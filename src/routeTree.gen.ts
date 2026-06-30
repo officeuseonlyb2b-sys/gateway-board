@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
   id: '/rate-search',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
@@ -66,6 +73,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
 }
@@ -76,6 +84,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
@@ -86,10 +95,18 @@ export interface FileRouteTypes {
     | '/login'
     | '/dashboard'
     | '/rate-search'
+    | '/settings'
     | '/hotels/$id'
     | '/hotels/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/dashboard' | '/rate-search' | '/hotels/$id' | '/hotels'
+  to:
+    | '/'
+    | '/login'
+    | '/dashboard'
+    | '/rate-search'
+    | '/settings'
+    | '/hotels/$id'
+    | '/hotels'
   id:
     | '__root__'
     | '/'
@@ -97,6 +114,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/dashboard'
     | '/_authenticated/rate-search'
+    | '/_authenticated/settings'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/hotels/'
   fileRoutesById: FileRoutesById
@@ -129,6 +147,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/rate-search': {
       id: '/_authenticated/rate-search'
@@ -164,6 +189,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
 }
@@ -171,6 +197,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
 }
