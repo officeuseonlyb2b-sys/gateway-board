@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
+import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -40,17 +41,24 @@ const AuthenticatedHotelsIndexRoute =
     path: '/hotels/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedHotelsIdRoute = AuthenticatedHotelsIdRouteImport.update({
+  id: '/hotels/$id',
+  path: '/hotels/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesById {
@@ -59,19 +67,21 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/dashboard' | '/hotels/'
+  fullPaths: '/' | '/login' | '/dashboard' | '/hotels/$id' | '/hotels/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/dashboard' | '/hotels'
+  to: '/' | '/login' | '/dashboard' | '/hotels/$id' | '/hotels'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/login'
     | '/_authenticated/dashboard'
+    | '/_authenticated/hotels/$id'
     | '/_authenticated/hotels/'
   fileRoutesById: FileRoutesById
 }
@@ -118,16 +128,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHotelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/hotels/$id': {
+      id: '/_authenticated/hotels/$id'
+      path: '/hotels/$id'
+      fullPath: '/hotels/$id'
+      preLoaderRoute: typeof AuthenticatedHotelsIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
 }
 
