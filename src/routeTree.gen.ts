@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
+  id: '/rate-search',
+  path: '/rate-search',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/rate-search': typeof AuthenticatedRateSearchRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
@@ -58,6 +65,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/rate-search': typeof AuthenticatedRateSearchRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
 }
@@ -67,20 +75,28 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/dashboard' | '/hotels/$id' | '/hotels/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/dashboard'
+    | '/rate-search'
+    | '/hotels/$id'
+    | '/hotels/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/dashboard' | '/hotels/$id' | '/hotels'
+  to: '/' | '/login' | '/dashboard' | '/rate-search' | '/hotels/$id' | '/hotels'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/login'
     | '/_authenticated/dashboard'
+    | '/_authenticated/rate-search'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/hotels/'
   fileRoutesById: FileRoutesById
@@ -114,6 +130,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/rate-search': {
+      id: '/_authenticated/rate-search'
+      path: '/rate-search'
+      fullPath: '/rate-search'
+      preLoaderRoute: typeof AuthenticatedRateSearchRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -140,12 +163,14 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
 }
