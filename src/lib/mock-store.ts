@@ -80,11 +80,42 @@ export interface RatePlan {
   updated_at: string;
 }
 
+export interface Quote {
+  id: string;
+  hotel_id: string;
+  room_category_id: string;
+  rate_plan_id: string | null;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  meal_plan: MealPlan;
+  num_rooms: number;
+  num_adults: number;
+  extra_beds: number;
+  cwb_count: number;
+  include_lunch: boolean;
+  include_dinner: boolean;
+  include_extra_breakfast: boolean;
+  xmas_applied: boolean;
+  newyear_applied: boolean;
+  subtotal: number;
+  gst_rate: number;
+  gst_amount: number;
+  grand_total: number;
+  generated_by: string;
+  generated_by_name: string;
+  hotel_name_snapshot: string;
+  room_name_snapshot: string;
+  city_name_snapshot: string;
+  created_at: string;
+}
+
 export interface DB {
   cities: City[];
   hotels: Hotel[];
   room_categories: RoomCategory[];
   rate_plans: RatePlan[];
+  quotes: Quote[];
 }
 
 const STORAGE_KEY = "mp-tourism-db-v1";
@@ -221,7 +252,7 @@ function seed(): DB {
     });
   });
 
-  return { cities, hotels, room_categories: rooms, rate_plans: plans };
+  return { cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [] };
 }
 
 let _db: DB | null = null;
@@ -236,7 +267,9 @@ function load(): DB {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      _db = JSON.parse(raw) as DB;
+      const parsed = JSON.parse(raw) as DB;
+      if (!parsed.quotes) parsed.quotes = [];
+      _db = parsed;
       return _db;
     }
   } catch {/* ignore */}
@@ -346,6 +379,20 @@ export const db = {
     d.rate_plans = d.rate_plans.filter(
       (p) => !(p.room_category_id === room_category_id && p.validity_start === validity_start && p.validity_end === validity_end),
     );
+    persist(); emit();
+  },
+
+  // Quotes
+  addQuote(q: Omit<Quote, "id" | "created_at">): Quote {
+    const d = load();
+    const quote: Quote = { ...q, id: uid(), created_at: now() };
+    d.quotes.unshift(quote);
+    persist(); emit();
+    return quote;
+  },
+  deleteQuote(id: string) {
+    const d = load();
+    d.quotes = d.quotes.filter((q) => q.id !== id);
     persist(); emit();
   },
 };
