@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Hotel as HotelIcon, Plane, Settings as SettingsIcon,
-  LogOut, ChevronLeft, ChevronRight, Wrench, Search,
+  LogOut, ChevronLeft, ChevronRight, Wrench, Search, Calculator,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ interface Item {
 const ITEMS: Item[] = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Hotels", to: "/hotels", icon: HotelIcon },
+  { label: "Final Costing", to: "/costing", icon: Calculator },
   { label: "Rate Search", to: "/rate-search", icon: Search },
   { label: "Travels", icon: Plane, disabled: true, badge: "Soon" },
   { label: "Operations", icon: Wrench, disabled: true, badge: "Soon" },
