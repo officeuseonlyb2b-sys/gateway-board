@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Plus, Search, Upload, Wifi, Waves, Building2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning } from "lucide-react";
 import { toast } from "sonner";
 import { useDB, HOTEL_CATEGORIES, type HotelCategory } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { HotelFormDialog } from "@/components/HotelFormDialog";
+import { importExcel, exportExcel, downloadErrorLog, type ImportSummary } from "@/lib/excel";
 
 export const Route = createFileRoute("/_authenticated/hotels/")({
   head: () => ({ meta: [{ title: "Hotels — MP Tourism Hub" }] }),
