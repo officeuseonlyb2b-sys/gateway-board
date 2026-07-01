@@ -53,11 +53,6 @@ const AuthenticatedCostingRoute = AuthenticatedCostingRouteImport.update({
   path: '/costing',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedCostingRoute = AuthenticatedCostingRouteImport.update({
-  id: '/costing',
-  path: '/costing',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedHotelsIndexRoute =
   AuthenticatedHotelsIndexRouteImport.update({
     id: '/hotels/',
