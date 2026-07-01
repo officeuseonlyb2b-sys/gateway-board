@@ -30,6 +30,23 @@ function HotelsListPage() {
   const [cityFilter, setCityFilter] = useState<string>("all");
   const [catFilters, setCatFilters] = useState<HotelCategory[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    setImporting(true); setSummary(null); setProgress({ done: 0, total: 0 });
+    try {
+      const result = await importExcel(file, (p) => setProgress(p));
+      setSummary(result);
+      toast.success(`Import complete — ${result.plansCreated} rate plans created.`);
+    } catch (err) {
+      toast.error(`Import failed: ${(err as Error).message}`);
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const rows = useMemo(() => {
     return data.hotels
@@ -60,7 +77,10 @@ function HotelsListPage() {
           <p className="text-sm text-muted-foreground mt-1">{data.hotels.length} hotels across {new Set(data.hotels.map((h) => h.city_id)).size} cities.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
+          <Button variant="outline" onClick={() => exportExcel()}>
+            <Download className="h-4 w-4 mr-2" /> Export to Excel
+          </Button>
+          <Button variant="outline" onClick={() => { setSummary(null); setProgress(null); setImportOpen(true); }}>
             <Upload className="h-4 w-4 mr-2" /> Import from Excel/CSV
           </Button>
           <HotelFormDialog trigger={
@@ -176,25 +196,57 @@ function HotelsListPage() {
         </p>
       )}
 
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <Dialog open={importOpen} onOpenChange={(v) => { if (!importing) setImportOpen(v); }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Import Hotels from Excel/CSV</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Import Hotels &amp; Rates from Excel</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Upload a .xlsx or .csv file with the following columns:
-            </p>
-            <div className="rounded-md border border-border bg-muted/40 p-3 text-xs font-mono overflow-x-auto">
-              name, city, hotel_category, contact_name, contact_phone, email, address, has_wifi, has_pool
-            </div>
-            <label className="block border-2 border-dashed border-border rounded-lg p-8 text-center hover:bg-muted/30 cursor-pointer transition-colors">
-              <Upload className="h-8 w-8 mx-auto text-muted-foreground/60" />
-              <div className="mt-2 text-sm font-medium">Drag &amp; drop or click to upload</div>
-              <div className="text-xs text-muted-foreground mt-1">.xlsx or .csv up to 10MB</div>
-              <input type="file" accept=".xlsx,.csv" className="hidden" onChange={() => {
-                toast.info("Excel import will be wired up once Lovable Cloud is enabled.");
-                setImportOpen(false);
-              }} />
-            </label>
+            {!summary && !importing && (
+              <>
+                <p className="text-sm text-muted-foreground">Upload a .xlsx or .csv file with columns:</p>
+                <div className="rounded-md border border-border bg-muted/40 p-3 text-[11px] font-mono overflow-x-auto">
+                  City, Hotel Category, Hotel Name, Room Category, Validity, Rates Standard Meal Plan, Double, Single, Extra Bed, CWB, Lunch, Dinner, Extra Breakfast, X'mas Sup, N'year Sup, Rates From, Email ID, Wifi, Pool, Remarks
+                </div>
+                <label className="block border-2 border-dashed border-border rounded-lg p-8 text-center hover:bg-muted/30 cursor-pointer transition-colors">
+                  <Upload className="h-8 w-8 mx-auto text-muted-foreground/60" />
+                  <div className="mt-2 text-sm font-medium">Click to upload</div>
+                  <div className="text-xs text-muted-foreground mt-1">.xlsx or .csv up to 10MB</div>
+                  <input
+                    ref={fileRef} type="file" accept=".xlsx,.csv,.xls" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                  />
+                </label>
+              </>
+            )}
+
+            {importing && (
+              <div className="space-y-3 py-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span>Importing row {progress?.done ?? 0} of {progress?.total ?? "…"}</span>
+                </div>
+                <Progress value={progress && progress.total > 0 ? (progress.done / progress.total) * 100 : 0} />
+              </div>
+            )}
+
+            {summary && (
+              <div className="space-y-3">
+                <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
+                  <div className="font-semibold text-emerald-800 mb-1">Import complete</div>
+                  <div className="text-emerald-900/80 text-xs space-y-0.5">
+                    <div>{summary.hotelsAdded} hotels added</div>
+                    <div>{summary.roomsAdded} rooms added</div>
+                    <div>{summary.plansCreated} rate plans created</div>
+                    <div>{summary.errors.length} errors</div>
+                  </div>
+                </div>
+                {summary.errors.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={() => downloadErrorLog(summary)}>
+                    <FileWarning className="h-4 w-4 mr-2" /> Download error log ({summary.errors.length})
+                  </Button>
+                )}
+                <Button className="w-full" onClick={() => { setImportOpen(false); setSummary(null); }}>Done</Button>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
