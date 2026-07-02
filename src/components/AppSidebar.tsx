@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Hotel as HotelIcon, Plane, Settings as SettingsIcon,
-  LogOut, ChevronLeft, ChevronRight, Wrench, Search, Calculator,
+  LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass,
+  Calculator, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -17,11 +17,12 @@ interface Item {
 
 const ITEMS: Item[] = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  { label: "Hotels", to: "/hotels", icon: HotelIcon },
-  { label: "Final Costing", to: "/costing", icon: Calculator },
-  { label: "Rate Search", to: "/rate-search", icon: Search },
+  { label: "Hotels", to: "/hotels", icon: Building2 },
   { label: "Travels", icon: Plane, disabled: true, badge: "Soon" },
-  { label: "Operations", icon: Wrench, disabled: true, badge: "Soon" },
+  { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
+  { label: "Entrances", to: "/entrances", icon: Landmark },
+  { label: "Activity & Experience", to: "/activities", icon: Compass },
+  { label: "Final Costing", to: "/costing", icon: Calculator },
   { label: "Settings", to: "/settings", icon: SettingsIcon },
 ];
 
@@ -32,7 +33,7 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        "shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col transition-[width] duration-200",
+        "shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col transition-[width] duration-200 print:hidden",
         collapsed ? "w-16" : "w-64",
       )}
     >
