@@ -14,8 +14,11 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
+import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
+import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
+import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authenticated/activities'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
 
@@ -43,6 +46,17 @@ const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
   path: '/rate-search',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMiscellaneousRoute =
+  AuthenticatedMiscellaneousRouteImport.update({
+    id: '/miscellaneous',
+    path: '/miscellaneous',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedEntrancesRoute = AuthenticatedEntrancesRouteImport.update({
+  id: '/entrances',
+  path: '/entrances',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -51,6 +65,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
 const AuthenticatedCostingRoute = AuthenticatedCostingRouteImport.update({
   id: '/costing',
   path: '/costing',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedActivitiesRoute = AuthenticatedActivitiesRouteImport.update({
+  id: '/activities',
+  path: '/activities',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedHotelsIndexRoute =
@@ -68,8 +87,11 @@ const AuthenticatedHotelsIdRoute = AuthenticatedHotelsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/activities': typeof AuthenticatedActivitiesRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/entrances': typeof AuthenticatedEntrancesRoute
+  '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -78,8 +100,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/activities': typeof AuthenticatedActivitiesRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/entrances': typeof AuthenticatedEntrancesRoute
+  '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -90,8 +115,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/login': typeof LoginRoute
+  '/_authenticated/activities': typeof AuthenticatedActivitiesRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/entrances': typeof AuthenticatedEntrancesRoute
+  '/_authenticated/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -102,8 +130,11 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/activities'
     | '/costing'
     | '/dashboard'
+    | '/entrances'
+    | '/miscellaneous'
     | '/rate-search'
     | '/settings'
     | '/hotels/$id'
@@ -112,8 +143,11 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/activities'
     | '/costing'
     | '/dashboard'
+    | '/entrances'
+    | '/miscellaneous'
     | '/rate-search'
     | '/settings'
     | '/hotels/$id'
@@ -123,8 +157,11 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/login'
+    | '/_authenticated/activities'
     | '/_authenticated/costing'
     | '/_authenticated/dashboard'
+    | '/_authenticated/entrances'
+    | '/_authenticated/miscellaneous'
     | '/_authenticated/rate-search'
     | '/_authenticated/settings'
     | '/_authenticated/hotels/$id'
@@ -174,6 +211,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRateSearchRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/miscellaneous': {
+      id: '/_authenticated/miscellaneous'
+      path: '/miscellaneous'
+      fullPath: '/miscellaneous'
+      preLoaderRoute: typeof AuthenticatedMiscellaneousRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/entrances': {
+      id: '/_authenticated/entrances'
+      path: '/entrances'
+      fullPath: '/entrances'
+      preLoaderRoute: typeof AuthenticatedEntrancesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -186,6 +237,13 @@ declare module '@tanstack/react-router' {
       path: '/costing'
       fullPath: '/costing'
       preLoaderRoute: typeof AuthenticatedCostingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/activities': {
+      id: '/_authenticated/activities'
+      path: '/activities'
+      fullPath: '/activities'
+      preLoaderRoute: typeof AuthenticatedActivitiesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/hotels/': {
@@ -206,8 +264,11 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedActivitiesRoute: typeof AuthenticatedActivitiesRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedEntrancesRoute: typeof AuthenticatedEntrancesRoute
+  AuthenticatedMiscellaneousRoute: typeof AuthenticatedMiscellaneousRoute
   AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
@@ -215,8 +276,11 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedActivitiesRoute: AuthenticatedActivitiesRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedEntrancesRoute: AuthenticatedEntrancesRoute,
+  AuthenticatedMiscellaneousRoute: AuthenticatedMiscellaneousRoute,
   AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
