@@ -110,15 +110,65 @@ export interface Quote {
   created_at: string;
 }
 
+export type MiscUnit = "per_person" | "per_day" | "fixed";
+export interface MiscellaneousItem {
+  id: string;
+  name: string;
+  description: string;
+  rate: number;
+  unit: MiscUnit;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface EntranceCity {
+  id: string;
+  name: string;
+  created_at: string;
+}
+export interface EntranceSite {
+  id: string;
+  city_id: string;
+  site_name: string;
+  indian_rate: number;
+  foreigner_rate: number;
+  notes?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ActivityDestination {
+  id: string;
+  name: string;
+  created_at: string;
+}
+export type ActivityPricingType = "per_person" | "total_fixed" | "per_vehicle";
+export interface Activity {
+  id: string;
+  destination_id: string;
+  activity_name: string;
+  description: string;
+  pricing_type: ActivityPricingType;
+  price: number;
+  unit_label: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface DB {
   cities: City[];
   hotels: Hotel[];
   room_categories: RoomCategory[];
   rate_plans: RatePlan[];
   quotes: Quote[];
+  miscellaneous_items: MiscellaneousItem[];
+  entrance_cities: EntranceCity[];
+  entrance_sites: EntranceSite[];
+  activity_destinations: ActivityDestination[];
+  activities: Activity[];
 }
 
-const STORAGE_KEY = "mp-tourism-db-v1";
+const STORAGE_KEY = "mp-tourism-db-v2";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
