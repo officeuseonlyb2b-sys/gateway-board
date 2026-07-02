@@ -367,6 +367,11 @@ function load(): DB {
     if (raw) {
       const parsed = JSON.parse(raw) as DB;
       if (!parsed.quotes) parsed.quotes = [];
+      if (!parsed.miscellaneous_items) parsed.miscellaneous_items = [];
+      if (!parsed.entrance_cities) parsed.entrance_cities = [];
+      if (!parsed.entrance_sites) parsed.entrance_sites = [];
+      if (!parsed.activity_destinations) parsed.activity_destinations = [];
+      if (!parsed.activities) parsed.activities = [];
       _db = parsed;
       return _db;
     }
