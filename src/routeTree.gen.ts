@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
+import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
@@ -43,6 +44,12 @@ const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
   path: '/rate-search',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMiscellaneousRoute =
+  AuthenticatedMiscellaneousRouteImport.update({
+    id: '/miscellaneous',
+    path: '/miscellaneous',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -70,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -80,6 +88,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -92,6 +101,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/costing'
     | '/dashboard'
+    | '/miscellaneous'
     | '/rate-search'
     | '/settings'
     | '/hotels/$id'
@@ -114,6 +125,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/costing'
     | '/dashboard'
+    | '/miscellaneous'
     | '/rate-search'
     | '/settings'
     | '/hotels/$id'
@@ -125,6 +137,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/costing'
     | '/_authenticated/dashboard'
+    | '/_authenticated/miscellaneous'
     | '/_authenticated/rate-search'
     | '/_authenticated/settings'
     | '/_authenticated/hotels/$id'
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRateSearchRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/miscellaneous': {
+      id: '/_authenticated/miscellaneous'
+      path: '/miscellaneous'
+      fullPath: '/miscellaneous'
+      preLoaderRoute: typeof AuthenticatedMiscellaneousRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -208,6 +228,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedMiscellaneousRoute: typeof AuthenticatedMiscellaneousRoute
   AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
@@ -217,6 +238,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedMiscellaneousRoute: AuthenticatedMiscellaneousRoute,
   AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
