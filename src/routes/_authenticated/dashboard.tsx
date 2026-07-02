@@ -24,6 +24,8 @@ function DashboardPage() {
       cities: new Set(data.hotels.map((h) => h.city_id)).size,
       ratePlans: data.rate_plans.length,
       updatedThisMonth,
+      entrances: data.entrance_sites.length,
+      activities: data.activities.length,
     };
   }, [data]);
 
