@@ -498,6 +498,89 @@ export const db = {
     d.quotes = d.quotes.filter((q) => q.id !== id);
     persist(); emit();
   },
+
+  // Miscellaneous items
+  addMisc(input: Omit<MiscellaneousItem, "id" | "created_at">): MiscellaneousItem {
+    const d = load();
+    const it: MiscellaneousItem = { ...input, id: uid(), created_at: now() };
+    d.miscellaneous_items.push(it); persist(); emit(); return it;
+  },
+  updateMisc(id: string, patch: Partial<MiscellaneousItem>) {
+    const d = load();
+    const idx = d.miscellaneous_items.findIndex((x) => x.id === id);
+    if (idx >= 0) { d.miscellaneous_items[idx] = { ...d.miscellaneous_items[idx], ...patch }; persist(); emit(); }
+  },
+  deleteMisc(id: string) {
+    const d = load();
+    d.miscellaneous_items = d.miscellaneous_items.filter((x) => x.id !== id);
+    persist(); emit();
+  },
+
+  // Entrance cities & sites
+  addEntranceCity(name: string): EntranceCity {
+    const d = load();
+    const c: EntranceCity = { id: uid(), name: name.trim(), created_at: now() };
+    d.entrance_cities.push(c); persist(); emit(); return c;
+  },
+  updateEntranceCity(id: string, name: string) {
+    const d = load();
+    const c = d.entrance_cities.find((x) => x.id === id);
+    if (c) { c.name = name; persist(); emit(); }
+  },
+  deleteEntranceCity(id: string) {
+    const d = load();
+    d.entrance_cities = d.entrance_cities.filter((x) => x.id !== id);
+    d.entrance_sites = d.entrance_sites.filter((s) => s.city_id !== id);
+    persist(); emit();
+  },
+  addEntranceSite(input: Omit<EntranceSite, "id" | "created_at">): EntranceSite {
+    const d = load();
+    const s: EntranceSite = { ...input, id: uid(), created_at: now() };
+    d.entrance_sites.push(s); persist(); emit(); return s;
+  },
+  updateEntranceSite(id: string, patch: Partial<EntranceSite>) {
+    const d = load();
+    const idx = d.entrance_sites.findIndex((x) => x.id === id);
+    if (idx >= 0) { d.entrance_sites[idx] = { ...d.entrance_sites[idx], ...patch }; persist(); emit(); }
+  },
+  deleteEntranceSite(id: string) {
+    const d = load();
+    d.entrance_sites = d.entrance_sites.filter((x) => x.id !== id);
+    persist(); emit();
+  },
+
+  // Activity destinations & activities
+  addActivityDestination(name: string): ActivityDestination {
+    const d = load();
+    const c: ActivityDestination = { id: uid(), name: name.trim(), created_at: now() };
+    d.activity_destinations.push(c); persist(); emit(); return c;
+  },
+  updateActivityDestination(id: string, name: string) {
+    const d = load();
+    const c = d.activity_destinations.find((x) => x.id === id);
+    if (c) { c.name = name; persist(); emit(); }
+  },
+  deleteActivityDestination(id: string) {
+    const d = load();
+    d.activity_destinations = d.activity_destinations.filter((x) => x.id !== id);
+    d.activities = d.activities.filter((a) => a.destination_id !== id);
+    persist(); emit();
+  },
+  addActivity(input: Omit<Activity, "id" | "created_at">): Activity {
+    const d = load();
+    const a: Activity = { ...input, id: uid(), created_at: now() };
+    d.activities.push(a); persist(); emit(); return a;
+  },
+  updateActivity(id: string, patch: Partial<Activity>) {
+    const d = load();
+    const idx = d.activities.findIndex((x) => x.id === id);
+    if (idx >= 0) { d.activities[idx] = { ...d.activities[idx], ...patch }; persist(); emit(); }
+  },
+  deleteActivity(id: string) {
+    const d = load();
+    d.activities = d.activities.filter((x) => x.id !== id);
+    persist(); emit();
+  },
 };
 
 // React helpers
