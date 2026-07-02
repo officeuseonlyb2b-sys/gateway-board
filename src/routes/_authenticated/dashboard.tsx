@@ -59,11 +59,13 @@ function DashboardPage() {
         <p className="text-sm text-muted-foreground mt-1">Overview of your hotel portfolio and rate operations.</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard icon={Hotel} label="Total Hotels" value={stats.hotels} tint="teal" />
         <StatCard icon={MapPin} label="Cities Covered" value={stats.cities} tint="blue" />
-        <StatCard icon={Layers} label="Active Rate Plans" value={stats.ratePlans} tint="gold" />
-        <StatCard icon={CalendarRange} label="Updated This Month" value={stats.updatedThisMonth} tint="green" />
+        <StatCard icon={Layers} label="Rate Plans" value={stats.ratePlans} tint="gold" />
+        <StatCard icon={CalendarRange} label="Updated / Month" value={stats.updatedThisMonth} tint="green" />
+        <StatCard icon={Landmark} label="Entrance Sites" value={stats.entrances} tint="blue" />
+        <StatCard icon={Compass} label="Total Activities" value={stats.activities} tint="gold" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
