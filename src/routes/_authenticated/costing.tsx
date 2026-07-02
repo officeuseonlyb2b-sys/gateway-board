@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Calculator, Printer, Save, RotateCcw, AlertTriangle, CheckCircle2, Sparkles, Trash2 } from "lucide-react";
+import {
+  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X,
+} from "lucide-react";
 import { toast } from "sonner";
-import { useDB, MEAL_PLANS, type MealPlan, type RatePlan } from "@/lib/mock-store";
-import { quoteService } from "@/services/api";
+import {
+  useDB, db, MEAL_PLANS, type MealPlan, type RatePlan,
+} from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,136 +14,271 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { CategoryBadge } from "@/components/CategoryBadge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { inr, fmtDateShort, nightsBetween, todayISO, addDaysISO } from "@/lib/format";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { inr, fmtDateShort, addDaysISO, todayISO } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "Final Costing — MP Tourism Hub" }] }),
   component: CostingPage,
 });
 
-type Occupancy = "double" | "single";
-
-function overlaps(startISO: string, endISO: string, month: number, day: number): boolean {
-  if (!startISO || !endISO) return false;
-  const s = new Date(startISO); const e = new Date(endISO);
-  for (let y = s.getFullYear(); y <= e.getFullYear(); y++) {
-    const d = new Date(Date.UTC(y, month - 1, day));
-    if (+d >= +s && +d < +e) return true;
-  }
-  return false;
+// ============================================================
+// Types
+// ============================================================
+interface ItineraryDay {
+  id: string;
+  date: string;          // ISO
+  city_id: string;
+  hotel_id: string;
+  room_id: string;
+  meal_plan: MealPlan;
+  add_lunch_pax: number;    // 0 = off
+  add_dinner_pax: number;   // 0 = off
 }
 
+interface TravelLine { id: string; label: string; amount: number; }
+interface MiscLine { id: string; item_id: string; pax: number; days: number; }
+interface GuideLine { id: string; guide_type: "Local" | "Expert"; days: number; rate: number; }
+interface EntranceLine { id: string; site_id: string; indian_pax: number; foreign_pax: number; }
+interface ActivityLine { id: string; activity_id: string; qty: number; }
+
+interface DayOccupancyCosts {
+  net: number;        // net rate before GST
+  gstRate: number;    // 0.05 or 0.18
+  gstAmt: number;
+  gross: number;      // net + gst
+  perPersonRate: number;
+  available: boolean;
+}
+interface DayCosts {
+  single: DayOccupancyCosts;
+  double: DayOccupancyCosts;
+  triple: DayOccupancyCosts;
+  lunchTotal: number;
+  dinnerTotal: number;
+  ratePlan: RatePlan | null;
+}
+type OccKey = "single" | "double" | "triple";
+const OCC_LABEL: Record<OccKey, string> = { single: "Single", double: "Double", triple: "Triple" };
+
+const uid = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// ============================================================
+// GST slab
+// ============================================================
+function gstRateFor(perPersonRate: number): number {
+  return perPersonRate <= 7500 ? 0.05 : 0.18;
+}
+
+function computeDay(
+  day: ItineraryDay,
+  ratePlans: RatePlan[],
+): DayCosts {
+  const t = +new Date(day.date);
+  const rp = ratePlans.find(
+    (p) => p.room_category_id === day.room_id && p.meal_plan === day.meal_plan &&
+      +new Date(p.validity_start) <= t && +new Date(p.validity_end) >= t,
+  ) ?? null;
+
+  const zero = (): DayOccupancyCosts => ({
+    net: 0, gstRate: 0, gstAmt: 0, gross: 0, perPersonRate: 0, available: false,
+  });
+
+  const build = (net: number, per: number): DayOccupancyCosts => {
+    const gstRate = gstRateFor(per);
+    const gstAmt = net * gstRate;
+    return { net, gstRate, gstAmt, gross: net + gstAmt, perPersonRate: per, available: true };
+  };
+
+  if (!rp) {
+    return {
+      single: zero(), double: zero(), triple: zero(),
+      lunchTotal: 0, dinnerTotal: 0, ratePlan: null,
+    };
+  }
+
+  const single = build(rp.single_rate, rp.single_rate);
+  const double = build(rp.double_rate, rp.double_rate / 2);
+  const triNet = rp.double_rate + (rp.extra_bed_rate ?? 0);
+  const triple = build(triNet, triNet / 3);
+
+  const lunchTotal = (rp.lunch_rate ?? 0) * (day.add_lunch_pax || 0);
+  const dinnerTotal = (rp.dinner_rate ?? 0) * (day.add_dinner_pax || 0);
+
+  return { single, double, triple, lunchTotal, dinnerTotal, ratePlan: rp };
+}
+
+// ============================================================
+// Component
+// ============================================================
 function CostingPage() {
   const data = useDB();
   const user = useAuth();
 
-  const [checkIn, setCheckIn] = useState(todayISO());
-  const [checkOut, setCheckOut] = useState(addDaysISO(todayISO(), 2));
-  const [cityId, setCityId] = useState<string>("");
-  const [hotelId, setHotelId] = useState<string>("");
-  const [roomId, setRoomId] = useState<string>("");
-  const [meal, setMeal] = useState<MealPlan>("CP");
-  const [numRooms, setNumRooms] = useState(1);
-  const [occupancy, setOccupancy] = useState<Occupancy>("double");
-  const [extraBeds, setExtraBeds] = useState(0);
-  const [cwbCount, setCwbCount] = useState(0);
-  const [adults, setAdults] = useState(2);
-  const [addLunch, setAddLunch] = useState(false); const [lunchPax, setLunchPax] = useState(2);
-  const [addDinner, setAddDinner] = useState(false); const [dinnerPax, setDinnerPax] = useState(2);
-  const [addBkf, setAddBkf] = useState(false); const [bkfPax, setBkfPax] = useState(2);
-  const [applyXmas, setApplyXmas] = useState(true);
-  const [applyNy, setApplyNy] = useState(true);
+  // --- itinerary ---
+  const [days, setDays] = useState<ItineraryDay[]>([]);
+  const [markupPct, setMarkupPct] = useState<number>(10);
+  const [markupGstPct] = useState<number>(5);
+  const [includedOcc, setIncludedOcc] = useState<Record<OccKey, boolean>>({
+    single: true, double: true, triple: false,
+  });
 
-  const nights = nightsBetween(checkIn, checkOut);
+  // --- add-ons ---
+  const [travels, setTravels] = useState<TravelLine[]>([]);
+  const [miscs, setMiscs] = useState<MiscLine[]>([]);
+  const [guides, setGuides] = useState<GuideLine[]>([]);
+  const [entrances, setEntrances] = useState<EntranceLine[]>([]);
+  const [activities, setActivities] = useState<ActivityLine[]>([]);
 
-  const hotelsInCity = useMemo(
-    () => data.hotels.filter((h) => !cityId || h.city_id === cityId),
-    [data.hotels, cityId],
-  );
-  const hotel = useMemo(() => data.hotels.find((h) => h.id === hotelId), [data.hotels, hotelId]);
-  const rooms = useMemo(
-    () => data.room_categories.filter((r) => r.hotel_id === hotelId),
-    [data.room_categories, hotelId],
-  );
+  // pax counts feeding misc "per_person" & default add-on quantities
+  const [totalPax, setTotalPax] = useState<number>(2);
 
-  // Auto rate lookup
-  const ratePlan: RatePlan | null = useMemo(() => {
-    if (!roomId || !checkIn) return null;
-    const t = +new Date(checkIn);
-    const matches = data.rate_plans.filter(
-      (p) => p.room_category_id === roomId && p.meal_plan === meal &&
-        +new Date(p.validity_start) <= t && +new Date(p.validity_end) >= t,
-    );
-    return matches[0] ?? null;
-  }, [data.rate_plans, roomId, checkIn, meal]);
-
-  const xmasEligible = ratePlan && overlaps(checkIn, checkOut, 12, 25);
-  const nyEligible = ratePlan && overlaps(checkIn, checkOut, 12, 31);
-
-  const breakdown = useMemo(() => {
-    if (!ratePlan || nights <= 0 || numRooms <= 0) return null;
-    const roomRate = occupancy === "double" ? ratePlan.double_rate : ratePlan.single_rate;
-    const roomCost = roomRate * numRooms * nights;
-    const extraBedCost = (ratePlan.extra_bed_rate ?? 0) * extraBeds * nights;
-    const cwbCost = (ratePlan.cwb_rate ?? 0) * cwbCount * nights;
-
-    const lunchCost = addLunch && ratePlan.lunch_rate ? ratePlan.lunch_rate * lunchPax * nights : 0;
-    const dinnerCost = addDinner && ratePlan.dinner_rate ? ratePlan.dinner_rate * dinnerPax * nights : 0;
-    const bkfCost = addBkf && ratePlan.extra_breakfast_rate ? ratePlan.extra_breakfast_rate * bkfPax * nights : 0;
-
-    const xmasAmt = xmasEligible && applyXmas && ratePlan.xmas_supplement
-      ? (ratePlan.xmas_supplement_type === "per_person"
-          ? ratePlan.xmas_supplement * adults
-          : ratePlan.xmas_supplement)
-      : 0;
-    const nyAmt = nyEligible && applyNy && ratePlan.newyear_supplement
-      ? (ratePlan.newyear_supplement_type === "per_person"
-          ? ratePlan.newyear_supplement * adults
-          : ratePlan.newyear_supplement)
-      : 0;
-
-    const subtotal = roomCost + extraBedCost + cwbCost + lunchCost + dinnerCost + bkfCost + xmasAmt + nyAmt;
-    // GST slab
-    const gstRate = roomRate <= 7500 ? 0.05 : 0.18;
-    const gstBase = roomCost + extraBedCost + cwbCost; // only room cost per spec
-    const gstAmount = gstBase * gstRate;
-    const grandTotal = subtotal + gstAmount;
-
-    return {
-      roomRate, roomCost, extraBedCost, cwbCost,
-      lunchCost, dinnerCost, bkfCost, xmasAmt, nyAmt,
-      subtotal, gstRate, gstAmount, grandTotal, gstBase,
-    };
-  }, [ratePlan, nights, numRooms, occupancy, extraBeds, cwbCount, addLunch, lunchPax, addDinner, dinnerPax, addBkf, bkfPax, xmasEligible, applyXmas, nyEligible, applyNy, adults]);
+  // ---------------- helpers ----------------
+  function addDay() {
+    const last = days[days.length - 1];
+    const date = last ? addDaysISO(last.date, 1) : todayISO();
+    setDays((prev) => [...prev, {
+      id: uid(),
+      date,
+      city_id: last?.city_id ?? "",
+      hotel_id: last?.hotel_id ?? "",
+      room_id: last?.room_id ?? "",
+      meal_plan: last?.meal_plan ?? "CP",
+      add_lunch_pax: 0, add_dinner_pax: 0,
+    }]);
+  }
+  function patchDay(id: string, patch: Partial<ItineraryDay>) {
+    setDays((prev) => prev.map((d) => d.id === id ? { ...d, ...patch } : d));
+  }
+  function removeDay(id: string) {
+    setDays((prev) => prev.filter((d) => d.id !== id));
+  }
 
   function reset() {
-    setCityId(""); setHotelId(""); setRoomId("");
-    setMeal("CP"); setNumRooms(1); setOccupancy("double");
-    setExtraBeds(0); setCwbCount(0); setAdults(2);
-    setAddLunch(false); setAddDinner(false); setAddBkf(false);
-    setApplyXmas(true); setApplyNy(true);
-    setCheckIn(todayISO()); setCheckOut(addDaysISO(todayISO(), 2));
+    setDays([]); setTravels([]); setMiscs([]); setGuides([]); setEntrances([]); setActivities([]);
+    setMarkupPct(10); setIncludedOcc({ single: true, double: true, triple: false });
+    setTotalPax(2);
     toast.success("Reset.");
   }
 
-  async function saveQuote() {
-    if (!breakdown || !ratePlan || !hotel) return toast.error("Complete the selection first.");
-    const room = rooms.find((r) => r.id === roomId)!;
-    const city = data.cities.find((c) => c.id === hotel.city_id)!;
-    await quoteService.create({
-      hotel_id: hotel.id, room_category_id: roomId, rate_plan_id: ratePlan.id,
-      check_in: checkIn, check_out: checkOut, nights, meal_plan: meal,
-      num_rooms: numRooms, num_adults: adults, extra_beds: extraBeds, cwb_count: cwbCount,
-      include_lunch: addLunch, include_dinner: addDinner, include_extra_breakfast: addBkf,
-      xmas_applied: !!xmasEligible && applyXmas, newyear_applied: !!nyEligible && applyNy,
-      subtotal: breakdown.subtotal, gst_rate: breakdown.gstRate, gst_amount: breakdown.gstAmount,
-      grand_total: breakdown.grandTotal,
+  // ---------------- per-day computation ----------------
+  const dayCosts = useMemo(
+    () => days.map((d) => ({ day: d, costs: computeDay(d, data.rate_plans) })),
+    [days, data.rate_plans],
+  );
+
+  const nights = days.length;
+
+  // ---------------- room totals per occupancy ----------------
+  const roomTotals = useMemo(() => {
+    const initial = { single: 0, double: 0, triple: 0 };
+    const netWithGst = { ...initial };
+    const netOnly = { ...initial };
+    const gstOnly = { ...initial };
+    let lunchTotal = 0, dinnerTotal = 0;
+    dayCosts.forEach(({ costs }) => {
+      (["single", "double", "triple"] as OccKey[]).forEach((k) => {
+        netWithGst[k] += costs[k].gross;
+        netOnly[k] += costs[k].net;
+        gstOnly[k] += costs[k].gstAmt;
+      });
+      lunchTotal += costs.lunchTotal;
+      dinnerTotal += costs.dinnerTotal;
+    });
+    return { netWithGst, netOnly, gstOnly, lunchTotal, dinnerTotal };
+  }, [dayCosts]);
+
+  // ---------------- add-on totals ----------------
+  const addonBreakdown = useMemo(() => {
+    const travelTotal = travels.reduce((s, t) => s + (t.amount || 0), 0);
+    const miscTotal = miscs.reduce((s, m) => {
+      const item = data.miscellaneous_items.find((x) => x.id === m.item_id);
+      if (!item) return s;
+      if (item.unit === "per_person") return s + item.rate * (m.pax || 0) * Math.max(1, m.days || 1);
+      if (item.unit === "per_day") return s + item.rate * (m.days || 0);
+      return s + item.rate;
+    }, 0);
+    const guideTotal = guides.reduce((s, g) => s + (g.days || 0) * (g.rate || 0), 0);
+    const entranceTotal = entrances.reduce((s, e) => {
+      const site = data.entrance_sites.find((x) => x.id === e.site_id);
+      if (!site) return s;
+      return s + site.indian_rate * (e.indian_pax || 0) + site.foreigner_rate * (e.foreign_pax || 0);
+    }, 0);
+    const activityTotal = activities.reduce((s, a) => {
+      const act = data.activities.find((x) => x.id === a.activity_id);
+      if (!act) return s;
+      return s + act.price * Math.max(1, a.qty || 1);
+    }, 0);
+    return {
+      travelTotal, miscTotal, guideTotal, entranceTotal, activityTotal,
+      total: travelTotal + miscTotal + guideTotal + entranceTotal + activityTotal,
+    };
+  }, [travels, miscs, guides, entrances, activities, data]);
+
+  // ---------------- final totals per occupancy (Excel formula) ----------------
+  const finalTotals = useMemo(() => {
+    const out: Record<OccKey, {
+      netWithGst: number; markup: number; markupGst: number;
+      addons: number; grand: number;
+    }> = { single: {} as any, double: {} as any, triple: {} as any };
+    (["single", "double", "triple"] as OccKey[]).forEach((k) => {
+      const netWithGst = roomTotals.netWithGst[k];
+      const markup = netWithGst * (markupPct / 100);
+      const markupGst = markup * (markupGstPct / 100);
+      const addons = addonBreakdown.total;
+      out[k] = {
+        netWithGst, markup, markupGst, addons,
+        grand: netWithGst + markup + markupGst + addons,
+      };
+    });
+    return out;
+  }, [roomTotals, markupPct, markupGstPct, addonBreakdown.total]);
+
+  // ---------------- meal counts for inclusions ----------------
+  const mealCounts = useMemo(() => {
+    let breakfast = 0, lunch = 0, dinner = 0;
+    days.forEach((d) => {
+      const mp = d.meal_plan;
+      if (mp === "CP" || mp === "MAP" || mp === "AP") breakfast += 1;
+      if (mp === "MAP") { if (d.add_lunch_pax > 0) lunch += 1; else dinner += 1; }
+      if (mp === "AP") { lunch += 1; dinner += 1; }
+      if (d.add_lunch_pax > 0 && mp !== "AP" && mp !== "MAP") lunch += 1;
+      if (d.add_dinner_pax > 0 && mp !== "AP") dinner += 1;
+    });
+    return { breakfast, lunch, dinner };
+  }, [days]);
+
+  // ---------------- save quote ----------------
+  function saveQuote() {
+    if (!days.length) return toast.error("Add at least one day.");
+    const anyOcc = (["single", "double", "triple"] as OccKey[]).find((k) => includedOcc[k]);
+    if (!anyOcc) return toast.error("Select at least one occupancy to save.");
+    const firstDay = days[0];
+    const lastDay = days[days.length - 1];
+    const hotel = data.hotels.find((h) => h.id === firstDay.hotel_id);
+    const room = data.room_categories.find((r) => r.id === firstDay.room_id);
+    const city = data.cities.find((c) => c.id === firstDay.city_id);
+    db.addQuote({
+      hotel_id: firstDay.hotel_id, room_category_id: firstDay.room_id, rate_plan_id: null,
+      check_in: firstDay.date, check_out: addDaysISO(lastDay.date, 1),
+      nights: days.length, meal_plan: firstDay.meal_plan,
+      num_rooms: 1, num_adults: totalPax, extra_beds: 0, cwb_count: 0,
+      include_lunch: days.some((d) => d.add_lunch_pax > 0),
+      include_dinner: days.some((d) => d.add_dinner_pax > 0),
+      include_extra_breakfast: false,
+      xmas_applied: false, newyear_applied: false,
+      subtotal: finalTotals[anyOcc].netWithGst,
+      gst_rate: 0, gst_amount: 0,
+      grand_total: finalTotals[anyOcc].grand,
       generated_by: user?.id ?? "anon", generated_by_name: user?.name ?? "—",
-      hotel_name_snapshot: hotel.name, room_name_snapshot: room.name, city_name_snapshot: city.name,
+      hotel_name_snapshot: hotel?.name ?? "—",
+      room_name_snapshot: room?.name ?? "—",
+      city_name_snapshot: city?.name ?? "—",
     });
     toast.success("Quote saved.");
   }
@@ -152,334 +290,578 @@ function CostingPage() {
     [data.quotes],
   );
 
+  const hasAnyMissing = dayCosts.some(({ costs }) => !costs.ratePlan && dayCosts.length > 0);
+
+  // ============================================================
+  // Render
+  // ============================================================
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
-      <div className="print:hidden">
+    <div className="p-6 lg:p-8 max-w-[1700px] mx-auto">
+      <div className="print:hidden mb-6 flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
             <Calculator className="h-5 w-5 text-primary" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Final Costing</h1>
-            <p className="text-sm text-muted-foreground">Build itemized quotes with automatic GST and festive supplements.</p>
+            <p className="text-sm text-muted-foreground">Multi-day, multi-city tour costing with automatic GST, markup, and add-ons.</p>
           </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={reset}><RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Reset</Button>
+          <Button variant="outline" size="sm" onClick={printQuote} disabled={!days.length}><Printer className="h-3.5 w-3.5 mr-1.5" /> Generate Quote</Button>
+          <Button size="sm" onClick={saveQuote} disabled={!days.length}><Save className="h-3.5 w-3.5 mr-1.5" /> Save Quote</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 print:block">
-        {/* Selection panel */}
-        <Card className="p-6 xl:col-span-2 space-y-5 print:hidden">
-          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            <span className="h-5 w-5 rounded bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-bold">1</span>
-            Selection
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Check-in Date"><Input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} /></Field>
-            <Field label="Check-out Date"><Input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} /></Field>
-          </div>
-          <div className="text-xs text-muted-foreground -mt-2">{nights} night{nights === 1 ? "" : "s"}</div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="City">
-              <Select value={cityId} onValueChange={(v) => { setCityId(v); setHotelId(""); setRoomId(""); }}>
-                <SelectTrigger><SelectValue placeholder="Choose city" /></SelectTrigger>
-                <SelectContent>
-                  {data.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Hotel">
-              <Select value={hotelId} onValueChange={(v) => { setHotelId(v); setRoomId(""); }} disabled={!cityId && hotelsInCity.length === 0}>
-                <SelectTrigger><SelectValue placeholder="Choose hotel" /></SelectTrigger>
-                <SelectContent>
-                  {hotelsInCity.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-
-          {hotel && (
-            <div className="flex items-center gap-2 -mt-2 text-xs text-muted-foreground">
-              <span>Category:</span> <CategoryBadge category={hotel.hotel_category} />
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Room Category">
-              <Select value={roomId} onValueChange={setRoomId} disabled={!hotelId}>
-                <SelectTrigger><SelectValue placeholder="Choose room" /></SelectTrigger>
-                <SelectContent>
-                  {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Meal Plan">
-              <Select value={meal} onValueChange={(v) => setMeal(v as MealPlan)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
-          </div>
-
-          {/* Rate match indicator */}
-          {roomId && (
-            <div className={`rounded-md border p-3 text-xs ${ratePlan ? "border-emerald-200 bg-emerald-50/60 text-emerald-800" : "border-amber-200 bg-amber-50/60 text-amber-800"}`}>
-              {ratePlan ? (
-                <div className="flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-                  <div>
-                    Rate matched: <strong>{ratePlan.season_label}</strong>{" "}
-                    <span className="opacity-80">({fmtDateShort(ratePlan.validity_start)} → {fmtDateShort(ratePlan.validity_end)})</span>
-                    <div className="mt-0.5 opacity-80">Double {inr(ratePlan.double_rate)} · Single {inr(ratePlan.single_rate)} · Extra bed {inr(ratePlan.extra_bed_rate)}</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                  <div>No rate plan available for {meal} on {fmtDateShort(checkIn)}. Try a different meal plan or date.</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Number of Rooms"><Input type="number" min={1} value={numRooms} onChange={(e) => setNumRooms(Math.max(1, +e.target.value || 1))} /></Field>
-            <Field label="Occupancy per Room">
-              <Select value={occupancy} onValueChange={(v) => setOccupancy(v as Occupancy)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="double">Double</SelectItem>
-                  <SelectItem value="single">Single</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Adults (total)"><Input type="number" min={0} value={adults} onChange={(e) => setAdults(Math.max(0, +e.target.value || 0))} /></Field>
-            <Field label="Extra Beds"><Input type="number" min={0} value={extraBeds} onChange={(e) => setExtraBeds(Math.max(0, +e.target.value || 0))} /></Field>
-            <Field label="CWB (Child w/ Bed)"><Input type="number" min={0} value={cwbCount} onChange={(e) => setCwbCount(Math.max(0, +e.target.value || 0))} /></Field>
-          </div>
-
-          <div className="rounded-md border border-border p-3 space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Additional Meals</div>
-            <MealAdd label="Include Lunch" enabled={addLunch} setEnabled={setAddLunch} pax={lunchPax} setPax={setLunchPax} />
-            <MealAdd label="Include Dinner" enabled={addDinner} setEnabled={setAddDinner} pax={dinnerPax} setPax={setDinnerPax} />
-            <MealAdd label="Include Extra Breakfast" enabled={addBkf} setEnabled={setAddBkf} pax={bkfPax} setPax={setBkfPax} />
-            {(meal === "AP" || meal === "MAP") && (addLunch || addDinner) && (
-              <p className="text-[11px] text-muted-foreground italic pt-1">Note: Some meals are already included in {meal} plan.</p>
-            )}
-          </div>
-
-          {(xmasEligible || nyEligible) && (
-            <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-amber-800 flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5" /> Festive Supplements Detected
-              </div>
-              {xmasEligible && (
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={applyXmas} onCheckedChange={(v) => setApplyXmas(!!v)} />
-                  Apply X'mas supplement ({inr(ratePlan!.xmas_supplement ?? 0)} {ratePlan!.xmas_supplement_type === "per_person" ? "per person" : "fixed"})
-                </label>
-              )}
-              {nyEligible && (
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={applyNy} onCheckedChange={(v) => setApplyNy(!!v)} />
-                  Apply N'Year supplement ({inr(ratePlan!.newyear_supplement ?? 0)} {ratePlan!.newyear_supplement_type === "per_person" ? "per person" : "fixed"})
-                </label>
-              )}
-            </div>
-          )}
-        </Card>
-
-        {/* Breakdown panel */}
-        <div className="xl:col-span-3 space-y-4 print:col-span-full">
-          <Card className="p-6 print:shadow-none print:border-0" id="quote-print">
-            <div className="hidden print:block mb-6 pb-4 border-b-2 border-primary">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 print:block">
+        {/* ============= LEFT: Itinerary + Add-Ons ============= */}
+        <div className="xl:col-span-2 space-y-6">
+          {/* Itinerary */}
+          <Card className="p-5 print:shadow-none print:border-0" id="quote-print">
+            <div className="hidden print:block mb-4 pb-3 border-b-2 border-primary">
               <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-lg bg-gold flex items-center justify-center">
+                <div className="h-10 w-10 rounded-lg bg-gold flex items-center justify-center">
                   <span className="font-bold text-gold-foreground">MP</span>
                 </div>
                 <div>
-                  <div className="font-bold text-lg">MP Tourism</div>
-                  <div className="text-xs text-muted-foreground">Operations Hub — Costing Quote</div>
+                  <div className="font-bold text-lg">MP Tourism Operations Hub</div>
+                  <div className="text-xs text-muted-foreground">Tour Cost Estimate</div>
                 </div>
-                <div className="ml-auto text-xs text-muted-foreground">Generated {fmtDateShort(new Date().toISOString())}</div>
+                <div className="ml-auto text-xs text-muted-foreground">
+                  Generated {fmtDateShort(new Date().toISOString())}
+                </div>
               </div>
             </div>
 
-            <div className="flex items-start justify-between gap-4 mb-4 print:hidden">
-              <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                <span className="h-5 w-5 rounded bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-bold">2</span>
-                Cost Breakdown
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={reset}><RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Reset</Button>
-                <Button variant="outline" size="sm" onClick={printQuote} disabled={!breakdown}><Printer className="h-3.5 w-3.5 mr-1.5" /> Generate Quote</Button>
-                <Button size="sm" onClick={saveQuote} disabled={!breakdown}><Save className="h-3.5 w-3.5 mr-1.5" /> Save Quote</Button>
-              </div>
-            </div>
-
-            {!hotel || !ratePlan || !breakdown ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                <Calculator className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-                Complete the selection panel to see the cost breakdown.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="rounded-md bg-muted/40 p-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                  <div><div className="text-xs text-muted-foreground">Hotel</div><div className="font-semibold">{hotel.name}</div></div>
-                  <div><div className="text-xs text-muted-foreground">City</div><div className="font-semibold">{data.cities.find((c) => c.id === hotel.city_id)?.name}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Check-in / out</div><div className="font-semibold">{fmtDateShort(checkIn)} → {fmtDateShort(checkOut)}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Nights / Rooms / Plan</div><div className="font-semibold">{nights} · {numRooms} · {meal}</div></div>
-                </div>
-
-                <Section title="Room Cost">
-                  <Line label={`Base Room (${occupancy === "double" ? "Double" : "Single"}) ${inr(breakdown.roomRate)} × ${numRooms} × ${nights} nights`} amount={breakdown.roomCost} />
-                  {extraBeds > 0 && <Line label={`Extra Bed ${inr(ratePlan.extra_bed_rate ?? 0)} × ${extraBeds} × ${nights}`} amount={breakdown.extraBedCost} />}
-                  {cwbCount > 0 && (
-                    ratePlan.cwb_rate
-                      ? <Line label={`CWB ${inr(ratePlan.cwb_rate)} × ${cwbCount} × ${nights}`} amount={breakdown.cwbCost} />
-                      : <Line label={`CWB (rule): ${ratePlan.cwb_rule_text ?? "—"}`} amount={0} muted />
-                  )}
-                </Section>
-
-                {(breakdown.lunchCost || breakdown.dinnerCost || breakdown.bkfCost) ? (
-                  <Section title="Additional Meals">
-                    {(meal === "AP" || meal === "MAP") && (
-                      <div className="text-xs italic text-muted-foreground pb-1">Note: primary meals already included in {meal}.</div>
-                    )}
-                    {breakdown.lunchCost > 0 && <Line label={`Lunch ${inr(ratePlan.lunch_rate!)} × ${lunchPax} × ${nights}`} amount={breakdown.lunchCost} />}
-                    {breakdown.dinnerCost > 0 && <Line label={`Dinner ${inr(ratePlan.dinner_rate!)} × ${dinnerPax} × ${nights}`} amount={breakdown.dinnerCost} />}
-                    {breakdown.bkfCost > 0 && <Line label={`Extra Breakfast ${inr(ratePlan.extra_breakfast_rate!)} × ${bkfPax} × ${nights}`} amount={breakdown.bkfCost} />}
-                  </Section>
-                ) : null}
-
-                {(breakdown.xmasAmt || breakdown.nyAmt) ? (
-                  <Section title="Festive Supplements">
-                    {breakdown.xmasAmt > 0 && <Line label={`X'mas Supplement (${ratePlan.xmas_supplement_type === "per_person" ? `${inr(ratePlan.xmas_supplement!)} × ${adults} pax` : "fixed"})`} amount={breakdown.xmasAmt} />}
-                    {breakdown.nyAmt > 0 && <Line label={`N'Year Supplement (${ratePlan.newyear_supplement_type === "per_person" ? `${inr(ratePlan.newyear_supplement!)} × ${adults} pax` : "fixed"})`} amount={breakdown.nyAmt} />}
-                  </Section>
-                ) : null}
-
-                <div className="flex justify-between items-center pt-3 border-t border-border text-sm">
-                  <span className="font-semibold">Sub-Total (before GST)</span>
-                  <span className="font-semibold tabular-nums">{inr(breakdown.subtotal)}</span>
-                </div>
-
-                <div className="rounded-md border border-border bg-muted/30 p-4 space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold">GST @ {(breakdown.gstRate * 100).toFixed(0)}%</div>
-                      <div className="text-xs text-muted-foreground">Room rate {inr(breakdown.roomRate)}/night → {breakdown.gstRate === 0.05 ? "5% (≤ ₹7,500)" : "18% (> ₹7,500)"} applied on room cost {inr(breakdown.gstBase)}</div>
-                    </div>
-                    <div className="tabular-nums font-semibold">{inr(breakdown.gstAmount)}</div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-primary text-primary-foreground p-5 flex items-center justify-between">
-                  <div className="font-bold text-lg">GRAND TOTAL</div>
-                  <div className="font-bold text-2xl tabular-nums text-gold">{inr(breakdown.grandTotal)}</div>
-                </div>
-
-                <div className="text-xs text-muted-foreground pt-2 border-t border-border">
-                  Rates valid as per <strong>{ratePlan.season_label}</strong> · {fmtDateShort(ratePlan.validity_start)} → {fmtDateShort(ratePlan.validity_end)}.
-                  {ratePlan.remarks && <span> · Remarks: {ratePlan.remarks}</span>}
-                </div>
-                <div className="hidden print:block text-center text-xs text-muted-foreground pt-4 border-t border-border mt-4">
-                  MP Tourism Operations Hub · Internal use only
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Recent quotes */}
-          <Card className="p-5 print:hidden">
             <div className="flex items-center justify-between mb-3">
-              <div className="font-semibold text-sm">Recent Quotes</div>
-              <Badge variant="secondary" className="text-[10px]">Last 5</Badge>
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Itinerary</h2>
+              <Button size="sm" onClick={addDay} className="print:hidden">
+                <Plus className="h-4 w-4 mr-1.5" /> Add Day
+              </Button>
             </div>
-            {recentQuotes.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">No quotes saved yet.</div>
+
+            {days.length === 0 ? (
+              <div className="py-12 text-center text-sm text-muted-foreground border border-dashed rounded-md">
+                <Calculator className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
+                Start by adding your first day.
+              </div>
             ) : (
-              <div className="overflow-x-auto -mx-5 px-5">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
                   <thead>
-                    <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
-                      <th className="font-medium py-2 pr-3">Hotel</th>
-                      <th className="font-medium py-2 pr-3">Dates</th>
-                      <th className="font-medium py-2 pr-3">Rooms · Plan</th>
-                      <th className="font-medium py-2 pr-3 text-right">Total</th>
-                      <th className="font-medium py-2 pr-3">By</th>
-                      <th className="font-medium py-2 pr-3"></th>
+                    <tr className="text-[11px] uppercase text-muted-foreground border-b">
+                      <th className="text-left py-2 pr-2">#</th>
+                      <th className="text-left py-2 pr-2">Date</th>
+                      <th className="text-left py-2 pr-2">City</th>
+                      <th className="text-left py-2 pr-2">Hotel</th>
+                      <th className="text-left py-2 pr-2">Room</th>
+                      <th className="text-left py-2 pr-2">Meal</th>
+                      <th className="text-right py-2 pr-2">SGL</th>
+                      <th className="text-right py-2 pr-2">DBL</th>
+                      <th className="text-right py-2 pr-2">TRP</th>
+                      <th className="print:hidden w-8"></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
-                    {recentQuotes.map((q) => (
-                      <tr key={q.id} className="hover:bg-muted/40">
-                        <td className="py-2 pr-3">
-                          <div className="font-medium">{q.hotel_name_snapshot}</div>
-                          <div className="text-xs text-muted-foreground">{q.city_name_snapshot} · {q.room_name_snapshot}</div>
-                        </td>
-                        <td className="py-2 pr-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDateShort(q.check_in)} → {fmtDateShort(q.check_out)}</td>
-                        <td className="py-2 pr-3 text-xs">{q.num_rooms} rm · {q.meal_plan}</td>
-                        <td className="py-2 pr-3 text-right font-semibold tabular-nums">{inr(q.grand_total)}</td>
-                        <td className="py-2 pr-3 text-xs text-muted-foreground">{q.generated_by_name}</td>
-                        <td className="py-2 pr-3">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={async () => { await quoteService.remove(q.id); toast.success("Quote removed."); }}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody>
+                    {dayCosts.map(({ day, costs }, idx) => {
+                      const hotelsInCity = data.hotels.filter((h) => !day.city_id || h.city_id === day.city_id);
+                      const rooms = data.room_categories.filter((r) => r.hotel_id === day.hotel_id);
+                      const hotel = data.hotels.find((h) => h.id === day.hotel_id);
+                      const missing = !costs.ratePlan && !!day.room_id;
+                      return (
+                        <>
+                          <tr key={day.id} className={missing ? "bg-amber-50" : ""}>
+                            <td className="py-2 pr-2 align-top text-muted-foreground text-xs">{idx + 1}</td>
+                            <td className="py-2 pr-2 align-top">
+                              <Input type="date" value={day.date}
+                                onChange={(e) => patchDay(day.id, { date: e.target.value })}
+                                className="h-8 print:border-0 print:p-0 print:h-auto" />
+                            </td>
+                            <td className="py-2 pr-2 align-top min-w-[130px]">
+                              <Select
+                                value={day.city_id}
+                                onValueChange={(v) => patchDay(day.id, { city_id: v, hotel_id: "", room_id: "" })}
+                              >
+                                <SelectTrigger className="h-8 print:border-0 print:p-0"><SelectValue placeholder="City" /></SelectTrigger>
+                                <SelectContent>
+                                  {data.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="py-2 pr-2 align-top min-w-[150px]">
+                              <Select
+                                value={day.hotel_id}
+                                onValueChange={(v) => patchDay(day.id, { hotel_id: v, room_id: "" })}
+                                disabled={!day.city_id}
+                              >
+                                <SelectTrigger className="h-8"><SelectValue placeholder="Hotel" /></SelectTrigger>
+                                <SelectContent>
+                                  {hotelsInCity.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                              {hotel && (
+                                <div className="mt-1"><CategoryBadge category={hotel.hotel_category} /></div>
+                              )}
+                            </td>
+                            <td className="py-2 pr-2 align-top min-w-[130px]">
+                              <Select
+                                value={day.room_id}
+                                onValueChange={(v) => patchDay(day.id, { room_id: v })}
+                                disabled={!day.hotel_id}
+                              >
+                                <SelectTrigger className="h-8"><SelectValue placeholder="Room" /></SelectTrigger>
+                                <SelectContent>
+                                  {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="py-2 pr-2 align-top">
+                              <Select
+                                value={day.meal_plan}
+                                onValueChange={(v) => patchDay(day.id, { meal_plan: v as MealPlan })}
+                              >
+                                <SelectTrigger className="h-8 w-20"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
+                              {costs.single.available ? inr(costs.single.gross) : "—"}
+                            </td>
+                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
+                              {costs.double.available ? inr(costs.double.gross) : "—"}
+                            </td>
+                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
+                              {costs.triple.available ? inr(costs.triple.gross) : "—"}
+                            </td>
+                            <td className="align-top print:hidden">
+                              <Button variant="ghost" size="icon" onClick={() => removeDay(day.id)}>
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </td>
+                          </tr>
+                          {costs.ratePlan && (
+                            <>
+                              <tr className="text-[11px] text-muted-foreground">
+                                <td></td>
+                                <td colSpan={5} className="pl-1">Net Rate</td>
+                                <td className="text-right tabular-nums">{inr(costs.single.net)}</td>
+                                <td className="text-right tabular-nums">{inr(costs.double.net)}</td>
+                                <td className="text-right tabular-nums">{inr(costs.triple.net)}</td>
+                                <td className="print:hidden"></td>
+                              </tr>
+                              <tr className="text-[11px] text-muted-foreground border-b">
+                                <td></td>
+                                <td colSpan={5} className="pl-1">GST</td>
+                                <td className="text-right tabular-nums">
+                                  {inr(costs.single.gstAmt)} <span className="opacity-60">({(costs.single.gstRate * 100).toFixed(0)}%)</span>
+                                </td>
+                                <td className="text-right tabular-nums">
+                                  {inr(costs.double.gstAmt)} <span className="opacity-60">({(costs.double.gstRate * 100).toFixed(0)}%)</span>
+                                </td>
+                                <td className="text-right tabular-nums">
+                                  {inr(costs.triple.gstAmt)} <span className="opacity-60">({(costs.triple.gstRate * 100).toFixed(0)}%)</span>
+                                </td>
+                                <td className="print:hidden"></td>
+                              </tr>
+                            </>
+                          )}
+                          {missing && (
+                            <tr className="text-xs">
+                              <td></td>
+                              <td colSpan={9} className="py-1 text-amber-800 flex items-center gap-1.5">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                No rate matched for selected dates — please check validity.
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
+
+                    {/* Totals rows (Excel style) */}
+                    {dayCosts.length > 0 && (
+                      <>
+                        <tr className="bg-emerald-100 text-emerald-900 font-semibold">
+                          <td colSpan={6} className="py-2 pl-2">Net rate with GST</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.single)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.double)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.triple)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
+                        <tr className="bg-orange-100 text-orange-900">
+                          <td colSpan={6} className="py-2 pl-2 flex items-center gap-2">
+                            <span>Mark up</span>
+                            <Input
+                              type="number" min={0} max={100} value={markupPct}
+                              onChange={(e) => setMarkupPct(Math.max(0, +e.target.value || 0))}
+                              className="h-6 w-16 print:border-0 print:p-0 print:h-auto print:w-auto"
+                            />
+                            <span>%</span>
+                          </td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markup)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markup)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markup)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
+                        <tr className="bg-red-100 text-red-900">
+                          <td colSpan={6} className="py-2 pl-2">GST 5% (on markup)</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markupGst)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markupGst)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markupGst)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
+                        <tr className="bg-red-200 text-red-900 font-bold">
+                          <td colSpan={6} className="py-2 pl-2">TOTAL</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.netWithGst + finalTotals.single.markup + finalTotals.single.markupGst)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.netWithGst + finalTotals.double.markup + finalTotals.double.markupGst)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.netWithGst + finalTotals.triple.markup + finalTotals.triple.markupGst)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
+                      </>
+                    )}
                   </tbody>
                 </table>
               </div>
             )}
+
+            {/* Occupancy boxes */}
+            {dayCosts.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+                {(["single", "double", "triple"] as OccKey[]).map((k) => {
+                  const included = includedOcc[k];
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => setIncludedOcc((p) => ({ ...p, [k]: !p[k] }))}
+                      className={
+                        "rounded-lg p-4 text-left border-2 transition-all " +
+                        (included
+                          ? "border-primary bg-primary/5 shadow-sm"
+                          : "border-border bg-muted/30 opacity-60 hover:opacity-100")
+                      }
+                    >
+                      <div className="text-xs uppercase font-semibold text-muted-foreground">
+                        {OCC_LABEL[k]} {k === "double" || k === "triple" ? "Sharing" : "Occupancy"}
+                      </div>
+                      <div className="text-2xl font-bold tabular-nums text-primary mt-1">
+                        {inr(finalTotals[k].grand)}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-1">
+                        {included ? "Included in quote" : "Click to include"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </Card>
+
+          {/* Add-ons */}
+          <Card className="p-5 print:hidden">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Add-Ons</h2>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Pax</Label>
+                <Input type="number" min={1} value={totalPax}
+                  onChange={(e) => setTotalPax(Math.max(1, +e.target.value || 1))} className="h-8 w-20" />
+              </div>
+            </div>
+
+            {/* Travels */}
+            <AddonSection
+              title="Travels"
+              onAdd={() => setTravels((p) => [...p, { id: uid(), label: "AC Bus 2×2", amount: 0 }])}
+            >
+              {travels.map((t) => (
+                <div key={t.id} className="grid grid-cols-[1fr_140px_36px] gap-2 items-center">
+                  <Input value={t.label} onChange={(e) =>
+                    setTravels((p) => p.map((x) => x.id === t.id ? { ...x, label: e.target.value } : x))} />
+                  <Input type="number" min={0} value={t.amount} onChange={(e) =>
+                    setTravels((p) => p.map((x) => x.id === t.id ? { ...x, amount: +e.target.value || 0 } : x))} />
+                  <Button variant="ghost" size="icon" onClick={() => setTravels((p) => p.filter((x) => x.id !== t.id))}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </AddonSection>
+
+            <Separator className="my-3" />
+
+            {/* Miscellaneous */}
+            <AddonSection
+              title="Miscellaneous"
+              onAdd={() => {
+                const first = data.miscellaneous_items.find((m) => m.is_active);
+                if (!first) return toast.error("No miscellaneous items — add some first.");
+                setMiscs((p) => [...p, { id: uid(), item_id: first.id, pax: totalPax, days: Math.max(1, nights) }]);
+              }}
+            >
+              {miscs.map((m) => {
+                const item = data.miscellaneous_items.find((x) => x.id === m.item_id);
+                const line =
+                  item
+                    ? item.unit === "per_person"
+                      ? item.rate * (m.pax || 0) * Math.max(1, m.days || 1)
+                      : item.unit === "per_day"
+                        ? item.rate * (m.days || 0)
+                        : item.rate
+                    : 0;
+                return (
+                  <div key={m.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
+                    <Select value={m.item_id} onValueChange={(v) =>
+                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, item_id: v } : x))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {data.miscellaneous_items.filter((x) => x.is_active).map((mi) => (
+                          <SelectItem key={mi.id} value={mi.id}>{mi.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={m.pax} placeholder="pax" onChange={(e) =>
+                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, pax: +e.target.value || 0 } : x))} />
+                    <Input type="number" min={0} value={m.days} placeholder="days" onChange={(e) =>
+                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, days: +e.target.value || 0 } : x))} />
+                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
+                    <Button variant="ghost" size="icon" onClick={() => setMiscs((p) => p.filter((x) => x.id !== m.id))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </AddonSection>
+
+            <Separator className="my-3" />
+
+            {/* Guide */}
+            <AddonSection
+              title="Guide"
+              onAdd={() => setGuides((p) => [...p, { id: uid(), guide_type: "Local", days: Math.max(1, nights), rate: 1500 }])}
+            >
+              {guides.map((g) => (
+                <div key={g.id} className="grid grid-cols-[1fr_80px_120px_100px_36px] gap-2 items-center">
+                  <Select value={g.guide_type} onValueChange={(v) =>
+                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guide_type: v as any } : x))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Local">Local Guide</SelectItem>
+                      <SelectItem value="Expert">Expert Guide</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input type="number" min={0} value={g.days} placeholder="Days" onChange={(e) =>
+                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, days: +e.target.value || 0 } : x))} />
+                  <Input type="number" min={0} value={g.rate} placeholder="Rate/day" onChange={(e) =>
+                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, rate: +e.target.value || 0 } : x))} />
+                  <div className="text-right tabular-nums text-sm font-medium">{inr((g.days || 0) * (g.rate || 0))}</div>
+                  <Button variant="ghost" size="icon" onClick={() => setGuides((p) => p.filter((x) => x.id !== g.id))}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </AddonSection>
+
+            <Separator className="my-3" />
+
+            {/* Entrances */}
+            <AddonSection
+              title="Entrances"
+              onAdd={() => {
+                const first = data.entrance_sites.find((s) => s.is_active);
+                if (!first) return toast.error("No entrance sites — add some first.");
+                setEntrances((p) => [...p, { id: uid(), site_id: first.id, indian_pax: totalPax, foreign_pax: 0 }]);
+              }}
+            >
+              {entrances.map((e) => {
+                const site = data.entrance_sites.find((x) => x.id === e.site_id);
+                const line = site
+                  ? site.indian_rate * (e.indian_pax || 0) + site.foreigner_rate * (e.foreign_pax || 0)
+                  : 0;
+                return (
+                  <div key={e.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
+                    <Select value={e.site_id} onValueChange={(v) =>
+                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, site_id: v } : x))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {data.entrance_sites.filter((s) => s.is_active).map((s) => {
+                          const city = data.entrance_cities.find((c) => c.id === s.city_id);
+                          return <SelectItem key={s.id} value={s.id}>{s.site_name} · {city?.name}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={e.indian_pax} placeholder="IND" onChange={(ev) =>
+                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, indian_pax: +ev.target.value || 0 } : x))} />
+                    <Input type="number" min={0} value={e.foreign_pax} placeholder="FRN" onChange={(ev) =>
+                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, foreign_pax: +ev.target.value || 0 } : x))} />
+                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
+                    <Button variant="ghost" size="icon" onClick={() => setEntrances((p) => p.filter((x) => x.id !== e.id))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </AddonSection>
+
+            <Separator className="my-3" />
+
+            {/* Activities */}
+            <AddonSection
+              title="Activity &amp; Experience"
+              onAdd={() => {
+                const first = data.activities.find((a) => a.is_active);
+                if (!first) return toast.error("No activities — add some first.");
+                setActivities((p) => [...p, { id: uid(), activity_id: first.id, qty: 1 }]);
+              }}
+            >
+              {activities.map((a) => {
+                const act = data.activities.find((x) => x.id === a.activity_id);
+                const line = act ? act.price * Math.max(1, a.qty || 1) : 0;
+                return (
+                  <div key={a.id} className="grid grid-cols-[1fr_80px_100px_36px] gap-2 items-center">
+                    <Select value={a.activity_id} onValueChange={(v) =>
+                      setActivities((p) => p.map((x) => x.id === a.id ? { ...x, activity_id: v } : x))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {data.activities.filter((x) => x.is_active).map((x) => {
+                          const dest = data.activity_destinations.find((d) => d.id === x.destination_id);
+                          return <SelectItem key={x.id} value={x.id}>{x.activity_name} · {dest?.name}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={1} value={a.qty} placeholder="Qty" onChange={(e) =>
+                      setActivities((p) => p.map((x) => x.id === a.id ? { ...x, qty: +e.target.value || 0 } : x))} />
+                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
+                    <Button variant="ghost" size="icon" onClick={() => setActivities((p) => p.filter((x) => x.id !== a.id))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </AddonSection>
+
+            <div className="mt-4 pt-3 border-t flex items-center justify-between text-sm font-semibold">
+              <span>Add-Ons Total</span>
+              <span className="tabular-nums">{inr(addonBreakdown.total)}</span>
+            </div>
+          </Card>
+
+          {/* Recent Quotes */}
+          <Card className="p-5 print:hidden">
+            <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Recent Quotes</h2>
+            {recentQuotes.length === 0 ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">No quotes saved yet.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                  <tr>
+                    <th className="text-left py-2">Hotel</th>
+                    <th className="text-left py-2">City</th>
+                    <th className="text-left py-2">Dates</th>
+                    <th className="text-right py-2">Grand Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentQuotes.map((q) => (
+                    <tr key={q.id} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{q.hotel_name_snapshot}</td>
+                      <td className="py-2 text-muted-foreground">{q.city_name_snapshot}</td>
+                      <td className="py-2 text-muted-foreground">{fmtDateShort(q.check_in)} → {fmtDateShort(q.check_out)}</td>
+                      <td className="py-2 text-right tabular-nums font-semibold">{inr(q.grand_total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </div>
+
+        {/* ============= RIGHT: Sticky Summary ============= */}
+        <div className="xl:col-span-1 print:hidden">
+          <div className="xl:sticky xl:top-6 space-y-4">
+            <Card className="p-5">
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Inclusions</h2>
+              <ul className="space-y-1.5 text-sm">
+                <li className="flex justify-between"><span>Accommodation</span><span className="font-medium">{nights} Night{nights !== 1 ? "s" : ""}</span></li>
+                <li className="flex justify-between text-muted-foreground text-xs">
+                  <span>Meals</span>
+                  <span>
+                    B/F: {mealCounts.breakfast} · Lunch: {mealCounts.lunch} · Dinner: {mealCounts.dinner}
+                  </span>
+                </li>
+                {addonBreakdown.travelTotal > 0 && <li className="flex justify-between text-xs"><span>Travels</span><span className="tabular-nums">{inr(addonBreakdown.travelTotal)}</span></li>}
+                {addonBreakdown.miscTotal > 0 && <li className="flex justify-between text-xs"><span>Miscellaneous</span><span className="tabular-nums">{inr(addonBreakdown.miscTotal)}</span></li>}
+                {addonBreakdown.guideTotal > 0 && <li className="flex justify-between text-xs"><span>Guide</span><span className="tabular-nums">{inr(addonBreakdown.guideTotal)}</span></li>}
+                {addonBreakdown.entranceTotal > 0 && <li className="flex justify-between text-xs"><span>Entrances</span><span className="tabular-nums">{inr(addonBreakdown.entranceTotal)}</span></li>}
+                {addonBreakdown.activityTotal > 0 && <li className="flex justify-between text-xs"><span>Activities</span><span className="tabular-nums">{inr(addonBreakdown.activityTotal)}</span></li>}
+              </ul>
+            </Card>
+
+            <Card className="p-5">
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Cost Summary</h2>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] uppercase text-muted-foreground border-b">
+                    <th className="text-left py-1.5"></th>
+                    <th className="text-right py-1.5">SGL</th>
+                    <th className="text-right py-1.5">DBL</th>
+                    <th className="text-right py-1.5">TRP</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  <SumRow label="Room (Net)" values={[roomTotals.netOnly.single, roomTotals.netOnly.double, roomTotals.netOnly.triple]} />
+                  <SumRow label="GST on rooms" values={[roomTotals.gstOnly.single, roomTotals.gstOnly.double, roomTotals.gstOnly.triple]} />
+                  <SumRow label={`Markup ${markupPct}%`} values={[finalTotals.single.markup, finalTotals.double.markup, finalTotals.triple.markup]} />
+                  <SumRow label="GST on markup 5%" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
+                  <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
+                  <tr className="bg-gold/20 font-bold">
+                    <td className="py-2 pl-1">GRAND TOTAL</td>
+                    <td className="py-2 pr-1 text-right">{inr(finalTotals.single.grand)}</td>
+                    <td className="py-2 pr-1 text-right">{inr(finalTotals.double.grand)}</td>
+                    <td className="py-2 pr-1 text-right">{inr(finalTotals.triple.grand)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              {hasAnyMissing && (
+                <div className="mt-3 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  Some days have no matching rate plan — totals may be incomplete.
+                </div>
+              )}
+              <div className="mt-3 text-[11px] text-muted-foreground text-center">
+                Valid for 7 days · Subject to availability · Rates inclusive of GST
+              </div>
+            </Card>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-1.5"><Label className="text-xs">{label}</Label>{children}</div>;
-}
-
-function MealAdd({ label, enabled, setEnabled, pax, setPax }:
-  { label: string; enabled: boolean; setEnabled: (v: boolean) => void; pax: number; setPax: (n: number) => void }) {
+function SumRow({ label, values }: { label: string; values: [number, number, number] }) {
   return (
-    <div className="flex items-center gap-3">
-      <label className="flex items-center gap-2 text-sm flex-1">
-        <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(!!v)} /> {label}
-      </label>
-      {enabled && (
-        <Input
-          type="number" min={1} value={pax}
-          onChange={(e) => setPax(Math.max(1, +e.target.value || 1))}
-          className="w-20 h-8"
-        />
-      )}
-    </div>
+    <tr className="border-b last:border-0">
+      <td className="py-1.5 pl-1 text-muted-foreground">{label}</td>
+      <td className="py-1.5 pr-1 text-right">{inr(values[0])}</td>
+      <td className="py-1.5 pr-1 text-right">{inr(values[1])}</td>
+      <td className="py-1.5 pr-1 text-right">{inr(values[2])}</td>
+    </tr>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function AddonSection({
+  title, onAdd, children,
+}: { title: React.ReactNode; onAdd: () => void; children: React.ReactNode }) {
   return (
-    <div className="space-y-1">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground pt-1">{title}</div>
-      <div className="space-y-1">{children}</div>
-    </div>
-  );
-}
-
-function Line({ label, amount, muted }: { label: string; amount: number; muted?: boolean }) {
-  return (
-    <div className={`flex justify-between text-sm ${muted ? "text-muted-foreground italic" : ""}`}>
-      <span>{label}</span>
-      <span className="tabular-nums">{inr(amount)}</span>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium">{title}</div>
+        <Button size="sm" variant="outline" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Add
+        </Button>
+      </div>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
