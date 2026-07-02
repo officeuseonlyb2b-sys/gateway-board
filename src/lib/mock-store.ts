@@ -302,7 +302,55 @@ function seed(): DB {
     });
   });
 
-  return { cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [] };
+  const miscellaneous_items: MiscellaneousItem[] = [
+    {
+      id: uid(),
+      name: "Basic Amenities Kit",
+      description: "Including Mineral Water, Wet Tissue, Hand Sanitizers, Mask Etc",
+      rate: 100, unit: "per_person", is_active: true, created_at: now(),
+    },
+  ];
+  const entrance_cities: EntranceCity[] = [
+    { id: uid(), name: "Gwalior", created_at: now() },
+  ];
+  const entrance_sites: EntranceSite[] = [
+    {
+      id: uid(), city_id: entrance_cities[0].id,
+      site_name: "Gwalior Fort",
+      indian_rate: 100, foreigner_rate: 1200,
+      notes: "Open 09:00 – 17:30. Camera fee extra.",
+      is_active: true, created_at: now(),
+    },
+  ];
+  const activity_destinations: ActivityDestination[] = [
+    { id: uid(), name: "Kanha", created_at: now() },
+    { id: uid(), name: "Bandhavgarh", created_at: now() },
+  ];
+  const activities: Activity[] = [
+    {
+      id: uid(), destination_id: activity_destinations[0].id,
+      activity_name: "Jungle Safari", description: "Shared jeep safari inside core zone (up to 6 pax)",
+      pricing_type: "total_fixed", price: 12500, unit_label: "Jungle Safari Total",
+      is_active: true, created_at: now(),
+    },
+    {
+      id: uid(), destination_id: activity_destinations[0].id,
+      activity_name: "Boat Safari", description: "Guided boat safari on Banjar river",
+      pricing_type: "total_fixed", price: 8500, unit_label: "Total",
+      is_active: true, created_at: now(),
+    },
+    {
+      id: uid(), destination_id: activity_destinations[1].id,
+      activity_name: "Jungle Safari", description: "Shared jeep safari, Tala zone",
+      pricing_type: "total_fixed", price: 13500, unit_label: "Total",
+      is_active: true, created_at: now(),
+    },
+  ];
+
+  return {
+    cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
+    miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
+  };
 }
 
 let _db: DB | null = null;
