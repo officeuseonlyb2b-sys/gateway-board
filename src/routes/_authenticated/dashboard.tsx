@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { Hotel, MapPin, Layers, CalendarRange, ArrowUpRight } from "lucide-react";
+import { Hotel, MapPin, Layers, CalendarRange, ArrowUpRight, Landmark, Compass } from "lucide-react";
 import { useDB, HOTEL_CATEGORIES } from "@/lib/mock-store";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { Card } from "@/components/ui/card";
