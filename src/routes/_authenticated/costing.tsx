@@ -38,11 +38,12 @@ interface ItineraryDay {
   add_dinner_pax: number;   // 0 = off
 }
 
-interface TravelLine { id: string; label: string; amount: number; }
+interface TravelLine { id: string; travel_id: string; days: number; vehicles: number; }
 interface MiscLine { id: string; item_id: string; pax: number; days: number; }
-interface GuideLine { id: string; guide_type: "Local" | "Expert"; days: number; rate: number; }
+interface GuideLine { id: string; guide_id: string; days: number; guides: number; }
 interface EntranceLine { id: string; site_id: string; indian_pax: number; foreign_pax: number; }
-interface ActivityLine { id: string; activity_id: string; qty: number; }
+interface ActivityLine { id: string; activity_id: string; pax: number; vehicles: number; }
+
 
 interface DayOccupancyCosts {
   net: number;        // net rate before GST
@@ -195,7 +196,11 @@ function CostingPage() {
 
   // ---------------- add-on totals ----------------
   const addonBreakdown = useMemo(() => {
-    const travelTotal = travels.reduce((s, t) => s + (t.amount || 0), 0);
+    const travelTotal = travels.reduce((s, t) => {
+      const opt = data.travel_options.find((x) => x.id === t.travel_id);
+      if (!opt) return s;
+      return s + opt.rate_per_day * (t.days || 0) * Math.max(1, t.vehicles || 1);
+    }, 0);
     const miscTotal = miscs.reduce((s, m) => {
       const item = data.miscellaneous_items.find((x) => x.id === m.item_id);
       if (!item) return s;
@@ -203,7 +208,11 @@ function CostingPage() {
       if (item.unit === "per_day") return s + item.rate * (m.days || 0);
       return s + item.rate;
     }, 0);
-    const guideTotal = guides.reduce((s, g) => s + (g.days || 0) * (g.rate || 0), 0);
+    const guideTotal = guides.reduce((s, g) => {
+      const gd = data.guides.find((x) => x.id === g.guide_id);
+      if (!gd) return s;
+      return s + gd.rate_per_day * (g.days || 0) * Math.max(1, g.guides || 1);
+    }, 0);
     const entranceTotal = entrances.reduce((s, e) => {
       const site = data.entrance_sites.find((x) => x.id === e.site_id);
       if (!site) return s;
@@ -212,7 +221,9 @@ function CostingPage() {
     const activityTotal = activities.reduce((s, a) => {
       const act = data.activities.find((x) => x.id === a.activity_id);
       if (!act) return s;
-      return s + act.price * Math.max(1, a.qty || 1);
+      if (act.pricing_type === "per_person") return s + act.price * Math.max(1, a.pax || 1);
+      if (act.pricing_type === "per_vehicle") return s + act.price * Math.max(1, a.vehicles || 1);
+      return s + act.price; // total_fixed
     }, 0);
     return {
       travelTotal, miscTotal, guideTotal, entranceTotal, activityTotal,
@@ -220,24 +231,27 @@ function CostingPage() {
     };
   }, [travels, miscs, guides, entrances, activities, data]);
 
-  // ---------------- final totals per occupancy (Excel formula) ----------------
+  // ---------------- final totals per occupancy (correct order) ----------------
+  // Sub-Total = Room (Net+GST) + Add-Ons; Markup on Sub-Total; GST 5% on Markup only.
   const finalTotals = useMemo(() => {
     const out: Record<OccKey, {
-      netWithGst: number; markup: number; markupGst: number;
-      addons: number; grand: number;
+      netWithGst: number; addons: number; subTotal: number;
+      markup: number; markupGst: number; grand: number;
     }> = { single: {} as any, double: {} as any, triple: {} as any };
     (["single", "double", "triple"] as OccKey[]).forEach((k) => {
       const netWithGst = roomTotals.netWithGst[k];
-      const markup = netWithGst * (markupPct / 100);
-      const markupGst = markup * (markupGstPct / 100);
       const addons = addonBreakdown.total;
+      const subTotal = netWithGst + addons;
+      const markup = subTotal * (markupPct / 100);
+      const markupGst = markup * (markupGstPct / 100);
       out[k] = {
-        netWithGst, markup, markupGst, addons,
-        grand: netWithGst + markup + markupGst + addons,
+        netWithGst, addons, subTotal, markup, markupGst,
+        grand: subTotal + markup + markupGst,
       };
     });
     return out;
   }, [roomTotals, markupPct, markupGstPct, addonBreakdown.total]);
+
 
   // ---------------- meal counts for inclusions ----------------
   const mealCounts = useMemo(() => {
@@ -491,9 +505,18 @@ function CostingPage() {
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.triple)}</td>
                           <td className="print:hidden"></td>
                         </tr>
+                        {addonBreakdown.total > 0 && (
+                          <tr className="bg-emerald-50 text-emerald-900">
+                            <td colSpan={6} className="py-2 pl-2">+ Add-Ons (flat)</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                            <td className="print:hidden"></td>
+                          </tr>
+                        )}
                         <tr className="bg-orange-100 text-orange-900">
                           <td colSpan={6} className="py-2 pl-2 flex items-center gap-2">
-                            <span>Mark up</span>
+                            <span>Mark up (on Room+GST+Add-Ons)</span>
                             <Input
                               type="number" min={0} max={100} value={markupPct}
                               onChange={(e) => setMarkupPct(Math.max(0, +e.target.value || 0))}
@@ -515,11 +538,12 @@ function CostingPage() {
                         </tr>
                         <tr className="bg-red-200 text-red-900 font-bold">
                           <td colSpan={6} className="py-2 pl-2">TOTAL</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.netWithGst + finalTotals.single.markup + finalTotals.single.markupGst)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.netWithGst + finalTotals.double.markup + finalTotals.double.markupGst)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.netWithGst + finalTotals.triple.markup + finalTotals.triple.markupGst)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.grand)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.grand)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.grand)}</td>
                           <td className="print:hidden"></td>
                         </tr>
+
                       </>
                     )}
                   </tbody>
@@ -573,20 +597,39 @@ function CostingPage() {
             {/* Travels */}
             <AddonSection
               title="Travels"
-              onAdd={() => setTravels((p) => [...p, { id: uid(), label: "AC Bus 2×2", amount: 0 }])}
+              onAdd={() => {
+                const first = data.travel_options.find((v) => v.is_active);
+                if (!first) return toast.error("No travel options — add some in Travels first.");
+                setTravels((p) => [...p, { id: uid(), travel_id: first.id, days: Math.max(1, nights), vehicles: 1 }]);
+              }}
             >
-              {travels.map((t) => (
-                <div key={t.id} className="grid grid-cols-[1fr_140px_36px] gap-2 items-center">
-                  <Input value={t.label} onChange={(e) =>
-                    setTravels((p) => p.map((x) => x.id === t.id ? { ...x, label: e.target.value } : x))} />
-                  <Input type="number" min={0} value={t.amount} onChange={(e) =>
-                    setTravels((p) => p.map((x) => x.id === t.id ? { ...x, amount: +e.target.value || 0 } : x))} />
-                  <Button variant="ghost" size="icon" onClick={() => setTravels((p) => p.filter((x) => x.id !== t.id))}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+              {travels.map((t) => {
+                const opt = data.travel_options.find((x) => x.id === t.travel_id);
+                const line = opt ? opt.rate_per_day * (t.days || 0) * Math.max(1, t.vehicles || 1) : 0;
+                return (
+                  <div key={t.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
+                    <Select value={t.travel_id} onValueChange={(v) =>
+                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, travel_id: v } : x))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {data.travel_options.filter((x) => x.is_active).map((v) => (
+                          <SelectItem key={v.id} value={v.id}>{v.vehicle_type} · {inr(v.rate_per_day)}/day</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={t.days} placeholder="Days" onChange={(e) =>
+                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, days: +e.target.value || 0 } : x))} />
+                    <Input type="number" min={1} value={t.vehicles} placeholder="Veh" onChange={(e) =>
+                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, vehicles: +e.target.value || 1 } : x))} />
+                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
+                    <Button variant="ghost" size="icon" onClick={() => setTravels((p) => p.filter((x) => x.id !== t.id))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
             </AddonSection>
+
 
             <Separator className="my-3" />
 
@@ -638,29 +681,39 @@ function CostingPage() {
             {/* Guide */}
             <AddonSection
               title="Guide"
-              onAdd={() => setGuides((p) => [...p, { id: uid(), guide_type: "Local", days: Math.max(1, nights), rate: 1500 }])}
+              onAdd={() => {
+                const first = data.guides.find((g) => g.is_active);
+                if (!first) return toast.error("No guides — add some in Guide first.");
+                setGuides((p) => [...p, { id: uid(), guide_id: first.id, days: Math.max(1, nights), guides: 1 }]);
+              }}
             >
-              {guides.map((g) => (
-                <div key={g.id} className="grid grid-cols-[1fr_80px_120px_100px_36px] gap-2 items-center">
-                  <Select value={g.guide_type} onValueChange={(v) =>
-                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guide_type: v as any } : x))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Local">Local Guide</SelectItem>
-                      <SelectItem value="Expert">Expert Guide</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input type="number" min={0} value={g.days} placeholder="Days" onChange={(e) =>
-                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, days: +e.target.value || 0 } : x))} />
-                  <Input type="number" min={0} value={g.rate} placeholder="Rate/day" onChange={(e) =>
-                    setGuides((p) => p.map((x) => x.id === g.id ? { ...x, rate: +e.target.value || 0 } : x))} />
-                  <div className="text-right tabular-nums text-sm font-medium">{inr((g.days || 0) * (g.rate || 0))}</div>
-                  <Button variant="ghost" size="icon" onClick={() => setGuides((p) => p.filter((x) => x.id !== g.id))}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+              {guides.map((g) => {
+                const gd = data.guides.find((x) => x.id === g.guide_id);
+                const line = gd ? gd.rate_per_day * (g.days || 0) * Math.max(1, g.guides || 1) : 0;
+                return (
+                  <div key={g.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
+                    <Select value={g.guide_id} onValueChange={(v) =>
+                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guide_id: v } : x))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {data.guides.filter((x) => x.is_active).map((gg) => (
+                          <SelectItem key={gg.id} value={gg.id}>{gg.name} · {gg.guide_type} · {inr(gg.rate_per_day)}/day</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={g.days} placeholder="Days" onChange={(e) =>
+                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, days: +e.target.value || 0 } : x))} />
+                    <Input type="number" min={1} value={g.guides} placeholder="Guides" onChange={(e) =>
+                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guides: +e.target.value || 1 } : x))} />
+                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
+                    <Button variant="ghost" size="icon" onClick={() => setGuides((p) => p.filter((x) => x.id !== g.id))}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
             </AddonSection>
+
 
             <Separator className="my-3" />
 
@@ -707,30 +760,40 @@ function CostingPage() {
 
             {/* Activities */}
             <AddonSection
-              title="Activity &amp; Experience"
+              title="Activity & Experience"
               onAdd={() => {
                 const first = data.activities.find((a) => a.is_active);
                 if (!first) return toast.error("No activities — add some first.");
-                setActivities((p) => [...p, { id: uid(), activity_id: first.id, qty: 1 }]);
+                setActivities((p) => [...p, { id: uid(), activity_id: first.id, pax: totalPax, vehicles: 1 }]);
               }}
             >
               {activities.map((a) => {
                 const act = data.activities.find((x) => x.id === a.activity_id);
-                const line = act ? act.price * Math.max(1, a.qty || 1) : 0;
+                const line = !act ? 0
+                  : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
+                  : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
+                  : act.price;
                 return (
-                  <div key={a.id} className="grid grid-cols-[1fr_80px_100px_36px] gap-2 items-center">
+                  <div key={a.id} className="grid grid-cols-[1fr_100px_100px_36px] gap-2 items-center">
                     <Select value={a.activity_id} onValueChange={(v) =>
                       setActivities((p) => p.map((x) => x.id === a.id ? { ...x, activity_id: v } : x))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {data.activities.filter((x) => x.is_active).map((x) => {
                           const dest = data.activity_destinations.find((d) => d.id === x.destination_id);
-                          return <SelectItem key={x.id} value={x.id}>{x.activity_name} · {dest?.name}</SelectItem>;
+                          return <SelectItem key={x.id} value={x.id}>{x.activity_name} · {dest?.name} · {x.pricing_type}</SelectItem>;
                         })}
                       </SelectContent>
                     </Select>
-                    <Input type="number" min={1} value={a.qty} placeholder="Qty" onChange={(e) =>
-                      setActivities((p) => p.map((x) => x.id === a.id ? { ...x, qty: +e.target.value || 0 } : x))} />
+                    {act?.pricing_type === "per_person" ? (
+                      <Input type="number" min={1} value={a.pax} placeholder="Pax" onChange={(e) =>
+                        setActivities((p) => p.map((x) => x.id === a.id ? { ...x, pax: +e.target.value || 0 } : x))} />
+                    ) : act?.pricing_type === "per_vehicle" ? (
+                      <Input type="number" min={1} value={a.vehicles} placeholder="Veh" onChange={(e) =>
+                        setActivities((p) => p.map((x) => x.id === a.id ? { ...x, vehicles: +e.target.value || 0 } : x))} />
+                    ) : (
+                      <div className="text-xs text-muted-foreground text-center py-2">Fixed</div>
+                    )}
                     <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
                     <Button variant="ghost" size="icon" onClick={() => setActivities((p) => p.filter((x) => x.id !== a.id))}>
                       <X className="h-4 w-4" />
@@ -739,6 +802,7 @@ function CostingPage() {
                 );
               })}
             </AddonSection>
+
 
             <div className="mt-4 pt-3 border-t flex items-center justify-between text-sm font-semibold">
               <span>Add-Ons Total</span>

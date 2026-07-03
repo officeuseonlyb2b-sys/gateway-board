@@ -6,7 +6,9 @@
 import {
   db, type City, type Hotel, type RoomCategory, type RatePlan,
   type HotelCategory, type MealPlan, type Quote,
+  type Guide, type TravelOption,
 } from "@/lib/mock-store";
+
 
 const delay = (ms = 60) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -94,5 +96,22 @@ export const quoteService = {
   async remove(id: string): Promise<void> { await delay(); db.deleteQuote(id); },
 };
 
+// ---------- Guides ----------
+export const guideService = {
+  async list(): Promise<Guide[]> { await delay(); return [...db.get().guides]; },
+  async create(input: Omit<Guide, "id" | "created_at">): Promise<Guide> { await delay(); return db.addGuide(input); },
+  async update(id: string, patch: Partial<Guide>): Promise<void> { await delay(); db.updateGuide(id, patch); },
+  async remove(id: string): Promise<void> { await delay(); db.deleteGuide(id); },
+};
+
+// ---------- Travel Options ----------
+export const travelService = {
+  async list(): Promise<TravelOption[]> { await delay(); return [...db.get().travel_options]; },
+  async create(input: Omit<TravelOption, "id" | "created_at">): Promise<TravelOption> { await delay(); return db.addTravel(input); },
+  async update(id: string, patch: Partial<TravelOption>): Promise<void> { await delay(); db.updateTravel(id, patch); },
+  async remove(id: string): Promise<void> { await delay(); db.deleteTravel(id); },
+};
+
 // Re-export types for consumers of the service layer
-export type { City, Hotel, RoomCategory, RatePlan, HotelCategory, MealPlan, Quote };
+export type { City, Hotel, RoomCategory, RatePlan, HotelCategory, MealPlan, Quote, Guide, TravelOption };
+
