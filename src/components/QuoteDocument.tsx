@@ -1,6 +1,8 @@
+import { Fragment } from "react";
 import { inr, fmtDateShort } from "@/lib/format";
 import { useBranding } from "@/lib/branding";
 import type { SavedQuote } from "@/lib/quotes-store";
+import { buildAddonGroups } from "@/lib/addon-breakdown";
 
 // Beautiful A4 print/PDF-ready quote document.
 // Wrapper adds `.quote-print-target` so print CSS can isolate it.
@@ -100,7 +102,7 @@ export function QuoteDocument({ quote: q }: Props) {
               v={[q.totals.addons_total, q.totals.addons_total, q.totals.addons_total]} />
             <SummaryRow bg="#fff3cd" label={`Mark Up ${q.markup_percent}%`}
               v={[q.totals.markup_sgl, q.totals.markup_dbl, q.totals.markup_trp]} />
-            <SummaryRow bg="#f8d7da" label="GST 5% (on Mark Up)"
+            <SummaryRow bg="#f8d7da" label="GST 5% (on Net + Add-Ons + Markup)"
               v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
             <SummaryRow bg="#f5b7b1" bold label="TOTAL"
               v={[q.totals.grand_sgl, q.totals.grand_dbl, q.totals.grand_trp]} />
@@ -115,7 +117,7 @@ export function QuoteDocument({ quote: q }: Props) {
         {includeTrp && <OccBox label="TRIPLE SHARING" value={q.totals.grand_trp} />}
       </div>
 
-      {/* ADD-ONS SECTION */}
+      {/* ADD-ONS SECTION — itemized grouped by category */}
       {q.addons.addons_total > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>ADD-ONS & EXTRAS</div>
@@ -124,11 +126,21 @@ export function QuoteDocument({ quote: q }: Props) {
               <Th>Category</Th><Th>Details</Th><Th align="right">Amount</Th>
             </tr></thead>
             <tbody>
-              {q.addons.travels.map((t, i) => <tr key={`t${i}`}><Td>Travels</Td><Td>{t.name} × {t.days}d × {t.vehicles} vehicle(s)</Td><Td align="right">{inr(t.total)}</Td></tr>)}
-              {q.addons.guide.map((g, i) => <tr key={`g${i}`}><Td>Guide</Td><Td>{g.name} ({g.type}) × {g.days}d × {g.count}</Td><Td align="right">{inr(g.total)}</Td></tr>)}
-              {q.addons.miscellaneous.map((m, i) => <tr key={`m${i}`}><Td>Miscellaneous</Td><Td>{m.name} ({m.unit})</Td><Td align="right">{inr(m.total)}</Td></tr>)}
-              {q.addons.entrances.map((e, i) => <tr key={`e${i}`}><Td>Entrance</Td><Td>{e.site_name}, {e.city} ({e.indian_pax} IND · {e.foreigner_pax} FRN)</Td><Td align="right">{inr(e.total)}</Td></tr>)}
-              {q.addons.activities.map((a, i) => <tr key={`a${i}`}><Td>Activity</Td><Td>{a.name} ({a.pricing_type})</Td><Td align="right">{inr(a.total)}</Td></tr>)}
+              {buildAddonGroups(q.addons).map((g) => (
+                <Fragment key={g.key}>
+                  <tr style={{ background: "#f5f5f5" }}>
+                    <Td colSpan={2}><b>{g.label}</b></Td>
+                    <Td align="right" ><span style={{ color: "#666" }}>{inr(g.total)}</span></Td>
+                  </tr>
+                  {g.rows.map((r, i) => (
+                    <tr key={`r-${g.key}-${i}`}>
+                      <Td></Td>
+                      <Td>{r.detail}</Td>
+                      <Td align="right">{inr(r.amount)}</Td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
               <tr style={{ background: "#e6f0f2", fontWeight: 700 }}>
                 <Td colSpan={2}>Add-Ons Total</Td>
                 <Td align="right">{inr(q.addons.addons_total)}</Td>
@@ -175,7 +187,7 @@ export function QuoteDocument({ quote: q }: Props) {
             <CSRow label="GST on Rooms" v={[q.totals.gst_rooms_sgl, q.totals.gst_rooms_dbl, q.totals.gst_rooms_trp]} />
             <CSRow label="Add-Ons Total" v={[q.totals.addons_total, q.totals.addons_total, q.totals.addons_total]} />
             <CSRow label={`Mark Up ${q.markup_percent}%`} v={[q.totals.markup_sgl, q.totals.markup_dbl, q.totals.markup_trp]} />
-            <CSRow label="GST on Mark Up 5%" v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
+            <CSRow label="GST 5% (on total)" v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
             <tr style={{ background: GOLD, color: "#000", fontWeight: 800 }}>
               <Td>GRAND TOTAL</Td>
               <Td align="right">{inr(q.totals.grand_sgl)}</Td>

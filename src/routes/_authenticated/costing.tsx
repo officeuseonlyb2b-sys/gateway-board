@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
-  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X,
+  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -19,7 +19,8 @@ import { CategoryBadge } from "@/components/CategoryBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { inr, fmtDateShort, addDaysISO, todayISO } from "@/lib/format";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
-import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote, type SavedAddons } from "@/lib/quotes-store";
+import { buildAddonGroups } from "@/lib/addon-breakdown";
 
 
 export const Route = createFileRoute("/_authenticated/costing")({
@@ -235,8 +236,11 @@ function CostingPage() {
     };
   }, [travels, miscs, guides, entrances, activities, data]);
 
-  // ---------------- final totals per occupancy (correct order) ----------------
-  // Sub-Total = Room (Net+GST) + Add-Ons; Markup on Sub-Total; GST 5% on Markup only.
+  // ---------------- final totals per occupancy ----------------
+  // Markup = (Net+GST + Add-Ons) × markup%
+  // Sub-Total-before-GST = Net+GST + Add-Ons + Markup
+  // Final GST 5% = Sub-Total-before-GST × 5%
+  // GRAND TOTAL = Sub-Total-before-GST + Final GST 5%
   const finalTotals = useMemo(() => {
     const out: Record<OccKey, {
       netWithGst: number; addons: number; subTotal: number;
@@ -245,12 +249,13 @@ function CostingPage() {
     (["single", "double", "triple"] as OccKey[]).forEach((k) => {
       const netWithGst = roomTotals.netWithGst[k];
       const addons = addonBreakdown.total;
-      const subTotal = netWithGst + addons;
-      const markup = subTotal * (markupPct / 100);
-      const markupGst = markup * (markupGstPct / 100);
+      const base = netWithGst + addons;
+      const markup = base * (markupPct / 100);
+      const subTotal = base + markup;
+      const markupGst = subTotal * (markupGstPct / 100); // Final GST on combined total
       out[k] = {
         netWithGst, addons, subTotal, markup, markupGst,
-        grand: subTotal + markup + markupGst,
+        grand: subTotal + markupGst,
       };
     });
     return out;
@@ -270,6 +275,63 @@ function CostingPage() {
     });
     return { breakfast, lunch, dinner };
   }, [days]);
+
+  // ---------------- itemized add-on snapshot for breakdown panel ----------------
+  const addonSnapshot = useMemo<SavedAddons>(() => ({
+    travels: travels.map((t) => {
+      const opt = data.travel_options.find((x) => x.id === t.travel_id);
+      return {
+        name: opt?.vehicle_type ?? "—", days: t.days, vehicles: t.vehicles,
+        rate_per_day: opt?.rate_per_day ?? 0,
+        total: (opt?.rate_per_day ?? 0) * (t.days || 0) * Math.max(1, t.vehicles || 1),
+      };
+    }),
+    miscellaneous: miscs.map((m) => {
+      const it = data.miscellaneous_items.find((x) => x.id === m.item_id);
+      const total = !it ? 0
+        : it.unit === "per_person" ? it.rate * (m.pax || 0) * Math.max(1, m.days || 1)
+        : it.unit === "per_day" ? it.rate * (m.days || 0)
+        : it.rate;
+      return { name: it?.name ?? "—", pax: m.pax, rate: it?.rate ?? 0, unit: it?.unit ?? "fixed", total };
+    }),
+    guide: guides.map((g) => {
+      const gd = data.guides.find((x) => x.id === g.guide_id);
+      return {
+        name: gd?.name ?? "—", type: gd?.guide_type ?? "",
+        days: g.days, count: g.guides, rate_per_day: gd?.rate_per_day ?? 0,
+        total: (gd?.rate_per_day ?? 0) * (g.days || 0) * Math.max(1, g.guides || 1),
+      };
+    }),
+    entrances: entrances.map((e) => {
+      const site = data.entrance_sites.find((x) => x.id === e.site_id);
+      const city = data.entrance_cities.find((c) => c.id === site?.city_id);
+      return {
+        site_name: site?.site_name ?? "—", city: city?.name ?? "",
+        indian_pax: e.indian_pax, indian_rate: site?.indian_rate ?? 0,
+        foreigner_pax: e.foreign_pax, foreigner_rate: site?.foreigner_rate ?? 0,
+        total: (site?.indian_rate ?? 0) * (e.indian_pax || 0) + (site?.foreigner_rate ?? 0) * (e.foreign_pax || 0),
+      };
+    }),
+    activities: activities.map((a) => {
+      const act = data.activities.find((x) => x.id === a.activity_id);
+      const dest = data.activity_destinations.find((d) => d.id === act?.destination_id);
+      const total = !act ? 0
+        : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
+        : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
+        : act.price;
+      const qty = !act ? 0 : act.pricing_type === "per_vehicle" ? a.vehicles : a.pax;
+      return {
+        name: act?.activity_name ?? "—", destination: dest?.name ?? "",
+        pricing_type: act?.pricing_type ?? "total_fixed",
+        qty, rate: act?.price ?? 0, total,
+      };
+    }),
+    addons_total: addonBreakdown.total,
+  }), [travels, miscs, guides, entrances, activities, data, addonBreakdown.total]);
+
+  const addonGroups = useMemo(() => buildAddonGroups(addonSnapshot), [addonSnapshot]);
+  const [addonsExpanded, setAddonsExpanded] = useState<boolean>(false);
+
 
   // ---------------- viewer state ----------------
   const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
@@ -642,32 +704,30 @@ function CostingPage() {
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.triple)}</td>
                           <td className="print:hidden"></td>
                         </tr>
-                        {addonBreakdown.total > 0 && (
-                          <tr className="bg-emerald-50 text-emerald-900">
-                            <td colSpan={6} className="py-2 pl-2">+ Add-Ons (flat)</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="print:hidden"></td>
-                          </tr>
-                        )}
+                        <tr className="bg-teal-100 text-teal-900">
+                          <td colSpan={6} className="py-2 pl-2">Add-Ons</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
                         <tr className="bg-orange-100 text-orange-900">
                           <td colSpan={6} className="py-2 pl-2 flex items-center gap-2">
-                            <span>Mark up (on Room+GST+Add-Ons)</span>
+                            <span>Mark Up</span>
                             <Input
                               type="number" min={0} max={100} value={markupPct}
                               onChange={(e) => setMarkupPct(Math.max(0, +e.target.value || 0))}
                               className="h-6 w-16 print:border-0 print:p-0 print:h-auto print:w-auto"
                             />
-                            <span>%</span>
+                            <span>% (on Net+GST+Add-Ons)</span>
                           </td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markup)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markup)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markup)}</td>
                           <td className="print:hidden"></td>
                         </tr>
-                        <tr className="bg-red-100 text-red-900">
-                          <td colSpan={6} className="py-2 pl-2">GST 5% (on markup)</td>
+                        <tr className="bg-pink-100 text-pink-900">
+                          <td colSpan={6} className="py-2 pl-2">GST 5% (on Net+Add-Ons+Markup)</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markupGst)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markupGst)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markupGst)}</td>
@@ -685,6 +745,50 @@ function CostingPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Collapsible add-ons itemized breakdown */}
+            {addonGroups.length > 0 && (
+              <div className="mt-4 border rounded-md print:hidden">
+                <button
+                  type="button"
+                  onClick={() => setAddonsExpanded((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/50"
+                >
+                  <span className="flex items-center gap-2">
+                    {addonsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    Add-Ons breakdown ({addonGroups.reduce((s, g) => s + g.rows.length, 0)} items)
+                  </span>
+                  <span className="tabular-nums font-semibold">{inr(addonBreakdown.total)}</span>
+                </button>
+                {addonsExpanded && (
+                  <div className="border-t">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {addonGroups.map((g) => (
+                          <Fragment key={g.key}>
+                            <tr className="bg-muted/60">
+                              <td colSpan={2} className="px-3 py-1.5 font-semibold">{g.label}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{inr(g.total)}</td>
+                            </tr>
+                            {g.rows.map((r, i) => (
+                              <tr key={`r-${g.key}-${i}`} className="border-b last:border-0">
+                                <td className="pl-8 pr-2 py-1.5 w-8"></td>
+                                <td className="py-1.5">{r.detail}</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">{inr(r.amount)}</td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        ))}
+                        <tr className="bg-primary/10 font-bold">
+                          <td colSpan={2} className="px-3 py-2">Add-Ons Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1014,7 +1118,7 @@ function CostingPage() {
                   <SumRow label="GST on rooms" values={[roomTotals.gstOnly.single, roomTotals.gstOnly.double, roomTotals.gstOnly.triple]} />
                   <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
                   <SumRow label={`Markup ${markupPct}%`} values={[finalTotals.single.markup, finalTotals.double.markup, finalTotals.triple.markup]} />
-                  <SumRow label="GST on markup 5%" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
+                  <SumRow label="GST 5% (on total)" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
 
                   <tr className="bg-gold/20 font-bold">
                     <td className="py-2 pl-1">GRAND TOTAL</td>
