@@ -16,8 +16,6 @@ import { Route as AuthenticatedTravelsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
 import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
-
-import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
 import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
 import { Route as AuthenticatedGuideRouteImport } from './routes/_authenticated/guide'
 import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
@@ -56,6 +54,12 @@ const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
   path: '/rate-search',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
+  id: '/quotes',
+  path: '/quotes',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+
 const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
   id: '/quotes',
   path: '/quotes',
