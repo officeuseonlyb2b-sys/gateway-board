@@ -276,6 +276,63 @@ function CostingPage() {
     return { breakfast, lunch, dinner };
   }, [days]);
 
+  // ---------------- itemized add-on snapshot for breakdown panel ----------------
+  const addonSnapshot = useMemo<SavedAddons>(() => ({
+    travels: travels.map((t) => {
+      const opt = data.travel_options.find((x) => x.id === t.travel_id);
+      return {
+        name: opt?.vehicle_type ?? "—", days: t.days, vehicles: t.vehicles,
+        rate_per_day: opt?.rate_per_day ?? 0,
+        total: (opt?.rate_per_day ?? 0) * (t.days || 0) * Math.max(1, t.vehicles || 1),
+      };
+    }),
+    miscellaneous: miscs.map((m) => {
+      const it = data.miscellaneous_items.find((x) => x.id === m.item_id);
+      const total = !it ? 0
+        : it.unit === "per_person" ? it.rate * (m.pax || 0) * Math.max(1, m.days || 1)
+        : it.unit === "per_day" ? it.rate * (m.days || 0)
+        : it.rate;
+      return { name: it?.name ?? "—", pax: m.pax, rate: it?.rate ?? 0, unit: it?.unit ?? "fixed", total };
+    }),
+    guide: guides.map((g) => {
+      const gd = data.guides.find((x) => x.id === g.guide_id);
+      return {
+        name: gd?.name ?? "—", type: gd?.guide_type ?? "",
+        days: g.days, count: g.guides, rate_per_day: gd?.rate_per_day ?? 0,
+        total: (gd?.rate_per_day ?? 0) * (g.days || 0) * Math.max(1, g.guides || 1),
+      };
+    }),
+    entrances: entrances.map((e) => {
+      const site = data.entrance_sites.find((x) => x.id === e.site_id);
+      const city = data.entrance_cities.find((c) => c.id === site?.city_id);
+      return {
+        site_name: site?.site_name ?? "—", city: city?.name ?? "",
+        indian_pax: e.indian_pax, indian_rate: site?.indian_rate ?? 0,
+        foreigner_pax: e.foreign_pax, foreigner_rate: site?.foreigner_rate ?? 0,
+        total: (site?.indian_rate ?? 0) * (e.indian_pax || 0) + (site?.foreigner_rate ?? 0) * (e.foreign_pax || 0),
+      };
+    }),
+    activities: activities.map((a) => {
+      const act = data.activities.find((x) => x.id === a.activity_id);
+      const dest = data.activity_destinations.find((d) => d.id === act?.destination_id);
+      const total = !act ? 0
+        : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
+        : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
+        : act.price;
+      const qty = !act ? 0 : act.pricing_type === "per_vehicle" ? a.vehicles : a.pax;
+      return {
+        name: act?.activity_name ?? "—", destination: dest?.name ?? "",
+        pricing_type: act?.pricing_type ?? "total_fixed",
+        qty, rate: act?.price ?? 0, total,
+      };
+    }),
+    addons_total: addonBreakdown.total,
+  }), [travels, miscs, guides, entrances, activities, data, addonBreakdown.total]);
+
+  const addonGroups = useMemo(() => buildAddonGroups(addonSnapshot), [addonSnapshot]);
+  const [addonsExpanded, setAddonsExpanded] = useState<boolean>(false);
+
+
   // ---------------- viewer state ----------------
   const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
 
