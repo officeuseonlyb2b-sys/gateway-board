@@ -186,7 +186,7 @@ export function QuoteDocument({ quote: q }: Props) {
             <CSRow label="GST on Rooms" v={[q.totals.gst_rooms_sgl, q.totals.gst_rooms_dbl, q.totals.gst_rooms_trp]} />
             <CSRow label="Add-Ons Total" v={[q.totals.addons_total, q.totals.addons_total, q.totals.addons_total]} />
             <CSRow label={`Mark Up ${q.markup_percent}%`} v={[q.totals.markup_sgl, q.totals.markup_dbl, q.totals.markup_trp]} />
-            <CSRow label="GST on Mark Up 5%" v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
+            <CSRow label="GST 5% (on total)" v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
             <tr style={{ background: GOLD, color: "#000", fontWeight: 800 }}>
               <Td>GRAND TOTAL</Td>
               <Td align="right">{inr(q.totals.grand_sgl)}</Td>
