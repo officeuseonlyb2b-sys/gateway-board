@@ -33,23 +33,20 @@ function costSheetAOA(q: SavedQuote): (string | number)[][] {
     q.totals.addons_total, q.totals.addons_total, q.totals.addons_total]);
   rows.push([`Mark Up ${q.markup_percent}%`, "", "", "", "", "", "",
     q.totals.markup_sgl, q.totals.markup_dbl, q.totals.markup_trp]);
-  rows.push(["GST 5% (on Mark Up)", "", "", "", "", "", "",
+  rows.push(["GST 5% (on Net + Add-Ons + Markup)", "", "", "", "", "", "",
     q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]);
   rows.push(["GRAND TOTAL", "", "", "", "", "", "",
     q.totals.grand_sgl, q.totals.grand_dbl, q.totals.grand_trp]);
 
-  const addAll = [
-    ...q.addons.travels.map((t) => ["Travels", `${t.name} × ${t.days}d × ${t.vehicles}`, t.total]),
-    ...q.addons.miscellaneous.map((m) => ["Miscellaneous", `${m.name} (${m.unit})`, m.total]),
-    ...q.addons.guide.map((g) => ["Guide", `${g.name} × ${g.days}d × ${g.count}`, g.total]),
-    ...q.addons.entrances.map((e) => ["Entrances", `${e.site_name}, ${e.city}`, e.total]),
-    ...q.addons.activities.map((a) => ["Activity", `${a.name} (${a.pricing_type})`, a.total]),
-  ];
-  if (addAll.length) {
+  const groups = buildAddonGroups(q.addons);
+  if (groups.length) {
     rows.push([]);
     rows.push(["Add-Ons & Extras"]);
     rows.push(["Category", "Details", "Amount"]);
-    addAll.forEach((r) => rows.push(r as (string | number)[]));
+    groups.forEach((g) => {
+      rows.push([g.label, "", g.total]);
+      g.rows.forEach((r) => rows.push(["", r.detail, r.amount]));
+    });
     rows.push(["", "Add-Ons Total", q.addons.addons_total]);
   }
   return rows;
