@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import type { SavedQuote } from "./quotes-store";
 import { getBranding } from "./branding";
 import { inr } from "./format";
+import { buildAddonGroups } from "./addon-breakdown";
+
 
 function safeName(s: string) { return (s || "").replace(/[^a-z0-9]+/gi, "_").slice(0, 60); }
 
