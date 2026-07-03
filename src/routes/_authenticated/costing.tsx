@@ -1118,7 +1118,7 @@ function CostingPage() {
                   <SumRow label="GST on rooms" values={[roomTotals.gstOnly.single, roomTotals.gstOnly.double, roomTotals.gstOnly.triple]} />
                   <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
                   <SumRow label={`Markup ${markupPct}%`} values={[finalTotals.single.markup, finalTotals.double.markup, finalTotals.triple.markup]} />
-                  <SumRow label="GST on markup 5%" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
+                  <SumRow label="GST 5% (on total)" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
 
                   <tr className="bg-gold/20 font-bold">
                     <td className="py-2 pl-1">GRAND TOTAL</td>
