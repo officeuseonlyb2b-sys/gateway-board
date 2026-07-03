@@ -18,6 +18,9 @@ import { Separator } from "@/components/ui/separator";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { inr, fmtDateShort, addDaysISO, todayISO } from "@/lib/format";
+import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
+import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "Final Costing — MP Tourism Hub" }] }),
