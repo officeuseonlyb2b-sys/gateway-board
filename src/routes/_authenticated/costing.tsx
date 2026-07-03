@@ -1037,9 +1037,12 @@ function CostingPage() {
           </div>
         </div>
       </div>
+
+      <QuoteViewerDialog quote={viewingQuote} open={!!viewingQuote} onClose={() => setViewingQuote(null)} />
     </div>
   );
 }
+
 
 function SumRow({ label, values }: { label: string; values: [number, number, number] }) {
   return (
