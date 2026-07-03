@@ -116,7 +116,7 @@ export function QuoteDocument({ quote: q }: Props) {
         {includeTrp && <OccBox label="TRIPLE SHARING" value={q.totals.grand_trp} />}
       </div>
 
-      {/* ADD-ONS SECTION */}
+      {/* ADD-ONS SECTION — itemized grouped by category */}
       {q.addons.addons_total > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>ADD-ONS & EXTRAS</div>
@@ -125,11 +125,21 @@ export function QuoteDocument({ quote: q }: Props) {
               <Th>Category</Th><Th>Details</Th><Th align="right">Amount</Th>
             </tr></thead>
             <tbody>
-              {q.addons.travels.map((t, i) => <tr key={`t${i}`}><Td>Travels</Td><Td>{t.name} × {t.days}d × {t.vehicles} vehicle(s)</Td><Td align="right">{inr(t.total)}</Td></tr>)}
-              {q.addons.guide.map((g, i) => <tr key={`g${i}`}><Td>Guide</Td><Td>{g.name} ({g.type}) × {g.days}d × {g.count}</Td><Td align="right">{inr(g.total)}</Td></tr>)}
-              {q.addons.miscellaneous.map((m, i) => <tr key={`m${i}`}><Td>Miscellaneous</Td><Td>{m.name} ({m.unit})</Td><Td align="right">{inr(m.total)}</Td></tr>)}
-              {q.addons.entrances.map((e, i) => <tr key={`e${i}`}><Td>Entrance</Td><Td>{e.site_name}, {e.city} ({e.indian_pax} IND · {e.foreigner_pax} FRN)</Td><Td align="right">{inr(e.total)}</Td></tr>)}
-              {q.addons.activities.map((a, i) => <tr key={`a${i}`}><Td>Activity</Td><Td>{a.name} ({a.pricing_type})</Td><Td align="right">{inr(a.total)}</Td></tr>)}
+              {buildAddonGroups(q.addons).map((g) => (
+                <>
+                  <tr key={`h-${g.key}`} style={{ background: "#f5f5f5" }}>
+                    <Td colSpan={2}><b>{g.label}</b></Td>
+                    <Td align="right" ><span style={{ color: "#666" }}>{inr(g.total)}</span></Td>
+                  </tr>
+                  {g.rows.map((r, i) => (
+                    <tr key={`r-${g.key}-${i}`}>
+                      <Td></Td>
+                      <Td>{r.detail}</Td>
+                      <Td align="right">{inr(r.amount)}</Td>
+                    </tr>
+                  ))}
+                </>
+              ))}
               <tr style={{ background: "#e6f0f2", fontWeight: 700 }}>
                 <Td colSpan={2}>Add-Ons Total</Td>
                 <Td align="right">{inr(q.addons.addons_total)}</Td>
