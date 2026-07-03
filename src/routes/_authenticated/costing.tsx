@@ -704,32 +704,30 @@ function CostingPage() {
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.triple)}</td>
                           <td className="print:hidden"></td>
                         </tr>
-                        {addonBreakdown.total > 0 && (
-                          <tr className="bg-emerald-50 text-emerald-900">
-                            <td colSpan={6} className="py-2 pl-2">+ Add-Ons (flat)</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                            <td className="print:hidden"></td>
-                          </tr>
-                        )}
+                        <tr className="bg-teal-100 text-teal-900">
+                          <td colSpan={6} className="py-2 pl-2">Add-Ons</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                          <td className="print:hidden"></td>
+                        </tr>
                         <tr className="bg-orange-100 text-orange-900">
                           <td colSpan={6} className="py-2 pl-2 flex items-center gap-2">
-                            <span>Mark up (on Room+GST+Add-Ons)</span>
+                            <span>Mark Up</span>
                             <Input
                               type="number" min={0} max={100} value={markupPct}
                               onChange={(e) => setMarkupPct(Math.max(0, +e.target.value || 0))}
                               className="h-6 w-16 print:border-0 print:p-0 print:h-auto print:w-auto"
                             />
-                            <span>%</span>
+                            <span>% (on Net+GST+Add-Ons)</span>
                           </td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markup)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markup)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markup)}</td>
                           <td className="print:hidden"></td>
                         </tr>
-                        <tr className="bg-red-100 text-red-900">
-                          <td colSpan={6} className="py-2 pl-2">GST 5% (on markup)</td>
+                        <tr className="bg-pink-100 text-pink-900">
+                          <td colSpan={6} className="py-2 pl-2">GST 5% (on Net+Add-Ons+Markup)</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markupGst)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markupGst)}</td>
                           <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markupGst)}</td>
@@ -747,6 +745,50 @@ function CostingPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Collapsible add-ons itemized breakdown */}
+            {addonGroups.length > 0 && (
+              <div className="mt-4 border rounded-md print:hidden">
+                <button
+                  type="button"
+                  onClick={() => setAddonsExpanded((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/50"
+                >
+                  <span className="flex items-center gap-2">
+                    {addonsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    Add-Ons breakdown ({addonGroups.reduce((s, g) => s + g.rows.length, 0)} items)
+                  </span>
+                  <span className="tabular-nums font-semibold">{inr(addonBreakdown.total)}</span>
+                </button>
+                {addonsExpanded && (
+                  <div className="border-t">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {addonGroups.map((g) => (
+                          <>
+                            <tr key={`h-${g.key}`} className="bg-muted/60">
+                              <td colSpan={2} className="px-3 py-1.5 font-semibold">{g.label}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{inr(g.total)}</td>
+                            </tr>
+                            {g.rows.map((r, i) => (
+                              <tr key={`r-${g.key}-${i}`} className="border-b last:border-0">
+                                <td className="pl-8 pr-2 py-1.5 w-8"></td>
+                                <td className="py-1.5">{r.detail}</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">{inr(r.amount)}</td>
+                              </tr>
+                            ))}
+                          </>
+                        ))}
+                        <tr className="bg-primary/10 font-bold">
+                          <td colSpan={2} className="px-3 py-2">Add-Ons Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
