@@ -69,18 +69,31 @@ export interface SavedQuote {
 }
 
 const listeners = new Set<() => void>();
-function emit() { listeners.forEach((l) => l()); }
+let cachedSnapshot: SavedQuote[] = [];
+let cacheInitialized = false;
+
+function readFromStorage(): SavedQuote[] {
+  if (!isBrowser()) return [];
+  try { return JSON.parse(localStorage.getItem(QUOTES_KEY) || "[]"); } catch { return []; }
+}
+function refreshCache() { cachedSnapshot = readFromStorage(); cacheInitialized = true; }
+function emit() { refreshCache(); listeners.forEach((l) => l()); }
 const isBrowser = () => typeof window !== "undefined";
 
 export function loadQuotes(): SavedQuote[] {
-  if (!isBrowser()) return [];
-  try { return JSON.parse(localStorage.getItem(QUOTES_KEY) || "[]"); } catch { return []; }
+  return readFromStorage();
+}
+
+function getSnapshot(): SavedQuote[] {
+  if (!cacheInitialized) refreshCache();
+  return cachedSnapshot;
 }
 
 function saveAll(list: SavedQuote[]) {
   localStorage.setItem(QUOTES_KEY, JSON.stringify(list));
   emit();
 }
+
 
 export function nextQuoteNumber(): string {
   if (!isBrowser()) return "QT-0000-000";
