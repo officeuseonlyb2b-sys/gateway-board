@@ -767,8 +767,8 @@ function CostingPage() {
                     <table className="w-full text-xs">
                       <tbody>
                         {addonGroups.map((g) => (
-                          <>
-                            <tr key={`h-${g.key}`} className="bg-muted/60">
+                          <Fragment key={g.key}>
+                            <tr className="bg-muted/60">
                               <td colSpan={2} className="px-3 py-1.5 font-semibold">{g.label}</td>
                               <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{inr(g.total)}</td>
                             </tr>
@@ -779,7 +779,7 @@ function CostingPage() {
                                 <td className="px-3 py-1.5 text-right tabular-nums">{inr(r.amount)}</td>
                               </tr>
                             ))}
-                          </>
+                          </Fragment>
                         ))}
                         <tr className="bg-primary/10 font-bold">
                           <td colSpan={2} className="px-3 py-2">Add-Ons Total</td>
