@@ -26,8 +26,10 @@ const ITEMS: Item[] = [
   { label: "Guide", to: "/guide", icon: UserCheck },
   { label: "Activity & Experience", to: "/activities", icon: Compass },
   { label: "Final Costing", to: "/costing", icon: Calculator },
+  { label: "Saved Quotes", to: "/quotes", icon: FileText },
   { label: "Settings", to: "/settings", icon: SettingsIcon },
 ];
+
 
 
 export function AppSidebar() {
