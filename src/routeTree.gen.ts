@@ -59,12 +59,6 @@ const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
   path: '/quotes',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-
-const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
-  id: '/quotes',
-  path: '/quotes',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedMiscellaneousRoute =
   AuthenticatedMiscellaneousRouteImport.update({
     id: '/miscellaneous',
