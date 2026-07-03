@@ -19,7 +19,8 @@ import { CategoryBadge } from "@/components/CategoryBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { inr, fmtDateShort, addDaysISO, todayISO } from "@/lib/format";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
-import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote, type SavedAddons } from "@/lib/quotes-store";
+import { buildAddonGroups } from "@/lib/addon-breakdown";
 
 
 export const Route = createFileRoute("/_authenticated/costing")({
