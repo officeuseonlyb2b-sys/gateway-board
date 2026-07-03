@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
-  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X,
+  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
