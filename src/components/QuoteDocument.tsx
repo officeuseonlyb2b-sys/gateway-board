@@ -101,7 +101,7 @@ export function QuoteDocument({ quote: q }: Props) {
               v={[q.totals.addons_total, q.totals.addons_total, q.totals.addons_total]} />
             <SummaryRow bg="#fff3cd" label={`Mark Up ${q.markup_percent}%`}
               v={[q.totals.markup_sgl, q.totals.markup_dbl, q.totals.markup_trp]} />
-            <SummaryRow bg="#f8d7da" label="GST 5% (on Mark Up)"
+            <SummaryRow bg="#f8d7da" label="GST 5% (on Net + Add-Ons + Markup)"
               v={[q.totals.gst_markup_sgl, q.totals.gst_markup_dbl, q.totals.gst_markup_trp]} />
             <SummaryRow bg="#f5b7b1" bold label="TOTAL"
               v={[q.totals.grand_sgl, q.totals.grand_dbl, q.totals.grand_trp]} />
