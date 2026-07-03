@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedTravelsRouteImport } from './routes/_authenticated/travels'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
+import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
 import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
 import { Route as AuthenticatedGuideRouteImport } from './routes/_authenticated/guide'
 import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
@@ -51,6 +52,11 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
 const AuthenticatedRateSearchRoute = AuthenticatedRateSearchRouteImport.update({
   id: '/rate-search',
   path: '/rate-search',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
+  id: '/quotes',
+  path: '/quotes',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedMiscellaneousRoute =
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/quotes': typeof AuthenticatedQuotesRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/travels': typeof AuthenticatedTravelsRoute
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/quotes': typeof AuthenticatedQuotesRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/travels': typeof AuthenticatedTravelsRoute
@@ -137,6 +145,7 @@ export interface FileRoutesById {
   '/_authenticated/entrances': typeof AuthenticatedEntrancesRoute
   '/_authenticated/guide': typeof AuthenticatedGuideRoute
   '/_authenticated/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/_authenticated/quotes': typeof AuthenticatedQuotesRoute
   '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/travels': typeof AuthenticatedTravelsRoute
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
     | '/entrances'
     | '/guide'
     | '/miscellaneous'
+    | '/quotes'
     | '/rate-search'
     | '/settings'
     | '/travels'
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/entrances'
     | '/guide'
     | '/miscellaneous'
+    | '/quotes'
     | '/rate-search'
     | '/settings'
     | '/travels'
@@ -185,6 +196,7 @@ export interface FileRouteTypes {
     | '/_authenticated/entrances'
     | '/_authenticated/guide'
     | '/_authenticated/miscellaneous'
+    | '/_authenticated/quotes'
     | '/_authenticated/rate-search'
     | '/_authenticated/settings'
     | '/_authenticated/travels'
@@ -240,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/rate-search'
       fullPath: '/rate-search'
       preLoaderRoute: typeof AuthenticatedRateSearchRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/quotes': {
+      id: '/_authenticated/quotes'
+      path: '/quotes'
+      fullPath: '/quotes'
+      preLoaderRoute: typeof AuthenticatedQuotesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/miscellaneous': {
@@ -308,6 +327,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedEntrancesRoute: typeof AuthenticatedEntrancesRoute
   AuthenticatedGuideRoute: typeof AuthenticatedGuideRoute
   AuthenticatedMiscellaneousRoute: typeof AuthenticatedMiscellaneousRoute
+  AuthenticatedQuotesRoute: typeof AuthenticatedQuotesRoute
   AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTravelsRoute: typeof AuthenticatedTravelsRoute
@@ -322,6 +342,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEntrancesRoute: AuthenticatedEntrancesRoute,
   AuthenticatedGuideRoute: AuthenticatedGuideRoute,
   AuthenticatedMiscellaneousRoute: AuthenticatedMiscellaneousRoute,
+  AuthenticatedQuotesRoute: AuthenticatedQuotesRoute,
   AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTravelsRoute: AuthenticatedTravelsRoute,

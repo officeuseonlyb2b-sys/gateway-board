@@ -1,11 +1,13 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
-  Calculator, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
+  Calculator, FileText, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth-mock";
+import { useBranding } from "@/lib/branding";
+
 
 interface Item {
   label: string;
@@ -24,13 +26,16 @@ const ITEMS: Item[] = [
   { label: "Guide", to: "/guide", icon: UserCheck },
   { label: "Activity & Experience", to: "/activities", icon: Compass },
   { label: "Final Costing", to: "/costing", icon: Calculator },
+  { label: "Saved Quotes", to: "/quotes", icon: FileText },
   { label: "Settings", to: "/settings", icon: SettingsIcon },
 ];
+
 
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const brand = useBranding();
 
   return (
     <aside
@@ -40,16 +45,21 @@ export function AppSidebar() {
       )}
     >
       <div className="h-16 flex items-center gap-3 px-4 border-b border-sidebar-border">
-        <div className="h-9 w-9 rounded-lg bg-gold flex items-center justify-center shrink-0">
-          <span className="text-gold-foreground font-bold text-sm">MP</span>
-        </div>
+        {brand.logo ? (
+          <img src={brand.logo} alt="logo" className="h-9 w-9 rounded-lg object-contain bg-white/90 p-0.5 shrink-0" />
+        ) : (
+          <div className="h-9 w-9 rounded-lg bg-gold flex items-center justify-center shrink-0">
+            <span className="text-gold-foreground font-bold text-sm">MP</span>
+          </div>
+        )}
         {!collapsed && (
           <div className="min-w-0">
-            <div className="font-semibold text-sm leading-tight truncate">MP Tourism</div>
-            <div className="text-[11px] text-sidebar-foreground/60 leading-tight">Operations Hub</div>
+            <div className="font-semibold text-sm leading-tight truncate">{brand.companyName || "MP Tourism"}</div>
+            <div className="text-[11px] text-sidebar-foreground/60 leading-tight truncate">{brand.tagline}</div>
           </div>
         )}
       </div>
+
 
       <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
         {ITEMS.map((it) => {

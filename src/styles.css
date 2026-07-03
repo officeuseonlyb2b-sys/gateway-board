@@ -141,3 +141,22 @@
     letter-spacing: -0.01em;
   }
 }
+
+/* -------- Quote print / PDF CSS -------- */
+@media print {
+  @page { size: A4; margin: 10mm; }
+  body.quote-viewer-open * { visibility: hidden !important; }
+  body.quote-viewer-open .quote-print-target,
+  body.quote-viewer-open .quote-print-target * { visibility: visible !important; }
+  body.quote-viewer-open .quote-viewer-overlay {
+    position: static !important; background: transparent !important;
+    overflow: visible !important; display: block !important;
+  }
+  body.quote-viewer-open .quote-viewer-actions { display: none !important; }
+  body.quote-viewer-open .quote-print-target {
+    position: absolute; top: 0; left: 0; width: 100%; box-shadow: none !important;
+    margin: 0 !important; padding: 8mm 10mm !important;
+  }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+
