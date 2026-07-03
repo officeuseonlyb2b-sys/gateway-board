@@ -1,6 +1,7 @@
 import { inr, fmtDateShort } from "@/lib/format";
 import { useBranding } from "@/lib/branding";
 import type { SavedQuote } from "@/lib/quotes-store";
+import { buildAddonGroups } from "@/lib/addon-breakdown";
 
 // Beautiful A4 print/PDF-ready quote document.
 // Wrapper adds `.quote-print-target` so print CSS can isolate it.
