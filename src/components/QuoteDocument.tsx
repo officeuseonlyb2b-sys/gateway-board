@@ -127,8 +127,8 @@ export function QuoteDocument({ quote: q }: Props) {
             </tr></thead>
             <tbody>
               {buildAddonGroups(q.addons).map((g) => (
-                <>
-                  <tr key={`h-${g.key}`} style={{ background: "#f5f5f5" }}>
+                <Fragment key={g.key}>
+                  <tr style={{ background: "#f5f5f5" }}>
                     <Td colSpan={2}><b>{g.label}</b></Td>
                     <Td align="right" ><span style={{ color: "#666" }}>{inr(g.total)}</span></Td>
                   </tr>
@@ -139,7 +139,7 @@ export function QuoteDocument({ quote: q }: Props) {
                       <Td align="right">{inr(r.amount)}</Td>
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
               <tr style={{ background: "#e6f0f2", fontWeight: 700 }}>
                 <Td colSpan={2}>Add-Ons Total</Td>
