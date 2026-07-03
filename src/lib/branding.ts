@@ -24,11 +24,12 @@ const DEFAULTS: Branding = {
 };
 
 const listeners = new Set<() => void>();
-function emit() { listeners.forEach((l) => l()); }
+let cached: Branding = DEFAULTS;
+let cacheInit = false;
 
 function isBrowser() { return typeof window !== "undefined"; }
 
-export function getBranding(): Branding {
+function readBranding(): Branding {
   if (!isBrowser()) return DEFAULTS;
   return {
     logo: localStorage.getItem(LOGO_KEY),
@@ -37,6 +38,18 @@ export function getBranding(): Branding {
     phone: localStorage.getItem(PHONE_KEY) || "",
     email: localStorage.getItem(EMAIL_KEY) || "",
   };
+}
+
+function refresh() { cached = readBranding(); cacheInit = true; }
+function emit() { refresh(); listeners.forEach((l) => l()); }
+
+export function getBranding(): Branding {
+  return readBranding();
+}
+
+function getSnapshot(): Branding {
+  if (!cacheInit) refresh();
+  return cached;
 }
 
 export function setBranding(b: Partial<Branding>) {
@@ -55,7 +68,8 @@ export function setBranding(b: Partial<Branding>) {
 export function useBranding(): Branding {
   return useSyncExternalStore(
     (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
-    getBranding,
+    getSnapshot,
     () => DEFAULTS,
   );
 }
+
