@@ -103,10 +103,11 @@ function computeDay(
     };
   }
 
+  // GST slab is on the ROOM TARIFF (not per-person). Pass full room rate.
   const single = build(rp.single_rate, rp.single_rate);
-  const double = build(rp.double_rate, rp.double_rate / 2);
+  const double = build(rp.double_rate, rp.double_rate);
   const triNet = rp.double_rate + (rp.extra_bed_rate ?? 0);
-  const triple = build(triNet, triNet / 3);
+  const triple = build(triNet, triNet);
 
   const lunchTotal = (rp.lunch_rate ?? 0) * (day.add_lunch_pax || 0);
   const dinnerTotal = (rp.dinner_rate ?? 0) * (day.add_dinner_pax || 0);
