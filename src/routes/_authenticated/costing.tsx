@@ -271,37 +271,170 @@ function CostingPage() {
     return { breakfast, lunch, dinner };
   }, [days]);
 
-  // ---------------- save quote ----------------
-  function saveQuote() {
-    if (!days.length) return toast.error("Add at least one day.");
-    const anyOcc = (["single", "double", "triple"] as OccKey[]).find((k) => includedOcc[k]);
-    if (!anyOcc) return toast.error("Select at least one occupancy to save.");
-    const firstDay = days[0];
+  // ---------------- viewer state ----------------
+  const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
+
+  // Build the full SavedQuote object from current state.
+  function buildSavedQuote(): SavedQuote | null {
+    if (!days.length) { toast.error("Add at least one day."); return null; }
+    const cityNames = Array.from(new Set(days.map((d) => {
+      const c = data.cities.find((x) => x.id === d.city_id); return c?.name;
+    }).filter(Boolean) as string[]));
+    const tourTitle = cityNames.length ? `${cityNames.join(" - ")} Tour` : "Tour";
+
+    const itinerary = dayCosts.map(({ day, costs }, idx) => {
+      const city = data.cities.find((c) => c.id === day.city_id);
+      const hotel = data.hotels.find((h) => h.id === day.hotel_id);
+      const room = data.room_categories.find((r) => r.id === day.room_id);
+      const rp = costs.ratePlan;
+      return {
+        day_number: idx + 1,
+        date: day.date,
+        city: city?.name ?? "—",
+        hotel_name: hotel?.name ?? "—",
+        hotel_category: hotel?.hotel_category ?? "",
+        room_category: room?.name ?? "—",
+        meal_plan: day.meal_plan,
+        season_label: rp?.season_label ?? "—",
+        validity_start: rp?.validity_start ?? "",
+        validity_end: rp?.validity_end ?? "",
+        rates: {
+          sgl_net: costs.single.net, sgl_gst_rate: Math.round(costs.single.gstRate * 100),
+          sgl_gst_amt: costs.single.gstAmt, sgl_total: costs.single.gross,
+          dbl_net: costs.double.net, dbl_gst_rate: Math.round(costs.double.gstRate * 100),
+          dbl_gst_amt: costs.double.gstAmt, dbl_total: costs.double.gross,
+          trp_net: costs.triple.net, trp_gst_rate: Math.round(costs.triple.gstRate * 100),
+          trp_gst_amt: costs.triple.gstAmt, trp_total: costs.triple.gross,
+        },
+        lunch_rate: rp?.lunch_rate ?? 0,
+        dinner_rate: rp?.dinner_rate ?? 0,
+      };
+    });
+
+    const addons = {
+      travels: travels.map((t) => {
+        const opt = data.travel_options.find((x) => x.id === t.travel_id);
+        return {
+          name: opt?.vehicle_type ?? "—", days: t.days, vehicles: t.vehicles,
+          rate_per_day: opt?.rate_per_day ?? 0,
+          total: (opt?.rate_per_day ?? 0) * (t.days || 0) * Math.max(1, t.vehicles || 1),
+        };
+      }),
+      miscellaneous: miscs.map((m) => {
+        const it = data.miscellaneous_items.find((x) => x.id === m.item_id);
+        const total = !it ? 0
+          : it.unit === "per_person" ? it.rate * (m.pax || 0) * Math.max(1, m.days || 1)
+          : it.unit === "per_day" ? it.rate * (m.days || 0)
+          : it.rate;
+        return { name: it?.name ?? "—", pax: m.pax, rate: it?.rate ?? 0, unit: it?.unit ?? "fixed", total };
+      }),
+      guide: guides.map((g) => {
+        const gd = data.guides.find((x) => x.id === g.guide_id);
+        return {
+          name: gd?.name ?? "—", type: gd?.guide_type ?? "",
+          days: g.days, count: g.guides, rate_per_day: gd?.rate_per_day ?? 0,
+          total: (gd?.rate_per_day ?? 0) * (g.days || 0) * Math.max(1, g.guides || 1),
+        };
+      }),
+      entrances: entrances.map((e) => {
+        const site = data.entrance_sites.find((x) => x.id === e.site_id);
+        const city = data.entrance_cities.find((c) => c.id === site?.city_id);
+        return {
+          site_name: site?.site_name ?? "—", city: city?.name ?? "",
+          indian_pax: e.indian_pax, indian_rate: site?.indian_rate ?? 0,
+          foreigner_pax: e.foreign_pax, foreigner_rate: site?.foreigner_rate ?? 0,
+          total: (site?.indian_rate ?? 0) * (e.indian_pax || 0) + (site?.foreigner_rate ?? 0) * (e.foreign_pax || 0),
+        };
+      }),
+      activities: activities.map((a) => {
+        const act = data.activities.find((x) => x.id === a.activity_id);
+        const dest = data.activity_destinations.find((d) => d.id === act?.destination_id);
+        const total = !act ? 0
+          : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
+          : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
+          : act.price;
+        const qty = !act ? 0 : act.pricing_type === "per_vehicle" ? a.vehicles : a.pax;
+        return {
+          name: act?.activity_name ?? "—", destination: dest?.name ?? "",
+          pricing_type: act?.pricing_type ?? "total_fixed",
+          qty, rate: act?.price ?? 0, total,
+        };
+      }),
+      addons_total: addonBreakdown.total,
+    };
+
     const lastDay = days[days.length - 1];
+    const q: SavedQuote = {
+      id: uid(),
+      quote_number: nextQuoteNumber(),
+      saved_at: new Date().toISOString(),
+      saved_by: user?.name ?? "—",
+      tour_title: tourTitle,
+      cities: cityNames,
+      total_nights: days.length,
+      travel_start: days[0].date,
+      travel_end: addDaysISO(lastDay.date, 1),
+      itinerary,
+      addons,
+      inclusions: {
+        accommodation_nights: days.length,
+        breakfast_count: mealCounts.breakfast,
+        lunch_count: mealCounts.lunch,
+        dinner_count: mealCounts.dinner,
+        travels_included: addonBreakdown.travelTotal > 0,
+        guide_included: addonBreakdown.guideTotal > 0,
+      },
+      markup_percent: markupPct,
+      totals: {
+        room_net_sgl: roomTotals.netOnly.single, room_net_dbl: roomTotals.netOnly.double, room_net_trp: roomTotals.netOnly.triple,
+        gst_rooms_sgl: roomTotals.gstOnly.single, gst_rooms_dbl: roomTotals.gstOnly.double, gst_rooms_trp: roomTotals.gstOnly.triple,
+        addons_total: addonBreakdown.total,
+        markup_sgl: finalTotals.single.markup, markup_dbl: finalTotals.double.markup, markup_trp: finalTotals.triple.markup,
+        gst_markup_sgl: finalTotals.single.markupGst, gst_markup_dbl: finalTotals.double.markupGst, gst_markup_trp: finalTotals.triple.markupGst,
+        grand_sgl: finalTotals.single.grand, grand_dbl: finalTotals.double.grand, grand_trp: finalTotals.triple.grand,
+      },
+      include_sgl: includedOcc.single, include_dbl: includedOcc.double, include_trp: includedOcc.triple,
+    };
+    return q;
+  }
+
+  // Save Quote — persist to storage (both full + summary).
+  function saveQuote() {
+    const q = buildSavedQuote();
+    if (!q) return;
+    persistQuote(q);
+    // Also add lightweight summary for existing Recent Quotes list.
+    const firstDay = days[0];
     const hotel = data.hotels.find((h) => h.id === firstDay.hotel_id);
     const room = data.room_categories.find((r) => r.id === firstDay.room_id);
     const city = data.cities.find((c) => c.id === firstDay.city_id);
+    const anyOcc = (["single", "double", "triple"] as OccKey[]).find((k) => includedOcc[k]) ?? "double";
     db.addQuote({
       hotel_id: firstDay.hotel_id, room_category_id: firstDay.room_id, rate_plan_id: null,
-      check_in: firstDay.date, check_out: addDaysISO(lastDay.date, 1),
+      check_in: firstDay.date, check_out: q.travel_end,
       nights: days.length, meal_plan: firstDay.meal_plan,
       num_rooms: 1, num_adults: totalPax, extra_beds: 0, cwb_count: 0,
       include_lunch: days.some((d) => d.add_lunch_pax > 0),
       include_dinner: days.some((d) => d.add_dinner_pax > 0),
       include_extra_breakfast: false,
       xmas_applied: false, newyear_applied: false,
-      subtotal: finalTotals[anyOcc].netWithGst,
-      gst_rate: 0, gst_amount: 0,
+      subtotal: finalTotals[anyOcc].netWithGst, gst_rate: 0, gst_amount: 0,
       grand_total: finalTotals[anyOcc].grand,
       generated_by: user?.id ?? "anon", generated_by_name: user?.name ?? "—",
       hotel_name_snapshot: hotel?.name ?? "—",
       room_name_snapshot: room?.name ?? "—",
       city_name_snapshot: city?.name ?? "—",
     });
-    toast.success("Quote saved.");
+    toast.success(`Quote ${q.quote_number} saved.`);
+    return q;
   }
 
-  function printQuote() { window.print(); }
+  // Generate Quote — save + open preview modal.
+  function generateQuote() {
+    const q = saveQuote();
+    if (q) setViewingQuote(q);
+  }
+
 
   const recentQuotes = useMemo(
     () => [...data.quotes].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 5),
