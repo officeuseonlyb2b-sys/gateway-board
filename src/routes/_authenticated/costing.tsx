@@ -876,9 +876,10 @@ function CostingPage() {
                 <tbody className="tabular-nums">
                   <SumRow label="Room (Net)" values={[roomTotals.netOnly.single, roomTotals.netOnly.double, roomTotals.netOnly.triple]} />
                   <SumRow label="GST on rooms" values={[roomTotals.gstOnly.single, roomTotals.gstOnly.double, roomTotals.gstOnly.triple]} />
+                  <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
                   <SumRow label={`Markup ${markupPct}%`} values={[finalTotals.single.markup, finalTotals.double.markup, finalTotals.triple.markup]} />
                   <SumRow label="GST on markup 5%" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
-                  <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
+
                   <tr className="bg-gold/20 font-bold">
                     <td className="py-2 pl-1">GRAND TOTAL</td>
                     <td className="py-2 pr-1 text-right">{inr(finalTotals.single.grand)}</td>
