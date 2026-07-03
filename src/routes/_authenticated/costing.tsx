@@ -235,8 +235,11 @@ function CostingPage() {
     };
   }, [travels, miscs, guides, entrances, activities, data]);
 
-  // ---------------- final totals per occupancy (correct order) ----------------
-  // Sub-Total = Room (Net+GST) + Add-Ons; Markup on Sub-Total; GST 5% on Markup only.
+  // ---------------- final totals per occupancy ----------------
+  // Markup = (Net+GST + Add-Ons) × markup%
+  // Sub-Total-before-GST = Net+GST + Add-Ons + Markup
+  // Final GST 5% = Sub-Total-before-GST × 5%
+  // GRAND TOTAL = Sub-Total-before-GST + Final GST 5%
   const finalTotals = useMemo(() => {
     const out: Record<OccKey, {
       netWithGst: number; addons: number; subTotal: number;
@@ -245,12 +248,13 @@ function CostingPage() {
     (["single", "double", "triple"] as OccKey[]).forEach((k) => {
       const netWithGst = roomTotals.netWithGst[k];
       const addons = addonBreakdown.total;
-      const subTotal = netWithGst + addons;
-      const markup = subTotal * (markupPct / 100);
-      const markupGst = markup * (markupGstPct / 100);
+      const base = netWithGst + addons;
+      const markup = base * (markupPct / 100);
+      const subTotal = base + markup;
+      const markupGst = subTotal * (markupGstPct / 100); // Final GST on combined total
       out[k] = {
         netWithGst, addons, subTotal, markup, markupGst,
-        grand: subTotal + markup + markupGst,
+        grand: subTotal + markupGst,
       };
     });
     return out;
