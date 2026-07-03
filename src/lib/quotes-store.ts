@@ -117,7 +117,8 @@ export function deleteQuote(id: string): void {
 export function useSavedQuotes(): SavedQuote[] {
   return useSyncExternalStore(
     (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
-    loadQuotes,
+    getSnapshot,
     () => [],
   );
 }
+
