@@ -155,6 +155,29 @@ export interface Activity {
   created_at: string;
 }
 
+export type GuideType = "Local" | "Expert" | "Specialist";
+export interface Guide {
+  id: string;
+  name: string;
+  guide_type: GuideType;
+  destination: string;
+  rate_per_day: number;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TravelOption {
+  id: string;
+  vehicle_type: string;
+  description: string;
+  capacity_persons: number;
+  rate_per_day: number;
+  rate_per_km: number;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface DB {
   cities: City[];
   hotels: Hotel[];
@@ -166,7 +189,10 @@ export interface DB {
   entrance_sites: EntranceSite[];
   activity_destinations: ActivityDestination[];
   activities: Activity[];
+  guides: Guide[];
+  travel_options: TravelOption[];
 }
+
 
 const STORAGE_KEY = "mp-tourism-db-v2";
 
@@ -347,11 +373,25 @@ function seed(): DB {
     },
   ];
 
+  const guides: Guide[] = [
+    { id: uid(), name: "Local City Guide", guide_type: "Local", destination: "Any", rate_per_day: 800, description: "Half-day / full-day local city guide", is_active: true, created_at: now() },
+    { id: uid(), name: "Wildlife Expert Guide", guide_type: "Expert", destination: "Kanha/Bandhavgarh", rate_per_day: 1500, description: "Experienced naturalist for jungle safaris", is_active: true, created_at: now() },
+    { id: uid(), name: "Archaeological Specialist", guide_type: "Specialist", destination: "Gwalior/Orchha", rate_per_day: 1200, description: "Heritage & archaeology expert", is_active: true, created_at: now() },
+  ];
+  const travel_options: TravelOption[] = [
+    { id: uid(), vehicle_type: "AC Bus 2×2", description: "Luxury coach for large groups", capacity_persons: 32, rate_per_day: 8000, rate_per_km: 25, is_active: true, created_at: now() },
+    { id: uid(), vehicle_type: "AC Tempo Traveller", description: "Comfortable mid-size group vehicle", capacity_persons: 12, rate_per_day: 4500, rate_per_km: 18, is_active: true, created_at: now() },
+    { id: uid(), vehicle_type: "AC Sedan", description: "Dzire / Etios class", capacity_persons: 4, rate_per_day: 2500, rate_per_km: 14, is_active: true, created_at: now() },
+    { id: uid(), vehicle_type: "AC SUV / Innova", description: "Innova Crysta / Ertiga", capacity_persons: 6, rate_per_day: 3000, rate_per_km: 16, is_active: true, created_at: now() },
+  ];
+
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
     miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
+    guides, travel_options,
   };
 }
+
 
 let _db: DB | null = null;
 const listeners = new Set<() => void>();
@@ -372,6 +412,14 @@ function load(): DB {
       if (!parsed.entrance_sites) parsed.entrance_sites = [];
       if (!parsed.activity_destinations) parsed.activity_destinations = [];
       if (!parsed.activities) parsed.activities = [];
+      if (!parsed.guides || parsed.guides.length === 0) {
+        const s = seed();
+        parsed.guides = s.guides;
+      }
+      if (!parsed.travel_options || parsed.travel_options.length === 0) {
+        const s = seed();
+        parsed.travel_options = s.travel_options;
+      }
       _db = parsed;
       return _db;
     }
@@ -581,7 +629,42 @@ export const db = {
     d.activities = d.activities.filter((x) => x.id !== id);
     persist(); emit();
   },
+
+  // Guides
+  addGuide(input: Omit<Guide, "id" | "created_at">): Guide {
+    const d = load();
+    const g: Guide = { ...input, id: uid(), created_at: now() };
+    d.guides.push(g); persist(); emit(); return g;
+  },
+  updateGuide(id: string, patch: Partial<Guide>) {
+    const d = load();
+    const idx = d.guides.findIndex((x) => x.id === id);
+    if (idx >= 0) { d.guides[idx] = { ...d.guides[idx], ...patch }; persist(); emit(); }
+  },
+  deleteGuide(id: string) {
+    const d = load();
+    d.guides = d.guides.filter((x) => x.id !== id);
+    persist(); emit();
+  },
+
+  // Travel options
+  addTravel(input: Omit<TravelOption, "id" | "created_at">): TravelOption {
+    const d = load();
+    const t: TravelOption = { ...input, id: uid(), created_at: now() };
+    d.travel_options.push(t); persist(); emit(); return t;
+  },
+  updateTravel(id: string, patch: Partial<TravelOption>) {
+    const d = load();
+    const idx = d.travel_options.findIndex((x) => x.id === id);
+    if (idx >= 0) { d.travel_options[idx] = { ...d.travel_options[idx], ...patch }; persist(); emit(); }
+  },
+  deleteTravel(id: string) {
+    const d = load();
+    d.travel_options = d.travel_options.filter((x) => x.id !== id);
+    persist(); emit();
+  },
 };
+
 
 // React helpers
 import { useSyncExternalStore } from "react";

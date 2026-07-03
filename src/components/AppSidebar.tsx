@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass,
+  LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
   Calculator, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
@@ -18,13 +18,15 @@ interface Item {
 const ITEMS: Item[] = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Hotels", to: "/hotels", icon: Building2 },
-  { label: "Travels", icon: Plane, disabled: true, badge: "Soon" },
+  { label: "Travels", to: "/travels", icon: Plane },
   { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
   { label: "Entrances", to: "/entrances", icon: Landmark },
+  { label: "Guide", to: "/guide", icon: UserCheck },
   { label: "Activity & Experience", to: "/activities", icon: Compass },
   { label: "Final Costing", to: "/costing", icon: Calculator },
   { label: "Settings", to: "/settings", icon: SettingsIcon },
 ];
+
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
