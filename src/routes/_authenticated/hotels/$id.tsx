@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth-mock";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { HotelFormDialog } from "@/components/HotelFormDialog";
 import { SeasonFormDialog, ratePlanGroups } from "@/components/SeasonFormDialog";
+import { HotelAnalytics } from "@/components/HotelAnalytics";
 
 export const Route = createFileRoute("/_authenticated/hotels/$id")({
   head: () => ({ meta: [{ title: "Hotel — MP Tourism Hub" }] }),
@@ -114,11 +115,15 @@ function HotelDetailPage() {
         </div>
       </Card>
 
-      <Tabs defaultValue="rooms">
+      <Tabs defaultValue="analytics">
         <TabsList>
+          <TabsTrigger value="analytics">Overview / Analytics</TabsTrigger>
           <TabsTrigger value="rooms">Room Categories ({rooms.length})</TabsTrigger>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="analytics">
+          <HotelAnalytics hotel={hotel} city={city ?? ""} onEdit={() => setEditOpen(true)} />
+        </TabsContent>
 
         <TabsContent value="rooms" className="space-y-4 mt-4">
           <Card className="p-4">
@@ -143,12 +148,6 @@ function HotelDetailPage() {
               ))}
             </Accordion>
           )}
-        </TabsContent>
-
-        <TabsContent value="overview" className="mt-4">
-          <Card className="p-6 text-sm text-muted-foreground">
-            {rooms.length} room categories · {data.rate_plans.filter((p) => rooms.some((r) => r.id === p.room_category_id)).length} rate plans across all seasons.
-          </Card>
         </TabsContent>
       </Tabs>
 

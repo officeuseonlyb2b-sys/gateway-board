@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
 
-
 interface Item {
   label: string;
   to?: string;
@@ -17,20 +16,22 @@ interface Item {
   badge?: string;
 }
 
-const ITEMS: Item[] = [
-  { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  { label: "Hotels", to: "/hotels", icon: Building2 },
-  { label: "Travels", to: "/travels", icon: Plane },
-  { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
-  { label: "Entrances", to: "/entrances", icon: Landmark },
-  { label: "Guide", to: "/guide", icon: UserCheck },
-  { label: "Activity & Experience", to: "/activities", icon: Compass },
-  { label: "Final Costing", to: "/costing", icon: Calculator },
-  { label: "Saved Quotes", to: "/quotes", icon: FileText },
-  { label: "Settings", to: "/settings", icon: SettingsIcon },
+const SECTIONS: Item[][] = [
+  [{ label: "Dashboard", to: "/dashboard", icon: LayoutDashboard }],
+  [
+    { label: "Hotels", to: "/hotels", icon: Building2 },
+    { label: "Travels", to: "/travels", icon: Plane },
+    { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
+    { label: "Entrances", to: "/entrances", icon: Landmark },
+    { label: "Guide", to: "/guide", icon: UserCheck },
+    { label: "Activity & Experience", to: "/activities", icon: Compass },
+  ],
+  [
+    { label: "Final Costing", to: "/costing", icon: Calculator },
+    { label: "Saved Quotes", to: "/quotes", icon: FileText },
+  ],
+  [{ label: "Settings", to: "/settings", icon: SettingsIcon }],
 ];
-
-
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -46,10 +47,14 @@ export function AppSidebar() {
     >
       <div className="h-16 flex items-center gap-3 px-4 border-b border-sidebar-border">
         {brand.logo ? (
-          <img src={brand.logo} alt="logo" className="h-9 w-9 rounded-lg object-contain bg-white/90 p-0.5 shrink-0" />
+          <img
+            src={brand.logo}
+            alt="logo"
+            className="h-9 w-9 rounded-lg object-contain bg-white/95 p-0.5 shrink-0 shadow-[0_0_0_1px_rgba(230,126,34,0.35),0_0_18px_rgba(230,126,34,0.35)]"
+          />
         ) : (
-          <div className="h-9 w-9 rounded-lg bg-gold flex items-center justify-center shrink-0">
-            <span className="text-gold-foreground font-bold text-sm">MP</span>
+          <div className="h-9 w-9 rounded-lg bg-accent flex items-center justify-center shrink-0 shadow-[0_0_18px_rgba(230,126,34,0.5)]">
+            <span className="text-accent-foreground font-bold text-sm">MP</span>
           </div>
         )}
         {!collapsed && (
@@ -60,42 +65,41 @@ export function AppSidebar() {
         )}
       </div>
 
-
-      <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
-        {ITEMS.map((it) => {
-          const Icon = it.icon;
-          const active = it.to && (pathname === it.to || pathname.startsWith(it.to + "/"));
-          const content = (
-            <>
-              <Icon className="h-[18px] w-[18px] shrink-0" />
-              {!collapsed && <span className="truncate">{it.label}</span>}
-              {!collapsed && it.badge && (
-                <span className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded bg-sidebar-accent/60 text-sidebar-foreground/70">
-                  {it.badge}
-                </span>
-              )}
-            </>
-          );
-          const base = cn(
-            "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-            active
-              ? "bg-gold text-gold-foreground shadow-sm"
-              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-            it.disabled && "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-sidebar-foreground/80",
-          );
-          if (it.disabled || !it.to) {
-            return (
-              <div key={it.label} className={base} title={collapsed ? it.label : undefined}>
-                {content}
-              </div>
-            );
-          }
-          return (
-            <Link key={it.label} to={it.to} className={base} title={collapsed ? it.label : undefined}>
-              {content}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-2 py-3 overflow-y-auto">
+        {SECTIONS.map((section, si) => (
+          <div key={si} className={cn("space-y-1", si > 0 && "mt-3 pt-3 border-t border-sidebar-border/60")}>
+            {section.map((it) => {
+              const Icon = it.icon;
+              const active = it.to && (pathname === it.to || pathname.startsWith(it.to + "/"));
+              const content = (
+                <>
+                  {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent" />}
+                  <Icon className="h-[18px] w-[18px] shrink-0" />
+                  {!collapsed && <span className="truncate">{it.label}</span>}
+                </>
+              );
+              const base = cn(
+                "relative flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                active
+                  ? "bg-accent/15 text-white"
+                  : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                it.disabled && "opacity-40 cursor-not-allowed",
+              );
+              if (it.disabled || !it.to) {
+                return (
+                  <div key={it.label} className={base} title={collapsed ? it.label : undefined}>
+                    {content}
+                  </div>
+                );
+              }
+              return (
+                <Link key={it.label} to={it.to} className={base} title={collapsed ? it.label : undefined}>
+                  {content}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="p-2 border-t border-sidebar-border space-y-1">
