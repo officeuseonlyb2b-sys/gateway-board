@@ -51,10 +51,10 @@ export function AppSidebar() {
           <img
             src={brand.logo}
             alt="logo"
-            className="h-9 w-9 rounded-lg object-contain bg-white/95 p-0.5 shrink-0 shadow-[0_0_0_1px_rgba(230,126,34,0.35),0_0_18px_rgba(230,126,34,0.35)]"
+            className="h-9 w-9 rounded-lg object-contain bg-white/95 p-0.5 shrink-0"
           />
         ) : (
-          <div className="h-9 w-9 rounded-lg bg-accent flex items-center justify-center shrink-0 shadow-[0_0_18px_rgba(230,126,34,0.5)]">
+          <div className="h-9 w-9 rounded-lg bg-accent flex items-center justify-center shrink-0">
             <span className="text-accent-foreground font-bold text-sm">MP</span>
           </div>
         )}
