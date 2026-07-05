@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
-  Calculator, FileText, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
+  Calculator, FileText, BarChart2, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,7 @@ const SECTIONS: Item[][] = [
   [
     { label: "Final Costing", to: "/costing", icon: Calculator },
     { label: "Saved Quotes", to: "/quotes", icon: FileText },
+    { label: "Reports", to: "/reports", icon: BarChart2 },
   ],
   [{ label: "Settings", to: "/settings", icon: SettingsIcon }],
 ];
@@ -50,10 +51,10 @@ export function AppSidebar() {
           <img
             src={brand.logo}
             alt="logo"
-            className="h-9 w-9 rounded-lg object-contain bg-white/95 p-0.5 shrink-0 shadow-[0_0_0_1px_rgba(230,126,34,0.35),0_0_18px_rgba(230,126,34,0.35)]"
+            className="h-9 w-9 rounded-lg object-contain bg-white/95 p-0.5 shrink-0"
           />
         ) : (
-          <div className="h-9 w-9 rounded-lg bg-accent flex items-center justify-center shrink-0 shadow-[0_0_18px_rgba(230,126,34,0.5)]">
+          <div className="h-9 w-9 rounded-lg bg-accent flex items-center justify-center shrink-0">
             <span className="text-accent-foreground font-bold text-sm">MP</span>
           </div>
         )}
@@ -74,15 +75,15 @@ export function AppSidebar() {
               const content = (
                 <>
                   {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent" />}
-                  <Icon className="h-[18px] w-[18px] shrink-0" />
+                  <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-accent" : "text-sidebar-foreground/70")} />
                   {!collapsed && <span className="truncate">{it.label}</span>}
                 </>
               );
               const base = cn(
                 "relative flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
                 active
-                  ? "bg-accent/15 text-white"
-                  : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  ? "bg-sidebar-accent/60 text-accent"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground",
                 it.disabled && "opacity-40 cursor-not-allowed",
               );
               if (it.disabled || !it.to) {

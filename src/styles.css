@@ -60,61 +60,61 @@
 :root {
   --radius: 0.75rem;
 
-  /* Modern navy + warm orange palette */
-  --background: #F4F6F9;
-  --foreground: #1A2332;
+  /* Premium navy + muted gold palette */
+  --background: #F0F2F5;
+  --foreground: #0F2D48;
 
   --card: #FFFFFF;
-  --card-foreground: #1A2332;
+  --card-foreground: #0F2D48;
   --popover: #FFFFFF;
-  --popover-foreground: #1A2332;
+  --popover-foreground: #0F2D48;
 
-  --primary: #1B4F72;          /* deep navy */
+  --primary: #0F2D48;          /* dark navy */
   --primary-foreground: #FFFFFF;
-  --primary-light: #2E86C1;
+  --primary-light: #1A4A6B;    /* medium navy */
 
-  --secondary: #EBF2F8;
-  --secondary-foreground: #1B4F72;
+  --secondary: #F3F4F6;
+  --secondary-foreground: #0F2D48;
 
-  --muted: #F1F5F9;
-  --muted-foreground: #6B7A8D;
+  --muted: #F3F4F6;
+  --muted-foreground: #9CA3AF;
 
-  --accent: #E67E22;           /* warm orange */
+  --accent: #C9A84C;           /* muted gold */
   --accent-foreground: #FFFFFF;
-  --accent-light: #F39C12;
+  --accent-light: #F5EDD6;     /* very light gold */
 
-  --destructive: #E74C3C;
+  --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
 
-  --border: #E2E8F0;
-  --input: #E2E8F0;
-  --ring: #E67E22;
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #C9A84C;
 
-  --gold: #F39C12;
-  --gold-foreground: #1A2332;
-  --teal: #2E86C1;
-  --sand: #FDF6EC;
+  --gold: #C9A84C;
+  --gold-foreground: #0F2D48;
+  --teal: #1A4A6B;
+  --sand: #F5EDD6;
 
-  --success: #27AE60;
-  --warning: #F39C12;
-  --danger: #E74C3C;
-  --info: #2980B9;
+  --success: #059669;
+  --warning: #C9A84C;
+  --danger: #DC2626;
+  --info: #1A4A6B;
 
-  --chart-1: #1B4F72;
-  --chart-2: #E67E22;
-  --chart-3: #2E86C1;
-  --chart-4: #F39C12;
-  --chart-5: #27AE60;
+  --chart-1: #0F2D48;
+  --chart-2: #1A4A6B;
+  --chart-3: #C9A84C;
+  --chart-4: #6B7A8D;
+  --chart-5: #059669;
 
-  /* Very dark navy sidebar */
+  /* Dark navy sidebar */
   --sidebar: #0F2D48;
-  --sidebar-foreground: #E8EEF4;
-  --sidebar-primary: #E67E22;
+  --sidebar-foreground: #D1D5DB;
+  --sidebar-primary: #C9A84C;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A3E5F;
+  --sidebar-accent: #1A3A52;
   --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: #1A3E5F;
-  --sidebar-ring: #E67E22;
+  --sidebar-border: #17324D;
+  --sidebar-ring: #C9A84C;
 }
 
 .dark {
@@ -157,11 +157,38 @@
 }
 
 @utility card-elevated {
-  box-shadow: 0 2px 12px rgba(15, 45, 72, 0.06);
-  transition: box-shadow 200ms ease;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.04);
+  transition: box-shadow 200ms ease, transform 200ms ease;
   &:hover {
-    box-shadow: 0 4px 20px rgba(15, 45, 72, 0.10);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
   }
+}
+
+@utility page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: -0.02em;
+  position: relative;
+  padding-bottom: 10px;
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 40px;
+    background: var(--color-accent);
+    border-radius: 2px;
+  }
+}
+
+@utility section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-foreground);
 }
 
 /* -------- Quote print / PDF CSS -------- */
