@@ -75,15 +75,15 @@ export function AppSidebar() {
               const content = (
                 <>
                   {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent" />}
-                  <Icon className="h-[18px] w-[18px] shrink-0" />
+                  <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-accent" : "text-sidebar-foreground/70")} />
                   {!collapsed && <span className="truncate">{it.label}</span>}
                 </>
               );
               const base = cn(
                 "relative flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
                 active
-                  ? "bg-accent/15 text-white"
-                  : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  ? "bg-sidebar-accent/60 text-accent"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground",
                 it.disabled && "opacity-40 cursor-not-allowed",
               );
               if (it.disabled || !it.to) {
