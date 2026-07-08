@@ -268,11 +268,3 @@ function CSRow({ label, v }: { label: string; v: [number, number, number] }) {
     </tr>
   );
 }
-function OccBox({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ flex: 1, border: `2px solid ${TEAL}`, borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: TEAL, letterSpacing: 0.5 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 800, color: "#000", marginTop: 4 }}>{inr(value)} <span style={{ fontSize: 9, fontWeight: 400, color: "#666" }}>per pax</span></div>
-    </div>
-  );
-}
