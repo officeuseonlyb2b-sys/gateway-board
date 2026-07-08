@@ -233,8 +233,21 @@ function validate(d: QuoteDraft, step: number): boolean {
     case 6: return d.categories.length >= 1;
     case 7: return !!d.departure_city;
     case 8: return d.travel_modes.length >= 1;
-    case 9: return d.routing.every((r) => !!r.city_id);
-    case 15: return d.hotel_options.some((o) => o.selections.length > 0);
+    // Step 9: only overnight days need a city; last (departure) day is auto.
+    case 9: {
+      const overnightRows = d.routing.filter((r) => r.overnight);
+      if (overnightRows.length === 0) return false;
+      return overnightRows.some((r) => !!r.city_id);
+    }
+    // Step 15: at least Option A must have a selection for every overnight city.
+    case 15: {
+      const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
+      if (overnightCities.length === 0) return true;
+      const A = d.hotel_options.find((o) => o.key === "A");
+      if (!A) return false;
+      return overnightCities.every((cid) => A.selections.some((s) => s.city_id === cid));
+    }
+    // Steps 10–14, 16–18: optional / auto-calculated — never block Next.
     default: return true;
   }
 }
