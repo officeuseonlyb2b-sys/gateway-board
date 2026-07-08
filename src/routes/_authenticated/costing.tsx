@@ -1,1176 +1,1559 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Fragment, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Calculator, Printer, Save, RotateCcw, AlertTriangle, Plus, Trash2, X, ChevronDown, ChevronRight,
+  Calculator, Check, ChevronLeft, ChevronRight, Save, Plus, Trash2,
+  Building2, User, Users, FileText, Printer, FileDown, FileSpreadsheet,
+  Star, AlertCircle, X,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  useDB, db, MEAL_PLANS, type MealPlan, type RatePlan,
-} from "@/lib/mock-store";
-import { useAuth } from "@/lib/auth-mock";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { CategoryBadge } from "@/components/CategoryBadge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { inr, fmtDateShort, addDaysISO, todayISO } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
+import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import { useAuth } from "@/lib/auth-mock";
+import {
+  useDraft, writeDraft, clearDraft, initDraft, loadDraft,
+} from "@/lib/wizard/store";
+import type {
+  QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
+} from "@/lib/wizard/types";
+import { emptyDraft } from "@/lib/wizard/types";
+import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
+import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
+import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
-import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote, type SavedAddons } from "@/lib/quotes-store";
-import { buildAddonGroups } from "@/lib/addon-breakdown";
-
 
 export const Route = createFileRoute("/_authenticated/costing")({
-  head: () => ({ meta: [{ title: "Final Costing — MP Tourism Hub" }] }),
-  component: CostingPage,
+  head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
+  component: WizardPage,
 });
 
 // ============================================================
-// Types
+// Step definitions
 // ============================================================
-interface ItineraryDay {
-  id: string;
-  date: string;          // ISO
-  city_id: string;
-  hotel_id: string;
-  room_id: string;
-  meal_plan: MealPlan;
-  add_lunch_pax: number;    // 0 = off
-  add_dinner_pax: number;   // 0 = off
-}
+const STEPS: { n: number; label: string }[] = [
+  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Duration" },
+  { n: 4, label: "Program" }, { n: 5, label: "Dates+Pax" }, { n: 6, label: "Category" },
+  { n: 7, label: "From" }, { n: 8, label: "Travel" }, { n: 9, label: "Routing" },
+  { n: 10, label: "Transport" }, { n: 11, label: "Activities" }, { n: 12, label: "Entrances" },
+  { n: 13, label: "Guide" }, { n: 14, label: "Misc" }, { n: 15, label: "Hotels" },
+  { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
+];
 
-interface TravelLine { id: string; travel_id: string; days: number; vehicles: number; }
-interface MiscLine { id: string; item_id: string; pax: number; days: number; }
-interface GuideLine { id: string; guide_id: string; days: number; guides: number; }
-interface EntranceLine { id: string; site_id: string; indian_pax: number; foreign_pax: number; }
-interface ActivityLine { id: string; activity_id: string; pax: number; vehicles: number; }
+const CATEGORY_TAGS = [
+  "Wildlife", "Heritage", "Pilgrimage", "Adventure", "Beach",
+  "Hill Station", "Cultural", "Corporate", "Honeymoon", "Family",
+];
+const TRAVEL_MODES = [
+  { id: "flight", label: "Flight", icon: "✈" },
+  { id: "train", label: "Train", icon: "🚂" },
+  { id: "car", label: "Car", icon: "🚗" },
+  { id: "self", label: "Self Drive", icon: "🏍" },
+];
 
-
-interface DayOccupancyCosts {
-  net: number;        // net rate before GST
-  gstRate: number;    // 0.05 or 0.18
-  gstAmt: number;
-  gross: number;      // net + gst
-  perPersonRate: number;
-  available: boolean;
-}
-interface DayCosts {
-  single: DayOccupancyCosts;
-  double: DayOccupancyCosts;
-  triple: DayOccupancyCosts;
-  lunchTotal: number;
-  dinnerTotal: number;
-  ratePlan: RatePlan | null;
-}
-type OccKey = "single" | "double" | "triple";
-const OCC_LABEL: Record<OccKey, string> = { single: "Single", double: "Double", triple: "Triple" };
-
-const uid = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+function uid() { return Math.random().toString(36).slice(2, 10); }
 
 // ============================================================
-// GST slab
+// Root
 // ============================================================
-function gstRateFor(perPersonRate: number): number {
-  return perPersonRate <= 7500 ? 0.05 : 0.18;
-}
+function WizardPage() {
+  const draft = useDraft();
+  const [showBanner, setShowBanner] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
-function computeDay(
-  day: ItineraryDay,
-  ratePlans: RatePlan[],
-): DayCosts {
-  const t = +new Date(day.date);
-  const rp = ratePlans.find(
-    (p) => p.room_category_id === day.room_id && p.meal_plan === day.meal_plan &&
-      +new Date(p.validity_start) <= t && +new Date(p.validity_end) >= t,
-  ) ?? null;
+  useEffect(() => {
+    if (initialized) return;
+    const existing = loadDraft();
+    if (existing) setShowBanner(true);
+    else initDraft();
+    setInitialized(true);
+  }, [initialized]);
 
-  const zero = (): DayOccupancyCosts => ({
-    net: 0, gstRate: 0, gstAmt: 0, gross: 0, perPersonRate: 0, available: false,
-  });
+  if (!draft) {
+    return (
+      <div className="p-8">
+        <Button onClick={() => initDraft()}>Start Quotation</Button>
+      </div>
+    );
+  }
 
-  const build = (net: number, per: number): DayOccupancyCosts => {
-    const gstRate = gstRateFor(per);
-    const gstAmt = net * gstRate;
-    return { net, gstRate, gstAmt, gross: net + gstAmt, perPersonRate: per, available: true };
+  const step = draft.step;
+  const set = (patch: Partial<QuoteDraft>) => writeDraft({ ...draft, ...patch });
+
+  const canProceed = validate(draft, step);
+
+  const go = (n: number) => {
+    if (n < 1 || n > 18) return;
+    if (n > step && !canProceed) return;
+    set({ step: n });
   };
 
-  if (!rp) {
-    return {
-      single: zero(), double: zero(), triple: zero(),
-      lunchTotal: 0, dinnerTotal: 0, ratePlan: null,
-    };
-  }
-
-  // GST slab is on the ROOM TARIFF (not per-person). Pass full room rate.
-  const single = build(rp.single_rate, rp.single_rate);
-  const double = build(rp.double_rate, rp.double_rate);
-  const triNet = rp.double_rate + (rp.extra_bed_rate ?? 0);
-  const triple = build(triNet, triNet);
-
-  const lunchTotal = (rp.lunch_rate ?? 0) * (day.add_lunch_pax || 0);
-  const dinnerTotal = (rp.dinner_rate ?? 0) * (day.add_dinner_pax || 0);
-
-  return { single, double, triple, lunchTotal, dinnerTotal, ratePlan: rp };
-}
-
-// ============================================================
-// Component
-// ============================================================
-function CostingPage() {
-  const data = useDB();
-  const user = useAuth();
-
-  // --- itinerary ---
-  const [days, setDays] = useState<ItineraryDay[]>([]);
-  const [markupPct, setMarkupPct] = useState<number>(10);
-  const [markupGstPct] = useState<number>(5);
-  const [includedOcc, setIncludedOcc] = useState<Record<OccKey, boolean>>({
-    single: true, double: true, triple: false,
-  });
-
-  // --- add-ons ---
-  const [travels, setTravels] = useState<TravelLine[]>([]);
-  const [miscs, setMiscs] = useState<MiscLine[]>([]);
-  const [guides, setGuides] = useState<GuideLine[]>([]);
-  const [entrances, setEntrances] = useState<EntranceLine[]>([]);
-  const [activities, setActivities] = useState<ActivityLine[]>([]);
-
-  // pax counts feeding misc "per_person" & default add-on quantities
-  const [totalPax, setTotalPax] = useState<number>(2);
-
-  // ---------------- helpers ----------------
-  function addDay() {
-    const last = days[days.length - 1];
-    const date = last ? addDaysISO(last.date, 1) : todayISO();
-    setDays((prev) => [...prev, {
-      id: uid(),
-      date,
-      city_id: last?.city_id ?? "",
-      hotel_id: last?.hotel_id ?? "",
-      room_id: last?.room_id ?? "",
-      meal_plan: last?.meal_plan ?? "CP",
-      add_lunch_pax: 0, add_dinner_pax: 0,
-    }]);
-  }
-  function patchDay(id: string, patch: Partial<ItineraryDay>) {
-    setDays((prev) => prev.map((d) => d.id === id ? { ...d, ...patch } : d));
-  }
-  function removeDay(id: string) {
-    setDays((prev) => prev.filter((d) => d.id !== id));
-  }
-
-  function reset() {
-    setDays([]); setTravels([]); setMiscs([]); setGuides([]); setEntrances([]); setActivities([]);
-    setMarkupPct(10); setIncludedOcc({ single: true, double: true, triple: false });
-    setTotalPax(2);
-    toast.success("Reset.");
-  }
-
-  // ---------------- per-day computation ----------------
-  const dayCosts = useMemo(
-    () => days.map((d) => ({ day: d, costs: computeDay(d, data.rate_plans) })),
-    [days, data.rate_plans],
-  );
-
-  const nights = days.length;
-
-  // ---------------- room totals per occupancy ----------------
-  const roomTotals = useMemo(() => {
-    const initial = { single: 0, double: 0, triple: 0 };
-    const netWithGst = { ...initial };
-    const netOnly = { ...initial };
-    const gstOnly = { ...initial };
-    let lunchTotal = 0, dinnerTotal = 0;
-    dayCosts.forEach(({ costs }) => {
-      (["single", "double", "triple"] as OccKey[]).forEach((k) => {
-        netWithGst[k] += costs[k].gross;
-        netOnly[k] += costs[k].net;
-        gstOnly[k] += costs[k].gstAmt;
-      });
-      lunchTotal += costs.lunchTotal;
-      dinnerTotal += costs.dinnerTotal;
-    });
-    return { netWithGst, netOnly, gstOnly, lunchTotal, dinnerTotal };
-  }, [dayCosts]);
-
-  // ---------------- add-on totals ----------------
-  const addonBreakdown = useMemo(() => {
-    const travelTotal = travels.reduce((s, t) => {
-      const opt = data.travel_options.find((x) => x.id === t.travel_id);
-      if (!opt) return s;
-      return s + opt.rate_per_day * (t.days || 0) * Math.max(1, t.vehicles || 1);
-    }, 0);
-    const miscTotal = miscs.reduce((s, m) => {
-      const item = data.miscellaneous_items.find((x) => x.id === m.item_id);
-      if (!item) return s;
-      if (item.unit === "per_person") return s + item.rate * (m.pax || 0) * Math.max(1, m.days || 1);
-      if (item.unit === "per_day") return s + item.rate * (m.days || 0);
-      return s + item.rate;
-    }, 0);
-    const guideTotal = guides.reduce((s, g) => {
-      const gd = data.guides.find((x) => x.id === g.guide_id);
-      if (!gd) return s;
-      return s + gd.rate_per_day * (g.days || 0) * Math.max(1, g.guides || 1);
-    }, 0);
-    const entranceTotal = entrances.reduce((s, e) => {
-      const site = data.entrance_sites.find((x) => x.id === e.site_id);
-      if (!site) return s;
-      return s + site.indian_rate * (e.indian_pax || 0) + site.foreigner_rate * (e.foreign_pax || 0);
-    }, 0);
-    const activityTotal = activities.reduce((s, a) => {
-      const act = data.activities.find((x) => x.id === a.activity_id);
-      if (!act) return s;
-      if (act.pricing_type === "per_person") return s + act.price * Math.max(1, a.pax || 1);
-      if (act.pricing_type === "per_vehicle") return s + act.price * Math.max(1, a.vehicles || 1);
-      return s + act.price; // total_fixed
-    }, 0);
-    return {
-      travelTotal, miscTotal, guideTotal, entranceTotal, activityTotal,
-      total: travelTotal + miscTotal + guideTotal + entranceTotal + activityTotal,
-    };
-  }, [travels, miscs, guides, entrances, activities, data]);
-
-  // ---------------- final totals per occupancy ----------------
-  // Markup = (Net+GST + Add-Ons) × markup%
-  // Sub-Total-before-GST = Net+GST + Add-Ons + Markup
-  // Final GST 5% = Sub-Total-before-GST × 5%
-  // GRAND TOTAL = Sub-Total-before-GST + Final GST 5%
-  const finalTotals = useMemo(() => {
-    const out: Record<OccKey, {
-      netWithGst: number; addons: number; subTotal: number;
-      markup: number; markupGst: number; grand: number;
-    }> = { single: {} as any, double: {} as any, triple: {} as any };
-    (["single", "double", "triple"] as OccKey[]).forEach((k) => {
-      const netWithGst = roomTotals.netWithGst[k];
-      const addons = addonBreakdown.total;
-      const base = netWithGst + addons;
-      const markup = base * (markupPct / 100);
-      const subTotal = base + markup;
-      const markupGst = subTotal * (markupGstPct / 100); // Final GST on combined total
-      out[k] = {
-        netWithGst, addons, subTotal, markup, markupGst,
-        grand: subTotal + markupGst,
-      };
-    });
-    return out;
-  }, [roomTotals, markupPct, markupGstPct, addonBreakdown.total]);
-
-
-  // ---------------- meal counts for inclusions ----------------
-  const mealCounts = useMemo(() => {
-    let breakfast = 0, lunch = 0, dinner = 0;
-    days.forEach((d) => {
-      const mp = d.meal_plan;
-      if (mp === "CP" || mp === "MAP" || mp === "AP") breakfast += 1;
-      if (mp === "MAP") { if (d.add_lunch_pax > 0) lunch += 1; else dinner += 1; }
-      if (mp === "AP") { lunch += 1; dinner += 1; }
-      if (d.add_lunch_pax > 0 && mp !== "AP" && mp !== "MAP") lunch += 1;
-      if (d.add_dinner_pax > 0 && mp !== "AP") dinner += 1;
-    });
-    return { breakfast, lunch, dinner };
-  }, [days]);
-
-  // ---------------- itemized add-on snapshot for breakdown panel ----------------
-  const addonSnapshot = useMemo<SavedAddons>(() => ({
-    travels: travels.map((t) => {
-      const opt = data.travel_options.find((x) => x.id === t.travel_id);
-      return {
-        name: opt?.vehicle_type ?? "—", days: t.days, vehicles: t.vehicles,
-        rate_per_day: opt?.rate_per_day ?? 0,
-        total: (opt?.rate_per_day ?? 0) * (t.days || 0) * Math.max(1, t.vehicles || 1),
-      };
-    }),
-    miscellaneous: miscs.map((m) => {
-      const it = data.miscellaneous_items.find((x) => x.id === m.item_id);
-      const total = !it ? 0
-        : it.unit === "per_person" ? it.rate * (m.pax || 0) * Math.max(1, m.days || 1)
-        : it.unit === "per_day" ? it.rate * (m.days || 0)
-        : it.rate;
-      return { name: it?.name ?? "—", pax: m.pax, rate: it?.rate ?? 0, unit: it?.unit ?? "fixed", total };
-    }),
-    guide: guides.map((g) => {
-      const gd = data.guides.find((x) => x.id === g.guide_id);
-      return {
-        name: gd?.name ?? "—", type: gd?.guide_type ?? "",
-        days: g.days, count: g.guides, rate_per_day: gd?.rate_per_day ?? 0,
-        total: (gd?.rate_per_day ?? 0) * (g.days || 0) * Math.max(1, g.guides || 1),
-      };
-    }),
-    entrances: entrances.map((e) => {
-      const site = data.entrance_sites.find((x) => x.id === e.site_id);
-      const city = data.entrance_cities.find((c) => c.id === site?.city_id);
-      return {
-        site_name: site?.site_name ?? "—", city: city?.name ?? "",
-        indian_pax: e.indian_pax, indian_rate: site?.indian_rate ?? 0,
-        foreigner_pax: e.foreign_pax, foreigner_rate: site?.foreigner_rate ?? 0,
-        total: (site?.indian_rate ?? 0) * (e.indian_pax || 0) + (site?.foreigner_rate ?? 0) * (e.foreign_pax || 0),
-      };
-    }),
-    activities: activities.map((a) => {
-      const act = data.activities.find((x) => x.id === a.activity_id);
-      const dest = data.activity_destinations.find((d) => d.id === act?.destination_id);
-      const total = !act ? 0
-        : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
-        : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
-        : act.price;
-      const qty = !act ? 0 : act.pricing_type === "per_vehicle" ? a.vehicles : a.pax;
-      return {
-        name: act?.activity_name ?? "—", destination: dest?.name ?? "",
-        pricing_type: act?.pricing_type ?? "total_fixed",
-        qty, rate: act?.price ?? 0, total,
-      };
-    }),
-    addons_total: addonBreakdown.total,
-  }), [travels, miscs, guides, entrances, activities, data, addonBreakdown.total]);
-
-  const addonGroups = useMemo(() => buildAddonGroups(addonSnapshot), [addonSnapshot]);
-  const [addonsExpanded, setAddonsExpanded] = useState<boolean>(false);
-
-
-  // ---------------- viewer state ----------------
-  const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
-
-  // Build the full SavedQuote object from current state.
-  function buildSavedQuote(): SavedQuote | null {
-    if (!days.length) { toast.error("Add at least one day."); return null; }
-    const cityNames = Array.from(new Set(days.map((d) => {
-      const c = data.cities.find((x) => x.id === d.city_id); return c?.name;
-    }).filter(Boolean) as string[]));
-    const tourTitle = cityNames.length ? `${cityNames.join(" - ")} Tour` : "Tour";
-
-    const itinerary = dayCosts.map(({ day, costs }, idx) => {
-      const city = data.cities.find((c) => c.id === day.city_id);
-      const hotel = data.hotels.find((h) => h.id === day.hotel_id);
-      const room = data.room_categories.find((r) => r.id === day.room_id);
-      const rp = costs.ratePlan;
-      return {
-        day_number: idx + 1,
-        date: day.date,
-        city: city?.name ?? "—",
-        hotel_name: hotel?.name ?? "—",
-        hotel_category: hotel?.hotel_category ?? "",
-        room_category: room?.name ?? "—",
-        meal_plan: day.meal_plan,
-        season_label: rp?.season_label ?? "—",
-        validity_start: rp?.validity_start ?? "",
-        validity_end: rp?.validity_end ?? "",
-        rates: {
-          sgl_net: costs.single.net, sgl_gst_rate: Math.round(costs.single.gstRate * 100),
-          sgl_gst_amt: costs.single.gstAmt, sgl_total: costs.single.gross,
-          dbl_net: costs.double.net, dbl_gst_rate: Math.round(costs.double.gstRate * 100),
-          dbl_gst_amt: costs.double.gstAmt, dbl_total: costs.double.gross,
-          trp_net: costs.triple.net, trp_gst_rate: Math.round(costs.triple.gstRate * 100),
-          trp_gst_amt: costs.triple.gstAmt, trp_total: costs.triple.gross,
-        },
-        lunch_rate: rp?.lunch_rate ?? 0,
-        dinner_rate: rp?.dinner_rate ?? 0,
-      };
-    });
-
-    const addons = {
-      travels: travels.map((t) => {
-        const opt = data.travel_options.find((x) => x.id === t.travel_id);
-        return {
-          name: opt?.vehicle_type ?? "—", days: t.days, vehicles: t.vehicles,
-          rate_per_day: opt?.rate_per_day ?? 0,
-          total: (opt?.rate_per_day ?? 0) * (t.days || 0) * Math.max(1, t.vehicles || 1),
-        };
-      }),
-      miscellaneous: miscs.map((m) => {
-        const it = data.miscellaneous_items.find((x) => x.id === m.item_id);
-        const total = !it ? 0
-          : it.unit === "per_person" ? it.rate * (m.pax || 0) * Math.max(1, m.days || 1)
-          : it.unit === "per_day" ? it.rate * (m.days || 0)
-          : it.rate;
-        return { name: it?.name ?? "—", pax: m.pax, rate: it?.rate ?? 0, unit: it?.unit ?? "fixed", total };
-      }),
-      guide: guides.map((g) => {
-        const gd = data.guides.find((x) => x.id === g.guide_id);
-        return {
-          name: gd?.name ?? "—", type: gd?.guide_type ?? "",
-          days: g.days, count: g.guides, rate_per_day: gd?.rate_per_day ?? 0,
-          total: (gd?.rate_per_day ?? 0) * (g.days || 0) * Math.max(1, g.guides || 1),
-        };
-      }),
-      entrances: entrances.map((e) => {
-        const site = data.entrance_sites.find((x) => x.id === e.site_id);
-        const city = data.entrance_cities.find((c) => c.id === site?.city_id);
-        return {
-          site_name: site?.site_name ?? "—", city: city?.name ?? "",
-          indian_pax: e.indian_pax, indian_rate: site?.indian_rate ?? 0,
-          foreigner_pax: e.foreign_pax, foreigner_rate: site?.foreigner_rate ?? 0,
-          total: (site?.indian_rate ?? 0) * (e.indian_pax || 0) + (site?.foreigner_rate ?? 0) * (e.foreign_pax || 0),
-        };
-      }),
-      activities: activities.map((a) => {
-        const act = data.activities.find((x) => x.id === a.activity_id);
-        const dest = data.activity_destinations.find((d) => d.id === act?.destination_id);
-        const total = !act ? 0
-          : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
-          : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
-          : act.price;
-        const qty = !act ? 0 : act.pricing_type === "per_vehicle" ? a.vehicles : a.pax;
-        return {
-          name: act?.activity_name ?? "—", destination: dest?.name ?? "",
-          pricing_type: act?.pricing_type ?? "total_fixed",
-          qty, rate: act?.price ?? 0, total,
-        };
-      }),
-      addons_total: addonBreakdown.total,
-    };
-
-    const lastDay = days[days.length - 1];
-    const q: SavedQuote = {
-      id: uid(),
-      quote_number: nextQuoteNumber(),
-      saved_at: new Date().toISOString(),
-      saved_by: user?.name ?? "—",
-      tour_title: tourTitle,
-      cities: cityNames,
-      total_nights: days.length,
-      travel_start: days[0].date,
-      travel_end: addDaysISO(lastDay.date, 1),
-      itinerary,
-      addons,
-      inclusions: {
-        accommodation_nights: days.length,
-        breakfast_count: mealCounts.breakfast,
-        lunch_count: mealCounts.lunch,
-        dinner_count: mealCounts.dinner,
-        travels_included: addonBreakdown.travelTotal > 0,
-        guide_included: addonBreakdown.guideTotal > 0,
-      },
-      markup_percent: markupPct,
-      totals: {
-        room_net_sgl: roomTotals.netOnly.single, room_net_dbl: roomTotals.netOnly.double, room_net_trp: roomTotals.netOnly.triple,
-        gst_rooms_sgl: roomTotals.gstOnly.single, gst_rooms_dbl: roomTotals.gstOnly.double, gst_rooms_trp: roomTotals.gstOnly.triple,
-        addons_total: addonBreakdown.total,
-        markup_sgl: finalTotals.single.markup, markup_dbl: finalTotals.double.markup, markup_trp: finalTotals.triple.markup,
-        gst_markup_sgl: finalTotals.single.markupGst, gst_markup_dbl: finalTotals.double.markupGst, gst_markup_trp: finalTotals.triple.markupGst,
-        grand_sgl: finalTotals.single.grand, grand_dbl: finalTotals.double.grand, grand_trp: finalTotals.triple.grand,
-      },
-      include_sgl: includedOcc.single, include_dbl: includedOcc.double, include_trp: includedOcc.triple,
-    };
-    return q;
-  }
-
-  // Save Quote — persist to storage (both full + summary).
-  function saveQuote() {
-    const q = buildSavedQuote();
-    if (!q) return;
-    persistQuote(q);
-    // Also add lightweight summary for existing Recent Quotes list.
-    const firstDay = days[0];
-    const hotel = data.hotels.find((h) => h.id === firstDay.hotel_id);
-    const room = data.room_categories.find((r) => r.id === firstDay.room_id);
-    const city = data.cities.find((c) => c.id === firstDay.city_id);
-    const anyOcc = (["single", "double", "triple"] as OccKey[]).find((k) => includedOcc[k]) ?? "double";
-    db.addQuote({
-      hotel_id: firstDay.hotel_id, room_category_id: firstDay.room_id, rate_plan_id: null,
-      check_in: firstDay.date, check_out: q.travel_end,
-      nights: days.length, meal_plan: firstDay.meal_plan,
-      num_rooms: 1, num_adults: totalPax, extra_beds: 0, cwb_count: 0,
-      include_lunch: days.some((d) => d.add_lunch_pax > 0),
-      include_dinner: days.some((d) => d.add_dinner_pax > 0),
-      include_extra_breakfast: false,
-      xmas_applied: false, newyear_applied: false,
-      subtotal: finalTotals[anyOcc].netWithGst, gst_rate: 0, gst_amount: 0,
-      grand_total: finalTotals[anyOcc].grand,
-      generated_by: user?.id ?? "anon", generated_by_name: user?.name ?? "—",
-      hotel_name_snapshot: hotel?.name ?? "—",
-      room_name_snapshot: room?.name ?? "—",
-      city_name_snapshot: city?.name ?? "—",
-    });
-    toast.success(`Quote ${q.quote_number} saved.`);
-    return q;
-  }
-
-  // Generate Quote — save + open preview modal.
-  function generateQuote() {
-    const q = saveQuote();
-    if (q) setViewingQuote(q);
-  }
-
-
-  const recentQuotes = useMemo(
-    () => [...data.quotes].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 5),
-    [data.quotes],
-  );
-
-  const hasAnyMissing = dayCosts.some(({ costs }) => !costs.ratePlan && dayCosts.length > 0);
-
-  // ============================================================
-  // Render
-  // ============================================================
   return (
-    <div className="p-6 lg:p-8 max-w-[1700px] mx-auto">
-      <div className="print:hidden mb-6 flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Calculator className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Final Costing</h1>
-            <p className="text-sm text-muted-foreground">Multi-day, multi-city tour costing with automatic GST, markup, and add-ons.</p>
+    <div className="min-h-full bg-muted/20">
+      {showBanner && draft.step > 1 && (
+        <div className="bg-accent/10 border-b border-accent/30 px-6 py-2 flex items-center justify-between text-sm">
+          <span>
+            Resuming draft from {new Date(draft.updated_at).toLocaleString("en-IN")}.
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setShowBanner(false)}>Continue</Button>
+            <Button size="sm" variant="outline" onClick={() => { clearDraft(); initDraft(); setShowBanner(false); }}>
+              Discard & start new
+            </Button>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={reset}><RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Reset</Button>
-          <Button variant="outline" size="sm" onClick={generateQuote} disabled={!days.length}><Printer className="h-3.5 w-3.5 mr-1.5" /> Generate Quote</Button>
-          <Button size="sm" onClick={saveQuote} disabled={!days.length}><Save className="h-3.5 w-3.5 mr-1.5" /> Save Quote</Button>
+      )}
+
+      <div className="max-w-[1600px] mx-auto p-6 lg:p-8">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Calculator className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">New Quotation</h1>
+              <p className="text-sm text-muted-foreground">
+                Step {step} of 18 — {STEPS[step - 1].label}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => { writeDraft(draft); toast.success("Draft saved."); }}>
+              <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => {
+              if (confirm("Discard all progress and start over?")) {
+                clearDraft();
+                writeDraft(emptyDraft());
+              }
+            }}>
+              <X className="h-3.5 w-3.5 mr-1.5" /> Discard
+            </Button>
+          </div>
+        </div>
+
+        <ProgressBar step={step} onJump={go} />
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 mt-6">
+          <Card className="p-6 card-elevated">
+            <StepContent draft={draft} set={set} />
+          </Card>
+          {step >= 5 && <SummarySidebar draft={draft} />}
+        </div>
+
+        {/* Nav footer */}
+        <div className="flex justify-between mt-6">
+          <Button variant="ghost" onClick={() => go(step - 1)} disabled={step === 1}>
+            <ChevronLeft className="h-4 w-4 mr-1" /> Back
+          </Button>
+          {step < 18 ? (
+            <Button onClick={() => go(step + 1)} disabled={!canProceed}>
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          ) : null}
         </div>
       </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 print:block">
-        {/* ============= LEFT: Itinerary + Add-Ons ============= */}
-        <div className="xl:col-span-2 space-y-6">
-          {/* Itinerary */}
-          <Card className="p-5 print:shadow-none print:border-0" id="quote-print">
-            <div className="hidden print:block mb-4 pb-3 border-b-2 border-primary">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-gold flex items-center justify-center">
-                  <span className="font-bold text-gold-foreground">MP</span>
-                </div>
-                <div>
-                  <div className="font-bold text-lg">MP Tourism Operations Hub</div>
-                  <div className="text-xs text-muted-foreground">Tour Cost Estimate</div>
-                </div>
-                <div className="ml-auto text-xs text-muted-foreground">
-                  Generated {fmtDateShort(new Date().toISOString())}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Itinerary</h2>
-              <Button size="sm" onClick={addDay} className="print:hidden">
-                <Plus className="h-4 w-4 mr-1.5" /> Add Day
-              </Button>
-            </div>
-
-            {days.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground border border-dashed rounded-md">
-                <Calculator className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-                Start by adding your first day.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="text-[11px] uppercase text-muted-foreground border-b">
-                      <th className="text-left py-2 pr-2">#</th>
-                      <th className="text-left py-2 pr-2">Date</th>
-                      <th className="text-left py-2 pr-2">City</th>
-                      <th className="text-left py-2 pr-2">Hotel</th>
-                      <th className="text-left py-2 pr-2">Room</th>
-                      <th className="text-left py-2 pr-2">Meal</th>
-                      <th className="text-right py-2 pr-2">SGL</th>
-                      <th className="text-right py-2 pr-2">DBL</th>
-                      <th className="text-right py-2 pr-2">TRP</th>
-                      <th className="print:hidden w-8"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dayCosts.map(({ day, costs }, idx) => {
-                      const hotelsInCity = data.hotels.filter((h) => !day.city_id || h.city_id === day.city_id);
-                      const rooms = data.room_categories.filter((r) => r.hotel_id === day.hotel_id);
-                      const hotel = data.hotels.find((h) => h.id === day.hotel_id);
-                      const missing = !costs.ratePlan && !!day.room_id;
-                      return (
-                        <>
-                          <tr key={day.id} className={missing ? "bg-amber-50" : ""}>
-                            <td className="py-2 pr-2 align-top text-muted-foreground text-xs">{idx + 1}</td>
-                            <td className="py-2 pr-2 align-top">
-                              <Input type="date" value={day.date}
-                                onChange={(e) => patchDay(day.id, { date: e.target.value })}
-                                className="h-8 print:border-0 print:p-0 print:h-auto" />
-                            </td>
-                            <td className="py-2 pr-2 align-top min-w-[130px]">
-                              <Select
-                                value={day.city_id}
-                                onValueChange={(v) => patchDay(day.id, { city_id: v, hotel_id: "", room_id: "" })}
-                              >
-                                <SelectTrigger className="h-8 print:border-0 print:p-0"><SelectValue placeholder="City" /></SelectTrigger>
-                                <SelectContent>
-                                  {data.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="py-2 pr-2 align-top min-w-[150px]">
-                              <Select
-                                value={day.hotel_id}
-                                onValueChange={(v) => patchDay(day.id, { hotel_id: v, room_id: "" })}
-                                disabled={!day.city_id}
-                              >
-                                <SelectTrigger className="h-8"><SelectValue placeholder="Hotel" /></SelectTrigger>
-                                <SelectContent>
-                                  {hotelsInCity.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                              {hotel && (
-                                <div className="mt-1"><CategoryBadge category={hotel.hotel_category} /></div>
-                              )}
-                            </td>
-                            <td className="py-2 pr-2 align-top min-w-[130px]">
-                              <Select
-                                value={day.room_id}
-                                onValueChange={(v) => patchDay(day.id, { room_id: v })}
-                                disabled={!day.hotel_id}
-                              >
-                                <SelectTrigger className="h-8"><SelectValue placeholder="Room" /></SelectTrigger>
-                                <SelectContent>
-                                  {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="py-2 pr-2 align-top">
-                              <Select
-                                value={day.meal_plan}
-                                onValueChange={(v) => patchDay(day.id, { meal_plan: v as MealPlan })}
-                              >
-                                <SelectTrigger className="h-8 w-20"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
-                              {costs.single.available ? inr(costs.single.gross) : "—"}
-                            </td>
-                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
-                              {costs.double.available ? inr(costs.double.gross) : "—"}
-                            </td>
-                            <td className="py-2 pr-2 align-top text-right tabular-nums font-medium">
-                              {costs.triple.available ? inr(costs.triple.gross) : "—"}
-                            </td>
-                            <td className="align-top print:hidden">
-                              <Button variant="ghost" size="icon" onClick={() => removeDay(day.id)}>
-                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                              </Button>
-                            </td>
-                          </tr>
-                          {costs.ratePlan && (
-                            <>
-                              <tr className="text-[11px] text-muted-foreground">
-                                <td></td>
-                                <td colSpan={5} className="pl-1">Net Rate</td>
-                                <td className="text-right tabular-nums">{inr(costs.single.net)}</td>
-                                <td className="text-right tabular-nums">{inr(costs.double.net)}</td>
-                                <td className="text-right tabular-nums">{inr(costs.triple.net)}</td>
-                                <td className="print:hidden"></td>
-                              </tr>
-                              <tr className="text-[11px] text-muted-foreground border-b">
-                                <td></td>
-                                <td colSpan={5} className="pl-1">GST</td>
-                                <td className="text-right tabular-nums">
-                                  {inr(costs.single.gstAmt)} <span className="opacity-60">({(costs.single.gstRate * 100).toFixed(0)}%)</span>
-                                </td>
-                                <td className="text-right tabular-nums">
-                                  {inr(costs.double.gstAmt)} <span className="opacity-60">({(costs.double.gstRate * 100).toFixed(0)}%)</span>
-                                </td>
-                                <td className="text-right tabular-nums">
-                                  {inr(costs.triple.gstAmt)} <span className="opacity-60">({(costs.triple.gstRate * 100).toFixed(0)}%)</span>
-                                </td>
-                                <td className="print:hidden"></td>
-                              </tr>
-                            </>
-                          )}
-                          {missing && (
-                            <tr className="text-xs">
-                              <td></td>
-                              <td colSpan={9} className="py-1 text-amber-800 flex items-center gap-1.5">
-                                <AlertTriangle className="h-3.5 w-3.5" />
-                                No rate matched for selected dates — please check validity.
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );
-                    })}
-
-                    {/* Totals rows (Excel style) */}
-                    {dayCosts.length > 0 && (
-                      <>
-                        <tr className="bg-emerald-100 text-emerald-900 font-semibold">
-                          <td colSpan={6} className="py-2 pl-2">Net rate with GST</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.single)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.double)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(roomTotals.netWithGst.triple)}</td>
-                          <td className="print:hidden"></td>
-                        </tr>
-                        <tr className="bg-teal-100 text-teal-900">
-                          <td colSpan={6} className="py-2 pl-2">Add-Ons</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                          <td className="print:hidden"></td>
-                        </tr>
-                        <tr className="bg-orange-100 text-orange-900">
-                          <td colSpan={6} className="py-2 pl-2 flex items-center gap-2">
-                            <span>Mark Up</span>
-                            <Input
-                              type="number" min={0} max={100} value={markupPct}
-                              onChange={(e) => setMarkupPct(Math.max(0, +e.target.value || 0))}
-                              className="h-6 w-16 print:border-0 print:p-0 print:h-auto print:w-auto"
-                            />
-                            <span>% (on Net+GST+Add-Ons)</span>
-                          </td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markup)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markup)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markup)}</td>
-                          <td className="print:hidden"></td>
-                        </tr>
-                        <tr className="bg-pink-100 text-pink-900">
-                          <td colSpan={6} className="py-2 pl-2">GST 5% (on Net+Add-Ons+Markup)</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.markupGst)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.markupGst)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.markupGst)}</td>
-                          <td className="print:hidden"></td>
-                        </tr>
-                        <tr className="bg-red-200 text-red-900 font-bold">
-                          <td colSpan={6} className="py-2 pl-2">TOTAL</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.single.grand)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.double.grand)}</td>
-                          <td className="py-2 pr-2 text-right tabular-nums">{inr(finalTotals.triple.grand)}</td>
-                          <td className="print:hidden"></td>
-                        </tr>
-
-                      </>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Collapsible add-ons itemized breakdown */}
-            {addonGroups.length > 0 && (
-              <div className="mt-4 border rounded-md print:hidden">
-                <button
-                  type="button"
-                  onClick={() => setAddonsExpanded((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/50"
-                >
-                  <span className="flex items-center gap-2">
-                    {addonsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    Add-Ons breakdown ({addonGroups.reduce((s, g) => s + g.rows.length, 0)} items)
-                  </span>
-                  <span className="tabular-nums font-semibold">{inr(addonBreakdown.total)}</span>
-                </button>
-                {addonsExpanded && (
-                  <div className="border-t">
-                    <table className="w-full text-xs">
-                      <tbody>
-                        {addonGroups.map((g) => (
-                          <Fragment key={g.key}>
-                            <tr className="bg-muted/60">
-                              <td colSpan={2} className="px-3 py-1.5 font-semibold">{g.label}</td>
-                              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{inr(g.total)}</td>
-                            </tr>
-                            {g.rows.map((r, i) => (
-                              <tr key={`r-${g.key}-${i}`} className="border-b last:border-0">
-                                <td className="pl-8 pr-2 py-1.5 w-8"></td>
-                                <td className="py-1.5">{r.detail}</td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">{inr(r.amount)}</td>
-                              </tr>
-                            ))}
-                          </Fragment>
-                        ))}
-                        <tr className="bg-primary/10 font-bold">
-                          <td colSpan={2} className="px-3 py-2">Add-Ons Total</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{inr(addonBreakdown.total)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Occupancy boxes */}
-            {dayCosts.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
-                {(["single", "double", "triple"] as OccKey[]).map((k) => {
-                  const included = includedOcc[k];
-                  return (
-                    <button
-                      key={k}
-                      onClick={() => setIncludedOcc((p) => ({ ...p, [k]: !p[k] }))}
-                      className={
-                        "rounded-lg p-4 text-left border-2 transition-all " +
-                        (included
-                          ? "border-primary bg-primary/5 shadow-sm"
-                          : "border-border bg-muted/30 opacity-60 hover:opacity-100")
-                      }
-                    >
-                      <div className="text-xs uppercase font-semibold text-muted-foreground">
-                        {OCC_LABEL[k]} {k === "double" || k === "triple" ? "Sharing" : "Occupancy"}
-                      </div>
-                      <div className="text-2xl font-bold tabular-nums text-primary mt-1">
-                        {inr(finalTotals[k].grand)}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        {included ? "Included in quote" : "Click to include"}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
-          {/* Add-ons */}
-          <Card className="p-5 print:hidden">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Add-Ons</h2>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">Pax</Label>
-                <Input type="number" min={1} value={totalPax}
-                  onChange={(e) => setTotalPax(Math.max(1, +e.target.value || 1))} className="h-8 w-20" />
-              </div>
-            </div>
-
-            {/* Travels */}
-            <AddonSection
-              title="Travels"
-              onAdd={() => {
-                const first = data.travel_options.find((v) => v.is_active);
-                if (!first) return toast.error("No travel options — add some in Travels first.");
-                setTravels((p) => [...p, { id: uid(), travel_id: first.id, days: Math.max(1, nights), vehicles: 1 }]);
-              }}
-            >
-              {travels.map((t) => {
-                const opt = data.travel_options.find((x) => x.id === t.travel_id);
-                const line = opt ? opt.rate_per_day * (t.days || 0) * Math.max(1, t.vehicles || 1) : 0;
-                return (
-                  <div key={t.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
-                    <Select value={t.travel_id} onValueChange={(v) =>
-                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, travel_id: v } : x))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {data.travel_options.filter((x) => x.is_active).map((v) => (
-                          <SelectItem key={v.id} value={v.id}>{v.vehicle_type} · {inr(v.rate_per_day)}/day</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" min={0} value={t.days} placeholder="Days" onChange={(e) =>
-                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, days: +e.target.value || 0 } : x))} />
-                    <Input type="number" min={1} value={t.vehicles} placeholder="Veh" onChange={(e) =>
-                      setTravels((p) => p.map((x) => x.id === t.id ? { ...x, vehicles: +e.target.value || 1 } : x))} />
-                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
-                    <Button variant="ghost" size="icon" onClick={() => setTravels((p) => p.filter((x) => x.id !== t.id))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </AddonSection>
-
-
-            <Separator className="my-3" />
-
-            {/* Miscellaneous */}
-            <AddonSection
-              title="Miscellaneous"
-              onAdd={() => {
-                const first = data.miscellaneous_items.find((m) => m.is_active);
-                if (!first) return toast.error("No miscellaneous items — add some first.");
-                setMiscs((p) => [...p, { id: uid(), item_id: first.id, pax: totalPax, days: Math.max(1, nights) }]);
-              }}
-            >
-              {miscs.map((m) => {
-                const item = data.miscellaneous_items.find((x) => x.id === m.item_id);
-                const line =
-                  item
-                    ? item.unit === "per_person"
-                      ? item.rate * (m.pax || 0) * Math.max(1, m.days || 1)
-                      : item.unit === "per_day"
-                        ? item.rate * (m.days || 0)
-                        : item.rate
-                    : 0;
-                return (
-                  <div key={m.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
-                    <Select value={m.item_id} onValueChange={(v) =>
-                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, item_id: v } : x))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {data.miscellaneous_items.filter((x) => x.is_active).map((mi) => (
-                          <SelectItem key={mi.id} value={mi.id}>{mi.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" min={0} value={m.pax} placeholder="pax" onChange={(e) =>
-                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, pax: +e.target.value || 0 } : x))} />
-                    <Input type="number" min={0} value={m.days} placeholder="days" onChange={(e) =>
-                      setMiscs((p) => p.map((x) => x.id === m.id ? { ...x, days: +e.target.value || 0 } : x))} />
-                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
-                    <Button variant="ghost" size="icon" onClick={() => setMiscs((p) => p.filter((x) => x.id !== m.id))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </AddonSection>
-
-            <Separator className="my-3" />
-
-            {/* Guide */}
-            <AddonSection
-              title="Guide"
-              onAdd={() => {
-                const first = data.guides.find((g) => g.is_active);
-                if (!first) return toast.error("No guides — add some in Guide first.");
-                setGuides((p) => [...p, { id: uid(), guide_id: first.id, days: Math.max(1, nights), guides: 1 }]);
-              }}
-            >
-              {guides.map((g) => {
-                const gd = data.guides.find((x) => x.id === g.guide_id);
-                const line = gd ? gd.rate_per_day * (g.days || 0) * Math.max(1, g.guides || 1) : 0;
-                return (
-                  <div key={g.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
-                    <Select value={g.guide_id} onValueChange={(v) =>
-                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guide_id: v } : x))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {data.guides.filter((x) => x.is_active).map((gg) => (
-                          <SelectItem key={gg.id} value={gg.id}>{gg.name} · {gg.guide_type} · {inr(gg.rate_per_day)}/day</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" min={0} value={g.days} placeholder="Days" onChange={(e) =>
-                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, days: +e.target.value || 0 } : x))} />
-                    <Input type="number" min={1} value={g.guides} placeholder="Guides" onChange={(e) =>
-                      setGuides((p) => p.map((x) => x.id === g.id ? { ...x, guides: +e.target.value || 1 } : x))} />
-                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
-                    <Button variant="ghost" size="icon" onClick={() => setGuides((p) => p.filter((x) => x.id !== g.id))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </AddonSection>
-
-
-            <Separator className="my-3" />
-
-            {/* Entrances */}
-            <AddonSection
-              title="Entrances"
-              onAdd={() => {
-                const first = data.entrance_sites.find((s) => s.is_active);
-                if (!first) return toast.error("No entrance sites — add some first.");
-                setEntrances((p) => [...p, { id: uid(), site_id: first.id, indian_pax: totalPax, foreign_pax: 0 }]);
-              }}
-            >
-              {entrances.map((e) => {
-                const site = data.entrance_sites.find((x) => x.id === e.site_id);
-                const line = site
-                  ? site.indian_rate * (e.indian_pax || 0) + site.foreigner_rate * (e.foreign_pax || 0)
-                  : 0;
-                return (
-                  <div key={e.id} className="grid grid-cols-[1fr_80px_80px_100px_36px] gap-2 items-center">
-                    <Select value={e.site_id} onValueChange={(v) =>
-                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, site_id: v } : x))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {data.entrance_sites.filter((s) => s.is_active).map((s) => {
-                          const city = data.entrance_cities.find((c) => c.id === s.city_id);
-                          return <SelectItem key={s.id} value={s.id}>{s.site_name} · {city?.name}</SelectItem>;
-                        })}
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" min={0} value={e.indian_pax} placeholder="IND" onChange={(ev) =>
-                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, indian_pax: +ev.target.value || 0 } : x))} />
-                    <Input type="number" min={0} value={e.foreign_pax} placeholder="FRN" onChange={(ev) =>
-                      setEntrances((p) => p.map((x) => x.id === e.id ? { ...x, foreign_pax: +ev.target.value || 0 } : x))} />
-                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
-                    <Button variant="ghost" size="icon" onClick={() => setEntrances((p) => p.filter((x) => x.id !== e.id))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </AddonSection>
-
-            <Separator className="my-3" />
-
-            {/* Activities */}
-            <AddonSection
-              title="Activity & Experience"
-              onAdd={() => {
-                const first = data.activities.find((a) => a.is_active);
-                if (!first) return toast.error("No activities — add some first.");
-                setActivities((p) => [...p, { id: uid(), activity_id: first.id, pax: totalPax, vehicles: 1 }]);
-              }}
-            >
-              {activities.map((a) => {
-                const act = data.activities.find((x) => x.id === a.activity_id);
-                const line = !act ? 0
-                  : act.pricing_type === "per_person" ? act.price * Math.max(1, a.pax || 1)
-                  : act.pricing_type === "per_vehicle" ? act.price * Math.max(1, a.vehicles || 1)
-                  : act.price;
-                return (
-                  <div key={a.id} className="grid grid-cols-[1fr_100px_100px_36px] gap-2 items-center">
-                    <Select value={a.activity_id} onValueChange={(v) =>
-                      setActivities((p) => p.map((x) => x.id === a.id ? { ...x, activity_id: v } : x))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {data.activities.filter((x) => x.is_active).map((x) => {
-                          const dest = data.activity_destinations.find((d) => d.id === x.destination_id);
-                          return <SelectItem key={x.id} value={x.id}>{x.activity_name} · {dest?.name} · {x.pricing_type}</SelectItem>;
-                        })}
-                      </SelectContent>
-                    </Select>
-                    {act?.pricing_type === "per_person" ? (
-                      <Input type="number" min={1} value={a.pax} placeholder="Pax" onChange={(e) =>
-                        setActivities((p) => p.map((x) => x.id === a.id ? { ...x, pax: +e.target.value || 0 } : x))} />
-                    ) : act?.pricing_type === "per_vehicle" ? (
-                      <Input type="number" min={1} value={a.vehicles} placeholder="Veh" onChange={(e) =>
-                        setActivities((p) => p.map((x) => x.id === a.id ? { ...x, vehicles: +e.target.value || 0 } : x))} />
-                    ) : (
-                      <div className="text-xs text-muted-foreground text-center py-2">Fixed</div>
-                    )}
-                    <div className="text-right tabular-nums text-sm font-medium">{inr(line)}</div>
-                    <Button variant="ghost" size="icon" onClick={() => setActivities((p) => p.filter((x) => x.id !== a.id))}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </AddonSection>
-
-
-            <div className="mt-4 pt-3 border-t flex items-center justify-between text-sm font-semibold">
-              <span>Add-Ons Total</span>
-              <span className="tabular-nums">{inr(addonBreakdown.total)}</span>
-            </div>
-          </Card>
-
-          {/* Recent Quotes */}
-          <Card className="p-5 print:hidden">
-            <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Recent Quotes</h2>
-            {recentQuotes.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-6 text-center">No quotes saved yet.</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="text-[11px] uppercase text-muted-foreground border-b">
-                  <tr>
-                    <th className="text-left py-2">Hotel</th>
-                    <th className="text-left py-2">City</th>
-                    <th className="text-left py-2">Dates</th>
-                    <th className="text-right py-2">Grand Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentQuotes.map((q) => (
-                    <tr key={q.id} className="border-b last:border-0">
-                      <td className="py-2 font-medium">{q.hotel_name_snapshot}</td>
-                      <td className="py-2 text-muted-foreground">{q.city_name_snapshot}</td>
-                      <td className="py-2 text-muted-foreground">{fmtDateShort(q.check_in)} → {fmtDateShort(q.check_out)}</td>
-                      <td className="py-2 text-right tabular-nums font-semibold">{inr(q.grand_total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Card>
-        </div>
-
-        {/* ============= RIGHT: Sticky Summary ============= */}
-        <div className="xl:col-span-1 print:hidden">
-          <div className="xl:sticky xl:top-6 space-y-4">
-            <Card className="p-5">
-              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Inclusions</h2>
-              <ul className="space-y-1.5 text-sm">
-                <li className="flex justify-between"><span>Accommodation</span><span className="font-medium">{nights} Night{nights !== 1 ? "s" : ""}</span></li>
-                <li className="flex justify-between text-muted-foreground text-xs">
-                  <span>Meals</span>
-                  <span>
-                    B/F: {mealCounts.breakfast} · Lunch: {mealCounts.lunch} · Dinner: {mealCounts.dinner}
-                  </span>
-                </li>
-                {addonBreakdown.travelTotal > 0 && <li className="flex justify-between text-xs"><span>Travels</span><span className="tabular-nums">{inr(addonBreakdown.travelTotal)}</span></li>}
-                {addonBreakdown.miscTotal > 0 && <li className="flex justify-between text-xs"><span>Miscellaneous</span><span className="tabular-nums">{inr(addonBreakdown.miscTotal)}</span></li>}
-                {addonBreakdown.guideTotal > 0 && <li className="flex justify-between text-xs"><span>Guide</span><span className="tabular-nums">{inr(addonBreakdown.guideTotal)}</span></li>}
-                {addonBreakdown.entranceTotal > 0 && <li className="flex justify-between text-xs"><span>Entrances</span><span className="tabular-nums">{inr(addonBreakdown.entranceTotal)}</span></li>}
-                {addonBreakdown.activityTotal > 0 && <li className="flex justify-between text-xs"><span>Activities</span><span className="tabular-nums">{inr(addonBreakdown.activityTotal)}</span></li>}
-              </ul>
-            </Card>
-
-            <Card className="p-5">
-              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-3">Cost Summary</h2>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] uppercase text-muted-foreground border-b">
-                    <th className="text-left py-1.5"></th>
-                    <th className="text-right py-1.5">SGL</th>
-                    <th className="text-right py-1.5">DBL</th>
-                    <th className="text-right py-1.5">TRP</th>
-                  </tr>
-                </thead>
-                <tbody className="tabular-nums">
-                  <SumRow label="Room (Net)" values={[roomTotals.netOnly.single, roomTotals.netOnly.double, roomTotals.netOnly.triple]} />
-                  <SumRow label="GST on rooms" values={[roomTotals.gstOnly.single, roomTotals.gstOnly.double, roomTotals.gstOnly.triple]} />
-                  <SumRow label="Add-Ons" values={[addonBreakdown.total, addonBreakdown.total, addonBreakdown.total]} />
-                  <SumRow label={`Markup ${markupPct}%`} values={[finalTotals.single.markup, finalTotals.double.markup, finalTotals.triple.markup]} />
-                  <SumRow label="GST 5% (on total)" values={[finalTotals.single.markupGst, finalTotals.double.markupGst, finalTotals.triple.markupGst]} />
-
-                  <tr className="bg-gold/20 font-bold">
-                    <td className="py-2 pl-1">GRAND TOTAL</td>
-                    <td className="py-2 pr-1 text-right">{inr(finalTotals.single.grand)}</td>
-                    <td className="py-2 pr-1 text-right">{inr(finalTotals.double.grand)}</td>
-                    <td className="py-2 pr-1 text-right">{inr(finalTotals.triple.grand)}</td>
-                  </tr>
-                </tbody>
-              </table>
-              {hasAnyMissing && (
-                <div className="mt-3 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  Some days have no matching rate plan — totals may be incomplete.
-                </div>
-              )}
-              <div className="mt-3 text-[11px] text-muted-foreground text-center">
-                Valid for 7 days · Subject to availability · Rates inclusive of GST
-              </div>
-            </Card>
-          </div>
-        </div>
-      </div>
-
-      <QuoteViewerDialog quote={viewingQuote} open={!!viewingQuote} onClose={() => setViewingQuote(null)} />
     </div>
   );
 }
 
-
-function SumRow({ label, values }: { label: string; values: [number, number, number] }) {
+// ============================================================
+// Progress bar
+// ============================================================
+function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => void }) {
   return (
-    <tr className="border-b last:border-0">
-      <td className="py-1.5 pl-1 text-muted-foreground">{label}</td>
-      <td className="py-1.5 pr-1 text-right">{inr(values[0])}</td>
-      <td className="py-1.5 pr-1 text-right">{inr(values[1])}</td>
-      <td className="py-1.5 pr-1 text-right">{inr(values[2])}</td>
-    </tr>
+    <div className="overflow-x-auto">
+      <div className="flex items-start gap-0 min-w-max py-2">
+        {STEPS.map((s, i) => {
+          const done = step > s.n;
+          const active = step === s.n;
+          const canJump = s.n <= step;
+          return (
+            <div key={s.n} className="flex items-start">
+              <button
+                type="button"
+                disabled={!canJump}
+                onClick={() => canJump && onJump(s.n)}
+                className="flex flex-col items-center gap-1 min-w-[68px] group"
+              >
+                <div
+                  className={cn(
+                    "h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold border-2 transition-colors",
+                    done && "bg-primary border-primary text-primary-foreground",
+                    active && "bg-accent border-accent text-accent-foreground",
+                    !done && !active && "bg-background border-muted-foreground/30 text-muted-foreground",
+                  )}
+                >
+                  {done ? <Check className="h-4 w-4" /> : s.n}
+                </div>
+                <span className={cn(
+                  "text-[10px] font-medium leading-tight text-center",
+                  active ? "text-accent" : done ? "text-primary" : "text-muted-foreground",
+                )}>
+                  {s.label}
+                </span>
+              </button>
+              {i < STEPS.length - 1 && (
+                <div className={cn(
+                  "h-[2px] w-4 mt-4",
+                  step > s.n ? "bg-primary" : "bg-muted-foreground/20",
+                )} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function AddonSection({
-  title, onAdd, children,
-}: { title: React.ReactNode; onAdd: () => void; children: React.ReactNode }) {
+// ============================================================
+// Validation
+// ============================================================
+function validate(d: QuoteDraft, step: number): boolean {
+  switch (step) {
+    case 1: return d.query_type !== null;
+    case 2:
+      if (d.query_type === "B2B") return !!d.agent.name;
+      if (d.query_type === "B2C") return !!d.guest.name;
+      if (d.query_type === "Brochure") return !!d.brochure.tour_type;
+      return false;
+    case 3: return d.nights >= 1;
+    case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
+    case 5: return !!d.start_date && (d.adults + d.ss + d.children.length) >= 1;
+    case 6: return d.categories.length >= 1;
+    case 7: return !!d.departure_city;
+    case 8: return d.travel_modes.length >= 1;
+    case 9: return d.routing.every((r) => !!r.city_id);
+    case 15: return d.hotel_options.some((o) => o.selections.length > 0);
+    default: return true;
+  }
+}
+
+// ============================================================
+// Step router
+// ============================================================
+function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
+  switch (draft.step) {
+    case 1: return <Step1 draft={draft} set={set} />;
+    case 2: return <Step2 draft={draft} set={set} />;
+    case 3: return <Step3 draft={draft} set={set} />;
+    case 4: return <Step4 draft={draft} set={set} />;
+    case 5: return <Step5 draft={draft} set={set} />;
+    case 6: return <Step6 draft={draft} set={set} />;
+    case 7: return <Step7 draft={draft} set={set} />;
+    case 8: return <Step8 draft={draft} set={set} />;
+    case 9: return <Step9 draft={draft} set={set} />;
+    case 10: return <Step10 draft={draft} set={set} />;
+    case 11: return <Step11 draft={draft} set={set} />;
+    case 12: return <Step12 draft={draft} set={set} />;
+    case 13: return <Step13 draft={draft} set={set} />;
+    case 14: return <Step14 draft={draft} set={set} />;
+    case 15: return <Step15 draft={draft} set={set} />;
+    case 16: return <Step16 draft={draft} set={set} />;
+    case 17: return <Step17 draft={draft} set={set} />;
+    case 18: return <Step18 draft={draft} set={set} />;
+    default: return null;
+  }
+}
+
+type StepProps = { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void };
+
+// ============================================================
+// STEP 1 — Query Type
+// ============================================================
+function Step1({ draft, set }: StepProps) {
+  const opts: { key: QueryType; title: string; desc: string; icon: typeof Building2 }[] = [
+    { key: "B2B", title: "B2B", desc: "Travel Agent Quotation", icon: Building2 },
+    { key: "B2C", title: "B2C", desc: "Direct Guest Quotation", icon: User },
+    { key: "Brochure", title: "Brochure", desc: "Group / Package / Event", icon: Users },
+  ];
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{title}</div>
-        <Button size="sm" variant="outline" onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Add
+    <div>
+      <h2 className="text-lg font-semibold mb-1">Select Query Type</h2>
+      <p className="text-sm text-muted-foreground mb-6">Choose the type of quotation you are creating.</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {opts.map((o) => {
+          const Icon = o.icon;
+          const active = draft.query_type === o.key;
+          return (
+            <button key={o.key} onClick={() => set({ query_type: o.key })}
+              className={cn(
+                "border-2 rounded-xl p-6 text-left transition-all hover:shadow-md",
+                active ? "border-accent bg-accent/5 shadow-md" : "border-border bg-background hover:border-primary/40",
+              )}>
+              <Icon className={cn("h-8 w-8 mb-3", active ? "text-accent" : "text-primary")} />
+              <div className="text-xl font-bold mb-1">{o.title}</div>
+              <div className="text-sm text-muted-foreground">{o.desc}</div>
+              {active && <Badge className="mt-3 bg-accent text-accent-foreground">Selected</Badge>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 2 — Identification
+// ============================================================
+function Step2({ draft, set }: StepProps) {
+  const agents = useAgents();
+  const [showNew, setShowNew] = useState(false);
+  const [nAgent, setNAgent] = useState({ name: "", agency: "", phone: "", email: "" });
+
+  if (draft.query_type === "B2B") {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">Agent Details</h2>
+        <div>
+          <Label>Select Agent</Label>
+          <Select value={draft.agent.agent_id || ""} onValueChange={(id) => {
+            const a = agents.find((x) => x.id === id);
+            if (a) set({ agent: { agent_id: a.id, name: a.name, agency: a.agency, phone: a.phone, email: a.email } });
+          }}>
+            <SelectTrigger><SelectValue placeholder="Choose agent…" /></SelectTrigger>
+            <SelectContent>
+              {agents.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} — {a.agency}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>Agent Name</Label><Input value={draft.agent.name} onChange={(e) => set({ agent: { ...draft.agent, name: e.target.value } })} /></div>
+          <div><Label>Agency Name</Label><Input value={draft.agent.agency} onChange={(e) => set({ agent: { ...draft.agent, agency: e.target.value } })} /></div>
+          <div><Label>Phone</Label><Input value={draft.agent.phone} onChange={(e) => set({ agent: { ...draft.agent, phone: e.target.value } })} /></div>
+          <div><Label>Email</Label><Input value={draft.agent.email} onChange={(e) => set({ agent: { ...draft.agent, email: e.target.value } })} /></div>
+        </div>
+        {!showNew ? (
+          <Button variant="outline" size="sm" onClick={() => setShowNew(true)}><Plus className="h-3 w-3 mr-1" /> Add New Agent</Button>
+        ) : (
+          <Card className="p-4 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="Name" value={nAgent.name} onChange={(e) => setNAgent({ ...nAgent, name: e.target.value })} />
+              <Input placeholder="Agency" value={nAgent.agency} onChange={(e) => setNAgent({ ...nAgent, agency: e.target.value })} />
+              <Input placeholder="Phone" value={nAgent.phone} onChange={(e) => setNAgent({ ...nAgent, phone: e.target.value })} />
+              <Input placeholder="Email" value={nAgent.email} onChange={(e) => setNAgent({ ...nAgent, email: e.target.value })} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => {
+                if (!nAgent.name) { toast.error("Agent name required"); return; }
+                const a = addAgent(nAgent);
+                set({ agent: { agent_id: a.id, ...nAgent } });
+                setNAgent({ name: "", agency: "", phone: "", email: "" });
+                setShowNew(false);
+                toast.success("Agent added");
+              }}>Save Agent</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowNew(false)}>Cancel</Button>
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+  if (draft.query_type === "B2C") {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">Guest Details</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>Guest Name</Label><Input value={draft.guest.name} onChange={(e) => set({ guest: { ...draft.guest, name: e.target.value } })} /></div>
+          <div><Label>Phone</Label><Input value={draft.guest.phone} onChange={(e) => set({ guest: { ...draft.guest, phone: e.target.value } })} /></div>
+          <div><Label>Email</Label><Input value={draft.guest.email} onChange={(e) => set({ guest: { ...draft.guest, email: e.target.value } })} /></div>
+          <div><Label>City (travelling from)</Label><Input value={draft.guest.city} onChange={(e) => set({ guest: { ...draft.guest, city: e.target.value } })} /></div>
+        </div>
+      </div>
+    );
+  }
+  // Brochure
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Brochure / Group Tour Details</h2>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Tour Type</Label>
+          <Select value={draft.brochure.tour_type} onValueChange={(v) => set({ brochure: { ...draft.brochure, tour_type: v } })}>
+            <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+            <SelectContent>
+              {["Leisure", "Pilgrimage", "Adventure", "Corporate", "Wedding", "Event"].map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div><Label>Purpose / Theme</Label><Input value={draft.brochure.theme} onChange={(e) => set({ brochure: { ...draft.brochure, theme: e.target.value } })} /></div>
+        <div><Label>Event / Season</Label><Input placeholder="e.g. Diwali Special" value={draft.brochure.event} onChange={(e) => set({ brochure: { ...draft.brochure, event: e.target.value } })} /></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><Label>Period From</Label><Input type="date" value={draft.brochure.period_start} onChange={(e) => set({ brochure: { ...draft.brochure, period_start: e.target.value } })} /></div>
+          <div><Label>Period To</Label><Input type="date" value={draft.brochure.period_end} onChange={(e) => set({ brochure: { ...draft.brochure, period_end: e.target.value } })} /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 3 — Duration
+// ============================================================
+function Step3({ draft, set }: StepProps) {
+  return (
+    <div className="space-y-4 max-w-md">
+      <h2 className="text-lg font-semibold">Tour Duration</h2>
+      <div>
+        <Label>Number of Nights</Label>
+        <Input type="number" min={1} value={draft.nights}
+          onChange={(e) => set({ nights: Math.max(1, parseInt(e.target.value) || 1) })} />
+      </div>
+      <div>
+        <Label>Number of Days</Label>
+        <Input value={draft.nights + 1} readOnly className="bg-muted" />
+      </div>
+      <div className="p-4 bg-primary/5 rounded-lg text-center">
+        <div className="text-3xl font-bold text-primary">{draft.nights} Nights / {draft.nights + 1} Days</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 4 — Program
+// ============================================================
+function Step4({ draft, set }: StepProps) {
+  const programs = usePrograms();
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Program Selection</h2>
+      <RadioGroup value={draft.program_mode} onValueChange={(v) => set({ program_mode: v as "existing" | "new" })}>
+        <div className="flex items-start gap-3 p-4 border rounded-lg">
+          <RadioGroupItem value="existing" id="pm-e" className="mt-1" />
+          <div className="flex-1">
+            <label htmlFor="pm-e" className="font-medium cursor-pointer">Pre-Select Existing Program</label>
+            {draft.program_mode === "existing" && (
+              <Select value={draft.program_id || ""} onValueChange={(id) => {
+                const p = programs.find((x) => x.id === id);
+                set({ program_id: id, program_name: p?.name || "", nights: p?.nights || draft.nights });
+              }}>
+                <SelectTrigger className="mt-2"><SelectValue placeholder="Choose program…" /></SelectTrigger>
+                <SelectContent>
+                  {programs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.nights}N)</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+        <div className="flex items-start gap-3 p-4 border rounded-lg">
+          <RadioGroupItem value="new" id="pm-n" className="mt-1" />
+          <div className="flex-1">
+            <label htmlFor="pm-n" className="font-medium cursor-pointer">New Routing / Customized</label>
+            {draft.program_mode === "new" && (
+              <Input placeholder="Program Name (e.g. Bhopal-Sanchi-Bhimbetka Heritage Tour)"
+                value={draft.program_name}
+                onChange={(e) => set({ program_name: e.target.value })}
+                className="mt-2" />
+            )}
+          </div>
+        </div>
+      </RadioGroup>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 5 — Dates & Pax
+// ============================================================
+function Step5({ draft, set }: StepProps) {
+  const endDate = addDaysISO(draft.start_date, draft.nights);
+  const totPax = draft.adults + draft.ss + draft.children.length;
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Dates & Pax</h2>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Tour Starting Date</Label><Input type="date" value={draft.start_date}
+          onChange={(e) => set({ start_date: e.target.value })} /></div>
+        <div><Label>Tour Ending Date</Label><Input value={fmtDateShort(endDate)} readOnly className="bg-muted" /></div>
+      </div>
+      <div className="p-3 bg-primary/5 rounded-lg text-sm text-primary font-medium">
+        {fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)} ({draft.nights} Nights / {draft.nights + 1} Days)
+      </div>
+
+      <Card className="p-4 space-y-3">
+        <div className="text-sm font-semibold">Pax</div>
+        <PaxRow label="Adults" value={draft.adults} onChange={(v) => set({ adults: v })} />
+        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={(v) => set({ ss: v })} />
+        <PaxRow label="Children" value={draft.children.length} onChange={(v) => {
+          const cur = draft.children.length;
+          if (v > cur) set({ children: [...draft.children, ...Array(v - cur).fill({ age: 5 })] });
+          else set({ children: draft.children.slice(0, Math.max(0, v)) });
+        }} />
+        {draft.children.map((c, i) => (
+          <div key={i} className="pl-8 flex items-center gap-3">
+            <span className="text-sm">Child {i + 1}: Age</span>
+            <Input type="number" min={0} max={17} value={c.age} className="w-20"
+              onChange={(e) => {
+                const next = [...draft.children];
+                next[i] = { age: parseInt(e.target.value) || 0 };
+                set({ children: next });
+              }} />
+            <span className="text-xs text-muted-foreground">years</span>
+          </div>
+        ))}
+        <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
+      </Card>
+    </div>
+  );
+}
+function PaxRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm">{label}</span>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(Math.max(0, value - 1))}>−</Button>
+        <Input value={value} readOnly className="w-14 text-center" />
+        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(value + 1)}>+</Button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 6 — Category
+// ============================================================
+function Step6({ draft, set }: StepProps) {
+  const toggle = (t: string) => {
+    const has = draft.categories.includes(t);
+    set({ categories: has ? draft.categories.filter((x) => x !== t) : [...draft.categories, t] });
+  };
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Program Category</h2>
+      <p className="text-sm text-muted-foreground">Select one or more categories.</p>
+      <div className="flex flex-wrap gap-2">
+        {CATEGORY_TAGS.map((t) => {
+          const on = draft.categories.includes(t);
+          return (
+            <button key={t} onClick={() => toggle(t)}
+              className={cn(
+                "px-4 py-2 rounded-full border-2 text-sm font-medium transition-colors",
+                on ? "bg-accent text-accent-foreground border-accent" : "bg-background border-border hover:border-primary/40",
+              )}>
+              {t}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 7 — Departure
+// ============================================================
+function Step7({ draft, set }: StepProps) {
+  const d = useDB();
+  if (draft.query_type === "Brochure") {
+    return (
+      <div className="space-y-4 max-w-md">
+        <h2 className="text-lg font-semibold">Ex (Departure Point)</h2>
+        <Input placeholder="e.g. Ex-Bhopal, Ex-Delhi" value={draft.departure_city}
+          onChange={(e) => set({ departure_city: e.target.value })} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4 max-w-md">
+      <h2 className="text-lg font-semibold">Guest Travelling From</h2>
+      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
+        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
+        <SelectContent>
+          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 8 — Mode of Travel
+// ============================================================
+function Step8({ draft, set }: StepProps) {
+  const toggle = (id: string) => {
+    const has = draft.travel_modes.includes(id);
+    set({ travel_modes: has ? draft.travel_modes.filter((x) => x !== id) : [...draft.travel_modes, id] });
+  };
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Mode of Travel</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {TRAVEL_MODES.map((m) => {
+          const on = draft.travel_modes.includes(m.id);
+          return (
+            <button key={m.id} onClick={() => toggle(m.id)}
+              className={cn(
+                "border-2 rounded-lg p-4 text-center transition",
+                on ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
+              )}>
+              <div className="text-2xl">{m.icon}</div>
+              <div className="text-sm font-medium mt-1">{m.label}</div>
+            </button>
+          );
+        })}
+      </div>
+      {draft.travel_modes.includes("flight") && (
+        <div>
+          <Label>Flight Class</Label>
+          <Select value={draft.travel_flight_class || ""} onValueChange={(v) => set({ travel_flight_class: v })}>
+            <SelectTrigger><SelectValue placeholder="Economy / Business" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Economy">Economy</SelectItem>
+              <SelectItem value="Premium Economy">Premium Economy</SelectItem>
+              <SelectItem value="Business">Business</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {draft.travel_modes.includes("train") && (
+        <div>
+          <Label>Train Class</Label>
+          <Select value={draft.travel_train_class || ""} onValueChange={(v) => set({ travel_train_class: v })}>
+            <SelectTrigger><SelectValue placeholder="AC 1 / 2 / 3 / Sleeper" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="AC 1">AC 1</SelectItem>
+              <SelectItem value="AC 2">AC 2</SelectItem>
+              <SelectItem value="AC 3">AC 3</SelectItem>
+              <SelectItem value="Sleeper">Sleeper</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 9 — Routing
+// ============================================================
+function Step9({ draft, set }: StepProps) {
+  const d = useDB();
+  // ensure routing length matches nights + 1
+  useEffect(() => {
+    const need = draft.nights + 1;
+    if (draft.routing.length !== need) {
+      const rows: RoutingDay[] = [];
+      for (let i = 0; i < need; i++) {
+        const existing = draft.routing[i];
+        rows.push(existing || {
+          day: i + 1,
+          date: addDaysISO(draft.start_date, i),
+          city_id: "",
+          program: "",
+          program_mode: "text",
+          overnight: i < need - 1,
+        });
+        rows[i].day = i + 1;
+        rows[i].date = addDaysISO(draft.start_date, i);
+        rows[i].overnight = i < need - 1;
+      }
+      writeDraft({ ...draft, routing: rows });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.nights, draft.start_date]);
+
+  const updateRow = (i: number, patch: Partial<RoutingDay>) => {
+    const next = [...draft.routing];
+    next[i] = { ...next[i], ...patch };
+    set({ routing: next });
+  };
+
+  const entrancesForCity = (city_id: string) => {
+    const cityName = d.cities.find((c) => c.id === city_id)?.name;
+    if (!cityName) return [];
+    const ec = d.entrance_cities.find((c) => c.name === cityName);
+    if (!ec) return [];
+    return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="text-left p-2 w-14">Day</th>
+              <th className="text-left p-2 w-28">Date</th>
+              <th className="text-left p-2">Overnight City</th>
+              <th className="text-left p-2">Day's Program</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.routing.map((r, i) => {
+              const isLast = i === draft.routing.length - 1;
+              const ents = entrancesForCity(r.city_id);
+              return (
+                <tr key={i} className="border-t align-top">
+                  <td className="p-2 font-semibold">Day {r.day}</td>
+                  <td className="p-2 text-xs">{fmtDateShort(r.date)}</td>
+                  <td className="p-2">
+                    {isLast ? (
+                      <span className="text-xs text-muted-foreground italic">Departure</span>
+                    ) : (
+                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v })}>
+                        <SelectTrigger className="h-8"><SelectValue placeholder="City…" /></SelectTrigger>
+                        <SelectContent>
+                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </td>
+                  <td className="p-2 space-y-1">
+                    <Textarea rows={2} placeholder="Describe the day's program…"
+                      value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
+                    {ents.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {ents.map((e) => (
+                          <button key={e.id} type="button"
+                            onClick={() => {
+                              const already = draft.entrances.some((x) => x.site_id === e.id);
+                              if (already) return;
+                              set({
+                                entrances: [...draft.entrances, {
+                                  id: uid(), site_id: e.id, indian_pax: totalPax(draft),
+                                  indian_rate: e.indian_rate, foreign_pax: 0, foreign_rate: e.foreigner_rate,
+                                }],
+                              });
+                              toast.success(`${e.site_name} added to entrances`);
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20">
+                            + {e.site_name} ₹{e.indian_rate}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 10 — Transport
+// ============================================================
+function Step10({ draft, set }: StepProps) {
+  const d = useDB();
+  const opts = d.travel_options.filter((t) => t.is_active);
+  const total = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold">Transport Options</h2>
+        <Button size="sm" onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0 }] })}>
+          <Plus className="h-3 w-3 mr-1" /> Add Transport
         </Button>
       </div>
-      <div className="space-y-2">{children}</div>
+      {draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
+      {draft.transport.map((t, i) => (
+        <Card key={t.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
+          <div>
+            <Label className="text-xs">Vehicle</Label>
+            <Select value={t.travel_id} onValueChange={(v) => {
+              const to = opts.find((x) => x.id === v);
+              const next = [...draft.transport]; next[i] = { ...t, travel_id: v, rate: to?.rate_per_day || t.rate };
+              set({ transport: next });
+            }}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.vehicle_type}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
+            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, vehicles: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
+          <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
+            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, days: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
+          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={t.rate}
+            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, rate: parseFloat(e.target.value) || 0 }; set({ transport: n }); }} /></div>
+          <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(t.rate * t.vehicles * t.days)}</div></div>
+          <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </Card>
+      ))}
+      <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 11 — Activities
+// ============================================================
+function Step11({ draft, set }: StepProps) {
+  const d = useDB();
+  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const relevant = d.activities.filter((a) => {
+    if (!a.is_active) return false;
+    const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+    return dest && (routingCities.has(dest) || routingCities.size === 0);
+  });
+
+  const toggle = (a: typeof relevant[number]) => {
+    const existing = draft.activities.find((x) => x.activity_id === a.id);
+    if (existing) set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
+    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: a.price }] });
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Activities & Experiences</h2>
+      {relevant.length === 0 && <p className="text-sm text-muted-foreground">No activities found for routing cities.</p>}
+      <div className="space-y-2">
+        {relevant.map((a) => {
+          const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+          const line = draft.activities.find((x) => x.activity_id === a.id);
+          const on = !!line;
+          return (
+            <div key={a.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
+              <Checkbox checked={on} onCheckedChange={() => toggle(a)} />
+              <div className="flex-1">
+                <div className="text-sm font-medium">{a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span></div>
+                <div className="text-xs text-muted-foreground">{a.description}</div>
+              </div>
+              {on && (
+                <>
+                  <div><Label className="text-xs">Qty</Label><Input type="number" min={1} value={line!.qty} className="w-20"
+                    onChange={(e) => set({ activities: draft.activities.map((x) => x.id === line!.id ? { ...x, qty: parseInt(e.target.value) || 1 } : x) })} /></div>
+                  <div className="text-sm font-semibold w-24 text-right">{inr(line!.rate * line!.qty)}</div>
+                </>
+              )}
+              <span className="text-sm">{inr(a.price)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <CustomAdd label="Custom Activity" onAdd={(name, rate) => set({
+        activities: [...draft.activities, { id: uid(), custom_name: name, qty: 1, rate }],
+      })} />
+      {draft.activities.filter((x) => x.custom_name).map((x) => (
+        <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+          <span>{x.custom_name} × {x.qty}</span>
+          <span>{inr(x.rate * x.qty)}
+            <button className="ml-2 text-destructive" onClick={() => set({ activities: draft.activities.filter((y) => y.id !== x.id) })}>×</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amount: number) => void }) {
+  const [n, setN] = useState(""); const [a, setA] = useState(0);
+  return (
+    <div className="flex gap-2 items-end pt-3 border-t">
+      <div className="flex-1"><Label className="text-xs">{label}</Label><Input value={n} onChange={(e) => setN(e.target.value)} placeholder="Name" /></div>
+      <div className="w-32"><Label className="text-xs">Amount</Label><Input type="number" value={a} onChange={(e) => setA(parseFloat(e.target.value) || 0)} /></div>
+      <Button size="sm" onClick={() => { if (n && a > 0) { onAdd(n, a); setN(""); setA(0); } }}>Add</Button>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 12 — Entrances
+// ============================================================
+function Step12({ draft, set }: StepProps) {
+  const d = useDB();
+  const routingCityNames = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const cityIds = new Set(d.entrance_cities.filter((c) => routingCityNames.has(c.name)).map((c) => c.id));
+  const relevant = d.entrance_sites.filter((s) => s.is_active && (cityIds.has(s.city_id) || cityIds.size === 0));
+
+  const pax = totalPax(draft);
+  const toggle = (s: typeof relevant[number]) => {
+    const existing = draft.entrances.find((x) => x.site_id === s.id);
+    if (existing) set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
+    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate }] });
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Entrance Fees</h2>
+      <div className="space-y-2">
+        {relevant.map((s) => {
+          const line = draft.entrances.find((x) => x.site_id === s.id);
+          const on = !!line;
+          const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
+          return (
+            <div key={s.id} className={cn("p-3 border rounded-lg", on && "border-accent bg-accent/5")}>
+              <div className="flex items-center gap-3">
+                <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
+                <div className="flex-1">
+                  <div className="text-sm font-medium">{s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span></div>
+                  <div className="text-xs text-muted-foreground">Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}</div>
+                </div>
+              </div>
+              {on && line && (
+                <div className="mt-2 pl-8 grid grid-cols-4 gap-2 text-xs">
+                  <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, indian_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, foreign_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div className="col-span-2 text-right font-semibold pt-4">
+                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
+        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0 }],
+      })} />
+      {draft.entrances.filter((x) => x.custom_name).map((x) => (
+        <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+          <span>{x.custom_name} — {x.indian_pax} pax × ₹{x.indian_rate}</span>
+          <span>{inr(x.indian_pax * x.indian_rate)}
+            <button className="ml-2 text-destructive" onClick={() => set({ entrances: draft.entrances.filter((y) => y.id !== x.id) })}>×</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 13 — Guide
+// ============================================================
+function Step13({ draft, set }: StepProps) {
+  const d = useDB();
+  const opts = d.guides.filter((g) => g.is_active);
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold">Guide Charges</h2>
+        <Button size="sm" onClick={() => set({ guides: [...draft.guides, { id: uid(), guide_id: opts[0]?.id || "", days: 1, guides: 1, rate: opts[0]?.rate_per_day || 0 }] })}>
+          <Plus className="h-3 w-3 mr-1" /> Add Guide
+        </Button>
+      </div>
+      {draft.guides.map((g, i) => (
+        <Card key={g.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
+          <div>
+            <Label className="text-xs">Guide</Label>
+            <Select value={g.guide_id} onValueChange={(v) => {
+              const go = opts.find((x) => x.id === v);
+              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go?.rate_per_day || g.rate };
+              set({ guides: n });
+            }}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name} ({o.guide_type})</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={g.days}
+            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, days: parseInt(e.target.value) || 1 }; set({ guides: n }); }} /></div>
+          <div><Label className="text-xs"># Guides</Label><Input type="number" min={1} value={g.guides}
+            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, guides: parseInt(e.target.value) || 1 }; set({ guides: n }); }} /></div>
+          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={g.rate}
+            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, rate: parseFloat(e.target.value) || 0 }; set({ guides: n }); }} /></div>
+          <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(g.rate * g.guides * g.days)}</div></div>
+          <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 14 — Miscellaneous
+// ============================================================
+function Step14({ draft, set }: StepProps) {
+  const d = useDB();
+  const items = d.miscellaneous_items.filter((x) => x.is_active);
+  const pax = totalPax(draft);
+
+  const toggle = (m: typeof items[number]) => {
+    const existing = draft.misc.find((x) => x.item_id === m.id);
+    if (existing) set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
+    else {
+      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? draft.nights : 1;
+      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit }] });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Miscellaneous</h2>
+      <div className="space-y-2">
+        {items.map((m) => {
+          const line = draft.misc.find((x) => x.item_id === m.id);
+          const on = !!line;
+          return (
+            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
+              <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
+              <div className="flex-1">
+                <div className="text-sm font-medium">{m.name}</div>
+                <div className="text-xs text-muted-foreground">₹{m.rate} / {m.unit}</div>
+              </div>
+              {on && line && (
+                <>
+                  <div><Label className="text-xs">Qty</Label><Input type="number" value={line.qty} className="w-20"
+                    onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div className="w-24 text-right font-semibold">{inr(line.qty * line.rate)}</div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <CustomAdd label="Custom Misc Item" onAdd={(name, rate) => set({
+        misc: [...draft.misc, { id: uid(), custom_name: name, qty: 1, rate, unit: "fixed" }],
+      })} />
+      {draft.misc.filter((x) => x.custom_name).map((x) => (
+        <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+          <span>{x.custom_name} × {x.qty}</span>
+          <span>{inr(x.qty * x.rate)}
+            <button className="ml-2 text-destructive" onClick={() => set({ misc: draft.misc.filter((y) => y.id !== x.id) })}>×</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 15 — Accommodation
+// ============================================================
+function Step15({ draft, set }: StepProps) {
+  const d = useDB();
+  const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
+  const overnightRouting = draft.routing.filter((r) => r.overnight && r.city_id);
+
+  const addOption = () => {
+    const existing = draft.hotel_options.map((o) => o.key);
+    const next = (["A", "B", "C", "D"] as OptionKey[]).find((k) => !existing.includes(k));
+    if (!next) return;
+    const label = { A: "Budget", B: "Standard", C: "Deluxe", D: "Luxury" }[next];
+    set({ hotel_options: [...draft.hotel_options, { key: next, label, selections: [] }] });
+    setActiveOpt(next);
+  };
+
+  const updateOption = (key: OptionKey, patch: Partial<HotelOption>) => {
+    set({ hotel_options: draft.hotel_options.map((o) => o.key === key ? { ...o, ...patch } : o) });
+  };
+
+  const activeOption = draft.hotel_options.find((o) => o.key === activeOpt) || draft.hotel_options[0];
+
+  const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
+    const cands = d.rate_plans.filter((p) => p.room_category_id === room_id && p.meal_plan === meal && p.validity_start <= dateISO && p.validity_end >= dateISO);
+    return cands[0];
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Accommodation Options (up to 4)</h2>
+
+      <div className="flex gap-2 border-b">
+        {draft.hotel_options.map((o) => (
+          <button key={o.key} onClick={() => setActiveOpt(o.key)}
+            className={cn(
+              "px-4 py-2 text-sm font-medium border-b-2 -mb-px",
+              activeOpt === o.key ? "border-accent text-accent" : "border-transparent text-muted-foreground",
+            )}>
+            Option {o.key} · {o.label}
+          </button>
+        ))}
+        {draft.hotel_options.length < 4 && (
+          <button onClick={addOption} className="px-3 py-2 text-sm text-primary">+ Add Option</button>
+        )}
+      </div>
+
+      {activeOption && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <Label>Label</Label>
+            <Input className="max-w-xs" value={activeOption.label}
+              onChange={(e) => updateOption(activeOption.key, { label: e.target.value })} />
+            {draft.hotel_options.length > 1 && (
+              <Button size="sm" variant="ghost" onClick={() => {
+                const next = draft.hotel_options.filter((o) => o.key !== activeOpt);
+                set({ hotel_options: next });
+                setActiveOpt(next[0].key);
+              }}>
+                <Trash2 className="h-3.5 w-3.5 text-destructive" /> Remove option
+              </Button>
+            )}
+          </div>
+
+          {overnightRouting.length === 0 && (
+            <p className="text-sm text-muted-foreground">Complete routing in Step 9 first.</p>
+          )}
+
+          {overnightRouting.map((day, i) => {
+            const cityName = d.cities.find((c) => c.id === day.city_id)?.name;
+            const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
+            const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id);
+            const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
+            const rate = sel ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
+
+            const setSel = (patch: Partial<typeof sel> & object) => {
+              const others = activeOption.selections.filter((s) => s.city_id !== day.city_id);
+              const cur = sel || { city_id: day.city_id, hotel_id: "", room_id: "", meal_plan: "CP" as MealPlan };
+              updateOption(activeOption.key, { selections: [...others, { ...cur, ...patch }] });
+            };
+
+            return (
+              <Card key={i} className="p-3">
+                <div className="text-sm font-semibold mb-2">Day {day.day} · {cityName} · {fmtDateShort(day.date)}</div>
+                <div className="grid grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-xs">Hotel</Label>
+                    <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        {cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Room</Label>
+                    <Select value={sel?.room_id || ""} onValueChange={(v) => setSel({ room_id: v })} disabled={!sel?.hotel_id}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Meal Plan</Label>
+                    <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="text-xs pt-5">
+                    {rate ? (
+                      <span className="text-green-700">✓ {rate.season_label} · ₹{rate.double_rate}/dbl</span>
+                    ) : sel?.room_id ? (
+                      <span className="text-amber-600">⚠ No rate for these dates</span>
+                    ) : null}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 16 — Costing Variations
+// ============================================================
+function Step16({ draft, set }: StepProps) {
+  const d = useDB();
+  const totals = useMemo(
+    () => draft.hotel_options.map((o) => computeOption(draft, o, d)),
+    [draft, d],
+  );
+
+  const [newInc, setNewInc] = useState("");
+  const [newExc, setNewExc] = useState("");
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold">Costing Variations</h2>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Markup %</Label>
+          <Input type="number" value={draft.markup_percent} className="w-20"
+            onChange={(e) => set({ markup_percent: parseFloat(e.target.value) || 0 })} />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="text-left p-2">Line</th>
+              {totals.map((t) => (
+                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              ["Room Cost (Net) DBL", (t: OptionTotals) => t.room_net_dbl],
+              ["GST on Rooms DBL", (t: OptionTotals) => t.gst_rooms_dbl],
+              ["Add-Ons Total", (t: OptionTotals) => t.addons_total],
+              [`Markup ${draft.markup_percent}% (DBL)`, (t: OptionTotals) => t.markup_dbl],
+              ["GST 5% (DBL)", (t: OptionTotals) => t.gst5_dbl],
+            ].map(([label, fn], i) => (
+              <tr key={i} className="border-t">
+                <td className="p-2">{label as string}</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr((fn as any)(t))}</td>)}
+              </tr>
+            ))}
+            <tr className="border-t bg-primary/5 font-bold">
+              <td className="p-2">GRAND TOTAL (DBL)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.grand_dbl)}</td>)}
+            </tr>
+            <tr className="border-t">
+              <td className="p-2 text-xs text-muted-foreground">Per Pax (SGL)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_sgl)}</td>)}
+            </tr>
+            <tr>
+              <td className="p-2 text-xs text-muted-foreground">Per Pax (DBL)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_dbl)}</td>)}
+            </tr>
+            <tr>
+              <td className="p-2 text-xs text-muted-foreground">Per Pax (TRP)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_trp)}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="p-4">
+          <div className="section-label mb-2">Inclusions</div>
+          <ul className="space-y-1 mb-2">
+            {draft.inclusions.map((x, i) => (
+              <li key={i} className="text-sm flex justify-between">
+                <span>✓ {x}</span>
+                <button onClick={() => set({ inclusions: draft.inclusions.filter((_, j) => j !== i) })}
+                  className="text-destructive">×</button>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Input value={newInc} onChange={(e) => setNewInc(e.target.value)} placeholder="Add inclusion" />
+            <Button size="sm" onClick={() => { if (newInc) { set({ inclusions: [...draft.inclusions, newInc] }); setNewInc(""); } }}>Add</Button>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="section-label mb-2">Exclusions</div>
+          <ul className="space-y-1 mb-2">
+            {draft.exclusions.map((x, i) => (
+              <li key={i} className="text-sm flex justify-between">
+                <span>✗ {x}</span>
+                <button onClick={() => set({ exclusions: draft.exclusions.filter((_, j) => j !== i) })}
+                  className="text-destructive">×</button>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Input value={newExc} onChange={(e) => setNewExc(e.target.value)} placeholder="Add exclusion" />
+            <Button size="sm" onClick={() => { if (newExc) { set({ exclusions: [...draft.exclusions, newExc] }); setNewExc(""); } }}>Add</Button>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 17 — Final Costing
+// ============================================================
+function Step17({ draft, set }: StepProps) {
+  const d = useDB();
+  const totals = useMemo(() => draft.hotel_options.map((o) => computeOption(draft, o, d)), [draft, d]);
+  const name = draft.query_type === "B2B" ? draft.agent.name : draft.query_type === "B2C" ? draft.guest.name : draft.brochure.theme;
+  const endDate = addDaysISO(draft.start_date, draft.nights);
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Final Cost Summary</h2>
+      <Card className="p-4 space-y-2 bg-primary/5">
+        <div className="text-xs text-muted-foreground uppercase">Tour</div>
+        <div className="text-lg font-bold">{draft.program_name || "—"}</div>
+        <div className="text-sm flex gap-4 flex-wrap">
+          <span>{fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)}</span>
+          <span>{draft.nights}N/{draft.nights + 1}D</span>
+          <span>{totalPax(draft)} pax</span>
+          <Badge variant="outline">{draft.query_type}</Badge>
+          {name && <span className="text-muted-foreground">For: {name}</span>}
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="section-label mb-3">Per Pax Comparison</div>
+        <div className="space-y-2">
+          {totals.map((t) => {
+            const recommended = draft.recommended_option === t.key;
+            return (
+              <button key={t.key} onClick={() => set({ recommended_option: recommended ? null : (t.key as OptionKey) })}
+                className={cn(
+                  "w-full grid grid-cols-[1fr_120px_120px_120px_40px] items-center gap-3 p-3 rounded-lg border-2 text-left transition",
+                  recommended ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
+                )}>
+                <div>
+                  <div className="text-sm font-semibold">Option {t.key} · {t.label}</div>
+                  {t.rate_missing > 0 && <div className="text-xs text-amber-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> {t.rate_missing} rate(s) missing</div>}
+                </div>
+                <div className="text-right text-xs">SGL<br /><span className="font-semibold text-sm">{inr(t.per_pax_sgl)}</span></div>
+                <div className="text-right text-xs">DBL<br /><span className="font-semibold text-sm">{inr(t.per_pax_dbl)}</span></div>
+                <div className="text-right text-xs">TRP<br /><span className="font-semibold text-sm">{inr(t.per_pax_trp)}</span></div>
+                <Star className={cn("h-5 w-5", recommended ? "fill-accent text-accent" : "text-muted-foreground/30")} />
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// STEP 18 — Optionals + Actions
+// ============================================================
+function Step18({ draft, set }: StepProps) {
+  const d = useDB();
+  const user = useAuth();
+  const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
+
+  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const suggActs = d.activities.filter((a) => {
+    if (!a.is_active) return false;
+    if (draft.activities.some((x) => x.activity_id === a.id)) return false;
+    const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+    return dest && routingCities.has(dest);
+  });
+  const cityIds = new Set(d.entrance_cities.filter((c) => routingCities.has(c.name)).map((c) => c.id));
+  const suggEnts = d.entrance_sites.filter((s) => s.is_active && cityIds.has(s.city_id) && !draft.entrances.some((x) => x.site_id === s.id));
+
+  const totals = useMemo(() => draft.hotel_options.map((o) => computeOption(draft, o, d)), [draft, d]);
+
+  function buildSavedQuote(): SavedQuote {
+    const recIdx = Math.max(0, draft.hotel_options.findIndex((o) => o.key === draft.recommended_option));
+    const rec = totals[recIdx] || totals[0];
+    // Build minimal legacy itinerary from recommended option
+    const recOpt = draft.hotel_options[recIdx];
+    const itinerary = draft.routing.map((day) => {
+      const sel = recOpt?.selections.find((s) => s.city_id === day.city_id);
+      const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
+      const room = sel ? d.room_categories.find((r) => r.id === sel.room_id) : null;
+      const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
+      const plan = sel ? d.rate_plans.find((p) => p.room_category_id === sel.room_id && p.meal_plan === sel.meal_plan
+        && p.validity_start <= day.date && p.validity_end >= day.date) : null;
+      const dbl = plan?.double_rate || 0;
+      const sgl = plan?.single_rate || 0;
+      const trp = dbl + (plan?.extra_bed_rate || 0);
+      const gr = (v: number) => v > 7500 ? 0.18 : 0.05;
+      return {
+        day_number: day.day, date: day.date, city: cityName,
+        hotel_name: hotel?.name || "—", hotel_category: hotel?.hotel_category || "—",
+        room_category: room?.name || "—", meal_plan: sel?.meal_plan || "CP",
+        season_label: plan?.season_label || "—",
+        validity_start: plan?.validity_start || "", validity_end: plan?.validity_end || "",
+        rates: {
+          sgl_net: sgl, sgl_gst_rate: gr(sgl), sgl_gst_amt: sgl * gr(sgl), sgl_total: sgl * (1 + gr(sgl)),
+          dbl_net: dbl, dbl_gst_rate: gr(dbl), dbl_gst_amt: dbl * gr(dbl), dbl_total: dbl * (1 + gr(dbl)),
+          trp_net: trp, trp_gst_rate: gr(trp), trp_gst_amt: trp * gr(trp), trp_total: trp * (1 + gr(trp)),
+        },
+        lunch_rate: plan?.lunch_rate || 0, dinner_rate: plan?.dinner_rate || 0,
+      };
+    });
+
+    const addonsBlock = {
+      travels: draft.transport.map((t) => {
+        const to = d.travel_options.find((x) => x.id === t.travel_id);
+        return { name: to?.vehicle_type || "—", days: t.days, vehicles: t.vehicles, rate_per_day: t.rate, total: t.rate * t.days * t.vehicles };
+      }),
+      miscellaneous: draft.misc.map((m) => {
+        const mo = m.item_id ? d.miscellaneous_items.find((x) => x.id === m.item_id) : null;
+        return { name: mo?.name || m.custom_name || "—", pax: m.qty, rate: m.rate, unit: m.unit, total: m.qty * m.rate };
+      }),
+      guide: draft.guides.map((g) => {
+        const go = d.guides.find((x) => x.id === g.guide_id);
+        return { name: go?.name || "—", type: go?.guide_type || "—", days: g.days, count: g.guides, rate_per_day: g.rate, total: g.rate * g.days * g.guides };
+      }),
+      entrances: draft.entrances.map((e) => {
+        const so = e.site_id ? d.entrance_sites.find((x) => x.id === e.site_id) : null;
+        const cityName = so ? d.entrance_cities.find((c) => c.id === so.city_id)?.name || "—" : "—";
+        return {
+          site_name: so?.site_name || e.custom_name || "—", city: cityName,
+          indian_pax: e.indian_pax, indian_rate: e.indian_rate,
+          foreigner_pax: e.foreign_pax, foreigner_rate: e.foreign_rate,
+          total: e.indian_pax * e.indian_rate + e.foreign_pax * e.foreign_rate,
+        };
+      }),
+      activities: [...draft.activities, ...draft.optionals].map((a) => {
+        const ao = a.activity_id ? d.activities.find((x) => x.id === a.activity_id) : null;
+        const dest = ao ? d.activity_destinations.find((x) => x.id === ao.destination_id)?.name || "—" : "—";
+        return { name: ao?.activity_name || a.custom_name || "—", destination: dest, pricing_type: ao?.pricing_type || "custom", qty: a.qty, rate: a.rate, total: a.qty * a.rate };
+      }),
+      addons_total: computeAddonsTotal(draft),
+    };
+
+    const q: SavedQuote = {
+      id: uid(),
+      quote_number: nextQuoteNumber(),
+      saved_at: new Date().toISOString(),
+      saved_by: user?.name || "Unknown",
+      tour_title: draft.program_name || `${draft.query_type} Tour`,
+      cities: Array.from(routingCities),
+      total_nights: draft.nights,
+      travel_start: draft.start_date,
+      travel_end: addDaysISO(draft.start_date, draft.nights),
+      itinerary,
+      addons: addonsBlock,
+      inclusions: {
+        accommodation_nights: draft.nights,
+        breakfast_count: draft.nights,
+        lunch_count: 0, dinner_count: 0,
+        travels_included: draft.transport.length > 0,
+        guide_included: draft.guides.length > 0,
+      },
+      markup_percent: draft.markup_percent,
+      totals: {
+        room_net_sgl: rec.room_net_sgl, room_net_dbl: rec.room_net_dbl, room_net_trp: rec.room_net_trp,
+        gst_rooms_sgl: rec.gst_rooms_sgl, gst_rooms_dbl: rec.gst_rooms_dbl, gst_rooms_trp: rec.gst_rooms_trp,
+        addons_total: rec.addons_total,
+        markup_sgl: rec.markup_sgl, markup_dbl: rec.markup_dbl, markup_trp: rec.markup_trp,
+        gst_markup_sgl: rec.gst5_sgl, gst_markup_dbl: rec.gst5_dbl, gst_markup_trp: rec.gst5_trp,
+        grand_sgl: rec.grand_sgl, grand_dbl: rec.grand_dbl, grand_trp: rec.grand_trp,
+      },
+      include_sgl: true, include_dbl: true, include_trp: true,
+    };
+    return q;
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Optional Add-Ons</h2>
+      <p className="text-sm text-muted-foreground">Items not yet included — suggest to guest.</p>
+
+      <Card className="p-4">
+        <div className="section-label mb-2">Suggested Activities</div>
+        {suggActs.length === 0 ? <p className="text-xs text-muted-foreground">All activities already included.</p> : (
+          <ul className="space-y-2">
+            {suggActs.map((a) => (
+              <li key={a.id} className="flex justify-between items-center text-sm">
+                <span>{a.activity_name} · {inr(a.price)}</span>
+                <Button size="sm" variant="outline" onClick={() => set({
+                  optionals: [...draft.optionals, { id: uid(), activity_id: a.id, qty: 1, rate: a.price }],
+                })}>+ Add to Quote</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <div className="section-label mb-2">Suggested Entrances</div>
+        {suggEnts.length === 0 ? <p className="text-xs text-muted-foreground">All entrances already included.</p> : (
+          <ul className="space-y-2">
+            {suggEnts.map((e) => (
+              <li key={e.id} className="flex justify-between items-center text-sm">
+                <span>{e.site_name} · Indian ₹{e.indian_rate}</span>
+                <Button size="sm" variant="outline" onClick={() => set({
+                  entrances: [...draft.entrances, { id: uid(), site_id: e.id, indian_pax: totalPax(draft), indian_rate: e.indian_rate, foreign_pax: 0, foreign_rate: e.foreigner_rate }],
+                })}>+ Add to Quote</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <CustomAdd label="Custom Optional" onAdd={(name, rate) => set({
+        optionals: [...draft.optionals, { id: uid(), custom_name: name, qty: 1, rate }],
+      })} />
+      {draft.optionals.map((x) => {
+        const name = x.custom_name || d.activities.find((a) => a.id === x.activity_id)?.activity_name || "—";
+        return (
+          <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+            <span>Optional: {name}</span>
+            <span>{inr(x.qty * x.rate)}
+              <button className="ml-2 text-destructive" onClick={() => set({ optionals: draft.optionals.filter((y) => y.id !== x.id) })}>×</button>
+            </span>
+          </div>
+        );
+      })}
+
+      <Card className="p-4 bg-primary/5 border-primary/20">
+        <div className="section-label mb-3">Final Actions</div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => {
+            const q = buildSavedQuote();
+            persistQuote(q);
+            clearDraft();
+            toast.success(`Quote ${q.quote_number} saved.`);
+            setSavedQuote(q);
+          }}>
+            <Save className="h-4 w-4 mr-1.5" /> Save Quote
+          </Button>
+          <Button variant="outline" onClick={() => setSavedQuote(buildSavedQuote())}>
+            <FileDown className="h-4 w-4 mr-1.5" /> Generate Quote PDF
+          </Button>
+          <Button variant="outline" onClick={async () => {
+            const q = buildSavedQuote();
+            const { exportQuoteExcel } = await import("@/lib/quotes-export");
+            exportQuoteExcel(q);
+            toast.success("Excel exported");
+          }}>
+            <FileSpreadsheet className="h-4 w-4 mr-1.5" /> Export Excel
+          </Button>
+          <Button variant="outline" onClick={() => {
+            setSavedQuote(buildSavedQuote());
+            setTimeout(() => window.print(), 400);
+          }}>
+            <Printer className="h-4 w-4 mr-1.5" /> Print
+          </Button>
+        </div>
+      </Card>
+
+      <QuoteViewerDialog quote={savedQuote} open={!!savedQuote} onClose={() => setSavedQuote(null)} />
+    </div>
+  );
+}
+
+// ============================================================
+// Summary sidebar
+// ============================================================
+function SummarySidebar({ draft }: { draft: QuoteDraft }) {
+  const d = useDB();
+  const routingNames = draft.routing.filter((r) => r.overnight).map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean).join(" → ");
+  const running = useMemo(() => {
+    const opt = draft.hotel_options[0];
+    if (!opt || opt.selections.length === 0) return computeAddonsTotal(draft);
+    return computeOption(draft, opt, d).grand_dbl;
+  }, [draft, d]);
+  const endDate = addDaysISO(draft.start_date, draft.nights);
+
+  return (
+    <div className="space-y-3">
+      <Card className="p-4 sticky top-4">
+        <div className="section-label mb-3">Live Summary</div>
+        {draft.query_type && <Badge className="mb-2">{draft.query_type}</Badge>}
+        <div className="space-y-2 text-sm">
+          {draft.program_name && (<div><span className="text-muted-foreground text-xs">Tour</span><div className="font-medium">{draft.program_name}</div></div>)}
+          <div><span className="text-muted-foreground text-xs">Dates</span>
+            <div>{fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)}</div>
+            <div className="text-xs text-muted-foreground">{draft.nights}N / {draft.nights + 1}D</div>
+          </div>
+          <div><span className="text-muted-foreground text-xs">Pax</span>
+            <div>{totalPax(draft)} ({draft.adults}A · {draft.ss}SS · {draft.children.length}C)</div>
+          </div>
+          {routingNames && (<div><span className="text-muted-foreground text-xs">Routing</span><div className="text-xs">{routingNames}</div></div>)}
+          <div className="pt-2 border-t">
+            <span className="text-muted-foreground text-xs">Running estimate (DBL)</span>
+            <div className="text-lg font-bold text-primary">{inr(running)}</div>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
