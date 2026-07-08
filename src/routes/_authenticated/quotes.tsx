@@ -85,7 +85,7 @@ function SavedQuotesPage() {
                 <th className="text-left py-2.5 px-2">Tour</th>
                 <th className="text-center py-2.5 px-2">Nights</th>
                 <th className="text-left py-2.5 px-2">Cities</th>
-                <th className="text-right py-2.5 px-2">Grand (DBL)</th>
+                <th className="text-right py-2.5 px-2">Per Person (2P)</th>
                 <th className="text-left py-2.5 px-2">Saved By</th>
                 <th className="text-left py-2.5 px-2">Date</th>
                 <th className="text-right py-2.5 px-4">Actions</th>
