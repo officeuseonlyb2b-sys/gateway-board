@@ -440,6 +440,40 @@ function Step3({ draft, set }: StepProps) {
 // ============================================================
 function Step4({ draft, set }: StepProps) {
   const programs = usePrograms();
+  const db = useDB();
+
+  const applyProgram = (id: string) => {
+    const p = programs.find((x) => x.id === id);
+    if (!p) return;
+    // Resolve city names → city_ids via DB.
+    const nameToId = (name: string | null) => {
+      if (!name) return "";
+      return db.cities.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id || "";
+    };
+    const routing: RoutingDay[] = p.routing.map((r, i) => ({
+      day: r.day,
+      date: addDaysISO(draft.start_date, i),
+      city_id: nameToId(r.overnight_city),
+      program: r.program_text,
+      program_mode: "text",
+      overnight: r.overnight_city !== null,
+    }));
+    writeDraft({
+      ...draft,
+      program_id: p.id,
+      program_name: p.name,
+      program_mode: "existing",
+      nights: p.nights,
+      categories: p.categories?.length ? p.categories : draft.categories,
+      departure_city: p.departure_city || draft.departure_city,
+      travel_modes: p.travel_modes?.length ? p.travel_modes : draft.travel_modes,
+      routing,
+      inclusions: p.inclusions?.length ? p.inclusions : draft.inclusions,
+      exclusions: p.exclusions?.length ? p.exclusions : draft.exclusions,
+    });
+    toast.success(`Auto-filled from "${p.name}" — all fields remain editable.`);
+  };
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Program Selection</h2>
@@ -449,15 +483,19 @@ function Step4({ draft, set }: StepProps) {
           <div className="flex-1">
             <label htmlFor="pm-e" className="font-medium cursor-pointer">Pre-Select Existing Program</label>
             {draft.program_mode === "existing" && (
-              <Select value={draft.program_id || ""} onValueChange={(id) => {
-                const p = programs.find((x) => x.id === id);
-                set({ program_id: id, program_name: p?.name || "", nights: p?.nights || draft.nights });
-              }}>
-                <SelectTrigger className="mt-2"><SelectValue placeholder="Choose program…" /></SelectTrigger>
-                <SelectContent>
-                  {programs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.nights}N)</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <>
+                <Select value={draft.program_id || ""} onValueChange={applyProgram}>
+                  <SelectTrigger className="mt-2"><SelectValue placeholder="Choose program…" /></SelectTrigger>
+                  <SelectContent>
+                    {programs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.nights}N)</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {draft.program_id && (
+                  <div className="mt-2 p-2 rounded bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                    ✓ Auto-filled from <b>{draft.program_name}</b> — routing, category, departure, travel mode & inclusions loaded. You can modify anything in later steps.
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
