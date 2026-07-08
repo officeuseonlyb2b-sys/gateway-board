@@ -8,12 +8,21 @@ export interface Agent {
   phone: string;
   email: string;
 }
+export interface ProgramRoutingRow {
+  day: number;
+  overnight_city: string | null; // city NAME; null = departure day
+  program_text: string;
+}
 export interface SavedProgram {
   id: string;
   name: string;
   nights: number;
-  routing: { city_id: string; program: string }[];
+  routing: ProgramRoutingRow[];
   categories: string[];
+  departure_city?: string;
+  travel_modes?: string[];
+  inclusions?: string[];
+  exclusions?: string[];
 }
 
 const AGENTS_KEY = "mp_tourism_agents";
