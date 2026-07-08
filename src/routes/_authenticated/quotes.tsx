@@ -85,7 +85,7 @@ function SavedQuotesPage() {
                 <th className="text-left py-2.5 px-2">Tour</th>
                 <th className="text-center py-2.5 px-2">Nights</th>
                 <th className="text-left py-2.5 px-2">Cities</th>
-                <th className="text-right py-2.5 px-2">Grand (DBL)</th>
+                <th className="text-right py-2.5 px-2">Per Person (2P)</th>
                 <th className="text-left py-2.5 px-2">Saved By</th>
                 <th className="text-left py-2.5 px-2">Date</th>
                 <th className="text-right py-2.5 px-4">Actions</th>
@@ -98,7 +98,7 @@ function SavedQuotesPage() {
                   <td className="py-2.5 px-2 font-medium">{qu.tour_title}</td>
                   <td className="py-2.5 px-2 text-center">{qu.total_nights}</td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{qu.cities.join(" → ")}</td>
-                  <td className="py-2.5 px-2 text-right tabular-nums font-semibold">{inr(qu.totals.grand_dbl)}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums font-semibold">{inr(qu.totals.grand_dbl / 2)}<span className="text-muted-foreground font-normal">/pax</span></td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{qu.saved_by}</td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{fmtDateShort(qu.saved_at)}</td>
                   <td className="py-2.5 px-4">

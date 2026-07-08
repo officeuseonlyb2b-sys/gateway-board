@@ -1262,16 +1262,16 @@ function Step16({ draft, set }: StepProps) {
               {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.grand_dbl)}</td>)}
             </tr>
             <tr className="border-t">
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (SGL)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_sgl)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">1 Person (Solo)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_sgl)}</td>)}
             </tr>
             <tr>
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (DBL)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_dbl)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">2 Persons (Per Head)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_dbl / 2)}</td>)}
             </tr>
             <tr>
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (TRP)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_trp)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">3 Persons (Per Head)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_trp / 3)}</td>)}
             </tr>
           </tbody>
         </table>
@@ -1324,6 +1324,9 @@ function Step17({ draft, set }: StepProps) {
   const name = draft.query_type === "B2B" ? draft.agent.name : draft.query_type === "B2C" ? draft.guest.name : draft.brochure.theme;
   const endDate = addDaysISO(draft.start_date, draft.nights);
 
+  const recIdx = Math.max(0, draft.hotel_options.findIndex((o) => o.key === draft.recommended_option));
+  const focus = totals[recIdx] || totals[0];
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Final Cost Summary</h2>
@@ -1340,7 +1343,47 @@ function Step17({ draft, set }: StepProps) {
       </Card>
 
       <Card className="p-4">
-        <div className="section-label mb-3">Per Pax Comparison</div>
+        <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label}</span>}</div>
+        {focus && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <PersonCard
+              icon="👤"
+              size="1 Person"
+              subtitle="Solo Travel"
+              badge="Single Room"
+              badgeClass="bg-muted text-foreground"
+              perPerson={focus.grand_sgl}
+              persons={1}
+            />
+            <PersonCard
+              icon="👥"
+              size="2 Persons"
+              subtitle="Couple / Pair"
+              badge="Shared Room"
+              badgeClass="bg-primary/10 text-primary"
+              perPerson={focus.grand_dbl / 2}
+              persons={2}
+              total={focus.grand_dbl}
+            />
+            <PersonCard
+              icon="👥👤"
+              size="3 Persons"
+              subtitle="Group of 3"
+              badge="Room + Extra Bed"
+              badgeClass="bg-accent/15 text-accent-foreground"
+              perPerson={focus.grand_trp / 3}
+              persons={3}
+              total={focus.grand_trp}
+            />
+          </div>
+        )}
+        <div className="mt-3 text-xs text-muted-foreground bg-muted/40 rounded p-2">
+          💡 Rates shown are per person. 2-person rate assumes double room sharing. 3-person rate assumes double room + 1 extra bed.
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="section-label mb-3">Compare Options (per person)</div>
         <div className="space-y-2">
           {totals.map((t) => {
             const recommended = draft.recommended_option === t.key;
@@ -1354,15 +1397,36 @@ function Step17({ draft, set }: StepProps) {
                   <div className="text-sm font-semibold">Option {t.key} · {t.label}</div>
                   {t.rate_missing > 0 && <div className="text-xs text-amber-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> {t.rate_missing} rate(s) missing</div>}
                 </div>
-                <div className="text-right text-xs">SGL<br /><span className="font-semibold text-sm">{inr(t.per_pax_sgl)}</span></div>
-                <div className="text-right text-xs">DBL<br /><span className="font-semibold text-sm">{inr(t.per_pax_dbl)}</span></div>
-                <div className="text-right text-xs">TRP<br /><span className="font-semibold text-sm">{inr(t.per_pax_trp)}</span></div>
+                <div className="text-right text-xs">1 Person<br /><span className="font-semibold text-sm">{inr(t.grand_sgl)}</span></div>
+                <div className="text-right text-xs">2 Persons<br /><span className="font-semibold text-sm">{inr(t.grand_dbl / 2)}</span></div>
+                <div className="text-right text-xs">3 Persons<br /><span className="font-semibold text-sm">{inr(t.grand_trp / 3)}</span></div>
                 <Star className={cn("h-5 w-5", recommended ? "fill-accent text-accent" : "text-muted-foreground/30")} />
               </button>
             );
           })}
         </div>
       </Card>
+    </div>
+  );
+}
+
+function PersonCard({ icon, size, subtitle, badge, badgeClass, perPerson, persons, total }: {
+  icon: string; size: string; subtitle: string; badge: string; badgeClass: string;
+  perPerson: number; persons: number; total?: number;
+}) {
+  return (
+    <div className="border-2 border-primary/20 rounded-lg p-4 bg-card flex flex-col items-center text-center">
+      <div className="text-2xl mb-1">{icon}</div>
+      <div className="text-sm font-semibold">{size}</div>
+      <div className="text-xs text-muted-foreground mb-2">{subtitle}</div>
+      <span className={cn("text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full mb-3", badgeClass)}>{badge}</span>
+      <div className="text-[28px] font-bold text-primary tabular-nums leading-tight">{inr(perPerson)}</div>
+      <div className="text-xs text-muted-foreground">per person</div>
+      {total !== undefined && (
+        <div className="text-[11px] text-muted-foreground italic mt-2">
+          Total: {inr(total)} <span className="opacity-70">({persons} × {inr(perPerson)})</span>
+        </div>
+      )}
     </div>
   );
 }

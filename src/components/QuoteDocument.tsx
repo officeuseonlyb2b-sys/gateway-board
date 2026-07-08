@@ -110,11 +110,41 @@ export function QuoteDocument({ quote: q }: Props) {
         </table>
       </div>
 
-      {/* OCCUPANCY BOXES */}
-      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-        {includeSgl && <OccBox label="SINGLE OCCUPANCY" value={q.totals.grand_sgl} />}
-        {includeDbl && <OccBox label="DOUBLE SHARING" value={q.totals.grand_dbl} />}
-        {includeTrp && <OccBox label="TRIPLE SHARING" value={q.totals.grand_trp} />}
+      {/* COST PER PERSON BY GROUP SIZE */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>COST PER PERSON (BASED ON GROUP SIZE)</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+          <thead><tr style={{ background: TEAL, color: "#fff" }}>
+            <Th>Group Size</Th><Th>Room Arrangement</Th>
+            <Th align="right">Per Person Cost</Th><Th align="right">Total Package</Th>
+          </tr></thead>
+          <tbody>
+            {includeSgl && (
+              <tr style={{ background: "#fff" }}>
+                <Td>1 Person</Td><Td>Single Room (Solo)</Td>
+                <Td align="right"><b style={{ color: TEAL, fontSize: 11 }}>{inr(q.totals.grand_sgl)}</b></Td>
+                <Td align="right"><span style={{ color: "#666" }}>{inr(q.totals.grand_sgl)}</span></Td>
+              </tr>
+            )}
+            {includeDbl && (
+              <tr style={{ background: "#f7f9fa" }}>
+                <Td>2 Persons</Td><Td>Double Room (Sharing)</Td>
+                <Td align="right"><b style={{ color: TEAL, fontSize: 11 }}>{inr(q.totals.grand_dbl / 2)}</b></Td>
+                <Td align="right"><span style={{ color: "#666" }}>{inr(q.totals.grand_dbl)}</span></Td>
+              </tr>
+            )}
+            {includeTrp && (
+              <tr style={{ background: "#fff" }}>
+                <Td>3 Persons</Td><Td>Double Room + Extra Bed</Td>
+                <Td align="right"><b style={{ color: TEAL, fontSize: 11 }}>{inr(q.totals.grand_trp / 3)}</b></Td>
+                <Td align="right"><span style={{ color: "#666" }}>{inr(q.totals.grand_trp)}</span></Td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div style={{ fontSize: 8.5, color: "#666", marginTop: 4, fontStyle: "italic" }}>
+          💡 Rates shown are per person. 2-person rate assumes double room sharing. 3-person rate assumes double room + 1 extra bed.
+        </div>
       </div>
 
       {/* ADD-ONS SECTION — itemized grouped by category */}
@@ -236,13 +266,5 @@ function CSRow({ label, v }: { label: string; v: [number, number, number] }) {
       <Td align="right">{inr(v[1])}</Td>
       <Td align="right">{inr(v[2])}</Td>
     </tr>
-  );
-}
-function OccBox({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ flex: 1, border: `2px solid ${TEAL}`, borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: TEAL, letterSpacing: 0.5 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 800, color: "#000", marginTop: 4 }}>{inr(value)} <span style={{ fontSize: 9, fontWeight: 400, color: "#666" }}>per pax</span></div>
-    </div>
   );
 }
