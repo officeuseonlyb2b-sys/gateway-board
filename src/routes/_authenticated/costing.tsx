@@ -1262,16 +1262,16 @@ function Step16({ draft, set }: StepProps) {
               {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.grand_dbl)}</td>)}
             </tr>
             <tr className="border-t">
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (SGL)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_sgl)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">1 Person (Solo)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_sgl)}</td>)}
             </tr>
             <tr>
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (DBL)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_dbl)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">2 Persons (Per Head)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_dbl / 2)}</td>)}
             </tr>
             <tr>
-              <td className="p-2 text-xs text-muted-foreground">Per Pax (TRP)</td>
-              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.per_pax_trp)}</td>)}
+              <td className="p-2 text-xs text-muted-foreground">3 Persons (Per Head)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums text-xs">{inr(t.grand_trp / 3)}</td>)}
             </tr>
           </tbody>
         </table>
