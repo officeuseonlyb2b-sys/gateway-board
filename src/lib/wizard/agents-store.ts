@@ -117,11 +117,25 @@ function readPrograms(): SavedProgram[] {
   if (!isBrowser()) return seedPrograms();
   try {
     const raw = localStorage.getItem(PROGRAMS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SavedProgram[];
+      // If old empty-routing seed is cached, refresh with new rich seed.
+      if (parsed.length > 0 && parsed[0].routing && parsed[0].routing.length > 0) return parsed;
+    }
   } catch {}
   const s = seedPrograms();
   localStorage.setItem(PROGRAMS_KEY, JSON.stringify(s));
   return s;
+}
+
+export function addProgram(p: Omit<SavedProgram, "id">): SavedProgram {
+  const np: SavedProgram = { ...p, id: "pg_" + Math.random().toString(36).slice(2, 8) };
+  const list = readPrograms();
+  list.push(np);
+  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(list));
+  refreshP();
+  programListeners.forEach((l) => l());
+  return np;
 }
 
 function refreshA() { agentCache = readAgents(); aInit = true; }
