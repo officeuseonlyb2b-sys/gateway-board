@@ -27,7 +27,7 @@ const SECTIONS: Item[][] = [
     { label: "Activity & Experience", to: "/activities", icon: Compass },
   ],
   [
-    { label: "Final Costing", to: "/costing", icon: Calculator },
+    { label: "New Quotation", to: "/costing", icon: Calculator },
     { label: "Saved Quotes", to: "/quotes", icon: FileText },
     { label: "Reports", to: "/reports", icon: BarChart2 },
   ],
