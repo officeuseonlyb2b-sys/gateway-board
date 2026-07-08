@@ -98,7 +98,7 @@ function SavedQuotesPage() {
                   <td className="py-2.5 px-2 font-medium">{qu.tour_title}</td>
                   <td className="py-2.5 px-2 text-center">{qu.total_nights}</td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{qu.cities.join(" → ")}</td>
-                  <td className="py-2.5 px-2 text-right tabular-nums font-semibold">{inr(qu.totals.grand_dbl)}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums font-semibold">{inr(qu.totals.grand_dbl / 2)}<span className="text-muted-foreground font-normal">/pax</span></td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{qu.saved_by}</td>
                   <td className="py-2.5 px-2 text-muted-foreground text-xs">{fmtDateShort(qu.saved_at)}</td>
                   <td className="py-2.5 px-4">
