@@ -2,18 +2,21 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
   Calculator, FileText, BarChart2, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
+  FolderClock, Bell,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
+import { useDraftCount } from "@/lib/drafts-store";
+import { useUnreadCount } from "@/lib/notifications-store";
 
 interface Item {
   label: string;
   to?: string;
   icon: typeof LayoutDashboard;
   disabled?: boolean;
-  badge?: string;
+  badgeKey?: "drafts" | "notifications";
 }
 
 const SECTIONS: Item[][] = [
@@ -28,10 +31,14 @@ const SECTIONS: Item[][] = [
   ],
   [
     { label: "New Quotation", to: "/costing", icon: Calculator },
+    { label: "Drafts", to: "/drafts", icon: FolderClock, badgeKey: "drafts" },
     { label: "Saved Quotes", to: "/quotes", icon: FileText },
     { label: "Reports", to: "/reports", icon: BarChart2 },
   ],
-  [{ label: "Settings", to: "/settings", icon: SettingsIcon }],
+  [
+    { label: "Notifications", to: "/notifications", icon: Bell, badgeKey: "notifications" },
+    { label: "Settings", to: "/settings", icon: SettingsIcon },
+  ],
 ];
 
 export function AppSidebar() {
