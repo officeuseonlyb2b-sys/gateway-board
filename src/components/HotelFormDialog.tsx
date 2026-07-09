@@ -53,12 +53,15 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
 
     setSaving(true);
     await new Promise((r) => setTimeout(r, 250));
+    const cityName = data.cities.find((c) => c.id === form.city_id)?.name ?? "";
     if (hotel) {
       db.updateHotel(hotel.id, form);
       toast.success("Hotel updated.");
+      notify.info("Hotel Updated", `${form.name} details have been updated.`);
     } else {
       db.addHotel(form);
       toast.success("Hotel added.");
+      notify.success("Hotel Added", `${form.name}${cityName ? ` in ${cityName}` : ""} has been added successfully.`, "/hotels", "hotel_added");
     }
     setSaving(false);
     setIsOpen(false);
