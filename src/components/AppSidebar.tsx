@@ -83,11 +83,24 @@ export function AppSidebar() {
             {section.map((it) => {
               const Icon = it.icon;
               const active = it.to && (pathname === it.to || pathname.startsWith(it.to + "/"));
+              const badge = badgeFor(it.badgeKey);
               const content = (
                 <>
                   {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent" />}
                   <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-accent" : "text-sidebar-foreground/70")} />
-                  {!collapsed && <span className="truncate">{it.label}</span>}
+                  {!collapsed && <span className="truncate flex-1">{it.label}</span>}
+                  {badge > 0 && (
+                    <span
+                      className={cn(
+                        "ml-auto rounded-full bg-accent text-accent-foreground text-[10px] font-semibold flex items-center justify-center",
+                        collapsed
+                          ? "absolute top-1 right-1 h-4 min-w-4 px-1"
+                          : "h-4 min-w-4 px-1.5",
+                      )}
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
                 </>
               );
               const base = cn(
