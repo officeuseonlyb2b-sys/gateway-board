@@ -22,6 +22,10 @@ import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
 } from "@/lib/wizard/store";
+import {
+  upsertDraft, getDraft, deleteDraft, migrateLegacyDraft,
+} from "@/lib/drafts-store";
+import { addNotification } from "@/lib/notifications-store";
 import type {
   QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
 } from "@/lib/wizard/types";
@@ -33,6 +37,7 @@ import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
+  validateSearch: (s: Record<string, unknown>) => ({ id: typeof s.id === "string" ? s.id : undefined }),
   component: WizardPage,
 });
 
@@ -66,16 +71,32 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 // ============================================================
 function WizardPage() {
   const draft = useDraft();
+  const search = Route.useSearch();
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialized) return;
+    // Migrate any legacy single-slot draft into the new drafts array.
+    migrateLegacyDraft();
+
+    // Resume a specific draft when navigated with ?id=...
+    if (search.id) {
+      const rec = getDraft(search.id);
+      if (rec) {
+        writeDraft(rec.wizard_state);
+        setCurrentDraftId(rec.id);
+        setInitialized(true);
+        return;
+      }
+    }
+
     const existing = loadDraft();
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
-  }, [initialized]);
+  }, [initialized, search.id]);
 
   if (!draft) {
     return (
@@ -90,10 +111,29 @@ function WizardPage() {
 
   const canProceed = validate(draft, step);
 
+  const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
+    const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
+    if (!currentDraftId) setCurrentDraftId(id);
+    if (!opts?.silent) {
+      addNotification({
+        kind: "info", category: "draft_saved",
+        title: "Draft saved",
+        message: `"${opts?.name || nextState.program_name || "Draft"}" saved. Resume anytime from Drafts.`,
+        href: "/drafts",
+      });
+    }
+    return id;
+  };
+
   const go = (n: number) => {
     if (n < 1 || n > 18) return;
     if (n > step && !canProceed) return;
-    set({ step: n });
+    const next = { ...draft, step: n };
+    writeDraft(next);
+    // Auto-save when moving forward past identification.
+    if (n > step && n >= 3) {
+      persistToDrafts(next, { silent: true });
+    }
   };
 
   return (
@@ -105,7 +145,7 @@ function WizardPage() {
           </span>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setShowBanner(false)}>Continue</Button>
-            <Button size="sm" variant="outline" onClick={() => { clearDraft(); initDraft(); setShowBanner(false); }}>
+            <Button size="sm" variant="outline" onClick={() => { clearDraft(); initDraft(); setCurrentDraftId(null); setShowBanner(false); }}>
               Discard & start new
             </Button>
           </div>
@@ -127,11 +167,17 @@ function WizardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { writeDraft(draft); toast.success("Draft saved."); }}>
+            <Button variant="outline" size="sm" onClick={() => {
+              const name = window.prompt("Name this draft (optional):", draft.program_name || "") || undefined;
+              persistToDrafts(draft, { name });
+              toast.success("Draft saved.");
+            }}>
               <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
             </Button>
             <Button variant="ghost" size="sm" onClick={() => {
               if (confirm("Discard all progress and start over?")) {
+                if (currentDraftId) deleteDraft(currentDraftId);
+                setCurrentDraftId(null);
                 clearDraft();
                 writeDraft(emptyDraft());
               }
@@ -1606,6 +1652,12 @@ function Step18({ draft, set }: StepProps) {
             persistQuote(q);
             clearDraft();
             toast.success(`Quote ${q.quote_number} saved.`);
+            addNotification({
+              kind: "success", category: "quote_saved",
+              title: `Quote ${q.quote_number} saved`,
+              message: `${q.tour_title} · ${q.total_nights}N · ${q.cities.join(" → ")}`,
+              href: "/quotes",
+            });
             setSavedQuote(q);
           }}>
             <Save className="h-4 w-4 mr-1.5" /> Save Quote
@@ -1618,6 +1670,11 @@ function Step18({ draft, set }: StepProps) {
             const { exportQuoteExcel } = await import("@/lib/quotes-export");
             exportQuoteExcel(q);
             toast.success("Excel exported");
+            addNotification({
+              kind: "info", category: "export",
+              title: "Excel exported",
+              message: `${q.quote_number} — ${q.tour_title}`,
+            });
           }}>
             <FileSpreadsheet className="h-4 w-4 mr-1.5" /> Export Excel
           </Button>

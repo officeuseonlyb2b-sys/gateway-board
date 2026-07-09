@@ -17,9 +17,11 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authenticated/rate-search'
 import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
+import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
 import { Route as AuthenticatedGuideRouteImport } from './routes/_authenticated/guide'
 import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
+import { Route as AuthenticatedDraftsRouteImport } from './routes/_authenticated/drafts'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authenticated/activities'
@@ -65,6 +67,12 @@ const AuthenticatedQuotesRoute = AuthenticatedQuotesRouteImport.update({
   path: '/quotes',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedNotificationsRoute =
+  AuthenticatedNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMiscellaneousRoute =
   AuthenticatedMiscellaneousRouteImport.update({
     id: '/miscellaneous',
@@ -79,6 +87,11 @@ const AuthenticatedGuideRoute = AuthenticatedGuideRouteImport.update({
 const AuthenticatedEntrancesRoute = AuthenticatedEntrancesRouteImport.update({
   id: '/entrances',
   path: '/entrances',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDraftsRoute = AuthenticatedDraftsRouteImport.update({
+  id: '/drafts',
+  path: '/drafts',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
@@ -114,9 +127,11 @@ export interface FileRoutesByFullPath {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/notifications': typeof AuthenticatedNotificationsRoute
   '/quotes': typeof AuthenticatedQuotesRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/reports': typeof AuthenticatedReportsRoute
@@ -131,9 +146,11 @@ export interface FileRoutesByTo {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/notifications': typeof AuthenticatedNotificationsRoute
   '/quotes': typeof AuthenticatedQuotesRoute
   '/rate-search': typeof AuthenticatedRateSearchRoute
   '/reports': typeof AuthenticatedReportsRoute
@@ -150,9 +167,11 @@ export interface FileRoutesById {
   '/_authenticated/activities': typeof AuthenticatedActivitiesRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/drafts': typeof AuthenticatedDraftsRoute
   '/_authenticated/entrances': typeof AuthenticatedEntrancesRoute
   '/_authenticated/guide': typeof AuthenticatedGuideRoute
   '/_authenticated/miscellaneous': typeof AuthenticatedMiscellaneousRoute
+  '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
   '/_authenticated/quotes': typeof AuthenticatedQuotesRoute
   '/_authenticated/rate-search': typeof AuthenticatedRateSearchRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
@@ -169,9 +188,11 @@ export interface FileRouteTypes {
     | '/activities'
     | '/costing'
     | '/dashboard'
+    | '/drafts'
     | '/entrances'
     | '/guide'
     | '/miscellaneous'
+    | '/notifications'
     | '/quotes'
     | '/rate-search'
     | '/reports'
@@ -186,9 +207,11 @@ export interface FileRouteTypes {
     | '/activities'
     | '/costing'
     | '/dashboard'
+    | '/drafts'
     | '/entrances'
     | '/guide'
     | '/miscellaneous'
+    | '/notifications'
     | '/quotes'
     | '/rate-search'
     | '/reports'
@@ -204,9 +227,11 @@ export interface FileRouteTypes {
     | '/_authenticated/activities'
     | '/_authenticated/costing'
     | '/_authenticated/dashboard'
+    | '/_authenticated/drafts'
     | '/_authenticated/entrances'
     | '/_authenticated/guide'
     | '/_authenticated/miscellaneous'
+    | '/_authenticated/notifications'
     | '/_authenticated/quotes'
     | '/_authenticated/rate-search'
     | '/_authenticated/reports'
@@ -280,6 +305,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedQuotesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/notifications': {
+      id: '/_authenticated/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof AuthenticatedNotificationsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/miscellaneous': {
       id: '/_authenticated/miscellaneous'
       path: '/miscellaneous'
@@ -299,6 +331,13 @@ declare module '@tanstack/react-router' {
       path: '/entrances'
       fullPath: '/entrances'
       preLoaderRoute: typeof AuthenticatedEntrancesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/drafts': {
+      id: '/_authenticated/drafts'
+      path: '/drafts'
+      fullPath: '/drafts'
+      preLoaderRoute: typeof AuthenticatedDraftsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/dashboard': {
@@ -343,9 +382,11 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivitiesRoute: typeof AuthenticatedActivitiesRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedDraftsRoute: typeof AuthenticatedDraftsRoute
   AuthenticatedEntrancesRoute: typeof AuthenticatedEntrancesRoute
   AuthenticatedGuideRoute: typeof AuthenticatedGuideRoute
   AuthenticatedMiscellaneousRoute: typeof AuthenticatedMiscellaneousRoute
+  AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
   AuthenticatedQuotesRoute: typeof AuthenticatedQuotesRoute
   AuthenticatedRateSearchRoute: typeof AuthenticatedRateSearchRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
@@ -359,9 +400,11 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivitiesRoute: AuthenticatedActivitiesRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedDraftsRoute: AuthenticatedDraftsRoute,
   AuthenticatedEntrancesRoute: AuthenticatedEntrancesRoute,
   AuthenticatedGuideRoute: AuthenticatedGuideRoute,
   AuthenticatedMiscellaneousRoute: AuthenticatedMiscellaneousRoute,
+  AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
   AuthenticatedQuotesRoute: AuthenticatedQuotesRoute,
   AuthenticatedRateSearchRoute: AuthenticatedRateSearchRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,

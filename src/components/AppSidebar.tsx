@@ -2,18 +2,21 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
   Calculator, FileText, BarChart2, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
+  FolderClock, Bell,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
+import { useDraftCount } from "@/lib/drafts-store";
+import { useUnreadCount } from "@/lib/notifications-store";
 
 interface Item {
   label: string;
   to?: string;
   icon: typeof LayoutDashboard;
   disabled?: boolean;
-  badge?: string;
+  badgeKey?: "drafts" | "notifications";
 }
 
 const SECTIONS: Item[][] = [
@@ -28,16 +31,24 @@ const SECTIONS: Item[][] = [
   ],
   [
     { label: "New Quotation", to: "/costing", icon: Calculator },
+    { label: "Drafts", to: "/drafts", icon: FolderClock, badgeKey: "drafts" },
     { label: "Saved Quotes", to: "/quotes", icon: FileText },
     { label: "Reports", to: "/reports", icon: BarChart2 },
   ],
-  [{ label: "Settings", to: "/settings", icon: SettingsIcon }],
+  [
+    { label: "Notifications", to: "/notifications", icon: Bell, badgeKey: "notifications" },
+    { label: "Settings", to: "/settings", icon: SettingsIcon },
+  ],
 ];
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const brand = useBranding();
+  const draftCount = useDraftCount();
+  const unread = useUnreadCount();
+  const badgeFor = (k?: Item["badgeKey"]) =>
+    k === "drafts" ? draftCount : k === "notifications" ? unread : 0;
 
   return (
     <aside
@@ -72,11 +83,24 @@ export function AppSidebar() {
             {section.map((it) => {
               const Icon = it.icon;
               const active = it.to && (pathname === it.to || pathname.startsWith(it.to + "/"));
+              const badge = badgeFor(it.badgeKey);
               const content = (
                 <>
                   {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent" />}
                   <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-accent" : "text-sidebar-foreground/70")} />
-                  {!collapsed && <span className="truncate">{it.label}</span>}
+                  {!collapsed && <span className="truncate flex-1">{it.label}</span>}
+                  {badge > 0 && (
+                    <span
+                      className={cn(
+                        "ml-auto rounded-full bg-accent text-accent-foreground text-[10px] font-semibold flex items-center justify-center",
+                        collapsed
+                          ? "absolute top-1 right-1 h-4 min-w-4 px-1"
+                          : "h-4 min-w-4 px-1.5",
+                      )}
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
                 </>
               );
               const base = cn(
