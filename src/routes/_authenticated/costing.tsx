@@ -33,6 +33,7 @@ import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
+  validateSearch: (s: Record<string, unknown>) => ({ id: typeof s.id === "string" ? s.id : undefined }),
   component: WizardPage,
 });
 
