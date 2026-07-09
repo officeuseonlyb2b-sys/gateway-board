@@ -33,10 +33,7 @@ export function TopBar() {
         />
       </div>
 
-      <button className="relative h-9 w-9 rounded-lg hover:bg-muted flex items-center justify-center transition-colors">
-        <Bell className="h-[18px] w-[18px] text-muted-foreground" />
-        <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-gold" />
-      </button>
+      <NotificationsDropdown />
 
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-2 hover:bg-muted rounded-lg pl-1 pr-2 py-1 transition-colors">
