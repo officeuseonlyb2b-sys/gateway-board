@@ -45,6 +45,10 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const brand = useBranding();
+  const draftCount = useDraftCount();
+  const unread = useUnreadCount();
+  const badgeFor = (k?: Item["badgeKey"]) =>
+    k === "drafts" ? draftCount : k === "notifications" ? unread : 0;
 
   return (
     <aside
