@@ -1,5 +1,6 @@
-import { Bell, Search, ChevronDown, LogOut, User } from "lucide-react";
+import { Search, ChevronDown, LogOut, User } from "lucide-react";
 import { useState } from "react";
+import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 import { useNavigate } from "@tanstack/react-router";
 import { auth, useAuth } from "@/lib/auth-mock";
 import {
