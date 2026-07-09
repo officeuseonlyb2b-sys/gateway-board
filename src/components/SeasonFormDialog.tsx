@@ -15,6 +15,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   db, MEAL_PLANS, type RatePlan, type MealPlan, type SupplementType,
 } from "@/lib/mock-store";
+import { notify } from "@/lib/notify";
 
 type MealRow = { double: string; single: string; extra: string };
 
