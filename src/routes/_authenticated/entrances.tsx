@@ -212,8 +212,8 @@ function CityDialog({
 
   function save() {
     if (!name.trim()) return toast.error("City name is required.");
-    if (editing) { db.updateEntranceCity(editing.id, name.trim()); toast.success("City updated."); }
-    else { db.addEntranceCity(name.trim()); toast.success("City added."); }
+    if (editing) { db.updateEntranceCity(editing.id, name.trim()); toast.success("City updated."); notify.info("City Updated", `${name.trim()} entrance city updated.`); }
+    else { db.addEntranceCity(name.trim()); toast.success("City added."); notify.success("City Added", `${name.trim()} has been added to entrance cities.`); }
     onOpenChange(false);
   }
 
