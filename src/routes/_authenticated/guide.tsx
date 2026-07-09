@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/guide")({
   head: () => ({ meta: [{ title: "Guides — MP Tourism Hub" }] }),
