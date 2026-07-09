@@ -22,6 +22,10 @@ import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
 } from "@/lib/wizard/store";
+import {
+  upsertDraft, getDraft, deleteDraft, migrateLegacyDraft,
+} from "@/lib/drafts-store";
+import { addNotification } from "@/lib/notifications-store";
 import type {
   QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
 } from "@/lib/wizard/types";
