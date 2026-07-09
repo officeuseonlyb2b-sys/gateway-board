@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { db, useDB, HOTEL_CATEGORIES, type Hotel, type HotelCategory } from "@/lib/mock-store";
+import { notify } from "@/lib/notify";
 
 interface Props {
   trigger?: React.ReactNode;
