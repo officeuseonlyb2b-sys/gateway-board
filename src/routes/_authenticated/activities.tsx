@@ -206,8 +206,8 @@ function DestDialog({
 
   function save() {
     if (!name.trim()) return toast.error("Destination name is required.");
-    if (editing) { db.updateActivityDestination(editing.id, name.trim()); toast.success("Updated."); }
-    else { db.addActivityDestination(name.trim()); toast.success("Added."); }
+    if (editing) { db.updateActivityDestination(editing.id, name.trim()); toast.success("Updated."); notify.info("Destination Updated", `${name.trim()} updated.`); }
+    else { db.addActivityDestination(name.trim()); toast.success("Added."); notify.success("Destination Added", `${name.trim()} added to activity destinations.`); }
     onOpenChange(false);
   }
 
