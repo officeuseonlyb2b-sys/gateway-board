@@ -42,8 +42,21 @@ function HotelsListPage() {
       const result = await importExcel(file, (p) => setProgress(p));
       setSummary(result);
       toast.success(`Import complete — ${result.plansCreated} rate plans created.`);
+      notify.success(
+        "Import Complete",
+        `Imported ${result.hotelsAdded} hotels, ${result.roomsAdded} rooms, ${result.plansCreated} rate plans.`,
+        "/hotels", "import",
+      );
+      if (result.errors.length > 0) {
+        notify.warning(
+          "Import Had Errors",
+          `${result.errors.length} row(s) failed during import. Review and retry.`,
+          "/hotels", "import",
+        );
+      }
     } catch (err) {
       toast.error(`Import failed: ${(err as Error).message}`);
+      notify.alert("Import Failed", (err as Error).message, undefined, "import");
     } finally {
       setImporting(false);
     }
