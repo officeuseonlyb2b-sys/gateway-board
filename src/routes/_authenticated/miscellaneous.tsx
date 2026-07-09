@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { db, useDB, type MiscellaneousItem, type MiscUnit } from "@/lib/mock-store";
+import { notify } from "@/lib/notify";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
