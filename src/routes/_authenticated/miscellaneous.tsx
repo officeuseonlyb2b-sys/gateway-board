@@ -130,9 +130,11 @@ function MiscDialog({
     if (editing) {
       db.updateMisc(editing.id, { name: name.trim(), description, rate, unit, is_active: active });
       toast.success("Item updated.");
+      notify.info("Item Updated", `${name.trim()} has been updated.`);
     } else {
       db.addMisc({ name: name.trim(), description, rate, unit, is_active: active });
       toast.success("Item added.");
+      notify.success("Item Added", `${name.trim()} has been added to miscellaneous items.`);
     }
     onOpenChange(false);
   }
