@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
 import { auth, useAuth } from "@/lib/auth-mock";
+import { db } from "@/lib/mock-store";
+import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -20,6 +22,12 @@ function AuthenticatedLayout() {
   useEffect(() => {
     if (!user) navigate({ to: "/login" });
   }, [user, navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+    seedIfEmpty();
+    checkExpiringRatesOnce(db.get().rate_plans);
+  }, [user]);
 
   if (!user) return null;
 

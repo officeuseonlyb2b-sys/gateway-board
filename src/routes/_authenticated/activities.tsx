@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/activities")({
   head: () => ({ meta: [{ title: "Activity & Experience — MP Tourism Hub" }] }),
@@ -205,8 +206,8 @@ function DestDialog({
 
   function save() {
     if (!name.trim()) return toast.error("Destination name is required.");
-    if (editing) { db.updateActivityDestination(editing.id, name.trim()); toast.success("Updated."); }
-    else { db.addActivityDestination(name.trim()); toast.success("Added."); }
+    if (editing) { db.updateActivityDestination(editing.id, name.trim()); toast.success("Updated."); notify.info("Destination Updated", `${name.trim()} updated.`); }
+    else { db.addActivityDestination(name.trim()); toast.success("Added."); notify.success("Destination Added", `${name.trim()} added to activity destinations.`); }
     onOpenChange(false);
   }
 
@@ -259,8 +260,9 @@ function ActDialog({
       pricing_type: type, price, unit_label: unitLabel || PRICING_LABEL[type],
       is_active: active,
     };
-    if (editing) { db.updateActivity(editing.id, payload); toast.success("Activity updated."); }
-    else { db.addActivity(payload); toast.success("Activity added."); }
+    const destName = db.get().activity_destinations.find((d) => d.id === destId)?.name ?? "";
+    if (editing) { db.updateActivity(editing.id, payload); toast.success("Activity updated."); notify.info("Activity Updated", `${name.trim()} updated.`); }
+    else { db.addActivity(payload); toast.success("Activity added."); notify.success("Activity Added", `${name.trim()}${destName ? ` in ${destName}` : ""} has been added.`); }
     onOpenChange(false);
   }
 

@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/entrances")({
   head: () => ({ meta: [{ title: "Entrances — MP Tourism Hub" }] }),
@@ -211,8 +212,8 @@ function CityDialog({
 
   function save() {
     if (!name.trim()) return toast.error("City name is required.");
-    if (editing) { db.updateEntranceCity(editing.id, name.trim()); toast.success("City updated."); }
-    else { db.addEntranceCity(name.trim()); toast.success("City added."); }
+    if (editing) { db.updateEntranceCity(editing.id, name.trim()); toast.success("City updated."); notify.info("City Updated", `${name.trim()} entrance city updated.`); }
+    else { db.addEntranceCity(name.trim()); toast.success("City added."); notify.success("City Added", `${name.trim()} has been added to entrance cities.`); }
     onOpenChange(false);
   }
 
@@ -263,8 +264,9 @@ function SiteDialog({
       indian_rate: indianRate, foreigner_rate: foreignerRate,
       notes, is_active: active,
     };
-    if (editing) { db.updateEntranceSite(editing.id, payload); toast.success("Site updated."); }
-    else { db.addEntranceSite(payload); toast.success("Site added."); }
+    const cityName = db.get().entrance_cities.find((c) => c.id === cityId)?.name ?? "";
+    if (editing) { db.updateEntranceSite(editing.id, payload); toast.success("Site updated."); notify.info("Entrance Updated", `${name.trim()} details updated.`); }
+    else { db.addEntranceSite(payload); toast.success("Site added."); notify.success("Entrance Added", `${name.trim()}${cityName ? ` in ${cityName}` : ""} has been added.`); }
     onOpenChange(false);
   }
 

@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/travels")({
   head: () => ({ meta: [{ title: "Travels — MP Tourism Hub" }] }),
@@ -106,8 +107,8 @@ function TravelDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
   function save() {
     if (!vehicleType.trim()) return toast.error("Vehicle type is required.");
     const payload = { vehicle_type: vehicleType.trim(), description, capacity_persons: capacity, rate_per_day: ratePerDay, rate_per_km: ratePerKm, is_active: active };
-    if (editing) { db.updateTravel(editing.id, payload); toast.success("Vehicle updated."); }
-    else { db.addTravel(payload); toast.success("Vehicle added."); }
+    if (editing) { db.updateTravel(editing.id, payload); toast.success("Vehicle updated."); notify.info("Transport Updated", `${payload.vehicle_type} details updated.`); }
+    else { db.addTravel(payload); toast.success("Vehicle added."); notify.success("Transport Added", `${payload.vehicle_type} has been added to transport options.`); }
     onOpenChange(false);
   }
 

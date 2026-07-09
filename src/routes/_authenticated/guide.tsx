@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/guide")({
   head: () => ({ meta: [{ title: "Guides — MP Tourism Hub" }] }),
@@ -115,9 +116,11 @@ function GuideDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCha
     if (editing) {
       db.updateGuide(editing.id, { name: name.trim(), guide_type: type, destination, rate_per_day: rate, description, is_active: active });
       toast.success("Guide updated.");
+      notify.info("Guide Updated", `${name.trim()} details updated.`);
     } else {
       db.addGuide({ name: name.trim(), guide_type: type, destination, rate_per_day: rate, description, is_active: active });
       toast.success("Guide added.");
+      notify.success("Guide Added", `${name.trim()} (${type}) has been added.`);
     }
     onOpenChange(false);
   }

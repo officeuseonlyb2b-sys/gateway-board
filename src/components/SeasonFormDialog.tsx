@@ -15,6 +15,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   db, MEAL_PLANS, type RatePlan, type MealPlan, type SupplementType,
 } from "@/lib/mock-store";
+import { notify } from "@/lib/notify";
 
 type MealRow = { double: string; single: string; extra: string };
 
@@ -111,6 +112,11 @@ export function SeasonFormDialog({ roomId, open, onOpenChange, seed, existingGro
     db.addRatePlans(rows);
     setSaving(false);
     toast.success(isEdit ? "Season updated." : `Season added with ${rows.length} meal plan${rows.length > 1 ? "s" : ""}.`);
+    if (!isEdit) {
+      notify.success("Rate Plan Added", `${rows.length} meal plan${rows.length > 1 ? "s" : ""} added for the selected room.`);
+    } else {
+      notify.info("Rate Plan Updated", `Season rates updated.`);
+    }
     onOpenChange(false);
   }
 

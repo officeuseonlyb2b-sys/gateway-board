@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { db, useDB, type MiscellaneousItem, type MiscUnit } from "@/lib/mock-store";
+import { notify } from "@/lib/notify";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,9 +130,11 @@ function MiscDialog({
     if (editing) {
       db.updateMisc(editing.id, { name: name.trim(), description, rate, unit, is_active: active });
       toast.success("Item updated.");
+      notify.info("Item Updated", `${name.trim()} has been updated.`);
     } else {
       db.addMisc({ name: name.trim(), description, rate, unit, is_active: active });
       toast.success("Item added.");
+      notify.success("Item Added", `${name.trim()} has been added to miscellaneous items.`);
     }
     onOpenChange(false);
   }
