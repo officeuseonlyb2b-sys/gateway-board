@@ -260,8 +260,9 @@ function ActDialog({
       pricing_type: type, price, unit_label: unitLabel || PRICING_LABEL[type],
       is_active: active,
     };
-    if (editing) { db.updateActivity(editing.id, payload); toast.success("Activity updated."); }
-    else { db.addActivity(payload); toast.success("Activity added."); }
+    const destName = db.get().activity_destinations.find((d) => d.id === destId)?.name ?? "";
+    if (editing) { db.updateActivity(editing.id, payload); toast.success("Activity updated."); notify.info("Activity Updated", `${name.trim()} updated.`); }
+    else { db.addActivity(payload); toast.success("Activity added."); notify.success("Activity Added", `${name.trim()}${destName ? ` in ${destName}` : ""} has been added.`); }
     onOpenChange(false);
   }
 
