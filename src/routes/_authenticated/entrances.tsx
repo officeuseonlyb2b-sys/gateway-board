@@ -264,7 +264,7 @@ function SiteDialog({
       indian_rate: indianRate, foreigner_rate: foreignerRate,
       notes, is_active: active,
     };
-    const cityName = db.getState().entrance_cities.find((c) => c.id === cityId)?.name ?? "";
+    const cityName = db.get().entrance_cities.find((c) => c.id === cityId)?.name ?? "";
     if (editing) { db.updateEntranceSite(editing.id, payload); toast.success("Site updated."); notify.info("Entrance Updated", `${name.trim()} details updated.`); }
     else { db.addEntranceSite(payload); toast.success("Site added."); notify.success("Entrance Added", `${name.trim()}${cityName ? ` in ${cityName}` : ""} has been added.`); }
     onOpenChange(false);
