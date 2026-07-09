@@ -17,6 +17,7 @@ import {
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { HotelFormDialog } from "@/components/HotelFormDialog";
 import { importExcel, exportExcel, downloadErrorLog, type ImportSummary } from "@/lib/excel";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/hotels/")({
   head: () => ({ meta: [{ title: "Hotels — MP Tourism Hub" }] }),
