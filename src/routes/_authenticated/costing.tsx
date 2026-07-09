@@ -1652,6 +1652,12 @@ function Step18({ draft, set }: StepProps) {
             persistQuote(q);
             clearDraft();
             toast.success(`Quote ${q.quote_number} saved.`);
+            addNotification({
+              kind: "success", category: "quote_saved",
+              title: `Quote ${q.quote_number} saved`,
+              message: `${q.tour_title} · ${q.total_nights}N · ${q.cities.join(" → ")}`,
+              href: "/quotes",
+            });
             setSavedQuote(q);
           }}>
             <Save className="h-4 w-4 mr-1.5" /> Save Quote
@@ -1664,6 +1670,11 @@ function Step18({ draft, set }: StepProps) {
             const { exportQuoteExcel } = await import("@/lib/quotes-export");
             exportQuoteExcel(q);
             toast.success("Excel exported");
+            addNotification({
+              kind: "info", category: "export",
+              title: "Excel exported",
+              message: `${q.quote_number} — ${q.tour_title}`,
+            });
           }}>
             <FileSpreadsheet className="h-4 w-4 mr-1.5" /> Export Excel
           </Button>
