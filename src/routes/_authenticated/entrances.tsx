@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { inr } from "@/lib/format";
+import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/entrances")({
   head: () => ({ meta: [{ title: "Entrances — MP Tourism Hub" }] }),
