@@ -77,6 +77,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Internal admin & management system for hotel rates and tourism operations." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "MP Tourism Operations Hub" },
+      { name: "twitter:description", content: "Internal admin & management system for hotel rates and tourism operations." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/VqW7zgx2bhWyEXElY5qTcZByNtf1/social-images/social-1783659792597-logo.webp" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/VqW7zgx2bhWyEXElY5qTcZByNtf1/social-images/social-1783659792597-logo.webp" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
