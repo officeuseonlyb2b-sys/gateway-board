@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning } from "lucide-react";
+import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useDB, HOTEL_CATEGORIES, type HotelCategory } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
@@ -157,6 +157,7 @@ function HotelsListPage() {
                 <th className="font-medium py-3 px-4 text-center">Rooms</th>
                 <th className="font-medium py-3 px-4 text-center">Plans</th>
                 <th className="font-medium py-3 px-4">Updated</th>
+                <th className="font-medium py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -181,10 +182,20 @@ function HotelsListPage() {
                   <td className="py-3 px-4 text-muted-foreground text-xs whitespace-nowrap">
                     {new Date(h.updated_at).toLocaleDateString()}
                   </td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap">
+                    <HotelFormDialog
+                      hotel={data.hotels.find((x) => x.id === h.id)}
+                      trigger={
+                        <Button size="sm" variant="outline">
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                        </Button>
+                      }
+                    />
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={8}>
                   <div className="py-16 text-center">
                     <Building2 className="h-12 w-12 mx-auto text-muted-foreground/40" />
                     <div className="mt-3 font-medium">No hotels found</div>

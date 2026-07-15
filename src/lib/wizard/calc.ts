@@ -17,15 +17,10 @@ export interface OptionTotals {
   rate_missing: number;
 }
 
+import { findRatePlan } from "./rate-lookup";
+
 function pickPlan(plans: RatePlan[], room_id: string, meal: string, dateISO: string): RatePlan | null {
-  const cands = plans.filter(
-    (p) =>
-      p.room_category_id === room_id &&
-      p.meal_plan === meal &&
-      p.validity_start <= dateISO &&
-      p.validity_end >= dateISO,
-  );
-  return cands[0] || null;
+  return findRatePlan(plans, room_id, meal, dateISO);
 }
 
 function gstRateFor(net: number) {

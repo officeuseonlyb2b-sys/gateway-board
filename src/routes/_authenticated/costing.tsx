@@ -32,6 +32,7 @@ import type {
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
+import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -1202,8 +1203,7 @@ function Step15({ draft, set }: StepProps) {
   const activeCategory = activeOption?.category || "";
 
   const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
-    const cands = d.rate_plans.filter((p) => p.room_category_id === room_id && p.meal_plan === meal && p.validity_start <= dateISO && p.validity_end >= dateISO);
-    return cands[0];
+    return findRatePlan(d.rate_plans, room_id, meal, dateISO);
   };
 
   return (
@@ -1264,7 +1264,8 @@ function Step15({ draft, set }: StepProps) {
             const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
             const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id && h.hotel_category === activeCategory);
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
-            const rate = sel ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
+            const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
+            const rate = sel && sel.room_id ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
 
             const setSel = (patch: Partial<typeof sel> & object) => {
               const others = activeOption.selections.filter((s) => s.city_id !== day.city_id);
@@ -1311,9 +1312,11 @@ function Step15({ draft, set }: StepProps) {
                     </div>
                     <div>
                       <Label className="text-xs">Meal Plan</Label>
-                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })} disabled={!sel?.room_id || meals.length === 0}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder={meals.length === 0 ? "—" : "Select…"} /></SelectTrigger>
+                        <SelectContent>
+                          {(meals.length ? meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
                       </Select>
                     </div>
                     <div className="text-xs pt-5">
@@ -1603,8 +1606,7 @@ function Step18({ draft, set }: StepProps) {
       const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
       const room = sel ? d.room_categories.find((r) => r.id === sel.room_id) : null;
       const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
-      const plan = sel ? d.rate_plans.find((p) => p.room_category_id === sel.room_id && p.meal_plan === sel.meal_plan
-        && p.validity_start <= day.date && p.validity_end >= day.date) : null;
+      const plan = sel ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
       const dbl = plan?.double_rate || 0;
       const sgl = plan?.single_rate || 0;
       const trp = dbl + (plan?.extra_bed_rate || 0);
