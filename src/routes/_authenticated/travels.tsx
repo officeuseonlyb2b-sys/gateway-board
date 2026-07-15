@@ -50,6 +50,8 @@ function TravelsPage() {
                 <TableHead>Vehicle Type</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Capacity</TableHead>
+                <TableHead>Min Pax</TableHead>
+                <TableHead>Max Pax</TableHead>
                 <TableHead>Rate / Day</TableHead>
                 <TableHead>Rate / KM</TableHead>
                 <TableHead>Status</TableHead>
