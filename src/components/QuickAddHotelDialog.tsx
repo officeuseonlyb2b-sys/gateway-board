@@ -12,14 +12,6 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { db, MEAL_PLANS, type HotelCategory, type SupplementType } from "@/lib/mock-store";
 import { addNotification } from "@/lib/notifications-store";
-// helper wrapping the object-shape store call
-const notifyHotelAdded = (name: string, cityName: string) =>
-  addNotification({
-    kind: "success",
-    category: "hotel_added",
-    title: "Hotel Added",
-    message: `${name} in ${cityName} added from quotation wizard.`,
-  });
 
 type CwbMode = "amount" | "rule";
 
