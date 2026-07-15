@@ -1352,7 +1352,7 @@ function Step16({ draft, set }: StepProps) {
             <tr>
               <th className="text-left p-2">Line</th>
               {totals.map((t) => (
-                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label}</th>
+                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label || "Select Category"}</th>
               ))}
             </tr>
           </thead>
@@ -1455,7 +1455,7 @@ function Step17({ draft, set }: StepProps) {
       </Card>
 
       <Card className="p-4">
-        <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label}</span>}</div>
+        <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label || "Select Category"}</span>}</div>
         {focus && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <PersonCard
@@ -1506,7 +1506,7 @@ function Step17({ draft, set }: StepProps) {
                   recommended ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
                 )}>
                 <div>
-                  <div className="text-sm font-semibold">Option {t.key} · {t.label}</div>
+                  <div className="text-sm font-semibold">Option {t.key} · {t.label || "Select Category"}</div>
                   {t.rate_missing > 0 && <div className="text-xs text-amber-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> {t.rate_missing} rate(s) missing</div>}
                 </div>
                 <div className="text-right text-xs">1 Person<br /><span className="font-semibold text-sm">{inr(t.grand_sgl)}</span></div>
