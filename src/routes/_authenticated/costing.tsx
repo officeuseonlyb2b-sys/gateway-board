@@ -1606,8 +1606,7 @@ function Step18({ draft, set }: StepProps) {
       const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
       const room = sel ? d.room_categories.find((r) => r.id === sel.room_id) : null;
       const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
-      const plan = sel ? d.rate_plans.find((p) => p.room_category_id === sel.room_id && p.meal_plan === sel.meal_plan
-        && p.validity_start <= day.date && p.validity_end >= day.date) : null;
+      const plan = sel ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
       const dbl = plan?.double_rate || 0;
       const sgl = plan?.single_rate || 0;
       const trp = dbl + (plan?.extra_bed_rate || 0);
