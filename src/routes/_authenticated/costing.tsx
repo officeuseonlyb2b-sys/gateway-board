@@ -1264,7 +1264,8 @@ function Step15({ draft, set }: StepProps) {
             const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
             const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id && h.hotel_category === activeCategory);
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
-            const rate = sel ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
+            const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
+            const rate = sel && sel.room_id ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
 
             const setSel = (patch: Partial<typeof sel> & object) => {
               const others = activeOption.selections.filter((s) => s.city_id !== day.city_id);
