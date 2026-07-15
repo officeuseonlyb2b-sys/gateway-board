@@ -172,11 +172,34 @@ export interface TravelOption {
   vehicle_type: string;
   description: string;
   capacity_persons: number;
+  min_pax?: number;
+  max_pax?: number;
   rate_per_day: number;
   rate_per_km: number;
   is_active: boolean;
   created_at: string;
 }
+
+// Standard MP Tourism vehicle allocation table. Used both as default seed
+// for the Travels module and as the pax-based filter in Wizard Step 10.
+export const VEHICLE_ALLOCATION: Array<{ min_pax: number; max_pax: number; name: string }> = [
+  { min_pax: 1,  max_pax: 3,  name: "AC Sedan (Swift Dzire / Etios)" },
+  { min_pax: 1,  max_pax: 6,  name: "AC Ertiga / Rumion" },
+  { min_pax: 1,  max_pax: 6,  name: "AC Innova Crysta" },
+  { min_pax: 4,  max_pax: 8,  name: "TT-1x1 - 11 Seater" },
+  { min_pax: 4,  max_pax: 9,  name: "TT-2x1 - 12 Seater" },
+  { min_pax: 4,  max_pax: 9,  name: "Urbania-1x1 - 09 Seater Modified" },
+  { min_pax: 4,  max_pax: 10, name: "TT-1x1 - 13 Seater" },
+  { min_pax: 4,  max_pax: 11, name: "Urbania-2x1 - 17 Seater" },
+  { min_pax: 10, max_pax: 12, name: "TT-2x1 - 17 Seater" },
+  { min_pax: 13, max_pax: 15, name: "TT-2x1 - 20 Seater" },
+  { min_pax: 16, max_pax: 20, name: "TT-2x2 - 25 Seater" },
+  { min_pax: 16, max_pax: 23, name: "Mini Coach - 27 Seater" },
+  { min_pax: 21, max_pax: 30, name: "AC Coach - 35 Seater" },
+  { min_pax: 30, max_pax: 40, name: "AC Volvo - 45 Seater" },
+  { min_pax: 31, max_pax: 35, name: "AC Coach - 40 Seater" },
+  { min_pax: 36, max_pax: 40, name: "AC Coach - 45 Seater" },
+];
 
 export interface DB {
   cities: City[];
