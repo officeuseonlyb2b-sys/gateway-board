@@ -195,7 +195,7 @@ function HotelsListPage() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={8}>
                   <div className="py-16 text-center">
                     <Building2 className="h-12 w-12 mx-auto text-muted-foreground/40" />
                     <div className="mt-3 font-medium">No hotels found</div>
