@@ -1275,50 +1275,78 @@ function Step15({ draft, set }: StepProps) {
             return (
               <Card key={i} className="p-3">
                 <div className="text-sm font-semibold mb-2">Day {day.day} · {cityName} · {fmtDateShort(day.date)}</div>
-                <div className="grid grid-cols-4 gap-2">
-                  <div>
-                    <Label className="text-xs">Hotel</Label>
-                    <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
-                      <SelectContent>
-                        {cityHotels.length === 0 ? (
-                          <div className="px-3 py-2 text-xs text-amber-600">
-                            No {activeCategory} hotels found in {cityName}. Add hotels in Hotels module first.
-                          </div>
-                        ) : (
-                          cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)
-                        )}
-                      </SelectContent>
-                    </Select>
+                {cityHotels.length === 0 ? (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                    <div className="text-sm text-amber-800 mb-2 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" /> No {activeCategory} hotels found in {cityName}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => setQuickAdd({ cityId: day.city_id, cityName: cityName || "" })}>
+                        <Plus className="h-3.5 w-3.5" /> Add Hotel for {cityName}
+                      </Button>
+                      <Button size="sm" variant="outline" asChild>
+                        <a href="/hotels" target="_blank" rel="noreferrer">Go to Hotels Module ↗</a>
+                      </Button>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">Room</Label>
-                    <Select value={sel?.room_id || ""} onValueChange={(v) => setSel({ room_id: v })} disabled={!sel?.hotel_id}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
-                      <SelectContent>
-                        {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2">
+                    <div>
+                      <Label className="text-xs">Hotel</Label>
+                      <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          {cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Room</Label>
+                      <Select value={sel?.room_id || ""} onValueChange={(v) => setSel({ room_id: v })} disabled={!sel?.hotel_id}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Meal Plan</Label>
+                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })}>
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="text-xs pt-5">
+                      {rate ? (
+                        <span className="text-green-700">✓ {rate.season_label} · ₹{rate.double_rate}/dbl</span>
+                      ) : sel?.room_id ? (
+                        <span className="text-amber-600">⚠ No rate for these dates</span>
+                      ) : null}
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">Meal Plan</Label>
-                    <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })}>
-                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                  <div className="text-xs pt-5">
-                    {rate ? (
-                      <span className="text-green-700">✓ {rate.season_label} · ₹{rate.double_rate}/dbl</span>
-                    ) : sel?.room_id ? (
-                      <span className="text-amber-600">⚠ No rate for these dates</span>
-                    ) : null}
-                  </div>
-                </div>
+                )}
               </Card>
             );
           })}
         </div>
+      )}
+
+      {quickAdd && (
+        <QuickAddHotelDialog
+          open={!!quickAdd}
+          onOpenChange={(v) => { if (!v) setQuickAdd(null); }}
+          cityId={quickAdd.cityId}
+          cityName={quickAdd.cityName}
+          category={activeCategory}
+          onCreated={(hotelId) => {
+            // auto-select the newly added hotel for this city day
+            const others = activeOption.selections.filter((s) => s.city_id !== quickAdd.cityId);
+            updateOption(activeOption.key, {
+              selections: [...others, { city_id: quickAdd.cityId, hotel_id: hotelId, room_id: "", meal_plan: "CP" as MealPlan }],
+            });
+            setQuickAdd(null);
+          }}
+        />
       )}
     </div>
   );
