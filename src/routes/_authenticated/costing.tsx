@@ -1312,9 +1312,11 @@ function Step15({ draft, set }: StepProps) {
                     </div>
                     <div>
                       <Label className="text-xs">Meal Plan</Label>
-                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>{MEAL_PLANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })} disabled={!sel?.room_id || meals.length === 0}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder={meals.length === 0 ? "—" : "Select…"} /></SelectTrigger>
+                        <SelectContent>
+                          {(meals.length ? meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
                       </Select>
                     </div>
                     <div className="text-xs pt-5">
