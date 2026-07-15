@@ -217,7 +217,7 @@ export interface DB {
 }
 
 
-const STORAGE_KEY = "mp-tourism-db-v2";
+const STORAGE_KEY = "mp-tourism-db-v3";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -226,130 +226,77 @@ const uid = () =>
 
 const now = () => new Date().toISOString();
 
-function seed(): DB {
-  const cityNames = [
-    "Bhopal", "Indore", "Khajuraho", "Gwalior", "Ujjain", "Jabalpur",
-    "Pachmarhi", "Mandu", "Orchha", "Kanha", "Bandhavgarh", "Panna",
-    "Jaipur", "Udaipur", "Agra",
-  ];
-  const cities: City[] = cityNames.map((name) => ({ id: uid(), name }));
-  const byCity = (n: string) => cities.find((c) => c.name === n)!.id;
+import {
+  MP_SEED_CITIES,
+  MP_SEED_HOTELS,
+  MP_SEED_ROOMS,
+  MP_SEED_PLANS,
+} from "./mp-hotels-seed";
 
-  const hotels: Hotel[] = [
-    {
-      id: uid(),
-      city_id: byCity("Khajuraho"),
-      name: "Taj Chandela",
-      hotel_category: "5 Star",
-      contact_name: "Rakesh Sharma",
-      contact_phone: "+91 98765 43210",
-      email: "reservations@tajchandela.com",
-      has_wifi: true, has_pool: true,
-      address: "Airport Road, Khajuraho, MP",
-      created_at: now(), updated_at: now(),
-    },
-    {
-      id: uid(),
-      city_id: byCity("Orchha"),
-      name: "Amar Mahal",
-      hotel_category: "Heritage",
-      contact_name: "Priya Singh",
-      contact_phone: "+91 98456 11122",
-      email: "stay@amarmahal.in",
-      has_wifi: true, has_pool: true,
-      address: "Jhansi Road, Orchha",
-      created_at: now(), updated_at: now(),
-    },
-    {
-      id: uid(),
-      city_id: byCity("Kanha"),
-      name: "Kanha Jungle Lodge",
-      hotel_category: "4 Star",
-      contact_name: "Vivek Patel",
-      contact_phone: "+91 99000 78912",
-      email: "info@kanhalodge.com",
-      has_wifi: true, has_pool: false,
-      address: "Mukki Gate, Kanha National Park",
-      created_at: now(), updated_at: now(),
-    },
-    {
-      id: uid(),
-      city_id: byCity("Bhopal"),
-      name: "Jehan Numa Palace",
-      hotel_category: "Heritage",
-      contact_name: "Anjali Mehta",
-      contact_phone: "+91 75500 22210",
-      email: "reservations@jehannuma.com",
-      has_wifi: true, has_pool: true,
-      address: "Shamla Hills, Bhopal",
-      created_at: now(), updated_at: now(),
-    },
-    {
-      id: uid(),
-      city_id: byCity("Pachmarhi"),
-      name: "Hotel Highlands",
-      hotel_category: "3 Star",
-      contact_name: "Suresh Yadav",
-      contact_phone: "+91 94250 11023",
-      email: "highlands@mptourism.com",
-      has_wifi: true, has_pool: false,
-      address: "Main Road, Pachmarhi",
-      created_at: now(), updated_at: now(),
-    },
-    {
-      id: uid(),
-      city_id: byCity("Indore"),
-      name: "Sayaji Hotel",
-      hotel_category: "5 Star Deluxe",
-      contact_name: "Neha Joshi",
-      contact_phone: "+91 96500 90011",
-      email: "sales@sayajiindore.com",
-      has_wifi: true, has_pool: true,
-      address: "Vijay Nagar, Indore",
-      created_at: now(), updated_at: now(),
-    },
-  ];
+function seed(): DB {
+  // Real MP rate-sheet data is the master. Merge with a small list of extra
+  // reference cities used elsewhere in the app.
+  const extraCities = ["Jaipur", "Udaipur", "Agra"];
+  const allCityNames = Array.from(new Set([...MP_SEED_CITIES, ...extraCities]));
+  const cities: City[] = allCityNames.map((name) => ({ id: uid(), name }));
+  const cityIdByName = new Map(cities.map((c) => [c.name, c.id]));
+
+  const hotels: Hotel[] = [];
+  const hotelIdByKey = new Map<string, string>(); // `${city}||${name}`
+  for (const h of MP_SEED_HOTELS) {
+    const cid = cityIdByName.get(h.city);
+    if (!cid) continue;
+    const id = uid();
+    hotelIdByKey.set(`${h.city}||${h.name}`, id);
+    const cat = (HOTEL_CATEGORIES as string[]).includes(h.category)
+      ? (h.category as HotelCategory)
+      : "3 Star";
+    hotels.push({
+      id, city_id: cid, name: h.name, hotel_category: cat,
+      contact_name: h.contact_name, contact_phone: h.contact_phone,
+      email: h.email, has_wifi: h.has_wifi, has_pool: h.has_pool,
+      address: "", created_at: now(), updated_at: now(),
+    });
+  }
 
   const rooms: RoomCategory[] = [];
+  const roomIdByKey = new Map<string, string>(); // `${city}||${hotel}||${roomName}`
+  for (const r of MP_SEED_ROOMS) {
+    const hid = hotelIdByKey.get(`${r.city}||${r.hotel}`);
+    if (!hid) continue;
+    const id = uid();
+    roomIdByKey.set(`${r.city}||${r.hotel}||${r.name}`, id);
+    rooms.push({ id, hotel_id: hid, name: r.name, created_at: now() });
+  }
+
   const plans: RatePlan[] = [];
-
-  hotels.forEach((h) => {
-    const deluxe: RoomCategory = { id: uid(), hotel_id: h.id, name: "Deluxe Room", created_at: now() };
-    const suite: RoomCategory = { id: uid(), hotel_id: h.id, name: "Executive Suite", created_at: now() };
-    rooms.push(deluxe, suite);
-
-    const baseDouble = h.hotel_category.includes("5 Star") ? 9000 : h.hotel_category === "Heritage" ? 7500 : h.hotel_category.includes("4 Star") ? 5500 : 3800;
-
-    (["Peak Season", "Off Season"] as const).forEach((label, i) => {
-      const startMonth = i === 0 ? "10" : "04";
-      const endMonth = i === 0 ? "03" : "09";
-      const startYear = "2026";
-      const endYear = i === 0 ? "2027" : "2026";
-      const factor = i === 0 ? 1 : 0.75;
-
-      MEAL_PLANS.forEach((mp) => {
-        const bump = mp === "AP" ? 1200 : mp === "MAP" ? 700 : 0;
-        plans.push({
-          id: uid(),
-          room_category_id: deluxe.id,
-          validity_start: `${startYear}-${startMonth}-01`,
-          validity_end: `${endYear}-${endMonth}-${i === 0 ? "31" : "30"}`,
-          season_label: label,
-          meal_plan: mp,
-          double_rate: Math.round((baseDouble + bump) * factor),
-          single_rate: Math.round((baseDouble * 0.75 + bump) * factor),
-          extra_bed_rate: Math.round(1500 * factor) + bump / 2,
-          cwb_rate: 1200,
-          cwb_rule_text: "06-12 Y / Rs.1500",
-          lunch_rate: 650, dinner_rate: 750, extra_breakfast_rate: 350,
-          xmas_supplement: 2500, xmas_supplement_type: "per_person",
-          newyear_supplement: 3500, newyear_supplement_type: "per_person",
-          remarks: i === 0 ? "Blackout: 24 Dec – 02 Jan additional supplement applies." : null,
-          created_at: now(), updated_at: now(),
-        });
-      });
+  for (const p of MP_SEED_PLANS) {
+    const rid = roomIdByKey.get(`${p.city}||${p.hotel}||${p.room}`);
+    if (!rid) continue;
+    plans.push({
+      id: uid(),
+      room_category_id: rid,
+      validity_start: p.start,
+      validity_end: p.end,
+      season_label: p.season,
+      meal_plan: p.meal,
+      double_rate: p.double,
+      single_rate: p.single,
+      extra_bed_rate: p.extra_bed,
+      cwb_rate: p.cwb,
+      cwb_rule_text: null,
+      lunch_rate: p.lunch,
+      dinner_rate: p.dinner,
+      extra_breakfast_rate: p.extra_bkf,
+      xmas_supplement: p.xmas,
+      xmas_supplement_type: "per_person",
+      newyear_supplement: p.nyear,
+      newyear_supplement_type: "per_person",
+      remarks: p.remarks,
+      created_at: now(), updated_at: now(),
     });
-  });
+  }
+
 
   const miscellaneous_items: MiscellaneousItem[] = [
     {
