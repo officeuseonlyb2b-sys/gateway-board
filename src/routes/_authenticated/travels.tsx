@@ -50,6 +50,8 @@ function TravelsPage() {
                 <TableHead>Vehicle Type</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Capacity</TableHead>
+                <TableHead>Min Pax</TableHead>
+                <TableHead>Max Pax</TableHead>
                 <TableHead>Rate / Day</TableHead>
                 <TableHead>Rate / KM</TableHead>
                 <TableHead>Status</TableHead>
@@ -62,6 +64,8 @@ function TravelsPage() {
                   <TableCell className="font-medium">{v.vehicle_type}</TableCell>
                   <TableCell className="text-muted-foreground max-w-sm">{v.description || "—"}</TableCell>
                   <TableCell className="tabular-nums">{v.capacity_persons} pax</TableCell>
+                  <TableCell className="tabular-nums">{v.min_pax ?? "—"}</TableCell>
+                  <TableCell className="tabular-nums">{v.max_pax ?? "—"}</TableCell>
                   <TableCell className="tabular-nums">{inr(v.rate_per_day)}</TableCell>
                   <TableCell className="tabular-nums">{inr(v.rate_per_km)}</TableCell>
                   <TableCell>
@@ -89,6 +93,8 @@ function TravelDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
   const [vehicleType, setVehicleType] = useState("");
   const [description, setDescription] = useState("");
   const [capacity, setCapacity] = useState<number>(4);
+  const [minPax, setMinPax] = useState<number>(1);
+  const [maxPax, setMaxPax] = useState<number>(4);
   const [ratePerDay, setRatePerDay] = useState<number>(0);
   const [ratePerKm, setRatePerKm] = useState<number>(0);
   const [active, setActive] = useState(true);
@@ -98,6 +104,8 @@ function TravelDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
       setVehicleType(editing?.vehicle_type ?? "");
       setDescription(editing?.description ?? "");
       setCapacity(editing?.capacity_persons ?? 4);
+      setMinPax(editing?.min_pax ?? 1);
+      setMaxPax(editing?.max_pax ?? editing?.capacity_persons ?? 4);
       setRatePerDay(editing?.rate_per_day ?? 0);
       setRatePerKm(editing?.rate_per_km ?? 0);
       setActive(editing?.is_active ?? true);
@@ -106,7 +114,8 @@ function TravelDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
 
   function save() {
     if (!vehicleType.trim()) return toast.error("Vehicle type is required.");
-    const payload = { vehicle_type: vehicleType.trim(), description, capacity_persons: capacity, rate_per_day: ratePerDay, rate_per_km: ratePerKm, is_active: active };
+    if (maxPax < minPax) return toast.error("Max Pax must be greater than or equal to Min Pax.");
+    const payload = { vehicle_type: vehicleType.trim(), description, capacity_persons: capacity, min_pax: minPax, max_pax: maxPax, rate_per_day: ratePerDay, rate_per_km: ratePerKm, is_active: active };
     if (editing) { db.updateTravel(editing.id, payload); toast.success("Vehicle updated."); notify.info("Transport Updated", `${payload.vehicle_type} details updated.`); }
     else { db.addTravel(payload); toast.success("Vehicle added."); notify.success("Transport Added", `${payload.vehicle_type} has been added to transport options.`); }
     onOpenChange(false);
@@ -121,6 +130,8 @@ function TravelDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
           <div><Label>Description</Label><Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Capacity (pax)</Label><Input type="number" min={1} value={capacity} onChange={(e) => setCapacity(+e.target.value || 1)} /></div>
+            <div><Label>Min Pax</Label><Input type="number" min={1} value={minPax} onChange={(e) => setMinPax(+e.target.value || 1)} /></div>
+            <div><Label>Max Pax</Label><Input type="number" min={1} value={maxPax} onChange={(e) => setMaxPax(+e.target.value || 1)} /></div>
             <div><Label>Rate / Day (₹)</Label><Input type="number" min={0} value={ratePerDay} onChange={(e) => setRatePerDay(+e.target.value || 0)} /></div>
             <div><Label>Rate / KM (₹)</Label><Input type="number" min={0} value={ratePerKm} onChange={(e) => setRatePerKm(+e.target.value || 0)} /></div>
           </div>
