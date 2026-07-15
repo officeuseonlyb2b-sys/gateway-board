@@ -445,7 +445,13 @@ function load(): DB {
         const s = seed();
         parsed.guides = s.guides;
       }
-      if (!parsed.travel_options || parsed.travel_options.length === 0) {
+      // Replace legacy travel_options (missing min_pax/max_pax) with the
+      // standard VEHICLE_ALLOCATION seed so Step 10 filtering works.
+      const needsTravelReseed =
+        !parsed.travel_options ||
+        parsed.travel_options.length === 0 ||
+        parsed.travel_options.every((t) => t.min_pax == null && t.max_pax == null);
+      if (needsTravelReseed) {
         const s = seed();
         parsed.travel_options = s.travel_options;
       }
