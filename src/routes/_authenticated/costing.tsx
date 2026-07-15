@@ -1166,6 +1166,19 @@ function Step14({ draft, set }: StepProps) {
 // ============================================================
 // STEP 15 — Accommodation
 // ============================================================
+const WIZARD_HOTEL_CATEGORIES = [
+  "Home Stay",
+  "Excellent Budget",
+  "3 Star",
+  "3 Star Deluxe",
+  "4 Star",
+  "4 Star Superior",
+  "5 Star",
+  "5 Star Deluxe",
+  "Heritage",
+  "Experiential",
+] as const;
+
 function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
@@ -1175,8 +1188,7 @@ function Step15({ draft, set }: StepProps) {
     const existing = draft.hotel_options.map((o) => o.key);
     const next = (["A", "B", "C", "D"] as OptionKey[]).find((k) => !existing.includes(k));
     if (!next) return;
-    const label = { A: "Budget", B: "Standard", C: "Deluxe", D: "Luxury" }[next];
-    set({ hotel_options: [...draft.hotel_options, { key: next, label, selections: [] }] });
+    set({ hotel_options: [...draft.hotel_options, { key: next, label: "", category: "", selections: [] }] });
     setActiveOpt(next);
   };
 
@@ -1185,6 +1197,7 @@ function Step15({ draft, set }: StepProps) {
   };
 
   const activeOption = draft.hotel_options.find((o) => o.key === activeOpt) || draft.hotel_options[0];
+  const activeCategory = activeOption?.category || "";
 
   const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
     const cands = d.rate_plans.filter((p) => p.room_category_id === room_id && p.meal_plan === meal && p.validity_start <= dateISO && p.validity_end >= dateISO);
@@ -1202,7 +1215,7 @@ function Step15({ draft, set }: StepProps) {
               "px-4 py-2 text-sm font-medium border-b-2 -mb-px",
               activeOpt === o.key ? "border-accent text-accent" : "border-transparent text-muted-foreground",
             )}>
-            Option {o.key} · {o.label}
+            Option {o.key} · {o.category || "Select Category"}
           </button>
         ))}
         {draft.hotel_options.length < 4 && (
@@ -1212,10 +1225,19 @@ function Step15({ draft, set }: StepProps) {
 
       {activeOption && (
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Label>Label</Label>
-            <Input className="max-w-xs" value={activeOption.label}
-              onChange={(e) => updateOption(activeOption.key, { label: e.target.value })} />
+          <div className="flex items-end gap-3">
+            <div className="flex-1 max-w-xs">
+              <Label className="text-xs">Hotel Category for this Option</Label>
+              <Select value={activeCategory} onValueChange={(v) => {
+                // Category change invalidates hotel picks made for a different category.
+                updateOption(activeOption.key, { category: v, label: v, selections: [] });
+              }}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select category..." /></SelectTrigger>
+                <SelectContent>
+                  {WIZARD_HOTEL_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             {draft.hotel_options.length > 1 && (
               <Button size="sm" variant="ghost" onClick={() => {
                 const next = draft.hotel_options.filter((o) => o.key !== activeOpt);
@@ -1231,10 +1253,14 @@ function Step15({ draft, set }: StepProps) {
             <p className="text-sm text-muted-foreground">Complete routing in Step 9 first.</p>
           )}
 
-          {overnightRouting.map((day, i) => {
+          {!activeCategory && overnightRouting.length > 0 && (
+            <p className="text-sm text-amber-600">Select a hotel category above to load hotels for each city.</p>
+          )}
+
+          {activeCategory && overnightRouting.map((day, i) => {
             const cityName = d.cities.find((c) => c.id === day.city_id)?.name;
             const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
-            const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id);
+            const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id && h.hotel_category === activeCategory);
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
             const rate = sel ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
 
@@ -1253,7 +1279,13 @@ function Step15({ draft, set }: StepProps) {
                     <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
                       <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
                       <SelectContent>
-                        {cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                        {cityHotels.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-amber-600">
+                            No {activeCategory} hotels found in {cityName}. Add hotels in Hotels module first.
+                          </div>
+                        ) : (
+                          cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1320,7 +1352,7 @@ function Step16({ draft, set }: StepProps) {
             <tr>
               <th className="text-left p-2">Line</th>
               {totals.map((t) => (
-                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label}</th>
+                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label || "Select Category"}</th>
               ))}
             </tr>
           </thead>
@@ -1423,7 +1455,7 @@ function Step17({ draft, set }: StepProps) {
       </Card>
 
       <Card className="p-4">
-        <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label}</span>}</div>
+        <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label || "Select Category"}</span>}</div>
         {focus && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <PersonCard
@@ -1474,7 +1506,7 @@ function Step17({ draft, set }: StepProps) {
                   recommended ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
                 )}>
                 <div>
-                  <div className="text-sm font-semibold">Option {t.key} · {t.label}</div>
+                  <div className="text-sm font-semibold">Option {t.key} · {t.label || "Select Category"}</div>
                   {t.rate_missing > 0 && <div className="text-xs text-amber-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> {t.rate_missing} rate(s) missing</div>}
                 </div>
                 <div className="text-right text-xs">1 Person<br /><span className="font-semibold text-sm">{inr(t.grand_sgl)}</span></div>
