@@ -64,6 +64,8 @@ function TravelsPage() {
                   <TableCell className="font-medium">{v.vehicle_type}</TableCell>
                   <TableCell className="text-muted-foreground max-w-sm">{v.description || "—"}</TableCell>
                   <TableCell className="tabular-nums">{v.capacity_persons} pax</TableCell>
+                  <TableCell className="tabular-nums">{v.min_pax ?? "—"}</TableCell>
+                  <TableCell className="tabular-nums">{v.max_pax ?? "—"}</TableCell>
                   <TableCell className="tabular-nums">{inr(v.rate_per_day)}</TableCell>
                   <TableCell className="tabular-nums">{inr(v.rate_per_km)}</TableCell>
                   <TableCell>
