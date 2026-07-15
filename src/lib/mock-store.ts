@@ -401,12 +401,18 @@ function seed(): DB {
     { id: uid(), name: "Wildlife Expert Guide", guide_type: "Expert", destination: "Kanha/Bandhavgarh", rate_per_day: 1500, description: "Experienced naturalist for jungle safaris", is_active: true, created_at: now() },
     { id: uid(), name: "Archaeological Specialist", guide_type: "Specialist", destination: "Gwalior/Orchha", rate_per_day: 1200, description: "Heritage & archaeology expert", is_active: true, created_at: now() },
   ];
-  const travel_options: TravelOption[] = [
-    { id: uid(), vehicle_type: "AC Bus 2×2", description: "Luxury coach for large groups", capacity_persons: 32, rate_per_day: 8000, rate_per_km: 25, is_active: true, created_at: now() },
-    { id: uid(), vehicle_type: "AC Tempo Traveller", description: "Comfortable mid-size group vehicle", capacity_persons: 12, rate_per_day: 4500, rate_per_km: 18, is_active: true, created_at: now() },
-    { id: uid(), vehicle_type: "AC Sedan", description: "Dzire / Etios class", capacity_persons: 4, rate_per_day: 2500, rate_per_km: 14, is_active: true, created_at: now() },
-    { id: uid(), vehicle_type: "AC SUV / Innova", description: "Innova Crysta / Ertiga", capacity_persons: 6, rate_per_day: 3000, rate_per_km: 16, is_active: true, created_at: now() },
-  ];
+  const travel_options: TravelOption[] = VEHICLE_ALLOCATION.map((v) => ({
+    id: uid(),
+    vehicle_type: v.name,
+    description: "",
+    capacity_persons: v.max_pax,
+    min_pax: v.min_pax,
+    max_pax: v.max_pax,
+    rate_per_day: 0,
+    rate_per_km: 0,
+    is_active: true,
+    created_at: now(),
+  }));
 
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
