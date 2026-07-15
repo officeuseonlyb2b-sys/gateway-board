@@ -1203,8 +1203,7 @@ function Step15({ draft, set }: StepProps) {
   const activeCategory = activeOption?.category || "";
 
   const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
-    const cands = d.rate_plans.filter((p) => p.room_category_id === room_id && p.meal_plan === meal && p.validity_start <= dateISO && p.validity_end >= dateISO);
-    return cands[0];
+    return findRatePlan(d.rate_plans, room_id, meal, dateISO);
   };
 
   return (
