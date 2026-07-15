@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -14,6 +14,14 @@ import {
 } from "@/components/ui/select";
 import { db, useDB, HOTEL_CATEGORIES, type Hotel, type HotelCategory } from "@/lib/mock-store";
 import { notify } from "@/lib/notify";
+import {
+  HotelRatesEditor,
+  emptyRoom,
+  hydrateRoomsFromDb,
+  persistRoomsForHotel,
+  validateRooms,
+  type RoomBlock,
+} from "@/components/HotelRatesEditor";
 
 interface Props {
   trigger?: React.ReactNode;
@@ -41,6 +49,18 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
   }));
   const [newCity, setNewCity] = useState("");
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const initialRooms = useMemo<RoomBlock[]>(() => {
+    if (!hotel) return [emptyRoom()];
+    const rooms = data.room_categories.filter((r) => r.hotel_id === hotel.id);
+    const plans = data.rate_plans.filter((p) => rooms.some((r) => r.id === p.room_category_id));
+    const hydrated = hydrateRoomsFromDb(rooms, plans);
+    return hydrated.length ? hydrated : [emptyRoom()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotel?.id]);
+
+  const [rooms, setRooms] = useState<RoomBlock[]>(initialRooms);
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -51,17 +71,39 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     if (!form.name.trim()) return toast.error("Hotel name is required.");
     if (!form.city_id) return toast.error("Please choose a city.");
 
+    const roomErrors = validateRooms(rooms);
+    if (Object.keys(roomErrors).length) {
+      setErrors(roomErrors);
+      toast.error("Please fill required fields in Room Categories & Rates.");
+      return;
+    }
+    setErrors({});
+
     setSaving(true);
     await new Promise((r) => setTimeout(r, 250));
     const cityName = data.cities.find((c) => c.id === form.city_id)?.name ?? "";
+    let hotelId: string;
     if (hotel) {
       db.updateHotel(hotel.id, form);
+      hotelId = hotel.id;
+    } else {
+      const created = db.addHotel(form);
+      hotelId = created.id;
+    }
+
+    persistRoomsForHotel(hotelId, rooms);
+
+    if (hotel) {
       toast.success("Hotel updated.");
       notify.info("Hotel Updated", `${form.name} details have been updated.`);
     } else {
-      db.addHotel(form);
       toast.success("Hotel added.");
-      notify.success("Hotel Added", `${form.name}${cityName ? ` in ${cityName}` : ""} has been added successfully.`, "/hotels", "hotel_added");
+      notify.success(
+        "Hotel Added",
+        `${form.name}${cityName ? ` in ${cityName}` : ""} has been added successfully.`,
+        "/hotels",
+        "hotel_added",
+      );
     }
     setSaving(false);
     setIsOpen(false);
@@ -161,6 +203,10 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
               </div>
               <Switch checked={form.has_pool} onCheckedChange={(v) => update("has_pool", v)} />
             </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
           </div>
 
           <DialogFooter>
