@@ -32,6 +32,7 @@ import type {
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
+import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
