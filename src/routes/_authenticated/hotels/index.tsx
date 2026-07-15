@@ -157,6 +157,7 @@ function HotelsListPage() {
                 <th className="font-medium py-3 px-4 text-center">Rooms</th>
                 <th className="font-medium py-3 px-4 text-center">Plans</th>
                 <th className="font-medium py-3 px-4">Updated</th>
+                <th className="font-medium py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
