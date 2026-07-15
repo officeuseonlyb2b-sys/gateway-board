@@ -34,6 +34,7 @@ import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
+import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
