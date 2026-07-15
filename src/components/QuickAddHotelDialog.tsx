@@ -178,7 +178,7 @@ export function QuickAddHotelDialog({ open, onOpenChange, cityId, cityName, cate
     });
 
     toast.success(`${hotel.name} added successfully`);
-    addNotification("success", "Hotel Added", `${hotel.name} in ${cityName} added from quotation wizard.`);
+    addNotification({ kind: "success", category: "hotel_added", title: "Hotel Added", message: `${hotel.name} in ${cityName} added from quotation wizard.` });
     onCreated?.(hotel.id);
     reset();
     onOpenChange(false);
