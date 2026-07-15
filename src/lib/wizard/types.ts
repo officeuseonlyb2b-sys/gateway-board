@@ -143,7 +143,7 @@ export const emptyDraft = (): QuoteDraft => ({
   entrances: [],
   guides: [],
   misc: [],
-  hotel_options: [{ key: "A", label: "Standard", selections: [] }],
+  hotel_options: [{ key: "A", label: "", category: "", selections: [] }],
   markup_percent: 10,
   inclusions: [],
   exclusions: [
