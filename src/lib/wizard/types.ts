@@ -83,6 +83,7 @@ export type OptionKey = "A" | "B" | "C" | "D";
 export interface HotelOption {
   key: OptionKey;
   label: string;
+  category?: string;
   selections: HotelSelection[];
 }
 
