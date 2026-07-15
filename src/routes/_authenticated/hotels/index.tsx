@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning } from "lucide-react";
+import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useDB, HOTEL_CATEGORIES, type HotelCategory } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
