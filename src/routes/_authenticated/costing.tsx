@@ -849,29 +849,62 @@ function Step9({ draft, set }: StepProps) {
 // ============================================================
 function Step10({ draft, set }: StepProps) {
   const d = useDB();
-  const opts = d.travel_options.filter((t) => t.is_active);
+  const totalPax = draft.adults + draft.ss + draft.children.length;
+  const opts = d.travel_options.filter((t) => {
+    if (!t.is_active) return false;
+    const min = t.min_pax ?? 1;
+    const max = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
+    return totalPax >= min && totalPax <= max;
+  });
+  const labelFor = (o: typeof opts[number]) => {
+    const min = o.min_pax ?? 1;
+    const max = o.max_pax ?? o.capacity_persons;
+    const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
+    return `${o.vehicle_type} (${range})`;
+  };
   const total = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+  const noMatch = opts.length === 0;
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">Transport Options</h2>
-        <Button size="sm" onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0 }] })}>
+      <div className="flex justify-between items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Transport Options</h2>
+          <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-3 py-1 text-xs font-medium">
+            Showing vehicles suitable for {totalPax} pax
+          </span>
+        </div>
+        <Button
+          size="sm"
+          disabled={noMatch}
+          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0 }] })}
+        >
           <Plus className="h-3 w-3 mr-1" /> Add Transport
         </Button>
       </div>
-      {draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
-      {draft.transport.map((t, i) => (
+      {noMatch && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 text-destructive text-sm p-3">
+          No standard vehicle found for {totalPax} pax. Please contact operations.
+        </div>
+      )}
+      {!noMatch && draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
+      {draft.transport.map((t, i) => {
+        // Ensure the currently-selected vehicle is always shown in its own row,
+        // even if it falls outside the filter (e.g. saved before pax changed).
+        const current = d.travel_options.find((x) => x.id === t.travel_id);
+        const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
+        return (
         <Card key={t.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
           <div>
             <Label className="text-xs">Vehicle</Label>
             <Select value={t.travel_id} onValueChange={(v) => {
-              const to = opts.find((x) => x.id === v);
-              const next = [...draft.transport]; next[i] = { ...t, travel_id: v, rate: to?.rate_per_day || t.rate };
+              const to = rowOpts.find((x) => x.id === v);
+              const next = [...draft.transport];
+              next[i] = { ...t, travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate };
               set({ transport: next });
             }}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
               <SelectContent>
-                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.vehicle_type}</SelectItem>)}
+                {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -879,14 +912,15 @@ function Step10({ draft, set }: StepProps) {
             onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, vehicles: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
           <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
             onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, days: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
-          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={t.rate}
+          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={t.rate || ""} placeholder="Enter rate"
             onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, rate: parseFloat(e.target.value) || 0 }; set({ transport: n }); }} /></div>
           <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(t.rate * t.vehicles * t.days)}</div></div>
           <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
             <Trash2 className="h-4 w-4 text-destructive" />
           </Button>
         </Card>
-      ))}
+        );
+      })}
       <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
     </div>
   );
