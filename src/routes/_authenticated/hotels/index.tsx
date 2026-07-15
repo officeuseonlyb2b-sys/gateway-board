@@ -182,6 +182,16 @@ function HotelsListPage() {
                   <td className="py-3 px-4 text-muted-foreground text-xs whitespace-nowrap">
                     {new Date(h.updated_at).toLocaleDateString()}
                   </td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap">
+                    <HotelFormDialog
+                      hotel={data.hotels.find((x) => x.id === h.id)}
+                      trigger={
+                        <Button size="sm" variant="outline">
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                        </Button>
+                      }
+                    />
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (
