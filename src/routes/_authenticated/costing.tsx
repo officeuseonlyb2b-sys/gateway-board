@@ -34,6 +34,7 @@ import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 
@@ -99,6 +100,19 @@ function WizardPage() {
     else initDraft();
     setInitialized(true);
   }, [initialized, search.id]);
+
+  // Publish active-wizard metadata whenever the draft moves — so other
+  // pages can show the "Continue Quotation" banner. Cleared on discard/save.
+  useEffect(() => {
+    if (!draft) return;
+    if (draft.step <= 1) { setActiveWizard(null); return; }
+    setActiveWizard({
+      draftId: currentDraftId,
+      programName: draft.program_name || (draft.query_type === "B2B" ? draft.agent.name : draft.query_type === "B2C" ? draft.guest.name : draft.brochure.theme) || "Untitled",
+      step: draft.step,
+      savedAt: draft.updated_at,
+    });
+  }, [draft, currentDraftId]);
 
   if (!draft) {
     return (
@@ -181,6 +195,7 @@ function WizardPage() {
                 if (currentDraftId) deleteDraft(currentDraftId);
                 setCurrentDraftId(null);
                 clearDraft();
+                setActiveWizard(null);
                 writeDraft(emptyDraft());
               }
             }}>
@@ -1331,6 +1346,10 @@ function Step15({ draft, set }: StepProps) {
               </Card>
             );
           })}
+
+          {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
+            <OptionCostPreview draft={draft} option={activeOption} />
+          )}
         </div>
       )}
 
@@ -1355,18 +1374,135 @@ function Step15({ draft, set }: StepProps) {
   );
 }
 
+// ------------------------------------------------------------
+// Live cost preview under each Option tab in Step 15.
+// Read-only rooms-only (Net, GST, Net+GST) with per-day warnings.
+// ------------------------------------------------------------
+function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
+  const d = useDB();
+  const [open, setOpen] = useState(true);
+  const overnight = draft.routing.filter((r) => r.overnight && r.city_id);
+  const gstFor = (v: number) => (v > 7500 ? 0.18 : 0.05);
+
+  let sglNet = 0, dblNet = 0, trpNet = 0;
+  let sglGst = 0, dblGst = 0, trpGst = 0;
+  const missingDays: { day: number; city: string }[] = [];
+
+  overnight.forEach((day) => {
+    const sel = option.selections.find((s) => s.city_id === day.city_id);
+    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
+    if (!sel || !sel.room_id) return;
+    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date);
+    if (!plan) { missingDays.push({ day: day.day, city: cityName }); return; }
+    const dbl = plan.double_rate;
+    const sgl = plan.single_rate;
+    const trp = dbl + plan.extra_bed_rate;
+    sglNet += sgl; dblNet += dbl; trpNet += trp;
+    sglGst += sgl * gstFor(sgl);
+    dblGst += dbl * gstFor(dbl);
+    trpGst += trp * gstFor(trp);
+  });
+
+  const sglTotal = sglNet + sglGst;
+  const dblTotal = dblNet + dblGst;
+  const trpTotal = trpNet + trpGst;
+
+  return (
+    <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#F0F4F8" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <div className="text-sm font-semibold text-primary">
+          OPTION {option.key} · {option.category || "—"} — Cost Preview
+        </div>
+        <span className="text-xs text-primary/70">{open ? "▾ Collapse" : "▸ Expand"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="text-left py-1.5 font-medium"></th>
+                <th className="text-right py-1.5 font-medium">SGL</th>
+                <th className="text-right py-1.5 font-medium">DBL</th>
+                <th className="text-right py-1.5 font-medium">TRP</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="py-1">Room Cost (Net)</td>
+                <td className="text-right tabular-nums">{inr(sglNet)}</td>
+                <td className="text-right tabular-nums">{inr(dblNet)}</td>
+                <td className="text-right tabular-nums">{inr(trpNet)}</td>
+              </tr>
+              <tr>
+                <td className="py-1">GST on Rooms</td>
+                <td className="text-right tabular-nums">{inr(sglGst)}</td>
+                <td className="text-right tabular-nums">{inr(dblGst)}</td>
+                <td className="text-right tabular-nums">{inr(trpGst)}</td>
+              </tr>
+              <tr className="border-t font-semibold">
+                <td className="py-1.5">Net with GST</td>
+                <td className="text-right tabular-nums text-primary">{inr(sglTotal)}</td>
+                <td className="text-right tabular-nums text-primary">{inr(dblTotal)}</td>
+                <td className="text-right tabular-nums text-primary">{inr(trpTotal)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {missingDays.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {missingDays.map((m) => (
+                <div key={m.day} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" /> Day {m.day} ({m.city}): No rate matched for selected dates
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 text-[11px] text-muted-foreground italic">
+            Room costs only. Add-ons (transport, guide, activities) are applied in Step 16.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ============================================================
 // STEP 16 — Costing Variations
 // ============================================================
 function Step16({ draft, set }: StepProps) {
   const d = useDB();
+  const includedKeys = draft.included_option_keys && draft.included_option_keys.length
+    ? draft.included_option_keys
+    : draft.hotel_options.map((o) => o.key);
+
+  const toggleInclude = (key: OptionKey) => {
+    const current = new Set(includedKeys);
+    if (current.has(key)) current.delete(key); else current.add(key);
+    set({ included_option_keys: Array.from(current) as OptionKey[] });
+  };
+
+  const includedOptions = draft.hotel_options.filter((o) => includedKeys.includes(o.key));
   const totals = useMemo(
-    () => draft.hotel_options.map((o) => computeOption(draft, o, d)),
-    [draft, d],
+    () => includedOptions.map((o) => computeOption(draft, o, d)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draft, d, includedKeys.join(",")],
   );
 
   const [newInc, setNewInc] = useState("");
   const [newExc, setNewExc] = useState("");
+
+  const addonBreakdown = useMemo(() => {
+    const transport = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+    const activities = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
+    const entrances = draft.entrances.reduce(
+      (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate, 0);
+    const guides = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);
+    const misc = draft.misc.reduce((s, l) => s + l.rate * l.qty, 0);
+    const optionals = draft.optionals.reduce((s, l) => s + l.rate * l.qty, 0);
+    return { transport, activities, entrances, guides, misc, optionals };
+  }, [draft]);
 
   return (
     <div className="space-y-6">
@@ -1379,13 +1515,34 @@ function Step16({ draft, set }: StepProps) {
         </div>
       </div>
 
+      <Card className="p-4 bg-primary/5 border-primary/20">
+        <div className="text-sm font-semibold text-primary mb-2">Include Options in Final Quote</div>
+        <div className="flex flex-wrap gap-4">
+          {draft.hotel_options.map((o) => {
+            const checked = includedKeys.includes(o.key);
+            const hasSelections = o.selections.some((s) => s.room_id);
+            return (
+              <label key={o.key} className={`flex items-center gap-2 px-3 py-1.5 rounded border cursor-pointer ${checked ? "bg-white border-primary" : "bg-muted/30 border-transparent opacity-60"}`}>
+                <input type="checkbox" checked={checked} onChange={() => toggleInclude(o.key)} disabled={!hasSelections} />
+                <span className="text-sm font-medium">Option {o.key}</span>
+                <span className="text-xs text-muted-foreground">{o.category || "—"}{!hasSelections && " · empty"}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="text-xs text-muted-foreground mt-2">Only selected options appear in the comparison and final quote.</div>
+      </Card>
+
+      {totals.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="text-left p-2">Line</th>
               {totals.map((t) => (
-                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label || "Select Category"}</th>
+                <th key={t.key} className="text-right p-2">Option {t.key} · {t.label || "—"}</th>
               ))}
             </tr>
           </thead>
@@ -1393,15 +1550,54 @@ function Step16({ draft, set }: StepProps) {
             {[
               ["Room Cost (Net) DBL", (t: OptionTotals) => t.room_net_dbl],
               ["GST on Rooms DBL", (t: OptionTotals) => t.gst_rooms_dbl],
-              ["Add-Ons Total", (t: OptionTotals) => t.addons_total],
-              [`Markup ${draft.markup_percent}% (DBL)`, (t: OptionTotals) => t.markup_dbl],
-              ["GST 5% (DBL)", (t: OptionTotals) => t.gst5_dbl],
             ].map(([label, fn], i) => (
               <tr key={i} className="border-t">
                 <td className="p-2">{label as string}</td>
                 {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr((fn as any)(t))}</td>)}
               </tr>
             ))}
+            {addonBreakdown.transport > 0 && (
+              <tr className="border-t text-xs text-muted-foreground">
+                <td className="p-2 pl-6">↳ Transport</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(addonBreakdown.transport)}</td>)}
+              </tr>
+            )}
+            {addonBreakdown.guides > 0 && (
+              <tr className="text-xs text-muted-foreground">
+                <td className="p-2 pl-6">↳ Guide</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(addonBreakdown.guides)}</td>)}
+              </tr>
+            )}
+            {addonBreakdown.activities > 0 && (
+              <tr className="text-xs text-muted-foreground">
+                <td className="p-2 pl-6">↳ Activities</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(addonBreakdown.activities)}</td>)}
+              </tr>
+            )}
+            {addonBreakdown.entrances > 0 && (
+              <tr className="text-xs text-muted-foreground">
+                <td className="p-2 pl-6">↳ Entrances</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(addonBreakdown.entrances)}</td>)}
+              </tr>
+            )}
+            {addonBreakdown.misc > 0 && (
+              <tr className="text-xs text-muted-foreground">
+                <td className="p-2 pl-6">↳ Miscellaneous</td>
+                {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(addonBreakdown.misc)}</td>)}
+              </tr>
+            )}
+            <tr className="border-t font-medium">
+              <td className="p-2">Add-Ons Total</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.addons_total)}</td>)}
+            </tr>
+            <tr className="border-t">
+              <td className="p-2">{`Markup ${draft.markup_percent}% (DBL)`}</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.markup_dbl)}</td>)}
+            </tr>
+            <tr className="border-t">
+              <td className="p-2">GST 5% (on subtotal + markup)</td>
+              {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.gst5_dbl)}</td>)}
+            </tr>
             <tr className="border-t bg-primary/5 font-bold">
               <td className="p-2">GRAND TOTAL (DBL)</td>
               {totals.map((t) => <td key={t.key} className="p-2 text-right tabular-nums">{inr(t.grand_dbl)}</td>)}
@@ -1421,6 +1617,7 @@ function Step16({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
@@ -1749,6 +1946,7 @@ function Step18({ draft, set }: StepProps) {
             const q = buildSavedQuote();
             persistQuote(q);
             clearDraft();
+            setActiveWizard(null);
             toast.success(`Quote ${q.quote_number} saved.`);
             addNotification({
               kind: "success", category: "quote_saved",

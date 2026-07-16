@@ -118,6 +118,8 @@ export interface QuoteDraft {
   exclusions: string[];
   recommended_option: OptionKey | null;
   optionals: ActivityLine[];
+  /** Option keys the user has chosen to include in the final quote (Step 16). Empty/missing → all included. */
+  included_option_keys?: OptionKey[];
   updated_at: string;
 }
 

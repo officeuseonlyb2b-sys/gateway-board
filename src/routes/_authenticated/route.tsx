@@ -1,7 +1,8 @@
-import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
+import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
 import { auth, useAuth } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   const user = useAuth();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   useEffect(() => {
     if (!user) navigate({ to: "/login" });
@@ -36,6 +38,8 @@ function AuthenticatedLayout() {
       <AppSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar />
+        {/* Re-mount per-path so the "Hide" state resets on navigation */}
+        <ActiveWizardBanner key={pathname} />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
