@@ -19,6 +19,7 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   const user = useAuth();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   useEffect(() => {
     if (!user) navigate({ to: "/login" });
@@ -37,6 +38,8 @@ function AuthenticatedLayout() {
       <AppSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar />
+        {/* Re-mount per-path so the "Hide" state resets on navigation */}
+        <ActiveWizardBanner key={pathname} />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
