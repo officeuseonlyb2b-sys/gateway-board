@@ -49,12 +49,18 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // Step definitions
 // ============================================================
 const STEPS: { n: number; label: string }[] = [
-  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Duration" },
-  { n: 4, label: "Program" }, { n: 5, label: "Dates+Pax" }, { n: 6, label: "Category" },
-  { n: 7, label: "From" }, { n: 8, label: "Travel" }, { n: 9, label: "Routing" },
+  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Pax+Type" },
+  { n: 4, label: "From" }, { n: 5, label: "Travel" }, { n: 6, label: "Duration" },
+  { n: 7, label: "Program" }, { n: 8, label: "Create Route" }, { n: 9, label: "Routing" },
   { n: 10, label: "Transport" }, { n: 11, label: "Activities" }, { n: 12, label: "Entrances" },
   { n: 13, label: "Guide" }, { n: 14, label: "Misc" }, { n: 15, label: "Hotels" },
   { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
+];
+
+/** Brochure departure ex-points (Ex-City list) */
+const BROCHURE_EX_CITIES = [
+  "Ex-Bhopal", "Ex-Indore", "Ex-Jabalpur", "Ex-Gwalior", "Ex-Ujjain",
+  "Ex-Delhi", "Ex-Mumbai", "Ex-Nagpur", "Ex-Raipur",
 ];
 
 const CATEGORY_TAGS = [
