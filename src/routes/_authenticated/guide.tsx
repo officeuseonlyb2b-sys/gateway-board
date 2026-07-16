@@ -21,11 +21,11 @@ export const Route = createFileRoute("/_authenticated/guide")({
   component: GuidePage,
 });
 
-const TYPES: GuideType[] = ["Local", "Expert", "Specialist"];
+const TYPES: GuideType[] = ["Hindi Guide - Local", "English Guide - Local", "Tour Escort"];
 const TYPE_COLORS: Record<GuideType, string> = {
-  Local: "bg-blue-100 text-blue-800",
-  Expert: "bg-emerald-100 text-emerald-800",
-  Specialist: "bg-amber-100 text-amber-800",
+  "Hindi Guide - Local": "bg-blue-100 text-blue-800",
+  "English Guide - Local": "bg-emerald-100 text-emerald-800",
+  "Tour Escort": "bg-amber-100 text-amber-800",
 };
 
 function GuidePage() {
