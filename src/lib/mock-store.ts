@@ -156,7 +156,7 @@ export interface Activity {
   created_at: string;
 }
 
-export type GuideType = "Local" | "Expert" | "Specialist";
+export type GuideType = "Hindi Guide - Local" | "English Guide - Local" | "Tour Escort";
 export interface Guide {
   id: string;
   name: string;
