@@ -78,6 +78,8 @@ export interface HotelSelection {
   hotel_id: string;
   room_id: string;
   meal_plan: MealPlan;
+  /** True when the hotel picked belongs to a different category than the option's category. */
+  is_fallback?: boolean;
 }
 export type OptionKey = "A" | "B" | "C" | "D";
 export interface HotelOption {
@@ -85,6 +87,10 @@ export interface HotelOption {
   label: string;
   category?: string;
   selections: HotelSelection[];
+  /** Per-option inclusions (auto-filled from category on category change). */
+  inclusions?: string[];
+  /** Per-option exclusions (auto-filled from category on category change). */
+  exclusions?: string[];
 }
 
 export interface QuoteDraft {

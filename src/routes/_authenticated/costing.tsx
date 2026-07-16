@@ -33,6 +33,7 @@ import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
+import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
@@ -1206,7 +1207,7 @@ function Step15({ draft, set }: StepProps) {
     const existing = draft.hotel_options.map((o) => o.key);
     const next = (["A", "B", "C", "D"] as OptionKey[]).find((k) => !existing.includes(k));
     if (!next) return;
-    set({ hotel_options: [...draft.hotel_options, { key: next, label: "", category: "", selections: [] }] });
+    set({ hotel_options: [...draft.hotel_options, { key: next, label: "", category: "", selections: [], inclusions: [], exclusions: [] }] });
     setActiveOpt(next);
   };
 
@@ -1219,6 +1220,18 @@ function Step15({ draft, set }: StepProps) {
 
   const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
     return findRatePlan(d.rate_plans, room_id, meal, dateISO);
+  };
+
+  const applyCategory = (v: string) => {
+    if (!activeOption) return;
+    const def = defaultsForCategory(v);
+    updateOption(activeOption.key, {
+      category: v,
+      label: v,
+      selections: [],
+      inclusions: def.inclusions,
+      exclusions: def.exclusions,
+    });
   };
 
   return (
@@ -1245,10 +1258,7 @@ function Step15({ draft, set }: StepProps) {
           <div className="flex items-end gap-3">
             <div className="flex-1 max-w-xs">
               <Label className="text-xs">Hotel Category for this Option</Label>
-              <Select value={activeCategory} onValueChange={(v) => {
-                // Category change invalidates hotel picks made for a different category.
-                updateOption(activeOption.key, { category: v, label: v, selections: [] });
-              }}>
+              <Select value={activeCategory} onValueChange={applyCategory}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select category..." /></SelectTrigger>
                 <SelectContent>
                   {WIZARD_HOTEL_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
@@ -1278,23 +1288,34 @@ function Step15({ draft, set }: StepProps) {
             const cityName = d.cities.find((c) => c.id === day.city_id)?.name;
             const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
             const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id && h.hotel_category === activeCategory);
+            const allCityHotels = d.hotels.filter((h) => h.city_id === day.city_id);
+            const noCategoryMatch = cityHotels.length === 0;
+            const hotelPool = noCategoryMatch ? allCityHotels : cityHotels;
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
             const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
             const rate = sel && sel.room_id ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
+            const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
 
             const setSel = (patch: Partial<typeof sel> & object) => {
               const others = activeOption.selections.filter((s) => s.city_id !== day.city_id);
               const cur = sel || { city_id: day.city_id, hotel_id: "", room_id: "", meal_plan: "CP" as MealPlan };
-              updateOption(activeOption.key, { selections: [...others, { ...cur, ...patch }] });
+              const merged = { ...cur, ...patch };
+              // Recompute fallback flag whenever hotel changes
+              if ("hotel_id" in patch) {
+                const h = d.hotels.find((x) => x.id === merged.hotel_id);
+                merged.is_fallback = !!h && h.hotel_category !== activeCategory;
+              }
+              updateOption(activeOption.key, { selections: [...others, merged] });
             };
 
             return (
               <Card key={i} className="p-3">
                 <div className="text-sm font-semibold mb-2">Day {day.day} · {cityName} · {fmtDateShort(day.date)}</div>
-                {cityHotels.length === 0 ? (
+
+                {noCategoryMatch && allCityHotels.length === 0 ? (
                   <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
                     <div className="text-sm text-amber-800 mb-2 flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4" /> No {activeCategory} hotels found in {cityName}
+                      <AlertCircle className="h-4 w-4" /> No hotels found in {cityName}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" onClick={() => setQuickAdd({ cityId: day.city_id, cityName: cityName || "" })}>
@@ -1306,42 +1327,65 @@ function Step15({ draft, set }: StepProps) {
                     </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-4 gap-2">
-                    <div>
-                      <Label className="text-xs">Hotel</Label>
-                      <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
-                        <SelectContent>
-                          {cityHotels.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                  <>
+                    {noCategoryMatch && (
+                      <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800 flex flex-wrap items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>No <b>{activeCategory}</b> hotels found in {cityName}. Select from available hotels below (showing all categories).</span>
+                        <Button size="sm" variant="outline" className="ml-auto h-7" onClick={() => setQuickAdd({ cityId: day.city_id, cityName: cityName || "" })}>
+                          <Plus className="h-3 w-3" /> Add New
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7" asChild>
+                          <a href="/hotels" target="_blank" rel="noreferrer">Hotels ↗</a>
+                        </Button>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-4 gap-2">
+                      <div>
+                        <Label className="text-xs">Hotel</Label>
+                        <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel({ hotel_id: v, room_id: "" })}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                          <SelectContent>
+                            {hotelPool.map((h) => (
+                              <SelectItem key={h.id} value={h.id}>
+                                {h.name}{noCategoryMatch ? ` (${h.hotel_category})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Room</Label>
+                        <Select value={sel?.room_id || ""} onValueChange={(v) => setSel({ room_id: v })} disabled={!sel?.hotel_id}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
+                          <SelectContent>
+                            {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Meal Plan</Label>
+                        <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })} disabled={!sel?.room_id || meals.length === 0}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder={meals.length === 0 ? "—" : "Select…"} /></SelectTrigger>
+                          <SelectContent>
+                            {(meals.length ? meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="text-xs pt-5 space-y-0.5">
+                        {rate ? (
+                          <span className="text-green-700">✓ {rate.season_label} · ₹{rate.double_rate}/dbl</span>
+                        ) : sel?.room_id ? (
+                          <span className="text-amber-600">⚠ No rate for these dates</span>
+                        ) : null}
+                        {sel?.is_fallback && selHotel && (
+                          <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[10px]">
+                            ⚠ {selHotel.hotel_category} selected (differs from option)
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <Label className="text-xs">Room</Label>
-                      <Select value={sel?.room_id || ""} onValueChange={(v) => setSel({ room_id: v })} disabled={!sel?.hotel_id}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Select…" /></SelectTrigger>
-                        <SelectContent>
-                          {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Meal Plan</Label>
-                      <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel({ meal_plan: v as MealPlan })} disabled={!sel?.room_id || meals.length === 0}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder={meals.length === 0 ? "—" : "Select…"} /></SelectTrigger>
-                        <SelectContent>
-                          {(meals.length ? meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="text-xs pt-5">
-                      {rate ? (
-                        <span className="text-green-700">✓ {rate.season_label} · ₹{rate.double_rate}/dbl</span>
-                      ) : sel?.room_id ? (
-                        <span className="text-amber-600">⚠ No rate for these dates</span>
-                      ) : null}
-                    </div>
-                  </div>
+                  </>
                 )}
               </Card>
             );
@@ -1349,6 +1393,13 @@ function Step15({ draft, set }: StepProps) {
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <OptionCostPreview draft={draft} option={activeOption} />
+          )}
+
+          {activeCategory && (
+            <OptionInclusionsEditor
+              option={activeOption}
+              onChange={(patch) => updateOption(activeOption.key, patch)}
+            />
           )}
         </div>
       )}
@@ -1363,8 +1414,15 @@ function Step15({ draft, set }: StepProps) {
           onCreated={(hotelId) => {
             // auto-select the newly added hotel for this city day
             const others = activeOption.selections.filter((s) => s.city_id !== quickAdd.cityId);
+            const h = d.hotels.find((x) => x.id === hotelId);
             updateOption(activeOption.key, {
-              selections: [...others, { city_id: quickAdd.cityId, hotel_id: hotelId, room_id: "", meal_plan: "CP" as MealPlan }],
+              selections: [...others, {
+                city_id: quickAdd.cityId,
+                hotel_id: hotelId,
+                room_id: "",
+                meal_plan: "CP" as MealPlan,
+                is_fallback: !!h && h.hotel_category !== activeCategory,
+              }],
             });
             setQuickAdd(null);
           }}
@@ -1373,6 +1431,82 @@ function Step15({ draft, set }: StepProps) {
     </div>
   );
 }
+
+// ------------------------------------------------------------
+// Per-option Inclusions & Exclusions editor (Step 15).
+// ------------------------------------------------------------
+function OptionInclusionsEditor({
+  option, onChange,
+}: {
+  option: HotelOption;
+  onChange: (patch: Partial<HotelOption>) => void;
+}) {
+  const [newInc, setNewInc] = useState("");
+  const [newExc, setNewExc] = useState("");
+  const inclusions = option.inclusions ?? [];
+  const exclusions = option.exclusions ?? [];
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs text-muted-foreground italic">
+        Auto-filled for <b>{option.category || "—"}</b>. Customize as needed.
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Card className="p-3">
+          <div className="section-label mb-2">Inclusions · Option {option.key}</div>
+          <ul className="space-y-1 mb-2">
+            {inclusions.map((x, i) => (
+              <li key={i} className="text-sm flex justify-between gap-2">
+                <span>✓ {x}</span>
+                <button
+                  onClick={() => onChange({ inclusions: inclusions.filter((_, j) => j !== i) })}
+                  className="text-destructive"
+                  aria-label="Remove"
+                >×</button>
+              </li>
+            ))}
+            {inclusions.length === 0 && (
+              <li className="text-xs text-muted-foreground">No inclusions yet.</li>
+            )}
+          </ul>
+          <div className="flex gap-2">
+            <Input value={newInc} onChange={(e) => setNewInc(e.target.value)} placeholder="Add inclusion" />
+            <Button size="sm" onClick={() => {
+              const v = newInc.trim();
+              if (v) { onChange({ inclusions: [...inclusions, v] }); setNewInc(""); }
+            }}>Add</Button>
+          </div>
+        </Card>
+        <Card className="p-3">
+          <div className="section-label mb-2">Exclusions · Option {option.key}</div>
+          <ul className="space-y-1 mb-2">
+            {exclusions.map((x, i) => (
+              <li key={i} className="text-sm flex justify-between gap-2">
+                <span>✗ {x}</span>
+                <button
+                  onClick={() => onChange({ exclusions: exclusions.filter((_, j) => j !== i) })}
+                  className="text-destructive"
+                  aria-label="Remove"
+                >×</button>
+              </li>
+            ))}
+            {exclusions.length === 0 && (
+              <li className="text-xs text-muted-foreground">No exclusions yet.</li>
+            )}
+          </ul>
+          <div className="flex gap-2">
+            <Input value={newExc} onChange={(e) => setNewExc(e.target.value)} placeholder="Add exclusion" />
+            <Button size="sm" onClick={() => {
+              const v = newExc.trim();
+              if (v) { onChange({ exclusions: [...exclusions, v] }); setNewExc(""); }
+            }}>Add</Button>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 
 // ------------------------------------------------------------
 // Live cost preview under each Option tab in Step 15.
@@ -1459,6 +1593,11 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
               ))}
             </div>
           )}
+          {option.selections.some((s) => s.is_fallback) && (
+            <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5" /> Some hotels in this option belong to a different category than <b>{option.category}</b>.
+            </div>
+          )}
           <div className="mt-2 text-[11px] text-muted-foreground italic">
             Room costs only. Add-ons (transport, guide, activities) are applied in Step 16.
           </div>
@@ -1490,8 +1629,6 @@ function Step16({ draft, set }: StepProps) {
     [draft, d, includedKeys.join(",")],
   );
 
-  const [newInc, setNewInc] = useState("");
-  const [newExc, setNewExc] = useState("");
 
   const addonBreakdown = useMemo(() => {
     const transport = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
@@ -1619,39 +1756,8 @@ function Step16({ draft, set }: StepProps) {
       </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="p-4">
-          <div className="section-label mb-2">Inclusions</div>
-          <ul className="space-y-1 mb-2">
-            {draft.inclusions.map((x, i) => (
-              <li key={i} className="text-sm flex justify-between">
-                <span>✓ {x}</span>
-                <button onClick={() => set({ inclusions: draft.inclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive">×</button>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Input value={newInc} onChange={(e) => setNewInc(e.target.value)} placeholder="Add inclusion" />
-            <Button size="sm" onClick={() => { if (newInc) { set({ inclusions: [...draft.inclusions, newInc] }); setNewInc(""); } }}>Add</Button>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="section-label mb-2">Exclusions</div>
-          <ul className="space-y-1 mb-2">
-            {draft.exclusions.map((x, i) => (
-              <li key={i} className="text-sm flex justify-between">
-                <span>✗ {x}</span>
-                <button onClick={() => set({ exclusions: draft.exclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive">×</button>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Input value={newExc} onChange={(e) => setNewExc(e.target.value)} placeholder="Add exclusion" />
-            <Button size="sm" onClick={() => { if (newExc) { set({ exclusions: [...draft.exclusions, newExc] }); setNewExc(""); } }}>Add</Button>
-          </div>
-        </Card>
+      <div className="text-xs text-muted-foreground italic">
+        Inclusions & Exclusions are managed per option in Step 15.
       </div>
     </div>
   );
