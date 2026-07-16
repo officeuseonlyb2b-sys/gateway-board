@@ -49,12 +49,18 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // Step definitions
 // ============================================================
 const STEPS: { n: number; label: string }[] = [
-  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Duration" },
-  { n: 4, label: "Program" }, { n: 5, label: "Dates+Pax" }, { n: 6, label: "Category" },
-  { n: 7, label: "From" }, { n: 8, label: "Travel" }, { n: 9, label: "Routing" },
+  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Pax+Type" },
+  { n: 4, label: "From" }, { n: 5, label: "Travel" }, { n: 6, label: "Duration" },
+  { n: 7, label: "Program" }, { n: 8, label: "Create Route" }, { n: 9, label: "Routing" },
   { n: 10, label: "Transport" }, { n: 11, label: "Activities" }, { n: 12, label: "Entrances" },
   { n: 13, label: "Guide" }, { n: 14, label: "Misc" }, { n: 15, label: "Hotels" },
   { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
+];
+
+/** Brochure departure ex-points (Ex-City list) */
+const BROCHURE_EX_CITIES = [
+  "Ex-Bhopal", "Ex-Indore", "Ex-Jabalpur", "Ex-Gwalior", "Ex-Ujjain",
+  "Ex-Delhi", "Ex-Mumbai", "Ex-Nagpur", "Ex-Raipur",
 ];
 
 const CATEGORY_TAGS = [
@@ -281,7 +287,7 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
 }
 
 // ============================================================
-// Validation
+// Validation — matches the reordered 18-step flow
 // ============================================================
 function validate(d: QuoteDraft, step: number): boolean {
   switch (step) {
@@ -291,19 +297,27 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (d.query_type === "B2C") return !!d.guest.name;
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
-    case 3: return d.nights >= 1;
-    case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
-    case 5: return !!d.start_date && (d.adults + d.ss + d.children.length) >= 1;
-    case 6: return d.categories.length >= 1;
-    case 7: return !!d.departure_city;
-    case 8: return d.travel_modes.length >= 1;
-    // Step 9: only overnight days need a city; last (departure) day is auto.
+    case 3: {
+      // Pax + Type
+      if (d.query_type === "Brochure") return (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0);
+      return (d.adults + d.ss + d.children.length) >= 1;
+    }
+    case 4: return !!d.departure_city;
+    case 5: return d.query_type === "Brochure" ? true : d.travel_modes.length >= 1;
+    case 6: {
+      if (d.nights < 1) return false;
+      if (d.query_type === "Brochure") return !!d.brochure_validity_from && !!d.brochure_validity_till;
+      // B2B/B2C: with dates → need start_date; without dates → ok
+      if (d.has_dates === false) return true;
+      return !!d.start_date;
+    }
+    case 7: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
+    case 8: return true; // Create-route gate — always allow (button generates rows)
     case 9: {
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    // Step 15: at least Option A must have a selection for every overnight city.
     case 15: {
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
@@ -311,24 +325,23 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (!A) return false;
       return overnightCities.every((cid) => A.selections.some((s) => s.city_id === cid));
     }
-    // Steps 10–14, 16–18: optional / auto-calculated — never block Next.
     default: return true;
   }
 }
 
 // ============================================================
-// Step router
+// Step router — maps slot → component
 // ============================================================
 function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
   switch (draft.step) {
     case 1: return <Step1 draft={draft} set={set} />;
     case 2: return <Step2 draft={draft} set={set} />;
-    case 3: return <Step3 draft={draft} set={set} />;
-    case 4: return <Step4 draft={draft} set={set} />;
-    case 5: return <Step5 draft={draft} set={set} />;
-    case 6: return <Step6 draft={draft} set={set} />;
-    case 7: return <Step7 draft={draft} set={set} />;
-    case 8: return <Step8 draft={draft} set={set} />;
+    case 3: return <StepPaxType draft={draft} set={set} />;
+    case 4: return <StepDeparture draft={draft} set={set} />;
+    case 5: return <StepTravel draft={draft} set={set} />;
+    case 6: return <StepDuration draft={draft} set={set} />;
+    case 7: return <Step4 draft={draft} set={set} />;
+    case 8: return <StepCreateRoute draft={draft} set={set} />;
     case 9: return <Step9 draft={draft} set={set} />;
     case 10: return <Step10 draft={draft} set={set} />;
     case 11: return <Step11 draft={draft} set={set} />;
@@ -794,16 +807,20 @@ function Step9({ draft, set }: StepProps) {
     return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
   };
 
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="text-left p-2 w-14">Day</th>
+              <th className="text-left p-2 w-24">Day Name</th>
               <th className="text-left p-2 w-28">Date</th>
-              <th className="text-left p-2">Overnight City</th>
+              <th className="text-left p-2">From</th>
+              <th className="text-left p-2">To / Overnight</th>
+              <th className="text-left p-2 w-28">Travel By</th>
               <th className="text-left p-2">Day's Program</th>
             </tr>
           </thead>
@@ -811,21 +828,46 @@ function Step9({ draft, set }: StepProps) {
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
               const ents = entrancesForCity(r.city_id);
+              const fromDefault = i === 0
+                ? draft.departure_city
+                : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
               return (
                 <tr key={i} className="border-t align-top">
                   <td className="p-2 font-semibold">Day {r.day}</td>
-                  <td className="p-2 text-xs">{fmtDateShort(r.date)}</td>
+                  <td className="p-2">
+                    <Input className="h-8 text-xs" value={r.day_name || `Day ${r.day}`}
+                      onChange={(e) => updateRow(i, { day_name: e.target.value })} />
+                  </td>
+                  <td className="p-2 text-xs">
+                    {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
+                  </td>
+                  <td className="p-2">
+                    <Input className="h-8 text-xs" value={r.from_city ?? fromDefault}
+                      onChange={(e) => updateRow(i, { from_city: e.target.value })} />
+                  </td>
                   <td className="p-2">
                     {isLast ? (
-                      <span className="text-xs text-muted-foreground italic">Departure</span>
+                      <Input className="h-8 text-xs" value={r.to_city || "Departure"}
+                        onChange={(e) => updateRow(i, { to_city: e.target.value })} />
                     ) : (
-                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v })}>
+                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
                         <SelectTrigger className="h-8"><SelectValue placeholder="City…" /></SelectTrigger>
                         <SelectContent>
                           {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}
+                  </td>
+                  <td className="p-2">
+                    <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"] })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Road">Road</SelectItem>
+                        <SelectItem value="Train">Train</SelectItem>
+                        <SelectItem value="Flight">Flight</SelectItem>
+                        <SelectItem value="Self Drive">Self Drive</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="p-2 space-y-1">
                     <Textarea rows={2} placeholder="Describe the day's program…"
@@ -880,7 +922,11 @@ function Step10({ draft, set }: StepProps) {
     const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
     return `${o.vehicle_type} (${range})`;
   };
-  const total = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+  const lineTotal = (l: typeof draft.transport[number]) => {
+    if (l.rate_format === "total") return l.total_override ?? 0;
+    return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
+  };
+  const total = draft.transport.reduce((s, l) => s + lineTotal(l), 0);
   const noMatch = opts.length === 0;
   return (
     <div className="space-y-4">
@@ -894,7 +940,7 @@ function Step10({ draft, set }: StepProps) {
         <Button
           size="sm"
           disabled={noMatch}
-          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0 }] })}
+          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0, rate_format: "per_day", reporting_cost: 0 }] })}
         >
           <Plus className="h-3 w-3 mr-1" /> Add Transport
         </Button>
@@ -906,36 +952,67 @@ function Step10({ draft, set }: StepProps) {
       )}
       {!noMatch && draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
       {draft.transport.map((t, i) => {
-        // Ensure the currently-selected vehicle is always shown in its own row,
-        // even if it falls outside the filter (e.g. saved before pax changed).
         const current = d.travel_options.find((x) => x.id === t.travel_id);
         const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
+        const format = t.rate_format ?? "per_day";
+        const patch = (p: Partial<typeof t>) => {
+          const n = [...draft.transport]; n[i] = { ...t, ...p }; set({ transport: n });
+        };
         return (
-        <Card key={t.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
-          <div>
-            <Label className="text-xs">Vehicle</Label>
-            <Select value={t.travel_id} onValueChange={(v) => {
-              const to = rowOpts.find((x) => x.id === v);
-              const next = [...draft.transport];
-              next[i] = { ...t, travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate };
-              set({ transport: next });
-            }}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
-              <SelectContent>
-                {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
-              </SelectContent>
-            </Select>
+        <Card key={t.id} className="p-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_80px_36px] gap-2 items-end">
+            <div>
+              <Label className="text-xs">Vehicle</Label>
+              <Select value={t.travel_id} onValueChange={(v) => {
+                const to = rowOpts.find((x) => x.id === v);
+                patch({ travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate });
+              }}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
+                <SelectContent>
+                  {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Rate Format</Label>
+              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="per_day">Per Day</SelectItem>
+                  <SelectItem value="total">Total Program</SelectItem>
+                  <SelectItem value="prefilled">Pre-filled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
+              onChange={(e) => patch({ vehicles: parseInt(e.target.value) || 1 })} /></div>
+            <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
           </div>
-          <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, vehicles: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
-          <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, days: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
-          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={t.rate || ""} placeholder="Enter rate"
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, rate: parseFloat(e.target.value) || 0 }; set({ transport: n }); }} /></div>
-          <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(t.rate * t.vehicles * t.days)}</div></div>
-          <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+            {format === "total" ? (
+              <div className="md:col-span-2">
+                <Label className="text-xs">Total Program Rate (₹)</Label>
+                <Input type="number" value={t.total_override ?? 0}
+                  onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+              </div>
+            ) : (
+              <>
+                <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
+                  onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
+                <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
+                  onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
+              </>
+            )}
+            <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+              onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+            <div className="text-right"><Label className="text-xs">Line Total</Label>
+              <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+            </div>
+          </div>
+          <Input placeholder="Remarks (optional)" value={t.remarks || ""}
+            onChange={(e) => patch({ remarks: e.target.value })} className="text-xs" />
         </Card>
         );
       })}
@@ -1029,7 +1106,7 @@ function Step12({ draft, set }: StepProps) {
   const toggle = (s: typeof relevant[number]) => {
     const existing = draft.entrances.find((x) => x.site_id === s.id);
     if (existing) set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
-    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate }] });
+    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate, student_pax: 0, student_rate: s.student_rate ?? 0 }] });
   };
 
   return (
@@ -1046,17 +1123,24 @@ function Step12({ draft, set }: StepProps) {
                 <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
                 <div className="flex-1">
                   <div className="text-sm font-medium">{s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span></div>
-                  <div className="text-xs text-muted-foreground">Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
+                    {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
+                  </div>
                 </div>
               </div>
               {on && line && (
-                <div className="mt-2 pl-8 grid grid-cols-4 gap-2 text-xs">
+                <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
                   <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
                     onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, indian_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
                   <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
                     onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, foreign_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div><Label className="text-[10px]">Student Pax</Label><Input type="number" value={line.student_pax ?? 0}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div><Label className="text-[10px]">Student Rate</Label><Input type="number" value={line.student_rate ?? 0}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_rate: parseFloat(e.target.value) || 0 } : x) })} /></div>
                   <div className="col-span-2 text-right font-semibold pt-4">
-                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate)}
+                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate + (line.student_pax ?? 0) * (line.student_rate ?? 0))}
                   </div>
                 </div>
               )}
@@ -1065,7 +1149,7 @@ function Step12({ draft, set }: StepProps) {
         })}
       </div>
       <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
-        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0 }],
+        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0, student_pax: 0, student_rate: 0 }],
       })} />
       {draft.entrances.filter((x) => x.custom_name).map((x) => (
         <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
@@ -2115,11 +2199,23 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
         <div className="space-y-2 text-sm">
           {draft.program_name && (<div><span className="text-muted-foreground text-xs">Tour</span><div className="font-medium">{draft.program_name}</div></div>)}
           <div><span className="text-muted-foreground text-xs">Dates</span>
-            <div>{fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)}</div>
+            <div>
+              {draft.query_type === "Brochure"
+                ? (draft.brochure_validity_from && draft.brochure_validity_till
+                    ? `${fmtDateShort(draft.brochure_validity_from)} – ${fmtDateShort(draft.brochure_validity_till)}`
+                    : "Brochure validity")
+                : draft.has_dates === false
+                  ? "Day 1 → Day " + (draft.nights + 1)
+                  : `${fmtDateShort(draft.start_date)} → ${fmtDateShort(endDate)}`}
+            </div>
             <div className="text-xs text-muted-foreground">{draft.nights}N / {draft.nights + 1}D</div>
           </div>
           <div><span className="text-muted-foreground text-xs">Pax</span>
-            <div>{totalPax(draft)} ({draft.adults}A · {draft.ss}SS · {draft.children.length}C)</div>
+            <div>
+              {draft.query_type === "Brochure"
+                ? `${draft.pax_min}-${draft.pax_max} pax`
+                : `${totalPax(draft)} (${draft.adults}A · ${draft.ss}SS · ${draft.children.length}C)`}
+            </div>
           </div>
           {routingNames && (<div><span className="text-muted-foreground text-xs">Routing</span><div className="text-xs">{routingNames}</div></div>)}
           <div className="pt-2 border-t">
@@ -2128,6 +2224,380 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 3 — Pax + Tour Type (FIT/GIT auto for B2B/B2C, pax-range for Brochure)
+// ============================================================
+function StepPaxType({ draft, set }: StepProps) {
+  const isBrochure = draft.query_type === "Brochure";
+  const totPax = draft.adults + draft.ss + draft.children.length;
+  const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure ? "Brochure" : totPax <= 5 ? "FIT" : "GIT";
+  // Persist auto-detected tour type into the draft (once when it changes)
+  useEffect(() => {
+    if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTourType]);
+
+  if (isBrochure) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-lg font-semibold">Pax Range & Tour Type</h2>
+        <div className="p-3 rounded-lg bg-primary/5 flex items-center gap-2">
+          <Badge className="bg-primary text-primary-foreground">Brochure</Badge>
+          <span className="text-sm">Fixed brochure pricing across a pax range.</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 max-w-md">
+          <div><Label>Min Pax</Label><Input type="number" min={1} value={draft.pax_min ?? 1}
+            onChange={(e) => set({ pax_min: Math.max(1, parseInt(e.target.value) || 1) })} /></div>
+          <div><Label>Max Pax</Label><Input type="number" min={1} value={draft.pax_max ?? 1}
+            onChange={(e) => set({ pax_max: Math.max(1, parseInt(e.target.value) || 1) })} /></div>
+        </div>
+        <p className="text-xs text-muted-foreground max-w-md">
+          Costs for Activities / Guides / Miscellaneous can be entered with per-range prices in later steps.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Pax & Tour Type</h2>
+      <div className="flex items-center gap-3">
+        <Badge className={cn("text-sm px-3 py-1",
+          autoTourType === "FIT" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white")}>
+          {autoTourType}
+        </Badge>
+        <span className="text-sm text-muted-foreground">
+          Auto-detected — 1-5 pax = FIT, 6+ = GIT.
+        </span>
+      </div>
+      <Card className="p-4 space-y-3 max-w-lg">
+        <div className="text-sm font-semibold">Pax</div>
+        <PaxRow label="Adults" value={draft.adults} onChange={(v) => set({ adults: v })} />
+        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={(v) => set({ ss: v })} />
+        <PaxRow label="Children" value={draft.children.length} onChange={(v) => {
+          const cur = draft.children.length;
+          if (v > cur) set({ children: [...draft.children, ...Array(v - cur).fill({ age: 5 })] });
+          else set({ children: draft.children.slice(0, Math.max(0, v)) });
+        }} />
+        {draft.children.map((c, i) => (
+          <div key={i} className="pl-8 flex items-center gap-3">
+            <span className="text-sm">Child {i + 1}: Age</span>
+            <Input type="number" min={0} max={17} value={c.age} className="w-20"
+              onChange={(e) => {
+                const next = [...draft.children];
+                next[i] = { age: parseInt(e.target.value) || 0 };
+                set({ children: next });
+              }} />
+            <span className="text-xs text-muted-foreground">years</span>
+          </div>
+        ))}
+        <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 4 — Departure (Brochure restricted list)
+// ============================================================
+function StepDeparture({ draft, set }: StepProps) {
+  const d = useDB();
+  if (draft.query_type === "Brochure") {
+    return (
+      <div className="space-y-4 max-w-md">
+        <h2 className="text-lg font-semibold">Ex (Departure Point)</h2>
+        <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
+          <SelectTrigger><SelectValue placeholder="Choose Ex point…" /></SelectTrigger>
+          <SelectContent>
+            {BROCHURE_EX_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Brochure ex-points are limited to standard MP gateways.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4 max-w-md">
+      <h2 className="text-lg font-semibold">Guest Travelling From</h2>
+      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
+        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
+        <SelectContent>
+          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 5 — Mode of Travel (with flight/train arrival + departure details)
+// Brochure: skipped
+// ============================================================
+function StepTravel({ draft, set }: StepProps) {
+  const toggle = (id: string) => {
+    const has = draft.travel_modes.includes(id);
+    set({ travel_modes: has ? draft.travel_modes.filter((x) => x !== id) : [...draft.travel_modes, id] });
+  };
+  if (draft.query_type === "Brochure") {
+    return (
+      <div className="space-y-3 max-w-md">
+        <h2 className="text-lg font-semibold">Mode of Travel</h2>
+        <div className="p-4 rounded-lg bg-muted/40 text-sm">
+          Not applicable for Brochure quotations — the packaged program handles internal transport.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Mode of Travel</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {TRAVEL_MODES.map((m) => {
+          const on = draft.travel_modes.includes(m.id);
+          return (
+            <button key={m.id} onClick={() => toggle(m.id)}
+              className={cn(
+                "border-2 rounded-lg p-4 text-center transition",
+                on ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
+              )}>
+              <div className="text-2xl">{m.icon}</div>
+              <div className="text-sm font-medium mt-1">{m.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {draft.travel_modes.includes("flight") && (
+        <Card className="p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">✈ Flight Details</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Class</Label>
+              <Select value={draft.travel_flight_class || ""} onValueChange={(v) => set({ travel_flight_class: v })}>
+                <SelectTrigger><SelectValue placeholder="Economy / Business" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Economy">Economy</SelectItem>
+                  <SelectItem value="Premium Economy">Premium Economy</SelectItem>
+                  <SelectItem value="Business">Business</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Arrival Flight</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Flight No" value={draft.arrival_flight?.flight_no || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), flight_no: e.target.value } })} />
+                <Input placeholder="From City" value={draft.arrival_flight?.from_city || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), from_city: e.target.value } })} />
+                <Input type="date" value={draft.arrival_flight?.date || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.arrival_flight?.time || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), time: e.target.value } })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Departure Flight</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Flight No" value={draft.departure_flight?.flight_no || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), flight_no: e.target.value } })} />
+                <Input placeholder="To City" value={draft.departure_flight?.to_city || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), to_city: e.target.value } })} />
+                <Input type="date" value={draft.departure_flight?.date || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.departure_flight?.time || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), time: e.target.value } })} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {draft.travel_modes.includes("train") && (
+        <Card className="p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">🚂 Train Details</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Class</Label>
+              <Select value={draft.travel_train_class || ""} onValueChange={(v) => set({ travel_train_class: v })}>
+                <SelectTrigger><SelectValue placeholder="AC 1 / 2 / 3 / Sleeper" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AC 1">AC 1</SelectItem>
+                  <SelectItem value="AC 2">AC 2</SelectItem>
+                  <SelectItem value="AC 3">AC 3</SelectItem>
+                  <SelectItem value="Sleeper">Sleeper</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Arrival Train</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Train Name / No" value={draft.arrival_train?.train_name || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), train_name: e.target.value } })} />
+                <Input placeholder="From City" value={draft.arrival_train?.from_city || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), from_city: e.target.value } })} />
+                <Input type="date" value={draft.arrival_train?.date || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.arrival_train?.time || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), time: e.target.value } })} />
+                <Input placeholder="PNR" value={draft.arrival_train?.pnr || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), pnr: e.target.value } })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Departure Train</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Train Name / No" value={draft.departure_train?.train_name || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), train_name: e.target.value } })} />
+                <Input placeholder="To City" value={draft.departure_train?.to_city || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), to_city: e.target.value } })} />
+                <Input type="date" value={draft.departure_train?.date || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.departure_train?.time || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), time: e.target.value } })} />
+                <Input placeholder="PNR" value={draft.departure_train?.pnr || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), pnr: e.target.value } })} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 6 — Duration (with/without dates for B2B/B2C, validity for Brochure)
+// ============================================================
+function StepDuration({ draft, set }: StepProps) {
+  const isBrochure = draft.query_type === "Brochure";
+  const hasDates = draft.has_dates !== false;
+  const endDate = addDaysISO(draft.start_date, draft.nights);
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <h2 className="text-lg font-semibold">Duration</h2>
+      <div className="grid grid-cols-2 gap-3 max-w-md">
+        <div><Label>Nights</Label>
+          <Input type="number" min={1} value={draft.nights}
+            onChange={(e) => set({ nights: Math.max(1, parseInt(e.target.value) || 1) })} />
+        </div>
+        <div><Label>Days</Label><Input value={draft.nights + 1} readOnly className="bg-muted" /></div>
+      </div>
+
+      {isBrochure ? (
+        <Card className="p-4 space-y-3">
+          <div className="text-sm font-semibold">Brochure Validity Period</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Valid From</Label>
+              <Input type="date" value={draft.brochure_validity_from || ""}
+                onChange={(e) => set({ brochure_validity_from: e.target.value })} /></div>
+            <div><Label>Valid Till</Label>
+              <Input type="date" value={draft.brochure_validity_till || ""}
+                onChange={(e) => set({ brochure_validity_till: e.target.value })} /></div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Programs use Day 1, Day 2… labels instead of calendar dates.
+          </p>
+        </Card>
+      ) : (
+        <Card className="p-4 space-y-3">
+          <RadioGroup value={hasDates ? "yes" : "no"} onValueChange={(v) => set({ has_dates: v === "yes" })}>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="yes" id="hd-yes" />
+              <label htmlFor="hd-yes" className="text-sm font-medium cursor-pointer">With Dates</label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="no" id="hd-no" />
+              <label htmlFor="hd-no" className="text-sm font-medium cursor-pointer">Without Dates (Day 1, Day 2…)</label>
+            </div>
+          </RadioGroup>
+          {hasDates && (
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div><Label>Tour Starting Date</Label>
+                <Input type="date" value={draft.start_date}
+                  onChange={(e) => set({ start_date: e.target.value })} /></div>
+              <div><Label>Tour Ending Date</Label>
+                <Input value={fmtDateShort(endDate)} readOnly className="bg-muted" /></div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      <div className="p-4 bg-primary/5 rounded-lg text-center">
+        <div className="text-2xl font-bold text-primary">{draft.nights} Nights / {draft.nights + 1} Days</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 8 — Create Route (Gate) — summary + Generate Routing button
+// ============================================================
+function StepCreateRoute({ draft, set }: StepProps) {
+  const totPax = draft.adults + draft.ss + draft.children.length;
+  const generate = () => {
+    const need = draft.nights + 1;
+    const rows: RoutingDay[] = [];
+    for (let i = 0; i < need; i++) {
+      const existing = draft.routing[i];
+      rows.push(existing || {
+        day: i + 1,
+        date: draft.has_dates === false ? "" : addDaysISO(draft.start_date, i),
+        day_name: `Day ${i + 1}`,
+        city_id: "",
+        program: "",
+        program_mode: "text",
+        overnight: i < need - 1,
+      });
+      rows[i].day = i + 1;
+      rows[i].date = draft.has_dates === false ? "" : addDaysISO(draft.start_date, i);
+      rows[i].day_name = `Day ${i + 1}`;
+      rows[i].overnight = i < need - 1;
+    }
+    set({ routing: rows });
+    toast.success(`Generated ${need} day rows.`);
+  };
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <h2 className="text-lg font-semibold">Ready to Create Routing</h2>
+      <Card className="p-5 space-y-3">
+        <div className="text-sm font-semibold text-muted-foreground uppercase">Summary</div>
+        <div className="grid grid-cols-2 gap-y-2 text-sm">
+          <div className="text-muted-foreground">Query</div><div className="font-medium">{draft.query_type}</div>
+          <div className="text-muted-foreground">Tour Type</div><div className="font-medium">{draft.tour_type || "—"}</div>
+          <div className="text-muted-foreground">Pax</div>
+          <div className="font-medium">
+            {draft.query_type === "Brochure"
+              ? `${draft.pax_min}-${draft.pax_max}`
+              : `${totPax} (${draft.adults}A + ${draft.ss}SS + ${draft.children.length}C)`}
+          </div>
+          <div className="text-muted-foreground">Duration</div><div className="font-medium">{draft.nights}N / {draft.nights + 1}D</div>
+          <div className="text-muted-foreground">Departure</div><div className="font-medium">{draft.departure_city || "—"}</div>
+          <div className="text-muted-foreground">Travel</div>
+          <div className="font-medium">{draft.query_type === "Brochure" ? "N/A" : (draft.travel_modes.join(", ") || "—")}</div>
+          <div className="text-muted-foreground">Program</div><div className="font-medium">{draft.program_name || "—"}</div>
+        </div>
+      </Card>
+      <div className="flex items-center gap-3">
+        <Button onClick={generate} size="lg">
+          <Plus className="h-4 w-4 mr-1.5" /> Generate Routing ({draft.nights + 1} days)
+        </Button>
+        {draft.routing.length > 0 && (
+          <span className="text-sm text-emerald-700">✓ {draft.routing.length} day rows ready</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Click Generate to build the day-by-day routing table, then continue to Step 9 to fill in cities and programs.
+      </p>
     </div>
   );
 }

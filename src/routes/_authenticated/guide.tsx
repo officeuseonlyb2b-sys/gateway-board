@@ -21,11 +21,11 @@ export const Route = createFileRoute("/_authenticated/guide")({
   component: GuidePage,
 });
 
-const TYPES: GuideType[] = ["Local", "Expert", "Specialist"];
+const TYPES: GuideType[] = ["Hindi Guide - Local", "English Guide - Local", "Tour Escort"];
 const TYPE_COLORS: Record<GuideType, string> = {
-  Local: "bg-blue-100 text-blue-800",
-  Expert: "bg-emerald-100 text-emerald-800",
-  Specialist: "bg-amber-100 text-amber-800",
+  "Hindi Guide - Local": "bg-blue-100 text-blue-800",
+  "English Guide - Local": "bg-emerald-100 text-emerald-800",
+  "Tour Escort": "bg-amber-100 text-amber-800",
 };
 
 function GuidePage() {
@@ -94,7 +94,7 @@ function GuidePage() {
 
 function GuideDialog({ open, onOpenChange, editing }: { open: boolean; onOpenChange: (v: boolean) => void; editing: Guide | null }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState<GuideType>("Local");
+  const [type, setType] = useState<GuideType>("Hindi Guide - Local");
   const [destination, setDestination] = useState("");
   const [rate, setRate] = useState<number>(0);
   const [description, setDescription] = useState("");
@@ -103,7 +103,7 @@ function GuideDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCha
   useEffect(() => {
     if (open) {
       setName(editing?.name ?? "");
-      setType(editing?.guide_type ?? "Local");
+      setType(editing?.guide_type ?? "Hindi Guide - Local");
       setDestination(editing?.destination ?? "");
       setRate(editing?.rate_per_day ?? 0);
       setDescription(editing?.description ?? "");

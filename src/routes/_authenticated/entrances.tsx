@@ -158,8 +158,9 @@ function EntrancesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Site Name</TableHead>
-                      <TableHead>Indian Rate (₹/pp)</TableHead>
-                      <TableHead>Foreigner Rate (₹/pp)</TableHead>
+                      <TableHead>Indian (₹/pp)</TableHead>
+                      <TableHead>Foreigner (₹/pp)</TableHead>
+                      <TableHead>Student (₹/pp)</TableHead>
                       <TableHead>Notes</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-24 text-right">Actions</TableHead>
@@ -171,6 +172,7 @@ function EntrancesPage() {
                         <TableCell className="font-medium">{s.site_name}</TableCell>
                         <TableCell className="tabular-nums">{inr(s.indian_rate)}</TableCell>
                         <TableCell className="tabular-nums">{inr(s.foreigner_rate)}</TableCell>
+                        <TableCell className="tabular-nums">{s.student_rate ? inr(s.student_rate) : "—"}</TableCell>
                         <TableCell className="text-muted-foreground text-xs max-w-xs">{s.notes || "—"}</TableCell>
                         <TableCell>
                           <Switch checked={s.is_active} onCheckedChange={(v) => db.updateEntranceSite(s.id, { is_active: v })} />
@@ -243,6 +245,7 @@ function SiteDialog({
   const [name, setName] = useState("");
   const [indianRate, setIndianRate] = useState(0);
   const [foreignerRate, setForeignerRate] = useState(0);
+  const [studentRate, setStudentRate] = useState(0);
   const [notes, setNotes] = useState("");
   const [active, setActive] = useState(true);
 
@@ -251,6 +254,7 @@ function SiteDialog({
       setName(editing?.site_name ?? "");
       setIndianRate(editing?.indian_rate ?? 0);
       setForeignerRate(editing?.foreigner_rate ?? 0);
+      setStudentRate(editing?.student_rate ?? 0);
       setNotes(editing?.notes ?? "");
       setActive(editing?.is_active ?? true);
     }
@@ -261,7 +265,7 @@ function SiteDialog({
     if (!name.trim()) return toast.error("Site name is required.");
     const payload = {
       city_id: cityId, site_name: name.trim(),
-      indian_rate: indianRate, foreigner_rate: foreignerRate,
+      indian_rate: indianRate, foreigner_rate: foreignerRate, student_rate: studentRate,
       notes, is_active: active,
     };
     const cityName = db.get().entrance_cities.find((c) => c.id === cityId)?.name ?? "";
@@ -279,14 +283,18 @@ function SiteDialog({
             <Label>Site Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gwalior Fort" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <Label>Indian Rate / person (₹)</Label>
+              <Label>Indian (₹/pp)</Label>
               <Input type="number" min={0} value={indianRate} onChange={(e) => setIndianRate(+e.target.value || 0)} />
             </div>
             <div>
-              <Label>Foreigner Rate / person (₹)</Label>
+              <Label>Foreigner (₹/pp)</Label>
               <Input type="number" min={0} value={foreignerRate} onChange={(e) => setForeignerRate(+e.target.value || 0)} />
+            </div>
+            <div>
+              <Label>Student (₹/pp)</Label>
+              <Input type="number" min={0} value={studentRate} onChange={(e) => setStudentRate(+e.target.value || 0)} />
             </div>
           </div>
           <div>

@@ -1,80 +1,56 @@
-## Tour Quotation Builder — 18-Step Wizard
+## Wizard Overhaul — Steps 3-14 + New Step 8
 
-Replace the current single-page Final Costing with a multi-step wizard while keeping all other modules untouched. The route stays `/costing` (sidebar label changes to "New Quotation").
+Incremental refactor of `src/routes/_authenticated/costing.tsx` plus supporting stores. I will land this in ordered commits so each change is verifiable in the preview before the next lands.
 
-### Architecture
+### Order of work
 
-```text
-src/routes/_authenticated/costing.tsx      ← wizard shell (progress bar + nav + right summary)
-src/lib/wizard/
-  types.ts                                 ← QuoteDraft type covering all 18 steps
-  store.ts                                 ← useSyncExternalStore-backed draft in localStorage
-                                             key: mp_tourism_draft_quote
-  calc.ts                                  ← cost roll-up per hotel option (rooms + GST + addons + markup + 5% GST)
-  agents-store.ts                          ← mock B2B agents (localStorage)
-  programs-store.ts                        ← mock saved programs (localStorage)
-src/components/wizard/
-  WizardShell.tsx                          ← progress bar, back/next, save-draft, right summary drawer
-  StepProgress.tsx
-  SummarySidebar.tsx
-  steps/
-    Step01_QueryType.tsx      Step02_Identification.tsx
-    Step03_Duration.tsx       Step04_Program.tsx
-    Step05_DatesPax.tsx       Step06_Category.tsx
-    Step07_Departure.tsx      Step08_TravelMode.tsx
-    Step09_Routing.tsx        Step10_Transport.tsx
-    Step11_Activities.tsx     Step12_Entrances.tsx
-    Step13_Guide.tsx          Step14_Miscellaneous.tsx
-    Step15_Accommodation.tsx  Step16_CostingVariations.tsx
-    Step17_FinalCosting.tsx   Step18_Optionals.tsx
-```
+1. **Types + state (`src/lib/wizard/types.ts`)**
+   - Extend `QuoteDraft` with: `tour_type`, `pax_min`, `pax_max`, `has_dates`, `brochure_validity_from/till`, `arrival_flight`, `departure_flight`, `arrival_train`, `departure_train`, entrance `students` fields, activity/guide/misc `pax_ranges`.
+   - Extend `RoutingDay` with `day_name`, `from_city`, `to_city`, `travel_by`. Keep old `city_id` populated as an alias of `to_city` during migration so Step 15 (untouched) keeps working.
+   - Extend `TransportLine` with `rate_format: 'per_day' | 'total' | 'prefilled'`, `reporting_cost`, `total_override`, `remarks`.
+   - Extend `EntranceLine` with `student_pax`, `student_rate`.
+   - `emptyDraft()` defaults for all new fields.
 
-### Step behaviours (concise)
+2. **Progress bar labels** — update `STEP_LABELS` array to the 18 new labels and bump total step count from 18 → 19 (new gate step 8). Steps 9-18 shift by +1 internally but keep their semantics; Step 15 (Hotels) etc. untouched in behavior.
 
-1. **Query Type** — 3 large cards: B2B / B2C / Brochure.
-2. **Identification** — B2B: agent picker + "Add agent"; B2C: guest form; Brochure: tour type + theme + event + period.
-3. **Duration** — nights input; days = nights + 1 (readonly).
-4. **Program** — radio: pre-select saved program (auto-fill routing) or new + program name.
-5. **Dates & Pax** — start date, computed end date; adults / SS / children with per-child age; total auto.
-6. **Category** — multi-select chip tags (min 1).
-7. **Departure** — city (B2B/B2C) or Ex-point text (Brochure).
-8. **Travel Mode** — checkboxes with conditional sub-fields (flight class, train class).
-9. **Routing** — auto-generate N+1 day rows; O/N city dropdown, program text/select toggle; entrance chips suggested by city.
-10. **Transport** — repeatable rows from Travels module; total = rate × vehicles × days.
-11. **Activities** — checkbox list grouped by destination + custom.
-12. **Entrances** — auto-suggest from routing cities + manual; indian/foreigner split.
-13. **Guide** — repeatable rows from Guide module.
-14. **Miscellaneous** — checkbox list with unit-aware qty defaults + custom.
-15. **Accommodation** — up to 4 tabbed options (A–D); per O/N city: hotel/room/meal + rate lookup indicator.
-16. **Costing Variations** — comparison table across options (rooms, GST, add-ons, markup, 5% GST, grand, per-pax SGL/DBL/TRP) + Inclusions/Exclusions editors.
-17. **Final Costing** — clean summary + per-pax comparison; mark one option as recommended.
-18. **Optionals** — un-selected activities/entrances + custom; each with "Add to Quote" that folds into totals; final actions: Save Quote / PDF / Excel / Print.
+3. **Step 3 (Pax + FIT/GIT)** — add auto-badge for B2B/B2C from total pax. For Brochure, swap adults/SS/children UI for `pax_min` / `pax_max` inputs. Persist `tour_type`.
 
-### Shared behaviours
+4. **Step 4 (Departure)** — Brochure-only: relabel + restrict dropdown to the 19 MP cities listed.
 
-- Progress bar: 18 numbered circles with short labels. Completed = navy + check, current = accent orange, future = gray. Click on completed step jumps back.
-- Back / Next buttons at bottom; Next disabled until step's required fields pass a per-step `isValid(draft)` check.
-- Save Draft button (top-right) writes to `mp_tourism_draft_quote`; on `/costing` mount, if a draft exists show a banner "Continue draft from {time}?" with Resume / Discard.
-- Right sidebar (collapsible, visible Step 5+): query type badge, tour name, dates+duration, pax, routing chain, running cost estimate from `calc.ts`.
-- Save at Step 18 pushes a full `SavedQuote` (extended shape) into existing quotes store and clears the draft.
+5. **Step 5 (Travel Mode)** — add conditional Flight/Train arrival + departure detail cards. Brochure shows skip message; Next always enabled.
 
-### Saved Quote extension
+6. **Step 6 (Duration)** — B2B/B2C: With Dates vs Without Dates radio; day-name chips (weekday or "Day N"). Brochure: Validity From/Till + nights/days.
 
-Extend `SavedQuote` with optional fields: `query_type`, `agent`, `guest`, `brochure`, `categories`, `travel_modes`, `hotel_options` (A–D with per-pax totals), `inclusions`, `exclusions`, `optionals`, `recommended_option`. Existing quotes remain valid (all new fields optional). Excel/PDF exports keep working with the current cost sheet; option-comparison sheet is added when `hotel_options` present.
+7. **Step 7 (Program)** — unchanged (already exists as current Step 4). Just reorder in the step map.
 
-### Sidebar
+8. **Step 8 (Create Routing — NEW gate)** — summary card + disabled-until-valid "Generate Day-by-Day Routing" button. On click, seeds the routing rows and advances to Step 9.
 
-Rename `"Final Costing"` → `"New Quotation"` in `src/components/AppSidebar.tsx`; icon and route unchanged.
+9. **Step 9 (Routing table)** — add `Day Name`, `From City`, `To City`, `Travel By` columns. `From City` on Day 1 pulls from `departure_city`; subsequent days auto-fill from prior `to_city` (overridable). Keep existing program text + entrance suggestions. Ensure `city_id` alias stays in sync so Step 15 hotel lookups continue to work.
 
-### Out of scope (unchanged)
+10. **Step 10 (Transport)** — add `Rate Format` radio (Per Day / Total Program / Pre-filled). Compute line total accordingly. Keep pax-based vehicle filter.
 
-Hotels, Travels, Miscellaneous, Entrances, Guide, Activities, Reports, Saved Quotes list, Settings, Dashboard, theme, and localStorage keys used by them.
+11. **Step 11 (Activities)** — Brochure only: pax-range pricing table per activity. Non-brochure unchanged.
 
-### Technical notes
+12. **Step 12 (Entrances)** — add `Students` pax + rate as a third row alongside Indian/Foreigner. Update `/entrances` module to add `student_rate` column and modal field (default 0).
 
-- Draft store uses `useSyncExternalStore` with a cached snapshot (same pattern as `quotes-store.ts`) to avoid the earlier infinite-loop regression.
-- Rate lookup reuses existing hotel `rate_plans` helpers from `mock-store.ts`.
-- GST logic reuses the current rule: 5% if room ≤ ₹7,500, 18% otherwise; final 5% on (net_with_gst + addons + markup).
-- No new npm dependencies; PDF/Excel/Print reuse existing `QuoteDocument` + `quotes-export.ts`, extended to render option comparison when present.
+13. **Step 13 (Guide)** — restrict guide type options to the 3 new strings, update `/guide` module + reseed. Brochure adds pax-range pricing table per guide row.
 
-Shall I build it?
+14. **Step 14 (Misc)** — Brochure only: pax-range pricing table per misc item.
+
+15. **Verification pass** — `tsgo` typecheck after each block; open preview and click through each step for the three query types (B2B, B2C, Brochure). Confirm Step 15/16/17/18 still render and Save Quote + drafts + banner unchanged.
+
+### Backward compatibility
+
+- All new draft fields optional or given safe defaults so existing drafts in `localStorage` continue to load.
+- Old routing rows lacking `from_city`/`to_city` fall back to `city_id` on read.
+- Step 15/16/17/18 code paths not modified beyond reading `to_city ?? city_id`.
+
+### Files touched
+
+- `src/lib/wizard/types.ts` (fields + defaults)
+- `src/routes/_authenticated/costing.tsx` (all step UI + step map + progress labels)
+- `src/routes/_authenticated/entrances.tsx` + `src/lib/mock-store.ts` (student rate column)
+- `src/routes/_authenticated/guide.tsx` + `src/lib/mock-store.ts` (guide-type enum + reseed)
+- `src/lib/wizard/calc.ts` (transport rate format, entrance students, brochure pax-range picks)
+
+Shall I proceed?

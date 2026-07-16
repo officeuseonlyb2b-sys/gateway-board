@@ -27,11 +27,18 @@ function gstRateFor(net: number) {
   return net > 7500 ? 0.18 : 0.05;
 }
 
+export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
+  if (l.rate_format === "total") return l.total_override ?? 0;
+  // "per_day" or "prefilled" or undefined
+  return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
+}
+
 export function computeAddonsTotal(draft: QuoteDraft): number {
-  const t = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+  const t = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
   const a = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
   const e = draft.entrances.reduce(
-    (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate,
+    (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate
+      + (l.student_pax ?? 0) * (l.student_rate ?? 0),
     0,
   );
   const g = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);

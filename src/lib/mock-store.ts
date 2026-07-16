@@ -132,6 +132,7 @@ export interface EntranceSite {
   site_name: string;
   indian_rate: number;
   foreigner_rate: number;
+  student_rate?: number;
   notes?: string;
   is_active: boolean;
   created_at: string;
@@ -155,7 +156,7 @@ export interface Activity {
   created_at: string;
 }
 
-export type GuideType = "Local" | "Expert" | "Specialist";
+export type GuideType = "Hindi Guide - Local" | "English Guide - Local" | "Tour Escort";
 export interface Guide {
   id: string;
   name: string;
@@ -217,7 +218,7 @@ export interface DB {
 }
 
 
-const STORAGE_KEY = "mp-tourism-db-v3";
+const STORAGE_KEY = "mp-tourism-db-v4";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -344,9 +345,9 @@ function seed(): DB {
   ];
 
   const guides: Guide[] = [
-    { id: uid(), name: "Local City Guide", guide_type: "Local", destination: "Any", rate_per_day: 800, description: "Half-day / full-day local city guide", is_active: true, created_at: now() },
-    { id: uid(), name: "Wildlife Expert Guide", guide_type: "Expert", destination: "Kanha/Bandhavgarh", rate_per_day: 1500, description: "Experienced naturalist for jungle safaris", is_active: true, created_at: now() },
-    { id: uid(), name: "Archaeological Specialist", guide_type: "Specialist", destination: "Gwalior/Orchha", rate_per_day: 1200, description: "Heritage & archaeology expert", is_active: true, created_at: now() },
+    { id: uid(), name: "Ravi Sharma", guide_type: "Hindi Guide - Local", destination: "Any", rate_per_day: 1500, description: "Half-day / full-day local city guide (Hindi)", is_active: true, created_at: now() },
+    { id: uid(), name: "Ananya Menon", guide_type: "English Guide - Local", destination: "Kanha/Bandhavgarh", rate_per_day: 2200, description: "English-speaking local guide", is_active: true, created_at: now() },
+    { id: uid(), name: "Suresh Rao", guide_type: "Tour Escort", destination: "Multi-city", rate_per_day: 2500, description: "Tour escort accompanying full circuit", is_active: true, created_at: now() },
   ];
   const travel_options: TravelOption[] = VEHICLE_ALLOCATION.map((v) => ({
     id: uid(),
