@@ -1598,8 +1598,6 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
               <AlertCircle className="h-3.5 w-3.5" /> Some hotels in this option belong to a different category than <b>{option.category}</b>.
             </div>
           )}
-          {false && (
-            <></>
           <div className="mt-2 text-[11px] text-muted-foreground italic">
             Room costs only. Add-ons (transport, guide, activities) are applied in Step 16.
           </div>
