@@ -1593,6 +1593,13 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
               ))}
             </div>
           )}
+          {option.selections.some((s) => s.is_fallback) && (
+            <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5" /> Some hotels in this option belong to a different category than <b>{option.category}</b>.
+            </div>
+          )}
+          {false && (
+            <></>
           <div className="mt-2 text-[11px] text-muted-foreground italic">
             Room costs only. Add-ons (transport, guide, activities) are applied in Step 16.
           </div>
