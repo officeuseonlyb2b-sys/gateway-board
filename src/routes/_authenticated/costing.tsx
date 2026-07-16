@@ -1106,7 +1106,7 @@ function Step12({ draft, set }: StepProps) {
   const toggle = (s: typeof relevant[number]) => {
     const existing = draft.entrances.find((x) => x.site_id === s.id);
     if (existing) set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
-    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate }] });
+    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate, student_pax: 0, student_rate: s.student_rate ?? 0 }] });
   };
 
   return (
@@ -1123,17 +1123,24 @@ function Step12({ draft, set }: StepProps) {
                 <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
                 <div className="flex-1">
                   <div className="text-sm font-medium">{s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span></div>
-                  <div className="text-xs text-muted-foreground">Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
+                    {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
+                  </div>
                 </div>
               </div>
               {on && line && (
-                <div className="mt-2 pl-8 grid grid-cols-4 gap-2 text-xs">
+                <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
                   <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
                     onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, indian_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
                   <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
                     onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, foreign_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div><Label className="text-[10px]">Student Pax</Label><Input type="number" value={line.student_pax ?? 0}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
+                  <div><Label className="text-[10px]">Student Rate</Label><Input type="number" value={line.student_rate ?? 0}
+                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_rate: parseFloat(e.target.value) || 0 } : x) })} /></div>
                   <div className="col-span-2 text-right font-semibold pt-4">
-                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate)}
+                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate + (line.student_pax ?? 0) * (line.student_rate ?? 0))}
                   </div>
                 </div>
               )}
@@ -1142,7 +1149,7 @@ function Step12({ draft, set }: StepProps) {
         })}
       </div>
       <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
-        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0 }],
+        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0, student_pax: 0, student_rate: 0 }],
       })} />
       {draft.entrances.filter((x) => x.custom_name).map((x) => (
         <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
