@@ -1758,39 +1758,8 @@ function Step16({ draft, set }: StepProps) {
       </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="p-4">
-          <div className="section-label mb-2">Inclusions</div>
-          <ul className="space-y-1 mb-2">
-            {draft.inclusions.map((x, i) => (
-              <li key={i} className="text-sm flex justify-between">
-                <span>✓ {x}</span>
-                <button onClick={() => set({ inclusions: draft.inclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive">×</button>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Input value={newInc} onChange={(e) => setNewInc(e.target.value)} placeholder="Add inclusion" />
-            <Button size="sm" onClick={() => { if (newInc) { set({ inclusions: [...draft.inclusions, newInc] }); setNewInc(""); } }}>Add</Button>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="section-label mb-2">Exclusions</div>
-          <ul className="space-y-1 mb-2">
-            {draft.exclusions.map((x, i) => (
-              <li key={i} className="text-sm flex justify-between">
-                <span>✗ {x}</span>
-                <button onClick={() => set({ exclusions: draft.exclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive">×</button>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Input value={newExc} onChange={(e) => setNewExc(e.target.value)} placeholder="Add exclusion" />
-            <Button size="sm" onClick={() => { if (newExc) { set({ exclusions: [...draft.exclusions, newExc] }); setNewExc(""); } }}>Add</Button>
-          </div>
-        </Card>
+      <div className="text-xs text-muted-foreground italic">
+        Inclusions & Exclusions are managed per option in Step 15.
       </div>
     </div>
   );
