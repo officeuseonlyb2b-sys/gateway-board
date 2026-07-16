@@ -1346,6 +1346,10 @@ function Step15({ draft, set }: StepProps) {
               </Card>
             );
           })}
+
+          {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
+            <OptionCostPreview draft={draft} option={activeOption} />
+          )}
         </div>
       )}
 
