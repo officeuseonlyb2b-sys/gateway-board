@@ -1629,8 +1629,6 @@ function Step16({ draft, set }: StepProps) {
     [draft, d, includedKeys.join(",")],
   );
 
-  const [newInc, setNewInc] = useState("");
-  const [newExc, setNewExc] = useState("");
 
   const addonBreakdown = useMemo(() => {
     const transport = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
