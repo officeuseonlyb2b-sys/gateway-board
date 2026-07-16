@@ -2144,3 +2144,377 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
     </div>
   );
 }
+
+// ============================================================
+// NEW STEP 3 — Pax + Tour Type (FIT/GIT auto for B2B/B2C, pax-range for Brochure)
+// ============================================================
+function StepPaxType({ draft, set }: StepProps) {
+  const isBrochure = draft.query_type === "Brochure";
+  const totPax = draft.adults + draft.ss + draft.children.length;
+  const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure ? "Brochure" : totPax <= 5 ? "FIT" : "GIT";
+  // Persist auto-detected tour type into the draft (once when it changes)
+  useEffect(() => {
+    if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTourType]);
+
+  if (isBrochure) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-lg font-semibold">Pax Range & Tour Type</h2>
+        <div className="p-3 rounded-lg bg-primary/5 flex items-center gap-2">
+          <Badge className="bg-primary text-primary-foreground">Brochure</Badge>
+          <span className="text-sm">Fixed brochure pricing across a pax range.</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 max-w-md">
+          <div><Label>Min Pax</Label><Input type="number" min={1} value={draft.pax_min ?? 1}
+            onChange={(e) => set({ pax_min: Math.max(1, parseInt(e.target.value) || 1) })} /></div>
+          <div><Label>Max Pax</Label><Input type="number" min={1} value={draft.pax_max ?? 1}
+            onChange={(e) => set({ pax_max: Math.max(1, parseInt(e.target.value) || 1) })} /></div>
+        </div>
+        <p className="text-xs text-muted-foreground max-w-md">
+          Costs for Activities / Guides / Miscellaneous can be entered with per-range prices in later steps.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Pax & Tour Type</h2>
+      <div className="flex items-center gap-3">
+        <Badge className={cn("text-sm px-3 py-1",
+          autoTourType === "FIT" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white")}>
+          {autoTourType}
+        </Badge>
+        <span className="text-sm text-muted-foreground">
+          Auto-detected — 1-5 pax = FIT, 6+ = GIT.
+        </span>
+      </div>
+      <Card className="p-4 space-y-3 max-w-lg">
+        <div className="text-sm font-semibold">Pax</div>
+        <PaxRow label="Adults" value={draft.adults} onChange={(v) => set({ adults: v })} />
+        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={(v) => set({ ss: v })} />
+        <PaxRow label="Children" value={draft.children.length} onChange={(v) => {
+          const cur = draft.children.length;
+          if (v > cur) set({ children: [...draft.children, ...Array(v - cur).fill({ age: 5 })] });
+          else set({ children: draft.children.slice(0, Math.max(0, v)) });
+        }} />
+        {draft.children.map((c, i) => (
+          <div key={i} className="pl-8 flex items-center gap-3">
+            <span className="text-sm">Child {i + 1}: Age</span>
+            <Input type="number" min={0} max={17} value={c.age} className="w-20"
+              onChange={(e) => {
+                const next = [...draft.children];
+                next[i] = { age: parseInt(e.target.value) || 0 };
+                set({ children: next });
+              }} />
+            <span className="text-xs text-muted-foreground">years</span>
+          </div>
+        ))}
+        <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 4 — Departure (Brochure restricted list)
+// ============================================================
+function StepDeparture({ draft, set }: StepProps) {
+  const d = useDB();
+  if (draft.query_type === "Brochure") {
+    return (
+      <div className="space-y-4 max-w-md">
+        <h2 className="text-lg font-semibold">Ex (Departure Point)</h2>
+        <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
+          <SelectTrigger><SelectValue placeholder="Choose Ex point…" /></SelectTrigger>
+          <SelectContent>
+            {BROCHURE_EX_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Brochure ex-points are limited to standard MP gateways.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4 max-w-md">
+      <h2 className="text-lg font-semibold">Guest Travelling From</h2>
+      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
+        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
+        <SelectContent>
+          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 5 — Mode of Travel (with flight/train arrival + departure details)
+// Brochure: skipped
+// ============================================================
+function StepTravel({ draft, set }: StepProps) {
+  const toggle = (id: string) => {
+    const has = draft.travel_modes.includes(id);
+    set({ travel_modes: has ? draft.travel_modes.filter((x) => x !== id) : [...draft.travel_modes, id] });
+  };
+  if (draft.query_type === "Brochure") {
+    return (
+      <div className="space-y-3 max-w-md">
+        <h2 className="text-lg font-semibold">Mode of Travel</h2>
+        <div className="p-4 rounded-lg bg-muted/40 text-sm">
+          Not applicable for Brochure quotations — the packaged program handles internal transport.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Mode of Travel</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {TRAVEL_MODES.map((m) => {
+          const on = draft.travel_modes.includes(m.id);
+          return (
+            <button key={m.id} onClick={() => toggle(m.id)}
+              className={cn(
+                "border-2 rounded-lg p-4 text-center transition",
+                on ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
+              )}>
+              <div className="text-2xl">{m.icon}</div>
+              <div className="text-sm font-medium mt-1">{m.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {draft.travel_modes.includes("flight") && (
+        <Card className="p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">✈ Flight Details</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Class</Label>
+              <Select value={draft.travel_flight_class || ""} onValueChange={(v) => set({ travel_flight_class: v })}>
+                <SelectTrigger><SelectValue placeholder="Economy / Business" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Economy">Economy</SelectItem>
+                  <SelectItem value="Premium Economy">Premium Economy</SelectItem>
+                  <SelectItem value="Business">Business</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Arrival Flight</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Flight No" value={draft.arrival_flight?.flight_no || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), flight_no: e.target.value } })} />
+                <Input placeholder="From City" value={draft.arrival_flight?.from_city || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), from_city: e.target.value } })} />
+                <Input type="date" value={draft.arrival_flight?.date || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.arrival_flight?.time || ""}
+                  onChange={(e) => set({ arrival_flight: { ...(draft.arrival_flight || {}), time: e.target.value } })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Departure Flight</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Flight No" value={draft.departure_flight?.flight_no || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), flight_no: e.target.value } })} />
+                <Input placeholder="To City" value={draft.departure_flight?.to_city || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), to_city: e.target.value } })} />
+                <Input type="date" value={draft.departure_flight?.date || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.departure_flight?.time || ""}
+                  onChange={(e) => set({ departure_flight: { ...(draft.departure_flight || {}), time: e.target.value } })} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {draft.travel_modes.includes("train") && (
+        <Card className="p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">🚂 Train Details</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Class</Label>
+              <Select value={draft.travel_train_class || ""} onValueChange={(v) => set({ travel_train_class: v })}>
+                <SelectTrigger><SelectValue placeholder="AC 1 / 2 / 3 / Sleeper" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AC 1">AC 1</SelectItem>
+                  <SelectItem value="AC 2">AC 2</SelectItem>
+                  <SelectItem value="AC 3">AC 3</SelectItem>
+                  <SelectItem value="Sleeper">Sleeper</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Arrival Train</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Train Name / No" value={draft.arrival_train?.train_name || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), train_name: e.target.value } })} />
+                <Input placeholder="From City" value={draft.arrival_train?.from_city || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), from_city: e.target.value } })} />
+                <Input type="date" value={draft.arrival_train?.date || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.arrival_train?.time || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), time: e.target.value } })} />
+                <Input placeholder="PNR" value={draft.arrival_train?.pnr || ""}
+                  onChange={(e) => set({ arrival_train: { ...(draft.arrival_train || {}), pnr: e.target.value } })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs uppercase text-muted-foreground">Departure Train</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Train Name / No" value={draft.departure_train?.train_name || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), train_name: e.target.value } })} />
+                <Input placeholder="To City" value={draft.departure_train?.to_city || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), to_city: e.target.value } })} />
+                <Input type="date" value={draft.departure_train?.date || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), date: e.target.value } })} />
+                <Input type="time" value={draft.departure_train?.time || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), time: e.target.value } })} />
+                <Input placeholder="PNR" value={draft.departure_train?.pnr || ""}
+                  onChange={(e) => set({ departure_train: { ...(draft.departure_train || {}), pnr: e.target.value } })} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 6 — Duration (with/without dates for B2B/B2C, validity for Brochure)
+// ============================================================
+function StepDuration({ draft, set }: StepProps) {
+  const isBrochure = draft.query_type === "Brochure";
+  const hasDates = draft.has_dates !== false;
+  const endDate = addDaysISO(draft.start_date, draft.nights);
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <h2 className="text-lg font-semibold">Duration</h2>
+      <div className="grid grid-cols-2 gap-3 max-w-md">
+        <div><Label>Nights</Label>
+          <Input type="number" min={1} value={draft.nights}
+            onChange={(e) => set({ nights: Math.max(1, parseInt(e.target.value) || 1) })} />
+        </div>
+        <div><Label>Days</Label><Input value={draft.nights + 1} readOnly className="bg-muted" /></div>
+      </div>
+
+      {isBrochure ? (
+        <Card className="p-4 space-y-3">
+          <div className="text-sm font-semibold">Brochure Validity Period</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Valid From</Label>
+              <Input type="date" value={draft.brochure_validity_from || ""}
+                onChange={(e) => set({ brochure_validity_from: e.target.value })} /></div>
+            <div><Label>Valid Till</Label>
+              <Input type="date" value={draft.brochure_validity_till || ""}
+                onChange={(e) => set({ brochure_validity_till: e.target.value })} /></div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Programs use Day 1, Day 2… labels instead of calendar dates.
+          </p>
+        </Card>
+      ) : (
+        <Card className="p-4 space-y-3">
+          <RadioGroup value={hasDates ? "yes" : "no"} onValueChange={(v) => set({ has_dates: v === "yes" })}>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="yes" id="hd-yes" />
+              <label htmlFor="hd-yes" className="text-sm font-medium cursor-pointer">With Dates</label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="no" id="hd-no" />
+              <label htmlFor="hd-no" className="text-sm font-medium cursor-pointer">Without Dates (Day 1, Day 2…)</label>
+            </div>
+          </RadioGroup>
+          {hasDates && (
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div><Label>Tour Starting Date</Label>
+                <Input type="date" value={draft.start_date}
+                  onChange={(e) => set({ start_date: e.target.value })} /></div>
+              <div><Label>Tour Ending Date</Label>
+                <Input value={fmtDateShort(endDate)} readOnly className="bg-muted" /></div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      <div className="p-4 bg-primary/5 rounded-lg text-center">
+        <div className="text-2xl font-bold text-primary">{draft.nights} Nights / {draft.nights + 1} Days</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW STEP 8 — Create Route (Gate) — summary + Generate Routing button
+// ============================================================
+function StepCreateRoute({ draft, set }: StepProps) {
+  const totPax = draft.adults + draft.ss + draft.children.length;
+  const generate = () => {
+    const need = draft.nights + 1;
+    const rows: RoutingDay[] = [];
+    for (let i = 0; i < need; i++) {
+      const existing = draft.routing[i];
+      rows.push(existing || {
+        day: i + 1,
+        date: draft.has_dates === false ? "" : addDaysISO(draft.start_date, i),
+        day_name: `Day ${i + 1}`,
+        city_id: "",
+        program: "",
+        program_mode: "text",
+        overnight: i < need - 1,
+      });
+      rows[i].day = i + 1;
+      rows[i].date = draft.has_dates === false ? "" : addDaysISO(draft.start_date, i);
+      rows[i].day_name = `Day ${i + 1}`;
+      rows[i].overnight = i < need - 1;
+    }
+    set({ routing: rows });
+    toast.success(`Generated ${need} day rows.`);
+  };
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <h2 className="text-lg font-semibold">Ready to Create Routing</h2>
+      <Card className="p-5 space-y-3">
+        <div className="text-sm font-semibold text-muted-foreground uppercase">Summary</div>
+        <div className="grid grid-cols-2 gap-y-2 text-sm">
+          <div className="text-muted-foreground">Query</div><div className="font-medium">{draft.query_type}</div>
+          <div className="text-muted-foreground">Tour Type</div><div className="font-medium">{draft.tour_type || "—"}</div>
+          <div className="text-muted-foreground">Pax</div>
+          <div className="font-medium">
+            {draft.query_type === "Brochure"
+              ? `${draft.pax_min}-${draft.pax_max}`
+              : `${totPax} (${draft.adults}A + ${draft.ss}SS + ${draft.children.length}C)`}
+          </div>
+          <div className="text-muted-foreground">Duration</div><div className="font-medium">{draft.nights}N / {draft.nights + 1}D</div>
+          <div className="text-muted-foreground">Departure</div><div className="font-medium">{draft.departure_city || "—"}</div>
+          <div className="text-muted-foreground">Travel</div>
+          <div className="font-medium">{draft.query_type === "Brochure" ? "N/A" : (draft.travel_modes.join(", ") || "—")}</div>
+          <div className="text-muted-foreground">Program</div><div className="font-medium">{draft.program_name || "—"}</div>
+        </div>
+      </Card>
+      <div className="flex items-center gap-3">
+        <Button onClick={generate} size="lg">
+          <Plus className="h-4 w-4 mr-1.5" /> Generate Routing ({draft.nights + 1} days)
+        </Button>
+        {draft.routing.length > 0 && (
+          <span className="text-sm text-emerald-700">✓ {draft.routing.length} day rows ready</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Click Generate to build the day-by-day routing table, then continue to Step 9 to fill in cities and programs.
+      </p>
+    </div>
+  );
+}
