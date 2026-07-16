@@ -807,16 +807,20 @@ function Step9({ draft, set }: StepProps) {
     return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
   };
 
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="text-left p-2 w-14">Day</th>
+              <th className="text-left p-2 w-24">Day Name</th>
               <th className="text-left p-2 w-28">Date</th>
-              <th className="text-left p-2">Overnight City</th>
+              <th className="text-left p-2">From</th>
+              <th className="text-left p-2">To / Overnight</th>
+              <th className="text-left p-2 w-28">Travel By</th>
               <th className="text-left p-2">Day's Program</th>
             </tr>
           </thead>
@@ -824,21 +828,46 @@ function Step9({ draft, set }: StepProps) {
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
               const ents = entrancesForCity(r.city_id);
+              const fromDefault = i === 0
+                ? draft.departure_city
+                : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
               return (
                 <tr key={i} className="border-t align-top">
                   <td className="p-2 font-semibold">Day {r.day}</td>
-                  <td className="p-2 text-xs">{fmtDateShort(r.date)}</td>
+                  <td className="p-2">
+                    <Input className="h-8 text-xs" value={r.day_name || `Day ${r.day}`}
+                      onChange={(e) => updateRow(i, { day_name: e.target.value })} />
+                  </td>
+                  <td className="p-2 text-xs">
+                    {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
+                  </td>
+                  <td className="p-2">
+                    <Input className="h-8 text-xs" value={r.from_city ?? fromDefault}
+                      onChange={(e) => updateRow(i, { from_city: e.target.value })} />
+                  </td>
                   <td className="p-2">
                     {isLast ? (
-                      <span className="text-xs text-muted-foreground italic">Departure</span>
+                      <Input className="h-8 text-xs" value={r.to_city || "Departure"}
+                        onChange={(e) => updateRow(i, { to_city: e.target.value })} />
                     ) : (
-                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v })}>
+                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
                         <SelectTrigger className="h-8"><SelectValue placeholder="City…" /></SelectTrigger>
                         <SelectContent>
                           {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}
+                  </td>
+                  <td className="p-2">
+                    <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"] })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Road">Road</SelectItem>
+                        <SelectItem value="Train">Train</SelectItem>
+                        <SelectItem value="Flight">Flight</SelectItem>
+                        <SelectItem value="Self Drive">Self Drive</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="p-2 space-y-1">
                     <Textarea rows={2} placeholder="Describe the day's program…"
