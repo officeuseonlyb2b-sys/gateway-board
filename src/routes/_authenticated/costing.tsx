@@ -1764,6 +1764,7 @@ function Step18({ draft, set }: StepProps) {
             const q = buildSavedQuote();
             persistQuote(q);
             clearDraft();
+            setActiveWizard(null);
             toast.success(`Quote ${q.quote_number} saved.`);
             addNotification({
               kind: "success", category: "quote_saved",
