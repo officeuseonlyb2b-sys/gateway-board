@@ -158,8 +158,9 @@ function EntrancesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Site Name</TableHead>
-                      <TableHead>Indian Rate (₹/pp)</TableHead>
-                      <TableHead>Foreigner Rate (₹/pp)</TableHead>
+                      <TableHead>Indian (₹/pp)</TableHead>
+                      <TableHead>Foreigner (₹/pp)</TableHead>
+                      <TableHead>Student (₹/pp)</TableHead>
                       <TableHead>Notes</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-24 text-right">Actions</TableHead>
@@ -171,6 +172,7 @@ function EntrancesPage() {
                         <TableCell className="font-medium">{s.site_name}</TableCell>
                         <TableCell className="tabular-nums">{inr(s.indian_rate)}</TableCell>
                         <TableCell className="tabular-nums">{inr(s.foreigner_rate)}</TableCell>
+                        <TableCell className="tabular-nums">{s.student_rate ? inr(s.student_rate) : "—"}</TableCell>
                         <TableCell className="text-muted-foreground text-xs max-w-xs">{s.notes || "—"}</TableCell>
                         <TableCell>
                           <Switch checked={s.is_active} onCheckedChange={(v) => db.updateEntranceSite(s.id, { is_active: v })} />
