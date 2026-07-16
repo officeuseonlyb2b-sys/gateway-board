@@ -287,7 +287,7 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
 }
 
 // ============================================================
-// Validation
+// Validation — matches the reordered 18-step flow
 // ============================================================
 function validate(d: QuoteDraft, step: number): boolean {
   switch (step) {
@@ -297,19 +297,27 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (d.query_type === "B2C") return !!d.guest.name;
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
-    case 3: return d.nights >= 1;
-    case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
-    case 5: return !!d.start_date && (d.adults + d.ss + d.children.length) >= 1;
-    case 6: return d.categories.length >= 1;
-    case 7: return !!d.departure_city;
-    case 8: return d.travel_modes.length >= 1;
-    // Step 9: only overnight days need a city; last (departure) day is auto.
+    case 3: {
+      // Pax + Type
+      if (d.query_type === "Brochure") return (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0);
+      return (d.adults + d.ss + d.children.length) >= 1;
+    }
+    case 4: return !!d.departure_city;
+    case 5: return d.query_type === "Brochure" ? true : d.travel_modes.length >= 1;
+    case 6: {
+      if (d.nights < 1) return false;
+      if (d.query_type === "Brochure") return !!d.brochure_validity_from && !!d.brochure_validity_till;
+      // B2B/B2C: with dates → need start_date; without dates → ok
+      if (d.has_dates === false) return true;
+      return !!d.start_date;
+    }
+    case 7: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
+    case 8: return true; // Create-route gate — always allow (button generates rows)
     case 9: {
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    // Step 15: at least Option A must have a selection for every overnight city.
     case 15: {
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
@@ -317,24 +325,23 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (!A) return false;
       return overnightCities.every((cid) => A.selections.some((s) => s.city_id === cid));
     }
-    // Steps 10–14, 16–18: optional / auto-calculated — never block Next.
     default: return true;
   }
 }
 
 // ============================================================
-// Step router
+// Step router — maps slot → component
 // ============================================================
 function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
   switch (draft.step) {
     case 1: return <Step1 draft={draft} set={set} />;
     case 2: return <Step2 draft={draft} set={set} />;
-    case 3: return <Step3 draft={draft} set={set} />;
-    case 4: return <Step4 draft={draft} set={set} />;
-    case 5: return <Step5 draft={draft} set={set} />;
-    case 6: return <Step6 draft={draft} set={set} />;
-    case 7: return <Step7 draft={draft} set={set} />;
-    case 8: return <Step8 draft={draft} set={set} />;
+    case 3: return <StepPaxType draft={draft} set={set} />;
+    case 4: return <StepDeparture draft={draft} set={set} />;
+    case 5: return <StepTravel draft={draft} set={set} />;
+    case 6: return <StepDuration draft={draft} set={set} />;
+    case 7: return <Step4 draft={draft} set={set} />;
+    case 8: return <StepCreateRoute draft={draft} set={set} />;
     case 9: return <Step9 draft={draft} set={set} />;
     case 10: return <Step10 draft={draft} set={set} />;
     case 11: return <Step11 draft={draft} set={set} />;
