@@ -2199,11 +2199,23 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
         <div className="space-y-2 text-sm">
           {draft.program_name && (<div><span className="text-muted-foreground text-xs">Tour</span><div className="font-medium">{draft.program_name}</div></div>)}
           <div><span className="text-muted-foreground text-xs">Dates</span>
-            <div>{fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)}</div>
+            <div>
+              {draft.query_type === "Brochure"
+                ? (draft.brochure_validity_from && draft.brochure_validity_till
+                    ? `${fmtDateShort(draft.brochure_validity_from)} – ${fmtDateShort(draft.brochure_validity_till)}`
+                    : "Brochure validity")
+                : draft.has_dates === false
+                  ? "Day 1 → Day " + (draft.nights + 1)
+                  : `${fmtDateShort(draft.start_date)} → ${fmtDateShort(endDate)}`}
+            </div>
             <div className="text-xs text-muted-foreground">{draft.nights}N / {draft.nights + 1}D</div>
           </div>
           <div><span className="text-muted-foreground text-xs">Pax</span>
-            <div>{totalPax(draft)} ({draft.adults}A · {draft.ss}SS · {draft.children.length}C)</div>
+            <div>
+              {draft.query_type === "Brochure"
+                ? `${draft.pax_min}-${draft.pax_max} pax`
+                : `${totalPax(draft)} (${draft.adults}A · ${draft.ss}SS · ${draft.children.length}C)`}
+            </div>
           </div>
           {routingNames && (<div><span className="text-muted-foreground text-xs">Routing</span><div className="text-xs">{routingNames}</div></div>)}
           <div className="pt-2 border-t">
