@@ -195,6 +195,7 @@ function WizardPage() {
                 if (currentDraftId) deleteDraft(currentDraftId);
                 setCurrentDraftId(null);
                 clearDraft();
+                setActiveWizard(null);
                 writeDraft(emptyDraft());
               }
             }}>
