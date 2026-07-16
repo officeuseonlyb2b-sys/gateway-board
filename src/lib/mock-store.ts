@@ -132,6 +132,7 @@ export interface EntranceSite {
   site_name: string;
   indian_rate: number;
   foreigner_rate: number;
+  student_rate?: number;
   notes?: string;
   is_active: boolean;
   created_at: string;
