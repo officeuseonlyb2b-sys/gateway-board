@@ -922,7 +922,11 @@ function Step10({ draft, set }: StepProps) {
     const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
     return `${o.vehicle_type} (${range})`;
   };
-  const total = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+  const lineTotal = (l: typeof draft.transport[number]) => {
+    if (l.rate_format === "total") return l.total_override ?? 0;
+    return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
+  };
+  const total = draft.transport.reduce((s, l) => s + lineTotal(l), 0);
   const noMatch = opts.length === 0;
   return (
     <div className="space-y-4">
@@ -936,7 +940,7 @@ function Step10({ draft, set }: StepProps) {
         <Button
           size="sm"
           disabled={noMatch}
-          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0 }] })}
+          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0, rate_format: "per_day", reporting_cost: 0 }] })}
         >
           <Plus className="h-3 w-3 mr-1" /> Add Transport
         </Button>
@@ -948,36 +952,67 @@ function Step10({ draft, set }: StepProps) {
       )}
       {!noMatch && draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
       {draft.transport.map((t, i) => {
-        // Ensure the currently-selected vehicle is always shown in its own row,
-        // even if it falls outside the filter (e.g. saved before pax changed).
         const current = d.travel_options.find((x) => x.id === t.travel_id);
         const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
+        const format = t.rate_format ?? "per_day";
+        const patch = (p: Partial<typeof t>) => {
+          const n = [...draft.transport]; n[i] = { ...t, ...p }; set({ transport: n });
+        };
         return (
-        <Card key={t.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
-          <div>
-            <Label className="text-xs">Vehicle</Label>
-            <Select value={t.travel_id} onValueChange={(v) => {
-              const to = rowOpts.find((x) => x.id === v);
-              const next = [...draft.transport];
-              next[i] = { ...t, travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate };
-              set({ transport: next });
-            }}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
-              <SelectContent>
-                {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
-              </SelectContent>
-            </Select>
+        <Card key={t.id} className="p-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_80px_36px] gap-2 items-end">
+            <div>
+              <Label className="text-xs">Vehicle</Label>
+              <Select value={t.travel_id} onValueChange={(v) => {
+                const to = rowOpts.find((x) => x.id === v);
+                patch({ travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate });
+              }}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
+                <SelectContent>
+                  {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Rate Format</Label>
+              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="per_day">Per Day</SelectItem>
+                  <SelectItem value="total">Total Program</SelectItem>
+                  <SelectItem value="prefilled">Pre-filled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
+              onChange={(e) => patch({ vehicles: parseInt(e.target.value) || 1 })} /></div>
+            <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
           </div>
-          <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, vehicles: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
-          <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, days: parseInt(e.target.value) || 1 }; set({ transport: n }); }} /></div>
-          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={t.rate || ""} placeholder="Enter rate"
-            onChange={(e) => { const n = [...draft.transport]; n[i] = { ...t, rate: parseFloat(e.target.value) || 0 }; set({ transport: n }); }} /></div>
-          <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(t.rate * t.vehicles * t.days)}</div></div>
-          <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+            {format === "total" ? (
+              <div className="md:col-span-2">
+                <Label className="text-xs">Total Program Rate (₹)</Label>
+                <Input type="number" value={t.total_override ?? 0}
+                  onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+              </div>
+            ) : (
+              <>
+                <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
+                  onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
+                <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
+                  onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
+              </>
+            )}
+            <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+              onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+            <div className="text-right"><Label className="text-xs">Line Total</Label>
+              <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+            </div>
+          </div>
+          <Input placeholder="Remarks (optional)" value={t.remarks || ""}
+            onChange={(e) => patch({ remarks: e.target.value })} className="text-xs" />
         </Card>
         );
       })}
