@@ -101,6 +101,19 @@ function WizardPage() {
     setInitialized(true);
   }, [initialized, search.id]);
 
+  // Publish active-wizard metadata whenever the draft moves — so other
+  // pages can show the "Continue Quotation" banner. Cleared on discard/save.
+  useEffect(() => {
+    if (!draft) return;
+    if (draft.step <= 1) { setActiveWizard(null); return; }
+    setActiveWizard({
+      draftId: currentDraftId,
+      programName: draft.program_name || (draft.query_type === "B2B" ? draft.agent.name : draft.query_type === "B2C" ? draft.guest.name : draft.brochure.theme) || "Untitled",
+      step: draft.step,
+      savedAt: draft.updated_at,
+    });
+  }, [draft, currentDraftId]);
+
   if (!draft) {
     return (
       <div className="p-8">
