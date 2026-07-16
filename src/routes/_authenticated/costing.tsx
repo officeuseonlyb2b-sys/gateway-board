@@ -1374,6 +1374,100 @@ function Step15({ draft, set }: StepProps) {
   );
 }
 
+// ------------------------------------------------------------
+// Live cost preview under each Option tab in Step 15.
+// Read-only rooms-only (Net, GST, Net+GST) with per-day warnings.
+// ------------------------------------------------------------
+function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
+  const d = useDB();
+  const [open, setOpen] = useState(true);
+  const overnight = draft.routing.filter((r) => r.overnight && r.city_id);
+  const gstFor = (v: number) => (v > 7500 ? 0.18 : 0.05);
+
+  let sglNet = 0, dblNet = 0, trpNet = 0;
+  let sglGst = 0, dblGst = 0, trpGst = 0;
+  const missingDays: { day: number; city: string }[] = [];
+
+  overnight.forEach((day) => {
+    const sel = option.selections.find((s) => s.city_id === day.city_id);
+    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
+    if (!sel || !sel.room_id) return;
+    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date);
+    if (!plan) { missingDays.push({ day: day.day, city: cityName }); return; }
+    const dbl = plan.double_rate;
+    const sgl = plan.single_rate;
+    const trp = dbl + plan.extra_bed_rate;
+    sglNet += sgl; dblNet += dbl; trpNet += trp;
+    sglGst += sgl * gstFor(sgl);
+    dblGst += dbl * gstFor(dbl);
+    trpGst += trp * gstFor(trp);
+  });
+
+  const sglTotal = sglNet + sglGst;
+  const dblTotal = dblNet + dblGst;
+  const trpTotal = trpNet + trpGst;
+
+  return (
+    <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#F0F4F8" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <div className="text-sm font-semibold text-primary">
+          OPTION {option.key} · {option.category || "—"} — Cost Preview
+        </div>
+        <span className="text-xs text-primary/70">{open ? "▾ Collapse" : "▸ Expand"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="text-left py-1.5 font-medium"></th>
+                <th className="text-right py-1.5 font-medium">SGL</th>
+                <th className="text-right py-1.5 font-medium">DBL</th>
+                <th className="text-right py-1.5 font-medium">TRP</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="py-1">Room Cost (Net)</td>
+                <td className="text-right tabular-nums">{inr(sglNet)}</td>
+                <td className="text-right tabular-nums">{inr(dblNet)}</td>
+                <td className="text-right tabular-nums">{inr(trpNet)}</td>
+              </tr>
+              <tr>
+                <td className="py-1">GST on Rooms</td>
+                <td className="text-right tabular-nums">{inr(sglGst)}</td>
+                <td className="text-right tabular-nums">{inr(dblGst)}</td>
+                <td className="text-right tabular-nums">{inr(trpGst)}</td>
+              </tr>
+              <tr className="border-t font-semibold">
+                <td className="py-1.5">Net with GST</td>
+                <td className="text-right tabular-nums text-primary">{inr(sglTotal)}</td>
+                <td className="text-right tabular-nums text-primary">{inr(dblTotal)}</td>
+                <td className="text-right tabular-nums text-primary">{inr(trpTotal)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {missingDays.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {missingDays.map((m) => (
+                <div key={m.day} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" /> Day {m.day} ({m.city}): No rate matched for selected dates
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 text-[11px] text-muted-foreground italic">
+            Room costs only. Add-ons (transport, guide, activities) are applied in Step 16.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ============================================================
 // STEP 16 — Costing Variations
 // ============================================================
