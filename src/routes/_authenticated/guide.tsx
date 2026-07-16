@@ -94,7 +94,7 @@ function GuidePage() {
 
 function GuideDialog({ open, onOpenChange, editing }: { open: boolean; onOpenChange: (v: boolean) => void; editing: Guide | null }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState<GuideType>("Local");
+  const [type, setType] = useState<GuideType>("Hindi Guide - Local");
   const [destination, setDestination] = useState("");
   const [rate, setRate] = useState<number>(0);
   const [description, setDescription] = useState("");
@@ -103,7 +103,7 @@ function GuideDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCha
   useEffect(() => {
     if (open) {
       setName(editing?.name ?? "");
-      setType(editing?.guide_type ?? "Local");
+      setType(editing?.guide_type ?? "Hindi Guide - Local");
       setDestination(editing?.destination ?? "");
       setRate(editing?.rate_per_day ?? 0);
       setDescription(editing?.description ?? "");
