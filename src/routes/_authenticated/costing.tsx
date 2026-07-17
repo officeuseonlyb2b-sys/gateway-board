@@ -1611,7 +1611,7 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
   const d = useDB();
   const [open, setOpen] = useState(true);
   const overnight = draft.routing.filter((r) => r.overnight && r.city_id);
-  const gstFor = (v: number) => (v > 7500 ? 0.18 : 0.05);
+  const gstFor = gstRateFor;
 
   let sglNet = 0, dblNet = 0, trpNet = 0;
   let sglGst = 0, dblGst = 0, trpGst = 0;
