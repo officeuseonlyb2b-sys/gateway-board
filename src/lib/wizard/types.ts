@@ -43,12 +43,13 @@ export interface RoutingDay {
   city_id: string;          // primary storage — still used by Step 15 hotel lookups
   from_city?: string;       // free-text / city id, day 1 auto from departure_city
   to_city?: string;         // mirror of city_id (kept in sync); "Departure" on last day
-  travel_by?: "Road" | "Train" | "Flight" | "Self Drive";
+  travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
+  travel_by_detail?: string;   // optional free-text: vehicle, flight no, train name
   program: string;
   program_mode: "text" | "select";
   overnight: boolean;
 }
-export type TransportRateFormat = "per_day" | "total" | "prefilled";
+export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
 export interface TransportLine {
   id: string;
   travel_id: string;
@@ -58,6 +59,7 @@ export interface TransportLine {
   rate_format?: TransportRateFormat;
   reporting_cost?: number;
   total_override?: number;   // used when rate_format === "total"
+  per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
   remarks?: string;
 }
 export interface PaxRangePrice {
