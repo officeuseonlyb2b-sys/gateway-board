@@ -1445,6 +1445,9 @@ function Step15({ draft, set }: StepProps) {
                             ))}
                           </SelectContent>
                         </Select>
+                        <div className="text-[10px] text-muted-foreground mt-1">
+                          Looking for {activeCategory} in {cityName || "—"} · {d.hotels.length} total, {cityHotels.length} matching ({allCityHotels.length} in city)
+                        </div>
                       </div>
                       <div>
                         <Label className="text-xs">Room</Label>
