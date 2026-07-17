@@ -1072,12 +1072,13 @@ function Step10({ draft, set }: StepProps) {
             </div>
             <div>
               <Label className="text-xs">Rate Format</Label>
-              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" })}>
+              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" | "per_route" })}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="per_day">Per Day</SelectItem>
                   <SelectItem value="total">Total Program</SelectItem>
                   <SelectItem value="prefilled">Pre-filled</SelectItem>
+                  <SelectItem value="per_route">Per Route / Per Day</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1087,27 +1088,76 @@ function Step10({ draft, set }: StepProps) {
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-            {format === "total" ? (
-              <div className="md:col-span-2">
-                <Label className="text-xs">Total Program Rate (₹)</Label>
-                <Input type="number" value={t.total_override ?? 0}
-                  onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+          {format === "per_route" ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Per-Route Rates (₹ per routing day)</Label>
+              <div className="border rounded-md overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                    <tr>
+                      <th className="text-left p-2 w-16">Day</th>
+                      <th className="text-left p-2">Route</th>
+                      <th className="text-right p-2 w-32">Rate (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.routing.map((r, ri) => {
+                      const fromLabel = r.from_city
+                        || (ri === 0 ? draft.departure_city : (d.cities.find((c) => c.id === draft.routing[ri - 1]?.city_id)?.name || "—"));
+                      const toLabel = d.cities.find((c) => c.id === r.city_id)?.name || r.to_city || "—";
+                      const rateVal = t.per_route_rates?.[ri] ?? 0;
+                      return (
+                        <tr key={ri} className="border-t">
+                          <td className="p-2 font-medium">Day {r.day}</td>
+                          <td className="p-2 text-muted-foreground">
+                            {fromLabel && toLabel && fromLabel !== toLabel ? `${fromLabel} → ${toLabel}` : `${toLabel} Local`}
+                          </td>
+                          <td className="p-2 text-right">
+                            <Input type="number" min={0} className="h-7 text-xs text-right" value={rateVal || ""}
+                              onChange={(e) => {
+                                const next = [...(t.per_route_rates ?? Array(draft.routing.length).fill(0))];
+                                while (next.length < draft.routing.length) next.push(0);
+                                next[ri] = parseFloat(e.target.value) || 0;
+                                patch({ per_route_rates: next.slice(0, draft.routing.length) });
+                              }} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            ) : (
-              <>
-                <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
-                  onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
-                <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
-                  onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
-              </>
-            )}
-            <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
-              onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
-            <div className="text-right"><Label className="text-xs">Line Total</Label>
-              <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-end">
+                <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+                  onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+                <div className="text-right"><Label className="text-xs">Line Total</Label>
+                  <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+              {format === "total" ? (
+                <div className="md:col-span-2">
+                  <Label className="text-xs">Total Program Rate (₹)</Label>
+                  <Input type="number" value={t.total_override ?? 0}
+                    onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+                </div>
+              ) : (
+                <>
+                  <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
+                    onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
+                  <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
+                    onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
+                </>
+              )}
+              <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+                onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+              <div className="text-right"><Label className="text-xs">Line Total</Label>
+                <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+              </div>
+            </div>
+          )}
           <Input placeholder="Remarks (optional)" value={t.remarks || ""}
             onChange={(e) => patch({ remarks: e.target.value })} className="text-xs" />
         </Card>
