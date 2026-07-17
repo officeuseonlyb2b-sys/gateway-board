@@ -216,11 +216,10 @@ function WizardPage() {
 
         <ProgressBar step={step} onJump={go} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 mt-6">
+        <div className="mt-6">
           <Card className="p-6 card-elevated">
             <StepContent draft={draft} set={set} />
           </Card>
-          {step >= 5 && <SummarySidebar draft={draft} />}
         </div>
 
         {/* Nav footer */}
