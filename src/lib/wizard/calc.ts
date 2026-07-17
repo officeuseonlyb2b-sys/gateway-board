@@ -23,7 +23,12 @@ function pickPlan(plans: RatePlan[], room_id: string, meal: string, dateISO: str
   return findRatePlan(plans, room_id, meal, dateISO);
 }
 
-function gstRateFor(net: number) {
+// GST slab per business rule: effective per-room tariff (meal-inclusive,
+// including extra-bed / mandatory hotel supplements) > ₹7,500 → 18%,
+// otherwise 5%. Applied uniformly for SGL / DBL / TRP and every meal plan,
+// so changing meal plan, room, hotel or season auto-reevaluates the slab
+// because the stored rate is already meal-inclusive.
+export function gstRateFor(net: number): number {
   return net > 7500 ? 0.18 : 0.05;
 }
 
