@@ -36,6 +36,38 @@ export interface TravelDetail {
   time?: string;
   pnr?: string;
 }
+export interface DayTransportDetails {
+  // Flight
+  flight_class?: string;
+  airline?: string;
+  flight_number?: string;
+  // Train
+  train_name?: string;
+  train_number?: string;
+  coach_class?: string;
+  boarding_station?: string;
+  destination_station?: string;
+  // Road
+  vehicle_type?: string;
+  vehicle_name?: string;
+  pickup_city?: string;
+  drop_city?: string;
+  reporting_time?: string;
+  // Self Drive
+  vehicle_category?: string;
+  pickup_location?: string;
+  drop_location?: string;
+  pickup_time?: string;
+  return_time?: string;
+  // Common / Flight-Train
+  from_city?: string;
+  to_city?: string;
+  departure_date?: string;
+  departure_time?: string;
+  arrival_date?: string;
+  arrival_time?: string;
+  remarks?: string;
+}
 export interface RoutingDay {
   day: number;
   date: string;
@@ -45,10 +77,13 @@ export interface RoutingDay {
   to_city?: string;         // mirror of city_id (kept in sync); "Departure" on last day
   travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
   travel_by_detail?: string;   // optional free-text: vehicle, flight no, train name
+  transport_details?: DayTransportDetails;  // per-day detailed transport info (see Step 9)
+  transport_expanded?: boolean;             // UI state — remembered so re-entry keeps panel open
   program: string;
   program_mode: "text" | "select";
   overnight: boolean;
 }
+
 export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
 export interface TransportLine {
   id: string;
