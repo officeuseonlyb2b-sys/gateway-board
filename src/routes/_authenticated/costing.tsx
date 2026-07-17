@@ -912,11 +912,14 @@ function Step9({ draft, set }: StepProps) {
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
+              const weekday = draft.has_dates !== false && r.date
+                ? new Date(r.date).toLocaleDateString("en-US", { weekday: "long" })
+                : `Day ${r.day}`;
               return (
                 <tr key={i} className="border-t align-top">
                   <td className="p-2 font-semibold">Day {r.day}</td>
                   <td className="p-2">
-                    <Input className="h-8 text-xs" value={r.day_name || `Day ${r.day}`}
+                    <Input className="h-8 text-xs" value={r.day_name || weekday}
                       onChange={(e) => updateRow(i, { day_name: e.target.value })} />
                   </td>
                   <td className="p-2 text-xs">
@@ -927,19 +930,20 @@ function Step9({ draft, set }: StepProps) {
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    {isLast ? (
-                      <Input className="h-8 text-xs" value={r.to_city || "Departure"}
+                    <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "City…"} /></SelectTrigger>
+                      <SelectContent>
+                        {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {isLast && (
+                      <Input className="h-7 text-[11px] mt-1"
+                        placeholder="or type departure city"
+                        value={r.to_city && !r.city_id ? r.to_city : ""}
                         onChange={(e) => updateRow(i, { to_city: e.target.value })} />
-                    ) : (
-                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
-                        <SelectTrigger className="h-8"><SelectValue placeholder="City…" /></SelectTrigger>
-                        <SelectContent>
-                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
                     )}
                   </td>
-                  <td className="p-2">
+                  <td className="p-2 space-y-1">
                     <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"] })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
                       <SelectContent>
@@ -947,8 +951,23 @@ function Step9({ draft, set }: StepProps) {
                         <SelectItem value="Train">Train</SelectItem>
                         <SelectItem value="Flight">Flight</SelectItem>
                         <SelectItem value="Self Drive">Self Drive</SelectItem>
+                        <SelectItem value="Helicopter">Helicopter</SelectItem>
+                        <SelectItem value="Boat">Boat</SelectItem>
+                        <SelectItem value="Walk">Walk</SelectItem>
+                        <SelectItem value="Custom">Custom</SelectItem>
                       </SelectContent>
                     </Select>
+                    {r.travel_by && (
+                      <Input className="h-7 text-[11px]"
+                        placeholder={
+                          r.travel_by === "Flight" ? "e.g. IndiGo 6E-214"
+                          : r.travel_by === "Train" ? "e.g. Vande Bharat"
+                          : r.travel_by === "Road" || r.travel_by === "Self Drive" ? "e.g. Tempo Traveller"
+                          : "Details (optional)"
+                        }
+                        value={r.travel_by_detail || ""}
+                        onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
+                    )}
                   </td>
                   <td className="p-2 space-y-1">
                     <Textarea rows={2} placeholder="Describe the day's program…"
