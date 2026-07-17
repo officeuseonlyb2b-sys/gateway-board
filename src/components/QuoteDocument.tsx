@@ -87,9 +87,9 @@ export function QuoteDocument({ quote: q }: Props) {
                 </tr>
                 <tr style={{ background: i % 2 ? "#f7f9fa" : "#fff", color: "#888", fontSize: 8 }}>
                   <Td colSpan={6}></Td>
-                  <Td align="right">Net: {inr(d.rates.sgl_net)} + GST {d.rates.sgl_gst_rate}%: {inr(d.rates.sgl_gst_amt)}</Td>
-                  <Td align="right">Net: {inr(d.rates.dbl_net)} + GST {d.rates.dbl_gst_rate}%: {inr(d.rates.dbl_gst_amt)}</Td>
-                  <Td align="right">Net: {inr(d.rates.trp_net)} + GST {d.rates.trp_gst_rate}%: {inr(d.rates.trp_gst_amt)}</Td>
+                  <Td align="right">Net: {inr(d.rates.sgl_net)} + GST {Math.round(d.rates.sgl_gst_rate * 100)}%: {inr(d.rates.sgl_gst_amt)}</Td>
+                  <Td align="right">Net: {inr(d.rates.dbl_net)} + GST {Math.round(d.rates.dbl_gst_rate * 100)}%: {inr(d.rates.dbl_gst_amt)}</Td>
+                  <Td align="right">Net: {inr(d.rates.trp_net)} + GST {Math.round(d.rates.trp_gst_rate * 100)}%: {inr(d.rates.trp_gst_amt)}</Td>
                 </tr>
               </>
             ))}

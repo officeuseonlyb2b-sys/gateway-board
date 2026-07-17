@@ -31,7 +31,7 @@ import type {
 } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
-import { computeOption, computeAddonsTotal, totalPax, type OptionTotals } from "@/lib/wizard/calc";
+import { computeOption, computeAddonsTotal, totalPax, gstRateFor, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
@@ -1611,7 +1611,7 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
   const d = useDB();
   const [open, setOpen] = useState(true);
   const overnight = draft.routing.filter((r) => r.overnight && r.city_id);
-  const gstFor = (v: number) => (v > 7500 ? 0.18 : 0.05);
+  const gstFor = gstRateFor;
 
   let sglNet = 0, dblNet = 0, trpNet = 0;
   let sglGst = 0, dblGst = 0, trpGst = 0;
@@ -2008,7 +2008,7 @@ function Step18({ draft, set }: StepProps) {
       const dbl = plan?.double_rate || 0;
       const sgl = plan?.single_rate || 0;
       const trp = dbl + (plan?.extra_bed_rate || 0);
-      const gr = (v: number) => v > 7500 ? 0.18 : 0.05;
+      const gr = gstRateFor;
       return {
         day_number: day.day, date: day.date, city: cityName,
         hotel_name: hotel?.name || "—", hotel_category: hotel?.hotel_category || "—",
