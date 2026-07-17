@@ -1022,10 +1022,7 @@ function Step10({ draft, set }: StepProps) {
     const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
     return `${o.vehicle_type} (${range})`;
   };
-  const lineTotal = (l: typeof draft.transport[number]) => {
-    if (l.rate_format === "total") return l.total_override ?? 0;
-    return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
-  };
+  const lineTotal = transportLineTotal;
   const total = draft.transport.reduce((s, l) => s + lineTotal(l), 0);
   const noMatch = opts.length === 0;
   return (
