@@ -1785,7 +1785,7 @@ function Step16({ draft, set }: StepProps) {
 
 
   const addonBreakdown = useMemo(() => {
-    const transport = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+    const transport = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
     const activities = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
     const entrances = draft.entrances.reduce(
       (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate, 0);
