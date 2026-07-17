@@ -1369,10 +1369,18 @@ function Step15({ draft, set }: StepProps) {
           )}
 
           {activeCategory && overnightRouting.map((day, i) => {
-            const cityName = d.cities.find((c) => c.id === day.city_id)?.name;
+            const cityName = d.cities.find((c) => c.id === day.city_id)?.name || day.to_city || "";
+            const cityKey = cityName.trim().toLowerCase();
+            const catKey = activeCategory.trim().toLowerCase();
             const sel = activeOption.selections.find((s) => s.city_id === day.city_id);
-            const cityHotels = d.hotels.filter((h) => h.city_id === day.city_id && h.hotel_category === activeCategory);
-            const allCityHotels = d.hotels.filter((h) => h.city_id === day.city_id);
+            const hotelCityName = (h: typeof d.hotels[number]) =>
+              (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase();
+            const allCityHotels = cityKey
+              ? d.hotels.filter((h) => hotelCityName(h) === cityKey)
+              : [];
+            const cityHotels = allCityHotels.filter(
+              (h) => h.hotel_category.trim().toLowerCase() === catKey,
+            );
             const noCategoryMatch = cityHotels.length === 0;
             const hotelPool = noCategoryMatch ? allCityHotels : cityHotels;
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
@@ -1437,6 +1445,9 @@ function Step15({ draft, set }: StepProps) {
                             ))}
                           </SelectContent>
                         </Select>
+                        <div className="text-[10px] text-muted-foreground mt-1">
+                          Looking for {activeCategory} in {cityName || "—"} · {d.hotels.length} total, {cityHotels.length} matching ({allCityHotels.length} in city)
+                        </div>
                       </div>
                       <div>
                         <Label className="text-xs">Room</Label>
