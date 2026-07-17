@@ -1036,7 +1036,99 @@ function Step9({ draft, set }: StepProps) {
   );
 }
 
+// Per-day transport details panel — mirrors the fields available in Step 10 (Transport)
+// per travel mode. Purely UI/data capture; does not affect costing.
+function DayTransportPanel({
+  mode, details, onChange, defaultFrom, defaultTo, defaultDate,
+}: {
+  mode: NonNullable<RoutingDay["travel_by"]>;
+  details: NonNullable<RoutingDay["transport_details"]>;
+  onChange: (patch: Partial<NonNullable<RoutingDay["transport_details"]>>) => void;
+  defaultFrom?: string;
+  defaultTo?: string;
+  defaultDate?: string;
+}) {
+  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="space-y-1">
+      <label className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
+  const cls = "h-8 text-xs";
 
+  if (mode === "Flight") {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <F label="Flight Class"><Input className={cls} value={details.flight_class || ""} onChange={(e) => onChange({ flight_class: e.target.value })} placeholder="Economy / Business" /></F>
+        <F label="Airline"><Input className={cls} value={details.airline || ""} onChange={(e) => onChange({ airline: e.target.value })} placeholder="IndiGo" /></F>
+        <F label="Flight Number"><Input className={cls} value={details.flight_number || ""} onChange={(e) => onChange({ flight_number: e.target.value })} placeholder="6E-214" /></F>
+        <F label="PNR / Ref"><Input className={cls} value={details.remarks || ""} onChange={(e) => onChange({ remarks: e.target.value })} placeholder="Optional" /></F>
+        <F label="From City"><Input className={cls} value={details.from_city ?? defaultFrom ?? ""} onChange={(e) => onChange({ from_city: e.target.value })} /></F>
+        <F label="To City"><Input className={cls} value={details.to_city ?? defaultTo ?? ""} onChange={(e) => onChange({ to_city: e.target.value })} /></F>
+        <F label="Departure Date"><Input type="date" className={cls} value={details.departure_date ?? defaultDate ?? ""} onChange={(e) => onChange({ departure_date: e.target.value })} /></F>
+        <F label="Departure Time"><Input type="time" className={cls} value={details.departure_time || ""} onChange={(e) => onChange({ departure_time: e.target.value })} /></F>
+        <F label="Arrival Date"><Input type="date" className={cls} value={details.arrival_date ?? defaultDate ?? ""} onChange={(e) => onChange({ arrival_date: e.target.value })} /></F>
+        <F label="Arrival Time"><Input type="time" className={cls} value={details.arrival_time || ""} onChange={(e) => onChange({ arrival_time: e.target.value })} /></F>
+      </div>
+    );
+  }
+
+  if (mode === "Train") {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <F label="Train Name"><Input className={cls} value={details.train_name || ""} onChange={(e) => onChange({ train_name: e.target.value })} placeholder="Vande Bharat" /></F>
+        <F label="Train Number"><Input className={cls} value={details.train_number || ""} onChange={(e) => onChange({ train_number: e.target.value })} placeholder="20171" /></F>
+        <F label="Coach / Class"><Input className={cls} value={details.coach_class || ""} onChange={(e) => onChange({ coach_class: e.target.value })} placeholder="CC / 3A / SL" /></F>
+        <F label="Remarks"><Input className={cls} value={details.remarks || ""} onChange={(e) => onChange({ remarks: e.target.value })} /></F>
+        <F label="Boarding Station"><Input className={cls} value={details.boarding_station ?? defaultFrom ?? ""} onChange={(e) => onChange({ boarding_station: e.target.value })} /></F>
+        <F label="Destination Station"><Input className={cls} value={details.destination_station ?? defaultTo ?? ""} onChange={(e) => onChange({ destination_station: e.target.value })} /></F>
+        <F label="Departure Date"><Input type="date" className={cls} value={details.departure_date ?? defaultDate ?? ""} onChange={(e) => onChange({ departure_date: e.target.value })} /></F>
+        <F label="Departure Time"><Input type="time" className={cls} value={details.departure_time || ""} onChange={(e) => onChange({ departure_time: e.target.value })} /></F>
+        <F label="Arrival Date"><Input type="date" className={cls} value={details.arrival_date ?? defaultDate ?? ""} onChange={(e) => onChange({ arrival_date: e.target.value })} /></F>
+        <F label="Arrival Time"><Input type="time" className={cls} value={details.arrival_time || ""} onChange={(e) => onChange({ arrival_time: e.target.value })} /></F>
+      </div>
+    );
+  }
+
+  if (mode === "Road") {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <F label="Vehicle Type"><Input className={cls} value={details.vehicle_type || ""} onChange={(e) => onChange({ vehicle_type: e.target.value })} placeholder="Tempo Traveller" /></F>
+        <F label="Vehicle Name / Model"><Input className={cls} value={details.vehicle_name || ""} onChange={(e) => onChange({ vehicle_name: e.target.value })} placeholder="Innova Crysta" /></F>
+        <F label="Reporting Time"><Input type="time" className={cls} value={details.reporting_time || ""} onChange={(e) => onChange({ reporting_time: e.target.value })} /></F>
+        <F label="Pickup City"><Input className={cls} value={details.pickup_city ?? defaultFrom ?? ""} onChange={(e) => onChange({ pickup_city: e.target.value })} /></F>
+        <F label="Drop City"><Input className={cls} value={details.drop_city ?? defaultTo ?? ""} onChange={(e) => onChange({ drop_city: e.target.value })} /></F>
+        <F label="Remarks"><Input className={cls} value={details.remarks || ""} onChange={(e) => onChange({ remarks: e.target.value })} /></F>
+      </div>
+    );
+  }
+
+  if (mode === "Self Drive") {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <F label="Vehicle Category"><Input className={cls} value={details.vehicle_category || ""} onChange={(e) => onChange({ vehicle_category: e.target.value })} placeholder="SUV / Hatchback" /></F>
+        <F label="Pickup Location"><Input className={cls} value={details.pickup_location ?? defaultFrom ?? ""} onChange={(e) => onChange({ pickup_location: e.target.value })} /></F>
+        <F label="Drop Location"><Input className={cls} value={details.drop_location ?? defaultTo ?? ""} onChange={(e) => onChange({ drop_location: e.target.value })} /></F>
+        <F label="Pickup Time"><Input type="time" className={cls} value={details.pickup_time || ""} onChange={(e) => onChange({ pickup_time: e.target.value })} /></F>
+        <F label="Return Time"><Input type="time" className={cls} value={details.return_time || ""} onChange={(e) => onChange({ return_time: e.target.value })} /></F>
+        <F label="Remarks"><Input className={cls} value={details.remarks || ""} onChange={(e) => onChange({ remarks: e.target.value })} /></F>
+      </div>
+    );
+  }
+
+  // Helicopter / Boat / Walk / Custom — lightweight capture
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <F label="From"><Input className={cls} value={details.from_city ?? defaultFrom ?? ""} onChange={(e) => onChange({ from_city: e.target.value })} /></F>
+      <F label="To"><Input className={cls} value={details.to_city ?? defaultTo ?? ""} onChange={(e) => onChange({ to_city: e.target.value })} /></F>
+      <F label="Departure Time"><Input type="time" className={cls} value={details.departure_time || ""} onChange={(e) => onChange({ departure_time: e.target.value })} /></F>
+      <F label="Arrival Time"><Input type="time" className={cls} value={details.arrival_time || ""} onChange={(e) => onChange({ arrival_time: e.target.value })} /></F>
+      <div className="md:col-span-4">
+        <F label="Remarks"><Input className={cls} value={details.remarks || ""} onChange={(e) => onChange({ remarks: e.target.value })} /></F>
+      </div>
+    </div>
+  );
+}
 
 
 // ============================================================
