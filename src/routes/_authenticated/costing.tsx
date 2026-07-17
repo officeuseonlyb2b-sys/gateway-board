@@ -30,7 +30,7 @@ import type {
   QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
 } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
-import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
+import { useAgents, usePrograms, getAgent, type Agent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, gstRateFor, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
