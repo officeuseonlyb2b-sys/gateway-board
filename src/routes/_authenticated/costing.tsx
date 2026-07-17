@@ -31,7 +31,7 @@ import type {
 } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, type Agent } from "@/lib/wizard/agents-store";
-import { computeOption, computeAddonsTotal, totalPax, gstRateFor, type OptionTotals } from "@/lib/wizard/calc";
+import { computeOption, computeAddonsTotal, totalPax, gstRateFor, transportLineTotal, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
@@ -76,6 +76,29 @@ const TRAVEL_MODES = [
   { id: "car", label: "Car", icon: "🚗" },
   { id: "self", label: "Self Drive", icon: "🏍" },
 ];
+
+/** Major Indian cities available for "Guest Travelling From" */
+const INDIAN_CITIES = [
+  "Agra", "Ahmedabad", "Ajmer", "Amritsar", "Aurangabad", "Bengaluru", "Bhopal",
+  "Bhubaneswar", "Chandigarh", "Chennai", "Coimbatore", "Dehradun", "Delhi",
+  "Gangtok", "Goa", "Guwahati", "Gwalior", "Hyderabad", "Indore", "Jabalpur",
+  "Jaipur", "Jaisalmer", "Jammu", "Jodhpur", "Kanpur", "Khajuraho", "Kochi",
+  "Kolkata", "Leh", "Lucknow", "Ludhiana", "Madurai", "Mangalore", "Mumbai",
+  "Mysuru", "Nagpur", "Nashik", "Patna", "Puducherry", "Pune", "Raipur",
+  "Ranchi", "Rishikesh", "Shimla", "Siliguri", "Srinagar", "Surat", "Thiruvananthapuram",
+  "Tiruchirappalli", "Udaipur", "Ujjain", "Vadodara", "Varanasi", "Vijayawada",
+  "Visakhapatnam",
+].sort();
+
+const INTERNATIONAL_CITIES = [
+  "Abu Dhabi", "Amsterdam", "Auckland", "Bangkok", "Barcelona", "Beijing",
+  "Berlin", "Cape Town", "Colombo", "Dhaka", "Doha", "Dubai", "Frankfurt",
+  "Hong Kong", "Istanbul", "Jakarta", "Johannesburg", "Kathmandu", "Kuala Lumpur",
+  "Kuwait City", "London", "Los Angeles", "Male", "Manila", "Melbourne",
+  "Moscow", "Muscat", "New York", "Paris", "Riyadh", "Rome", "San Francisco",
+  "Seoul", "Shanghai", "Singapore", "Sydney", "Tokyo", "Toronto", "Vancouver",
+  "Vienna", "Zurich",
+].sort();
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
@@ -216,11 +239,10 @@ function WizardPage() {
 
         <ProgressBar step={step} onJump={go} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 mt-6">
+        <div className="mt-6">
           <Card className="p-6 card-elevated">
             <StepContent draft={draft} set={set} />
           </Card>
-          {step >= 5 && <SummarySidebar draft={draft} />}
         </div>
 
         {/* Nav footer */}
@@ -890,11 +912,14 @@ function Step9({ draft, set }: StepProps) {
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
+              const weekday = draft.has_dates !== false && r.date
+                ? new Date(r.date).toLocaleDateString("en-US", { weekday: "long" })
+                : `Day ${r.day}`;
               return (
                 <tr key={i} className="border-t align-top">
                   <td className="p-2 font-semibold">Day {r.day}</td>
                   <td className="p-2">
-                    <Input className="h-8 text-xs" value={r.day_name || `Day ${r.day}`}
+                    <Input className="h-8 text-xs" value={r.day_name || weekday}
                       onChange={(e) => updateRow(i, { day_name: e.target.value })} />
                   </td>
                   <td className="p-2 text-xs">
@@ -905,19 +930,20 @@ function Step9({ draft, set }: StepProps) {
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    {isLast ? (
-                      <Input className="h-8 text-xs" value={r.to_city || "Departure"}
+                    <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "City…"} /></SelectTrigger>
+                      <SelectContent>
+                        {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {isLast && (
+                      <Input className="h-7 text-[11px] mt-1"
+                        placeholder="or type departure city"
+                        value={r.to_city && !r.city_id ? r.to_city : ""}
                         onChange={(e) => updateRow(i, { to_city: e.target.value })} />
-                    ) : (
-                      <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
-                        <SelectTrigger className="h-8"><SelectValue placeholder="City…" /></SelectTrigger>
-                        <SelectContent>
-                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
                     )}
                   </td>
-                  <td className="p-2">
+                  <td className="p-2 space-y-1">
                     <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"] })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
                       <SelectContent>
@@ -925,8 +951,23 @@ function Step9({ draft, set }: StepProps) {
                         <SelectItem value="Train">Train</SelectItem>
                         <SelectItem value="Flight">Flight</SelectItem>
                         <SelectItem value="Self Drive">Self Drive</SelectItem>
+                        <SelectItem value="Helicopter">Helicopter</SelectItem>
+                        <SelectItem value="Boat">Boat</SelectItem>
+                        <SelectItem value="Walk">Walk</SelectItem>
+                        <SelectItem value="Custom">Custom</SelectItem>
                       </SelectContent>
                     </Select>
+                    {r.travel_by && (
+                      <Input className="h-7 text-[11px]"
+                        placeholder={
+                          r.travel_by === "Flight" ? "e.g. IndiGo 6E-214"
+                          : r.travel_by === "Train" ? "e.g. Vande Bharat"
+                          : r.travel_by === "Road" || r.travel_by === "Self Drive" ? "e.g. Tempo Traveller"
+                          : "Details (optional)"
+                        }
+                        value={r.travel_by_detail || ""}
+                        onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
+                    )}
                   </td>
                   <td className="p-2 space-y-1">
                     <Textarea rows={2} placeholder="Describe the day's program…"
@@ -981,10 +1022,7 @@ function Step10({ draft, set }: StepProps) {
     const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
     return `${o.vehicle_type} (${range})`;
   };
-  const lineTotal = (l: typeof draft.transport[number]) => {
-    if (l.rate_format === "total") return l.total_override ?? 0;
-    return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
-  };
+  const lineTotal = transportLineTotal;
   const total = draft.transport.reduce((s, l) => s + lineTotal(l), 0);
   const noMatch = opts.length === 0;
   return (
@@ -1034,12 +1072,13 @@ function Step10({ draft, set }: StepProps) {
             </div>
             <div>
               <Label className="text-xs">Rate Format</Label>
-              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" })}>
+              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" | "per_route" })}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="per_day">Per Day</SelectItem>
                   <SelectItem value="total">Total Program</SelectItem>
                   <SelectItem value="prefilled">Pre-filled</SelectItem>
+                  <SelectItem value="per_route">Per Route / Per Day</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1049,27 +1088,76 @@ function Step10({ draft, set }: StepProps) {
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-            {format === "total" ? (
-              <div className="md:col-span-2">
-                <Label className="text-xs">Total Program Rate (₹)</Label>
-                <Input type="number" value={t.total_override ?? 0}
-                  onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+          {format === "per_route" ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Per-Route Rates (₹ per routing day)</Label>
+              <div className="border rounded-md overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                    <tr>
+                      <th className="text-left p-2 w-16">Day</th>
+                      <th className="text-left p-2">Route</th>
+                      <th className="text-right p-2 w-32">Rate (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.routing.map((r, ri) => {
+                      const fromLabel = r.from_city
+                        || (ri === 0 ? draft.departure_city : (d.cities.find((c) => c.id === draft.routing[ri - 1]?.city_id)?.name || "—"));
+                      const toLabel = d.cities.find((c) => c.id === r.city_id)?.name || r.to_city || "—";
+                      const rateVal = t.per_route_rates?.[ri] ?? 0;
+                      return (
+                        <tr key={ri} className="border-t">
+                          <td className="p-2 font-medium">Day {r.day}</td>
+                          <td className="p-2 text-muted-foreground">
+                            {fromLabel && toLabel && fromLabel !== toLabel ? `${fromLabel} → ${toLabel}` : `${toLabel} Local`}
+                          </td>
+                          <td className="p-2 text-right">
+                            <Input type="number" min={0} className="h-7 text-xs text-right" value={rateVal || ""}
+                              onChange={(e) => {
+                                const next = [...(t.per_route_rates ?? Array(draft.routing.length).fill(0))];
+                                while (next.length < draft.routing.length) next.push(0);
+                                next[ri] = parseFloat(e.target.value) || 0;
+                                patch({ per_route_rates: next.slice(0, draft.routing.length) });
+                              }} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            ) : (
-              <>
-                <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
-                  onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
-                <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
-                  onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
-              </>
-            )}
-            <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
-              onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
-            <div className="text-right"><Label className="text-xs">Line Total</Label>
-              <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-end">
+                <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+                  onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+                <div className="text-right"><Label className="text-xs">Line Total</Label>
+                  <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+              {format === "total" ? (
+                <div className="md:col-span-2">
+                  <Label className="text-xs">Total Program Rate (₹)</Label>
+                  <Input type="number" value={t.total_override ?? 0}
+                    onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
+                </div>
+              ) : (
+                <>
+                  <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
+                    onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
+                  <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
+                    onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
+                </>
+              )}
+              <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
+                onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
+              <div className="text-right"><Label className="text-xs">Line Total</Label>
+                <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
+              </div>
+            </div>
+          )}
           <Input placeholder="Remarks (optional)" value={t.remarks || ""}
             onChange={(e) => patch({ remarks: e.target.value })} className="text-xs" />
         </Card>
@@ -1785,7 +1873,7 @@ function Step16({ draft, set }: StepProps) {
 
 
   const addonBreakdown = useMemo(() => {
-    const transport = draft.transport.reduce((s, l) => s + l.rate * l.vehicles * l.days, 0);
+    const transport = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
     const activities = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
     const entrances = draft.entrances.reduce(
       (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate, 0);
@@ -2375,7 +2463,6 @@ function StepPaxType({ draft, set }: StepProps) {
 // NEW STEP 4 — Departure (Brochure restricted list)
 // ============================================================
 function StepDeparture({ draft, set }: StepProps) {
-  const d = useDB();
   if (draft.query_type === "Brochure") {
     return (
       <div className="space-y-4 max-w-md">
@@ -2393,13 +2480,64 @@ function StepDeparture({ draft, set }: StepProps) {
   return (
     <div className="space-y-4 max-w-md">
       <h2 className="text-lg font-semibold">Guest Travelling From</h2>
-      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
-        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
-        <SelectContent>
-          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <CityCombobox
+        value={draft.departure_city}
+        onChange={(v) => set({ departure_city: v })}
+      />
+      <p className="text-xs text-muted-foreground">
+        Search Indian cities or pick from Other Countries. Existing typed values are preserved.
+      </p>
     </div>
+  );
+}
+
+function CityCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const d = useDB();
+  const [open, setOpen] = useState(false);
+
+  // Merge db cities + curated Indian list, dedupe (case-insensitive), sort.
+  const indian = useMemo(() => {
+    const set = new Map<string, string>();
+    [...INDIAN_CITIES, ...d.cities.map((c) => c.name)].forEach((n) => {
+      if (n) set.set(n.toLowerCase(), n);
+    });
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+  }, [d.cities]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open}
+          className="w-full justify-between font-normal">
+          {value || <span className="text-muted-foreground">Search city…</span>}
+          <ChevronRight className="h-4 w-4 opacity-50 rotate-90" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+        <Command>
+          <CommandInput placeholder="Type to search city…" />
+          <CommandList>
+            <CommandEmpty>No city found.</CommandEmpty>
+            <CommandGroup heading="Indian Cities">
+              {indian.map((c) => (
+                <CommandItem key={`in-${c}`} value={c} onSelect={() => { onChange(c); setOpen(false); }}>
+                  <Check className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")} />
+                  {c}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandGroup heading="Other Countries">
+              {INTERNATIONAL_CITIES.map((c) => (
+                <CommandItem key={`int-${c}`} value={c} onSelect={() => { onChange(c); setOpen(false); }}>
+                  <Check className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")} />
+                  {c}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
