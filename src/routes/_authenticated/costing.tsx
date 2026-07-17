@@ -1285,7 +1285,7 @@ function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
   const [quickAdd, setQuickAdd] = useState<{ cityId: string; cityName: string } | null>(null);
-  const overnightRouting = draft.routing.filter((r) => r.overnight && r.city_id);
+  const overnightRouting = draft.routing.filter((r) => r.overnight && (r.city_id || r.to_city));
 
   const addOption = () => {
     const existing = draft.hotel_options.map((o) => o.key);
