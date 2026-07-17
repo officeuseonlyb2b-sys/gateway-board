@@ -38,6 +38,9 @@ import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/l
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
+import { AgentFormDialog } from "@/components/AgentFormDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
