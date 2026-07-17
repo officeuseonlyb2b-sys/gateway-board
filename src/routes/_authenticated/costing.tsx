@@ -916,6 +916,7 @@ function Step9({ draft, set }: StepProps) {
                 ? new Date(r.date).toLocaleDateString("en-US", { weekday: "long" })
                 : `Day ${r.day}`;
               return (
+                <>
                 <tr key={i} className="border-t align-top">
                   <td className="p-2 font-semibold">Day {r.day}</td>
                   <td className="p-2">
@@ -944,19 +945,33 @@ function Step9({ draft, set }: StepProps) {
                     )}
                   </td>
                   <td className="p-2 space-y-1">
-                    <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"] })}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Road">Road</SelectItem>
-                        <SelectItem value="Train">Train</SelectItem>
-                        <SelectItem value="Flight">Flight</SelectItem>
-                        <SelectItem value="Self Drive">Self Drive</SelectItem>
-                        <SelectItem value="Helicopter">Helicopter</SelectItem>
-                        <SelectItem value="Boat">Boat</SelectItem>
-                        <SelectItem value="Walk">Walk</SelectItem>
-                        <SelectItem value="Custom">Custom</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="flex gap-1">
+                      <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"], transport_expanded: true })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Road">Road</SelectItem>
+                          <SelectItem value="Train">Train</SelectItem>
+                          <SelectItem value="Flight">Flight</SelectItem>
+                          <SelectItem value="Self Drive">Self Drive</SelectItem>
+                          <SelectItem value="Helicopter">Helicopter</SelectItem>
+                          <SelectItem value="Boat">Boat</SelectItem>
+                          <SelectItem value="Walk">Walk</SelectItem>
+                          <SelectItem value="Custom">Custom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {r.travel_by && (
+                        <button
+                          type="button"
+                          title={r.transport_expanded ? "Hide details" : "Show details"}
+                          onClick={() => updateRow(i, { transport_expanded: !r.transport_expanded })}
+                          className="h-8 w-8 shrink-0 flex items-center justify-center rounded-md border hover:bg-muted"
+                        >
+                          {r.transport_expanded
+                            ? <ChevronDown className="h-3.5 w-3.5" />
+                            : <ChevronRight className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+                    </div>
                     {r.travel_by && (
                       <Input className="h-7 text-[11px]"
                         placeholder={
@@ -995,14 +1010,24 @@ function Step9({ draft, set }: StepProps) {
                     )}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+                {r.travel_by && r.transport_expanded && (
+                  <tr key={`${i}-details`} className="border-t bg-muted/20">
+                    <td colSpan={7} className="p-3">
+                      <DayTransportPanel
+                        mode={r.travel_by}
+                        details={r.transport_details || {}}
+                        onChange={(patch) =>
+                          updateRow(i, { transport_details: { ...(r.transport_details || {}), ...patch } })
+                        }
+                        defaultFrom={r.from_city ?? fromDefault}
+                        defaultTo={cityName(r.city_id) || r.to_city || ""}
+                        defaultDate={r.date}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </>
+
 
 // ============================================================
 // STEP 10 — Transport
