@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
   Calculator, FileText, BarChart2, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
-  FolderClock, Bell,
+  FolderClock, Bell, Users,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,7 @@ const SECTIONS: Item[][] = [
     { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
     { label: "Entrances", to: "/entrances", icon: Landmark },
     { label: "Guide", to: "/guide", icon: UserCheck },
+    { label: "Agents", to: "/agents", icon: Users },
     { label: "Activity & Experience", to: "/activities", icon: Compass },
   ],
   [

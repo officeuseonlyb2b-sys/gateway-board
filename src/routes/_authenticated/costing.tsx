@@ -30,7 +30,7 @@ import type {
   QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
 } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
-import { useAgents, usePrograms, addAgent } from "@/lib/wizard/agents-store";
+import { useAgents, usePrograms, type Agent } from "@/lib/wizard/agents-store";
 import { computeOption, computeAddonsTotal, totalPax, gstRateFor, type OptionTotals } from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
@@ -38,6 +38,9 @@ import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/l
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
+import { AgentFormDialog } from "@/components/AgentFormDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
@@ -398,54 +401,110 @@ function Step1({ draft, set }: StepProps) {
 // ============================================================
 function Step2({ draft, set }: StepProps) {
   const agents = useAgents();
-  const [showNew, setShowNew] = useState(false);
-  const [nAgent, setNAgent] = useState({ name: "", agency: "", phone: "", email: "" });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+
+  // Keep draft in sync when the selected agent's master record changes.
+  useEffect(() => {
+    const id = draft.agent.agent_id;
+    if (!id) return;
+    const a = agents.find((x) => x.id === id);
+    if (!a) return;
+    if (
+      a.name !== draft.agent.name ||
+      a.agency !== draft.agent.agency ||
+      a.phone !== draft.agent.phone ||
+      a.email !== draft.agent.email
+    ) {
+      set({ agent: { agent_id: a.id, name: a.name, agency: a.agency, phone: a.phone, email: a.email } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents]);
+
+  const applyAgent = (a: Agent) => {
+    set({ agent: { agent_id: a.id, name: a.name, agency: a.agency, phone: a.phone, email: a.email } });
+    setEditMode(false);
+  };
 
   if (draft.query_type === "B2B") {
+    const selected = draft.agent.agent_id ? agents.find((a) => a.id === draft.agent.agent_id) : undefined;
     return (
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">Agent Details</h2>
         <div>
           <Label>Select Agent</Label>
-          <Select value={draft.agent.agent_id || ""} onValueChange={(id) => {
-            const a = agents.find((x) => x.id === id);
-            if (a) set({ agent: { agent_id: a.id, name: a.name, agency: a.agency, phone: a.phone, email: a.email } });
-          }}>
-            <SelectTrigger><SelectValue placeholder="Choose agent…" /></SelectTrigger>
-            <SelectContent>
-              {agents.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} — {a.agency}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2">
+            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" className="flex-1 justify-between font-normal">
+                  {selected ? `${selected.name} — ${selected.agency}` : draft.agent.name ? `${draft.agent.name}${draft.agent.agency ? " — " + draft.agent.agency : ""}` : "Search agent by name, agency, mobile, email…"}
+                  <ChevronRight className="h-4 w-4 opacity-50 rotate-90" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+                <Command
+                  filter={(value, search) => {
+                    // value is the id; look up the agent and match against its searchable fields
+                    const a = agents.find((x) => x.id === value);
+                    if (!a) return 0;
+                    const hay = [a.name, a.agency, a.phone, a.email, a.city].filter(Boolean).join(" ").toLowerCase();
+                    return hay.includes(search.toLowerCase()) ? 1 : 0;
+                  }}
+                >
+                  <CommandInput placeholder="Search agents…" />
+                  <CommandList>
+                    <CommandEmpty>No agents found.</CommandEmpty>
+                    <CommandGroup>
+                      {agents.map((a) => (
+                        <CommandItem key={a.id} value={a.id} onSelect={() => { applyAgent(a); setPickerOpen(false); }}>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{a.name} <span className="text-muted-foreground font-normal">— {a.agency}</span></span>
+                            <span className="text-xs text-muted-foreground">{[a.phone, a.email, a.city].filter(Boolean).join(" · ")}</span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" onClick={() => { setEditingAgent(null); setFormOpen(true); }}>
+              <Plus className="h-4 w-4 mr-1" /> Add New
+            </Button>
+            {selected && (
+              <Button variant="outline" onClick={() => { setEditingAgent(selected); setFormOpen(true); }}>
+                Edit
+              </Button>
+            )}
+          </div>
         </div>
+
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>Agent Name</Label><Input value={draft.agent.name} onChange={(e) => set({ agent: { ...draft.agent, name: e.target.value } })} /></div>
-          <div><Label>Agency Name</Label><Input value={draft.agent.agency} onChange={(e) => set({ agent: { ...draft.agent, agency: e.target.value } })} /></div>
-          <div><Label>Phone</Label><Input value={draft.agent.phone} onChange={(e) => set({ agent: { ...draft.agent, phone: e.target.value } })} /></div>
-          <div><Label>Email</Label><Input value={draft.agent.email} onChange={(e) => set({ agent: { ...draft.agent, email: e.target.value } })} /></div>
+          <div><Label>Agent Name</Label><Input readOnly={!!selected && !editMode} value={draft.agent.name} onChange={(e) => set({ agent: { ...draft.agent, name: e.target.value } })} /></div>
+          <div><Label>Agency Name</Label><Input readOnly={!!selected && !editMode} value={draft.agent.agency} onChange={(e) => set({ agent: { ...draft.agent, agency: e.target.value } })} /></div>
+          <div><Label>Phone</Label><Input readOnly={!!selected && !editMode} value={draft.agent.phone} onChange={(e) => set({ agent: { ...draft.agent, phone: e.target.value } })} /></div>
+          <div><Label>Email</Label><Input readOnly={!!selected && !editMode} value={draft.agent.email} onChange={(e) => set({ agent: { ...draft.agent, email: e.target.value } })} /></div>
         </div>
-        {!showNew ? (
-          <Button variant="outline" size="sm" onClick={() => setShowNew(true)}><Plus className="h-3 w-3 mr-1" /> Add New Agent</Button>
-        ) : (
-          <Card className="p-4 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <Input placeholder="Name" value={nAgent.name} onChange={(e) => setNAgent({ ...nAgent, name: e.target.value })} />
-              <Input placeholder="Agency" value={nAgent.agency} onChange={(e) => setNAgent({ ...nAgent, agency: e.target.value })} />
-              <Input placeholder="Phone" value={nAgent.phone} onChange={(e) => setNAgent({ ...nAgent, phone: e.target.value })} />
-              <Input placeholder="Email" value={nAgent.email} onChange={(e) => setNAgent({ ...nAgent, email: e.target.value })} />
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => {
-                if (!nAgent.name) { toast.error("Agent name required"); return; }
-                const a = addAgent(nAgent);
-                set({ agent: { agent_id: a.id, ...nAgent } });
-                setNAgent({ name: "", agency: "", phone: "", email: "" });
-                setShowNew(false);
-                toast.success("Agent added");
-              }}>Save Agent</Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowNew(false)}>Cancel</Button>
-            </div>
-          </Card>
+
+        {selected && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Fields auto-filled from master.</span>
+            {!editMode ? (
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setEditMode(true)}>Override for this quote</Button>
+            ) : (
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => { if (selected) applyAgent(selected); }}>Reset to master</Button>
+            )}
+          </div>
         )}
+
+        <AgentFormDialog
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          agent={editingAgent}
+          onSaved={(a) => { applyAgent(a); }}
+        />
       </div>
     );
   }
