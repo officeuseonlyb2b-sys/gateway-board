@@ -2008,7 +2008,7 @@ function Step18({ draft, set }: StepProps) {
       const dbl = plan?.double_rate || 0;
       const sgl = plan?.single_rate || 0;
       const trp = dbl + (plan?.extra_bed_rate || 0);
-      const gr = (v: number) => v > 7500 ? 0.18 : 0.05;
+      const gr = gstRateFor;
       return {
         day_number: day.day, date: day.date, city: cityName,
         hotel_name: hotel?.name || "—", hotel_category: hotel?.hotel_category || "—",
