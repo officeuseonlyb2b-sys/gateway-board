@@ -77,6 +77,29 @@ const TRAVEL_MODES = [
   { id: "self", label: "Self Drive", icon: "🏍" },
 ];
 
+/** Major Indian cities available for "Guest Travelling From" */
+const INDIAN_CITIES = [
+  "Agra", "Ahmedabad", "Ajmer", "Amritsar", "Aurangabad", "Bengaluru", "Bhopal",
+  "Bhubaneswar", "Chandigarh", "Chennai", "Coimbatore", "Dehradun", "Delhi",
+  "Gangtok", "Goa", "Guwahati", "Gwalior", "Hyderabad", "Indore", "Jabalpur",
+  "Jaipur", "Jaisalmer", "Jammu", "Jodhpur", "Kanpur", "Khajuraho", "Kochi",
+  "Kolkata", "Leh", "Lucknow", "Ludhiana", "Madurai", "Mangalore", "Mumbai",
+  "Mysuru", "Nagpur", "Nashik", "Patna", "Puducherry", "Pune", "Raipur",
+  "Ranchi", "Rishikesh", "Shimla", "Siliguri", "Srinagar", "Surat", "Thiruvananthapuram",
+  "Tiruchirappalli", "Udaipur", "Ujjain", "Vadodara", "Varanasi", "Vijayawada",
+  "Visakhapatnam",
+].sort();
+
+const INTERNATIONAL_CITIES = [
+  "Abu Dhabi", "Amsterdam", "Auckland", "Bangkok", "Barcelona", "Beijing",
+  "Berlin", "Cape Town", "Colombo", "Dhaka", "Doha", "Dubai", "Frankfurt",
+  "Hong Kong", "Istanbul", "Jakarta", "Johannesburg", "Kathmandu", "Kuala Lumpur",
+  "Kuwait City", "London", "Los Angeles", "Male", "Manila", "Melbourne",
+  "Moscow", "Muscat", "New York", "Paris", "Riyadh", "Rome", "San Francisco",
+  "Seoul", "Shanghai", "Singapore", "Sydney", "Tokyo", "Toronto", "Vancouver",
+  "Vienna", "Zurich",
+].sort();
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
 // ============================================================
