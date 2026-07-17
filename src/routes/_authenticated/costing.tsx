@@ -2415,13 +2415,64 @@ function StepDeparture({ draft, set }: StepProps) {
   return (
     <div className="space-y-4 max-w-md">
       <h2 className="text-lg font-semibold">Guest Travelling From</h2>
-      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
-        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
-        <SelectContent>
-          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <CityCombobox
+        value={draft.departure_city}
+        onChange={(v) => set({ departure_city: v })}
+      />
+      <p className="text-xs text-muted-foreground">
+        Search Indian cities or pick from Other Countries. Existing typed values are preserved.
+      </p>
     </div>
+  );
+}
+
+function CityCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const d = useDB();
+  const [open, setOpen] = useState(false);
+
+  // Merge db cities + curated Indian list, dedupe (case-insensitive), sort.
+  const indian = useMemo(() => {
+    const set = new Map<string, string>();
+    [...INDIAN_CITIES, ...d.cities.map((c) => c.name)].forEach((n) => {
+      if (n) set.set(n.toLowerCase(), n);
+    });
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+  }, [d.cities]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open}
+          className="w-full justify-between font-normal">
+          {value || <span className="text-muted-foreground">Search city…</span>}
+          <ChevronRight className="h-4 w-4 opacity-50 rotate-90" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+        <Command>
+          <CommandInput placeholder="Type to search city…" />
+          <CommandList>
+            <CommandEmpty>No city found.</CommandEmpty>
+            <CommandGroup heading="Indian Cities">
+              {indian.map((c) => (
+                <CommandItem key={`in-${c}`} value={c} onSelect={() => { onChange(c); setOpen(false); }}>
+                  <Check className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")} />
+                  {c}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandGroup heading="Other Countries">
+              {INTERNATIONAL_CITIES.map((c) => (
+                <CommandItem key={`int-${c}`} value={c} onSelect={() => { onChange(c); setOpen(false); }}>
+                  <Check className={cn("mr-2 h-4 w-4", value === c ? "opacity-100" : "opacity-0")} />
+                  {c}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
