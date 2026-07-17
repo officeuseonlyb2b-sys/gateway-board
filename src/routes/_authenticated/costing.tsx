@@ -2397,7 +2397,6 @@ function StepPaxType({ draft, set }: StepProps) {
 // NEW STEP 4 — Departure (Brochure restricted list)
 // ============================================================
 function StepDeparture({ draft, set }: StepProps) {
-  const d = useDB();
   if (draft.query_type === "Brochure") {
     return (
       <div className="space-y-4 max-w-md">
