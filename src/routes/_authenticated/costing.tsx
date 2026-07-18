@@ -2374,6 +2374,8 @@ function Step16({ draft, set }: StepProps) {
       </div>
       )}
 
+      <PerPersonSummaryBlock draft={draft} options={includedOptions} title="Per-Person Breakdown (Custom Allocation)" />
+
       <div className="text-xs text-muted-foreground italic">
         Inclusions & Exclusions are managed per option in Step 15.
       </div>
