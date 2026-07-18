@@ -2288,9 +2288,14 @@ function Step16({ draft, set }: StepProps) {
         <div className="text-xs text-muted-foreground mt-2">Only selected options appear in the comparison and final quote.</div>
       </Card>
 
+      {includedOptions.filter((o) => optionUsesCustomAllocation(o)).map((o) => (
+        <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
+      ))}
+
       {totals.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
       ) : (
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
