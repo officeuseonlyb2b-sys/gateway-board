@@ -147,6 +147,44 @@ export function QuoteDocument({ quote: q }: Props) {
         </div>
       </div>
 
+      {/* ROOM ALLOCATION DETAIL (only if custom allocation was enabled) */}
+      {q.allocations && q.allocations.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>ROOM ALLOCATION DETAIL</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+            <thead><tr style={{ background: TEAL, color: "#fff" }}>
+              <Th>Person</Th><Th>Room Type</Th>
+              <Th align="right">Room Cost</Th>
+              <Th align="right">GST</Th>
+              <Th align="right">Add-Ons Share</Th>
+              <Th align="right">Markup + GST</Th>
+              <Th align="right">Total</Th>
+            </tr></thead>
+            <tbody>
+              {q.allocations.map((a, i) => (
+                <tr key={i} style={{ background: i % 2 ? "#f7f9fa" : "#fff" }}>
+                  <Td>{a.label}</Td>
+                  <Td>{a.room_type_label}</Td>
+                  <Td align="right">{inr(a.room_net)}</Td>
+                  <Td align="right">{inr(a.room_gst)}</Td>
+                  <Td align="right">{inr(a.shared_addons)}</Td>
+                  <Td align="right">{inr(a.markup_plus_gst)}</Td>
+                  <Td align="right"><b style={{ color: TEAL }}>{inr(a.grand_total)}</b></Td>
+                </tr>
+              ))}
+              <tr style={{ background: GOLD, color: "#000", fontWeight: 800 }}>
+                <Td colSpan={6}>PACKAGE TOTAL</Td>
+                <Td align="right">{inr(q.allocations.reduce((s, a) => s + a.grand_total, 0))}</Td>
+              </tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 8.5, color: "#666", marginTop: 4, fontStyle: "italic" }}>
+            Add-ons split equally across all travellers. Room cost per actual allocation.
+          </div>
+        </div>
+      )}
+
+
       {/* ADD-ONS SECTION — itemized grouped by category */}
       {q.addons.addons_total > 0 && (
         <div style={{ marginTop: 14 }}>
