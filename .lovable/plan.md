@@ -1,56 +1,84 @@
-## Wizard Overhaul — Steps 3-14 + New Step 8
+## Goal
 
-Incremental refactor of `src/routes/_authenticated/costing.tsx` plus supporting stores. I will land this in ordered commits so each change is verifiable in the preview before the next lands.
+Add an **optional** "Per-Person Room Allocation" mode to each hotel option (A/B/C/D) in the New Quotation wizard. When enabled, each pax picks a room type (Single / Double sharing / Triple sharing / Extra Bed / CWB) with a sharing partner, and Steps 15–17 plus the exported quote show a per-person cost breakdown. When disabled (default), the existing SGL/DBL/TRP display and calculations are unchanged.
 
-### Order of work
+Agents module already exists (`src/routes/_authenticated/agents.tsx` + Step 2 integration), so Change 8 is a no-op — I'll verify only.
 
-1. **Types + state (`src/lib/wizard/types.ts`)**
-   - Extend `QuoteDraft` with: `tour_type`, `pax_min`, `pax_max`, `has_dates`, `brochure_validity_from/till`, `arrival_flight`, `departure_flight`, `arrival_train`, `departure_train`, entrance `students` fields, activity/guide/misc `pax_ranges`.
-   - Extend `RoutingDay` with `day_name`, `from_city`, `to_city`, `travel_by`. Keep old `city_id` populated as an alias of `to_city` during migration so Step 15 (untouched) keeps working.
-   - Extend `TransportLine` with `rate_format: 'per_day' | 'total' | 'prefilled'`, `reporting_cost`, `total_override`, `remarks`.
-   - Extend `EntranceLine` with `student_pax`, `student_rate`.
-   - `emptyDraft()` defaults for all new fields.
+## Data model (`src/lib/wizard/types.ts`)
 
-2. **Progress bar labels** — update `STEP_LABELS` array to the 18 new labels and bump total step count from 18 → 19 (new gate step 8). Steps 9-18 shift by +1 internally but keep their semantics; Step 15 (Hotels) etc. untouched in behavior.
+Add per-option allocation to `HotelOption`:
 
-3. **Step 3 (Pax + FIT/GIT)** — add auto-badge for B2B/B2C from total pax. For Brochure, swap adults/SS/children UI for `pax_min` / `pax_max` inputs. Persist `tour_type`.
+```ts
+export type PersonRoomType = "single" | "double" | "triple" | "extra_bed" | "cwb";
 
-4. **Step 4 (Departure)** — Brochure-only: relabel + restrict dropdown to the 19 MP cities listed.
+export interface PersonAllocation {
+  person_id: number;         // 1-based, stable
+  label: string;             // editable, default "Person N"
+  room_type: PersonRoomType;
+  sharing_with: number[];    // other person_ids in the same room
+}
 
-5. **Step 5 (Travel Mode)** — add conditional Flight/Train arrival + departure detail cards. Brochure shows skip message; Next always enabled.
+export interface HotelOption {
+  // ...existing...
+  use_custom_allocation?: boolean;
+  pax_allocations?: PersonAllocation[];
+}
+```
 
-6. **Step 6 (Duration)** — B2B/B2C: With Dates vs Without Dates radio; day-name chips (weekday or "Day N"). Brochure: Validity From/Till + nights/days.
+`emptyDraft()` unchanged (flag defaults to falsy = existing behaviour).
 
-7. **Step 7 (Program)** — unchanged (already exists as current Step 4). Just reorder in the step map.
+## Calculation helpers (`src/lib/wizard/calc.ts`)
 
-8. **Step 8 (Create Routing — NEW gate)** — summary card + disabled-until-valid "Generate Day-by-Day Routing" button. On click, seeds the routing rows and advances to Step 9.
+Add pure helpers, do not touch `computeOption`:
 
-9. **Step 9 (Routing table)** — add `Day Name`, `From City`, `To City`, `Travel By` columns. `From City` on Day 1 pulls from `departure_city`; subsequent days auto-fill from prior `to_city` (overridable). Keep existing program text + entrance suggestions. Ensure `city_id` alias stays in sync so Step 15 hotel lookups continue to work.
+- `computePersonRoomCostForDay(person, allocations, plan)` returns `{ net, gst }` using:
+  - single → `sgl_rate`, GST slab on `sgl_rate`
+  - double → `dbl_rate / 2`, GST slab on `dbl_rate`
+  - triple → `(dbl_rate + extra_bed_rate) / 3`, slab on `(dbl_rate + extra_bed_rate)`
+  - extra_bed → `extra_bed_rate`, slab on `extra_bed_rate`
+  - cwb → `cwb_rate` (fallback 0), slab on `cwb_rate`
+- `computePersonTotals(draft, opt, d)` → array of `{ person_id, label, room_type, room_net, room_gst, room_total, shared_addons, markup, gst5, grand_total }`. Shared add-ons = `computeAddonsTotal(draft) / totalPax(draft)`. Markup = `(room_total + shared_addons) * markup%`. GST5 on markup only, per spec Change 4.
+- `optionUsesCustomAllocation(opt)` guard.
 
-10. **Step 10 (Transport)** — add `Rate Format` radio (Per Day / Total Program / Pre-filled). Compute line total accordingly. Keep pax-based vehicle filter.
+## Step 15 UI (`src/routes/_authenticated/costing.tsx`)
 
-11. **Step 11 (Activities)** — Brochure only: pax-range pricing table per activity. Non-brochure unchanged.
+Per option card, above the day-wise hotel rows:
 
-12. **Step 12 (Entrances)** — add `Students` pax + rate as a third row alongside Indian/Foreigner. Update `/entrances` module to add `student_rate` column and modal field (default 0).
+- Switch: **"Use custom room allocation"** (bound to `opt.use_custom_allocation`).
+- When ON, render `<PaxAllocator>`:
+  - Header: "Room allocation for N persons" (N = `totalPax(draft)`).
+  - Presets row: `All Single`, `All Double Sharing`, `Mixed: 1 Single + Rest Double`.
+  - One row per person: editable name input, `room_type` select, `sharing_with` select filtered to pax not already paired (except self / current partner). Auto-mirror pairing both ways; keep read-only on the mirror.
+  - Auto-init `pax_allocations` from pax count when switch flips ON; auto-resize when pax count changes while ON.
+- Below allocator, extend the existing **Cost Preview** box: when custom mode is ON, replace the SGL/DBL/TRP mini-summary with the per-person block described in Change 3 (nights × rate + GST per person, then combined total). Default mode preview is untouched.
 
-13. **Step 13 (Guide)** — restrict guide type options to the 3 new strings, update `/guide` module + reseed. Brochure adds pax-range pricing table per guide row.
+Helper `PaxAllocator` and preset functions live in the same file (matching the file's current pattern of local step components).
 
-14. **Step 14 (Misc)** — Brochure only: pax-range pricing table per misc item.
+## Step 16 (Costing Variations)
 
-15. **Verification pass** — `tsgo` typecheck after each block; open preview and click through each step for the three query types (B2B, B2C, Brochure). Confirm Step 15/16/17/18 still render and Save Quote + drafts + banner unchanged.
+For each selected option:
 
-### Backward compatibility
+- If `use_custom_allocation`: render a new **"Cost Per Person"** table above the existing SGL/DBL/TRP block with columns Person / Room Type / Room Cost / GST / Room Total, then Shared Costs breakdown (transport, guide, entrances, misc, activities, optionals — using existing `computeAddonsTotal` split), then Markup per person, GST 5% on markup per person, Grand Total per person, and Package Total.
+- Keep the existing SGL/DBL/TRP summary rows untouched below (spec Change 4 explicitly says "keep for reference").
 
-- All new draft fields optional or given safe defaults so existing drafts in `localStorage` continue to load.
-- Old routing rows lacking `from_city`/`to_city` fall back to `city_id` on read.
-- Step 15/16/17/18 code paths not modified beyond reading `to_city ?? city_id`.
+## Step 17 (Final)
 
-### Files touched
+For options with custom allocation, add a per-person summary card (Change 5 layout) alongside the existing final blocks. Non-custom options render exactly as today.
 
-- `src/lib/wizard/types.ts` (fields + defaults)
-- `src/routes/_authenticated/costing.tsx` (all step UI + step map + progress labels)
-- `src/routes/_authenticated/entrances.tsx` + `src/lib/mock-store.ts` (student rate column)
-- `src/routes/_authenticated/guide.tsx` + `src/lib/mock-store.ts` (guide-type enum + reseed)
-- `src/lib/wizard/calc.ts` (transport rate format, entrance students, brochure pax-range picks)
+## PDF export (`src/components/QuoteDocument.tsx`)
 
-Shall I proceed?
+For each included option with custom allocation, add a **"Room Allocation & Cost Per Person"** table (Change 6 columns: Person, Room Type, Accommodation, Shared Costs, Markup+GST, Total) with the footnote about shared costs. Options without custom allocation render unchanged.
+
+## Backward compatibility
+
+- New fields are optional; existing drafts and saved quotes without them fall through to today's behaviour.
+- `computeOption`, `transportLineTotal`, `gstRateFor`, and add-ons breakdown are not modified.
+- Hotels module, notifications, drafts store, saved quotes store, styling: untouched.
+
+## Change 8 (Agents)
+
+Verify `src/routes/_authenticated/agents.tsx` and Step 2 combobox still work; no code changes expected. If a regression is found I'll note it but not expand scope.
+
+## Out of scope
+
+Per-day allocation overrides, per-person meal-plan overrides, editing allocations from Step 16/17 (Step 15 remains the single edit surface).
