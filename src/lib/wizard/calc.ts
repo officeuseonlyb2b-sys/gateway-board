@@ -138,8 +138,9 @@ export interface PersonDayCost {
 // Compute a single person's share for a single day given the resolved plan.
 export function computePersonDayCost(
   room_type: PersonRoomType,
-  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number },
+  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number | null },
 ): PersonDayCost {
+
   const sgl = plan.single_rate || 0;
   const dbl = plan.double_rate || 0;
   const eb = plan.extra_bed_rate || 0;
