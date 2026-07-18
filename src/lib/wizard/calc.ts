@@ -127,7 +127,8 @@ export function computeOption(
 // ============================================================
 // Per-Person Room Allocation (Step 15 optional mode)
 // ============================================================
-import type { HotelOption, PersonAllocation, PersonRoomType } from "./types";
+import type { PersonAllocation, PersonRoomType } from "./types";
+
 
 export interface PersonDayCost {
   net: number;      // person share of the room tariff for this night
