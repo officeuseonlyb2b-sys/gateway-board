@@ -123,3 +123,218 @@ export function computeOption(
     rate_missing: missing,
   };
 }
+
+// ============================================================
+// Per-Person Room Allocation (Step 15 optional mode)
+// ============================================================
+import type { PersonAllocation, PersonRoomType } from "./types";
+
+
+export interface PersonDayCost {
+  net: number;      // person share of the room tariff for this night
+  gst: number;      // GST amount at slab based on effective room tariff
+}
+
+// Compute a single person's share for a single day given the resolved plan.
+export function computePersonDayCost(
+  room_type: PersonRoomType,
+  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number | null },
+): PersonDayCost {
+
+  const sgl = plan.single_rate || 0;
+  const dbl = plan.double_rate || 0;
+  const eb = plan.extra_bed_rate || 0;
+  const cwb = (plan as { cwb_rate?: number }).cwb_rate || 0;
+  const trpTariff = dbl + eb;
+  switch (room_type) {
+    case "single":    return { net: sgl,        gst: sgl        * gstRateFor(sgl) };
+    case "double":    return { net: dbl / 2,    gst: (dbl / 2)  * gstRateFor(dbl) };
+    case "triple":    return { net: trpTariff / 3, gst: (trpTariff / 3) * gstRateFor(trpTariff) };
+    case "extra_bed": return { net: eb,         gst: eb         * gstRateFor(eb) };
+    case "cwb":       return { net: cwb,        gst: cwb        * gstRateFor(cwb) };
+    default:          return { net: 0, gst: 0 };
+  }
+}
+
+export interface PersonOptionTotal {
+  person_id: number;
+  label: string;
+  room_type: PersonRoomType;
+  sharing_with: number[];
+  room_net: number;      // sum across nights
+  room_gst: number;
+  room_total: number;    // room_net + room_gst
+  shared_addons: number; // add-ons split equally
+  markup: number;        // markup% on (room_total + shared_addons)
+  gst5: number;          // 5% on markup
+  grand_total: number;
+}
+
+export function optionUsesCustomAllocation(opt: HotelOption): boolean {
+  return !!(opt.use_custom_allocation && opt.pax_allocations && opt.pax_allocations.length);
+}
+
+// Roll up per-person totals for an option (custom-allocation mode).
+export function computePersonTotals(
+  draft: import("./types").QuoteDraft,
+  opt: HotelOption,
+  d: import("@/lib/mock-store").DB,
+): PersonOptionTotal[] {
+  const allocs = opt.pax_allocations ?? [];
+  if (!allocs.length) return [];
+  const totPax = Math.max(1, totalPax(draft));
+  const addons = computeAddonsTotal(draft);
+  const sharedPer = addons / totPax;
+  const mk = (draft.markup_percent || 0) / 100;
+
+  // Pre-resolve day plans for this option
+  const dayPlans = draft.routing.map((day, i) => {
+    if (!day.overnight) return null;
+    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    if (!sel) return null;
+    const date = addDaysISO(draft.start_date, i);
+    return findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+  });
+
+  return allocs.map((p) => {
+    let net = 0, gst = 0;
+    dayPlans.forEach((plan) => {
+      if (!plan) return;
+      const c = computePersonDayCost(p.room_type, plan);
+      net += c.net;
+      gst += c.gst;
+    });
+    const room_total = net + gst;
+    const markup = (room_total + sharedPer) * mk;
+    const gst5 = markup * 0.05;
+    const grand_total = room_total + sharedPer + markup + gst5;
+    return {
+      person_id: p.person_id,
+      label: p.label,
+      room_type: p.room_type,
+      sharing_with: p.sharing_with ?? [],
+      room_net: net,
+      room_gst: gst,
+      room_total,
+      shared_addons: sharedPer,
+      markup,
+      gst5,
+      grand_total,
+    };
+  });
+}
+
+export function personRoomTypeLabel(t: PersonRoomType, sharing_with: number[] = []): string {
+  switch (t) {
+    case "single":    return "Single Room";
+    case "double":    return sharing_with.length ? `Double (shared)` : "Double";
+    case "triple":    return "Triple Sharing";
+    case "extra_bed": return "Extra Bed";
+    case "cwb":       return "Child With Bed";
+  }
+}
+
+// Build default allocations for N pax (all double sharing pairs).
+export function defaultAllocations(count: number): PersonAllocation[] {
+  const list: PersonAllocation[] = [];
+  for (let i = 1; i <= count; i++) {
+    list.push({ person_id: i, label: `Person ${i}`, room_type: "double", sharing_with: [] });
+  }
+  // pair up consecutive persons
+  for (let i = 0; i + 1 < list.length; i += 2) {
+    list[i].sharing_with = [list[i + 1].person_id];
+    list[i + 1].sharing_with = [list[i].person_id];
+  }
+  // if odd, last person becomes single
+  if (list.length % 2 === 1) {
+    const last = list[list.length - 1];
+    last.room_type = "single";
+    last.sharing_with = [];
+  }
+  return list;
+}
+
+export function presetAllSingle(count: number): PersonAllocation[] {
+  return Array.from({ length: count }, (_, i) => ({
+    person_id: i + 1, label: `Person ${i + 1}`, room_type: "single" as PersonRoomType, sharing_with: [],
+  }));
+}
+
+export function presetAllDouble(count: number): PersonAllocation[] {
+  return defaultAllocations(count);
+}
+
+export function presetOneSingleRestDouble(count: number): PersonAllocation[] {
+  if (count <= 0) return [];
+  const list: PersonAllocation[] = [
+    { person_id: 1, label: "Person 1", room_type: "single", sharing_with: [] },
+  ];
+  for (let i = 2; i <= count; i++) {
+    list.push({ person_id: i, label: `Person ${i}`, room_type: "double", sharing_with: [] });
+  }
+  for (let i = 1; i + 1 < list.length; i += 2) {
+    list[i].sharing_with = [list[i + 1].person_id];
+    list[i + 1].sharing_with = [list[i].person_id];
+  }
+  if ((count - 1) % 2 === 1) {
+    const last = list[list.length - 1];
+    last.room_type = "single";
+    last.sharing_with = [];
+  }
+  return list;
+}
+
+// Reconcile stored allocations with the current pax count.
+export function normalizeAllocations(
+  allocs: PersonAllocation[] | undefined,
+  count: number,
+): PersonAllocation[] {
+  const src = allocs ?? [];
+  if (src.length === count) return src;
+  if (src.length < count) {
+    const out = [...src];
+    for (let i = src.length + 1; i <= count; i++) {
+      out.push({ person_id: i, label: `Person ${i}`, room_type: "double", sharing_with: [] });
+    }
+    return out;
+  }
+  // Trim extras and remove stale sharing references
+  const kept = src.slice(0, count);
+  const validIds = new Set(kept.map((p) => p.person_id));
+  return kept.map((p) => ({ ...p, sharing_with: p.sharing_with.filter((id) => validIds.has(id)) }));
+}
+
+// Look-up per-night room rates for the option (used by preview).
+
+
+
+export interface OptionRateLookup {
+  perNight: {
+    sgl: number; dbl: number; extra_bed: number; cwb: number;
+    date: string; city_id: string;
+  }[];
+  missing: number;
+  nights: number;
+}
+export function lookupOptionNightlyRates(
+  draft: import("./types").QuoteDraft,
+  opt: HotelOption,
+  d: import("@/lib/mock-store").DB,
+): OptionRateLookup {
+  const perNight: OptionRateLookup["perNight"] = [];
+  let missing = 0;
+  draft.routing.forEach((day, i) => {
+    if (!day.overnight) return;
+    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    if (!sel) { missing++; return; }
+    const date = addDaysISO(draft.start_date, i);
+    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    if (!plan) { missing++; return; }
+    perNight.push({
+      sgl: plan.single_rate, dbl: plan.double_rate,
+      extra_bed: plan.extra_bed_rate, cwb: (plan as { cwb_rate?: number }).cwb_rate || 0,
+      date, city_id: day.city_id,
+    });
+  });
+  return { perNight, missing, nights: perNight.length };
+}

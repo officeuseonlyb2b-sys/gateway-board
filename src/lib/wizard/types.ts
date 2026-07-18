@@ -147,6 +147,13 @@ export interface HotelSelection {
   is_fallback?: boolean;
 }
 export type OptionKey = "A" | "B" | "C" | "D";
+export type PersonRoomType = "single" | "double" | "triple" | "extra_bed" | "cwb";
+export interface PersonAllocation {
+  person_id: number;         // stable 1-based id
+  label: string;             // editable, defaults to "Person N"
+  room_type: PersonRoomType;
+  sharing_with: number[];    // other person_ids in the same shared room
+}
 export interface HotelOption {
   key: OptionKey;
   label: string;
@@ -154,6 +161,8 @@ export interface HotelOption {
   selections: HotelSelection[];
   inclusions?: string[];
   exclusions?: string[];
+  use_custom_allocation?: boolean;
+  pax_allocations?: PersonAllocation[];
 }
 
 export interface QuoteDraft {
