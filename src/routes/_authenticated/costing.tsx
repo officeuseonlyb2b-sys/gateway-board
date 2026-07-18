@@ -2702,9 +2702,27 @@ function Step18({ draft, set }: StepProps) {
         grand_sgl: rec.grand_sgl, grand_dbl: rec.grand_dbl, grand_trp: rec.grand_trp,
       },
       include_sgl: true, include_dbl: true, include_trp: true,
+      allocations: recOpt && optionUsesCustomAllocation(recOpt)
+        ? (() => {
+            const rows = computePersonTotals(draft, recOpt, d);
+            const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
+            return rows.map((r) => ({
+              label: r.label,
+              room_type_label: personRoomTypeLabel(r.room_type, r.sharing_with)
+                + (r.sharing_with.length ? ` (w/ ${r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")})` : ""),
+              room_net: r.room_net,
+              room_gst: r.room_gst,
+              room_total: r.room_total,
+              shared_addons: r.shared_addons,
+              markup_plus_gst: r.markup + r.gst5,
+              grand_total: r.grand_total,
+            }));
+          })()
+        : undefined,
     };
     return q;
   }
+
 
   return (
     <div className="space-y-6">
