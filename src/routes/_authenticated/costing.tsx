@@ -2288,9 +2288,14 @@ function Step16({ draft, set }: StepProps) {
         <div className="text-xs text-muted-foreground mt-2">Only selected options appear in the comparison and final quote.</div>
       </Card>
 
+      {includedOptions.filter((o) => optionUsesCustomAllocation(o)).map((o) => (
+        <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
+      ))}
+
       {totals.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
       ) : (
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
@@ -2475,7 +2480,19 @@ function Step17({ draft, set }: StepProps) {
         </div>
       </Card>
 
-      <PerPersonSummaryBlock draft={draft} options={draft.hotel_options} title="Per-Person Grand Totals (Custom Allocation)" />
+      {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
+        <details className="rounded-lg border bg-card">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-primary hover:bg-muted/30">
+            ▼ Room Allocation Detail
+          </summary>
+          <div className="px-4 pb-4 pt-1">
+            <PerPersonSummaryBlock draft={draft} options={draft.hotel_options} title="Per-Person Grand Totals (Custom Allocation)" />
+            <div className="mt-2 text-xs text-muted-foreground italic">
+              Add-ons split equally. Room cost per actual allocation.
+            </div>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -2685,9 +2702,27 @@ function Step18({ draft, set }: StepProps) {
         grand_sgl: rec.grand_sgl, grand_dbl: rec.grand_dbl, grand_trp: rec.grand_trp,
       },
       include_sgl: true, include_dbl: true, include_trp: true,
+      allocations: recOpt && optionUsesCustomAllocation(recOpt)
+        ? (() => {
+            const rows = computePersonTotals(draft, recOpt, d);
+            const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
+            return rows.map((r) => ({
+              label: r.label,
+              room_type_label: personRoomTypeLabel(r.room_type, r.sharing_with)
+                + (r.sharing_with.length ? ` (w/ ${r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")})` : ""),
+              room_net: r.room_net,
+              room_gst: r.room_gst,
+              room_total: r.room_total,
+              shared_addons: r.shared_addons,
+              markup_plus_gst: r.markup + r.gst5,
+              grand_total: r.grand_total,
+            }));
+          })()
+        : undefined,
     };
     return q;
   }
+
 
   return (
     <div className="space-y-6">

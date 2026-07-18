@@ -48,6 +48,16 @@ export interface SavedTotals {
   gst_markup_sgl: number; gst_markup_dbl: number; gst_markup_trp: number;
   grand_sgl: number; grand_dbl: number; grand_trp: number;
 }
+export interface SavedAllocationRow {
+  label: string;
+  room_type_label: string;
+  room_total: number;
+  room_gst: number;
+  room_net: number;
+  shared_addons: number;
+  markup_plus_gst: number;
+  grand_total: number;
+}
 export interface SavedQuote {
   id: string;
   quote_number: string;
@@ -66,7 +76,9 @@ export interface SavedQuote {
   include_sgl: boolean;
   include_dbl: boolean;
   include_trp: boolean;
+  allocations?: SavedAllocationRow[];
 }
+
 
 const listeners = new Set<() => void>();
 let cachedSnapshot: SavedQuote[] = [];
