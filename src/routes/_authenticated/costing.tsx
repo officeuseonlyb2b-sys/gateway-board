@@ -1994,6 +1994,237 @@ function OptionCostPreview({ draft, option }: { draft: QuoteDraft; option: Hotel
 }
 
 // ============================================================
+// Step 15 — Per-Person Room Allocation
+// ============================================================
+const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: number }[] = [
+  { value: "single", label: "Single Room", shares: 0 },
+  { value: "double", label: "Double Sharing", shares: 1 },
+  { value: "triple", label: "Triple Sharing", shares: 2 },
+  { value: "extra_bed", label: "Extra Bed", shares: 0 },
+  { value: "cwb", label: "Child With Bed", shares: 0 },
+];
+
+function PaxAllocator({
+  draft, option, onChange,
+}: {
+  draft: QuoteDraft;
+  option: HotelOption;
+  onChange: (patch: Partial<HotelOption>) => void;
+}) {
+  const paxCount = Math.max(1, totalPax(draft));
+  const enabled = !!option.use_custom_allocation;
+  const allocs = normalizeAllocations(option.pax_allocations, paxCount);
+
+  const setAllocs = (next: PersonAllocation[]) => onChange({ pax_allocations: next });
+
+  const setRoomType = (person_id: number, type: PersonRoomType) => {
+    // Clear existing sharing links when switching types
+    const next = allocs.map((p) => {
+      if (p.person_id === person_id) return { ...p, room_type: type, sharing_with: [] };
+      // remove this person from other people's sharing_with, if this person moved out
+      return { ...p, sharing_with: p.sharing_with.filter((id) => id !== person_id) };
+    });
+    setAllocs(next);
+  };
+
+  const togglePartner = (person_id: number, partner_id: number) => {
+    const person = allocs.find((p) => p.person_id === person_id);
+    if (!person) return;
+    const maxShares = PERSON_ROOM_TYPES.find((r) => r.value === person.room_type)?.shares ?? 0;
+    const has = person.sharing_with.includes(partner_id);
+    let newList = has
+      ? person.sharing_with.filter((id) => id !== partner_id)
+      : [...person.sharing_with, partner_id];
+    if (newList.length > maxShares) newList = newList.slice(-maxShares);
+
+    // Mirror on partner: sync room_type + reciprocal sharing_with
+    const next = allocs.map((p) => {
+      if (p.person_id === person_id) return { ...p, sharing_with: newList };
+      if (newList.includes(p.person_id)) {
+        // ensure partner shares back and same type
+        const withList = [person_id, ...newList.filter((id) => id !== p.person_id)];
+        return { ...p, room_type: person.room_type, sharing_with: withList };
+      }
+      if (has && p.person_id === partner_id) {
+        return { ...p, sharing_with: p.sharing_with.filter((id) => id !== person_id) };
+      }
+      return p;
+    });
+    setAllocs(next);
+  };
+
+  const setLabel = (person_id: number, label: string) => {
+    setAllocs(allocs.map((p) => (p.person_id === person_id ? { ...p, label } : p)));
+  };
+
+  const applyPreset = (which: "single" | "double" | "one_rest") => {
+    if (which === "single") setAllocs(presetAllSingle(paxCount));
+    else if (which === "double") setAllocs(presetAllDouble(paxCount));
+    else setAllocs(presetOneSingleRestDouble(paxCount));
+  };
+
+  return (
+    <Card className="p-4 border-primary/20">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-sm font-semibold text-primary">Per-Person Room Allocation</div>
+          <div className="text-xs text-muted-foreground">
+            Mix room types per traveller. Applies to Option {option.key} only.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Use custom allocation</span>
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => {
+              if (v && !option.pax_allocations?.length) {
+                onChange({ use_custom_allocation: true, pax_allocations: defaultAllocations(paxCount) });
+              } else {
+                onChange({ use_custom_allocation: v });
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <Button size="sm" variant="outline" onClick={() => applyPreset("single")}>All Single</Button>
+            <Button size="sm" variant="outline" onClick={() => applyPreset("double")}>All Double Sharing</Button>
+            <Button size="sm" variant="outline" onClick={() => applyPreset("one_rest")}>1 Single + Rest Double</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="text-left py-1.5 font-medium">Person</th>
+                  <th className="text-left py-1.5 font-medium">Room Type</th>
+                  <th className="text-left py-1.5 font-medium">Sharing With</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allocs.map((p) => {
+                  const rt = PERSON_ROOM_TYPES.find((r) => r.value === p.room_type)!;
+                  const others = allocs.filter((o) => o.person_id !== p.person_id);
+                  return (
+                    <tr key={p.person_id} className="border-t">
+                      <td className="py-1.5 pr-2 align-top">
+                        <Input
+                          className="h-8 text-sm"
+                          value={p.label}
+                          onChange={(e) => setLabel(p.person_id, e.target.value)}
+                          placeholder={`Person ${p.person_id}`}
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2 align-top">
+                        <Select
+                          value={p.room_type}
+                          onValueChange={(v) => setRoomType(p.person_id, v as PersonRoomType)}
+                        >
+                          <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PERSON_ROOM_TYPES.map((r) => (
+                              <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="py-1.5 align-top">
+                        {rt.shares > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {others.map((o) => {
+                              const active = p.sharing_with.includes(o.person_id);
+                              return (
+                                <button
+                                  key={o.person_id}
+                                  type="button"
+                                  onClick={() => togglePartner(p.person_id, o.person_id)}
+                                  className={`text-xs px-2 py-1 rounded border ${active ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border"}`}
+                                >
+                                  {o.label}
+                                </button>
+                              );
+                            })}
+                            {p.sharing_with.length < rt.shares && (
+                              <span className="text-[11px] text-amber-700 self-center">
+                                Choose {rt.shares - p.sharing_with.length} more
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------
+// Live per-person cost preview (Step 15).
+// ------------------------------------------------------------
+function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
+  const d = useDB();
+  const rows = useMemo(() => computePersonTotals(draft, option, d), [draft, option, d]);
+  const nights = draft.routing.filter((r) => r.overnight && r.city_id).length;
+  if (!rows.length) return null;
+
+  const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
+
+  return (
+    <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#FBF7EE" }}>
+      <div className="px-4 py-2.5 text-sm font-semibold text-primary">
+        OPTION {option.key} · Per-Person Cost Preview ({nights} night{nights === 1 ? "" : "s"})
+      </div>
+      <div className="px-4 pb-4 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="text-left py-1.5 font-medium">Person</th>
+              <th className="text-left py-1.5 font-medium">Room</th>
+              <th className="text-right py-1.5 font-medium">Room Net</th>
+              <th className="text-right py-1.5 font-medium">Room GST</th>
+              <th className="text-right py-1.5 font-medium">Rooms Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.person_id} className="border-t">
+                <td className="py-1.5">{r.label}</td>
+                <td className="py-1.5 text-muted-foreground">
+                  {personRoomTypeLabel(r.room_type, r.sharing_with)}
+                  {r.sharing_with.length > 0 && (
+                    <span className="ml-1 text-xs">
+                      w/ {r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")}
+                    </span>
+                  )}
+                </td>
+                <td className="text-right tabular-nums">{inr(r.room_net)}</td>
+                <td className="text-right tabular-nums">{inr(r.room_gst)}</td>
+                <td className="text-right tabular-nums font-semibold text-primary">{inr(r.room_total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mt-2 text-[11px] text-muted-foreground italic">
+          Add-ons (transport, guide, activities) will be split equally across all {rows.length} traveller{rows.length === 1 ? "" : "s"} in Steps 16 & 17.
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+
+
+// ============================================================
 // STEP 16 — Costing Variations
 // ============================================================
 function Step16({ draft, set }: StepProps) {
