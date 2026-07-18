@@ -1768,7 +1768,17 @@ function Step15({ draft, set }: StepProps) {
           })}
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
-            <OptionCostPreview draft={draft} option={activeOption} />
+            <>
+              <PaxAllocator
+                draft={draft}
+                option={activeOption}
+                onChange={(patch) => updateOption(activeOption.key, patch)}
+              />
+              <OptionCostPreview draft={draft} option={activeOption} />
+              {optionUsesCustomAllocation(activeOption) && (
+                <OptionPerPersonPreview draft={draft} option={activeOption} />
+              )}
+            </>
           )}
 
           {activeCategory && (
