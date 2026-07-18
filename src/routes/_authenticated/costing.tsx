@@ -2480,7 +2480,19 @@ function Step17({ draft, set }: StepProps) {
         </div>
       </Card>
 
-      <PerPersonSummaryBlock draft={draft} options={draft.hotel_options} title="Per-Person Grand Totals (Custom Allocation)" />
+      {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
+        <details className="rounded-lg border bg-card">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-primary hover:bg-muted/30">
+            ▼ Room Allocation Detail
+          </summary>
+          <div className="px-4 pb-4 pt-1">
+            <PerPersonSummaryBlock draft={draft} options={draft.hotel_options} title="Per-Person Grand Totals (Custom Allocation)" />
+            <div className="mt-2 text-xs text-muted-foreground italic">
+              Add-ons split equally. Room cost per actual allocation.
+            </div>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
