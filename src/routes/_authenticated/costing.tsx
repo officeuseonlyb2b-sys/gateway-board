@@ -2474,9 +2474,85 @@ function Step17({ draft, set }: StepProps) {
           })}
         </div>
       </Card>
+
+      <PerPersonSummaryBlock draft={draft} options={draft.hotel_options} title="Per-Person Grand Totals (Custom Allocation)" />
     </div>
   );
 }
+
+// ------------------------------------------------------------
+// Shared per-person summary card used in Step 16 & 17.
+// Only renders options that use custom room allocation.
+// ------------------------------------------------------------
+function PerPersonSummaryBlock({
+  draft, options, title,
+}: {
+  draft: QuoteDraft; options: HotelOption[]; title: string;
+}) {
+  const d = useDB();
+  const active = options.filter((o) => optionUsesCustomAllocation(o));
+  if (!active.length) return null;
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="section-label">{title}</div>
+      {active.map((opt) => {
+        const rows = computePersonTotals(draft, opt, d);
+        if (!rows.length) return null;
+        const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
+        const grand = rows.reduce((s, r) => s + r.grand_total, 0);
+        return (
+          <div key={opt.key} className="rounded-lg border overflow-hidden">
+            <div className="px-3 py-2 bg-muted/40 text-sm font-semibold text-primary">
+              Option {opt.key} · {opt.category || opt.label || "—"}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs uppercase text-muted-foreground bg-muted/20">
+                  <tr>
+                    <th className="text-left p-2">Person</th>
+                    <th className="text-left p-2">Room</th>
+                    <th className="text-right p-2">Rooms Total</th>
+                    <th className="text-right p-2">Add-Ons Share</th>
+                    <th className="text-right p-2">Markup</th>
+                    <th className="text-right p-2">GST 5%</th>
+                    <th className="text-right p-2">Grand Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.person_id} className="border-t">
+                      <td className="p-2">{r.label}</td>
+                      <td className="p-2 text-muted-foreground text-xs">
+                        {personRoomTypeLabel(r.room_type, r.sharing_with)}
+                        {r.sharing_with.length > 0 && (
+                          <> · w/ {r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")}</>
+                        )}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">{inr(r.room_total)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(r.shared_addons)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(r.markup)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(r.gst5)}</td>
+                      <td className="p-2 text-right tabular-nums font-semibold text-primary">{inr(r.grand_total)}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-primary/5 font-semibold">
+                    <td className="p-2" colSpan={6}>Option {opt.key} · Group Total</td>
+                    <td className="p-2 text-right tabular-nums text-primary">{inr(grand)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+      <div className="text-xs text-muted-foreground italic">
+        Add-ons are split equally across all travellers. GST slab (5% / 18%) is applied on the effective room tariff, then 5% GST is applied on the markup layer.
+      </div>
+    </Card>
+  );
+}
+
 
 function PersonCard({ icon, size, subtitle, badge, badgeClass, perPerson, persons, total }: {
   icon: string; size: string; subtitle: string; badge: string; badgeClass: string;
