@@ -28,10 +28,17 @@ import {
 import { addNotification } from "@/lib/notifications-store";
 import type {
   QuoteDraft, QueryType, RoutingDay, OptionKey, HotelOption,
+  PersonAllocation, PersonRoomType,
 } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, type Agent } from "@/lib/wizard/agents-store";
-import { computeOption, computeAddonsTotal, totalPax, gstRateFor, transportLineTotal, type OptionTotals } from "@/lib/wizard/calc";
+import {
+  computeOption, computeAddonsTotal, totalPax, gstRateFor, transportLineTotal,
+  computePersonTotals, optionUsesCustomAllocation, normalizeAllocations,
+  defaultAllocations, presetAllSingle, presetAllDouble, presetOneSingleRestDouble,
+  personRoomTypeLabel, lookupOptionNightlyRates,
+  type OptionTotals, type PersonOptionTotal,
+} from "@/lib/wizard/calc";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
