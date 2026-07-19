@@ -2889,7 +2889,20 @@ function Step18({ draft, set }: StepProps) {
             }));
           })()
         : undefined,
+      ...(isGroupTour(draft) && recOpt ? (() => {
+        const pax = Math.max(1, totalPax(draft));
+        const dbl = computeGroupOption(draft, recOpt, d, autoDoubleMix(pax));
+        const trp = computeGroupOption(draft, recOpt, d, autoTripleMix(pax));
+        const cust = draft.group_room_mix ? computeGroupOption(draft, recOpt, d, draft.group_room_mix) : null;
+        const rows = [
+          { arrangement: "Double Sharing", rooms_label: mixLabel(dbl.mix), total_package: dbl.grand_total, per_person: dbl.per_person, pax_covered: dbl.pax_covered },
+          { arrangement: "Triple Sharing", rooms_label: mixLabel(trp.mix), total_package: trp.grand_total, per_person: trp.per_person, pax_covered: trp.pax_covered },
+        ];
+        if (cust) rows.push({ arrangement: "Custom Mix", rooms_label: mixLabel(cust.mix), total_package: cust.grand_total, per_person: cust.per_person, pax_covered: cust.pax_covered });
+        return { is_group: true, group_total_pax: pax, group_rows: rows };
+      })() : {}),
     };
+
     return q;
   }
 
