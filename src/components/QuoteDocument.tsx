@@ -110,7 +110,33 @@ export function QuoteDocument({ quote: q }: Props) {
         </table>
       </div>
 
-      {/* COST PER PERSON BY GROUP SIZE */}
+      {/* COST PER PERSON / GROUP PACKAGE */}
+      {q.is_group && q.group_rows && q.group_rows.length > 0 ? (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>
+            GROUP PACKAGE COST — {q.group_total_pax} PAX
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+            <thead><tr style={{ background: TEAL, color: "#fff" }}>
+              <Th>Arrangement</Th><Th>Room Configuration</Th>
+              <Th align="right">Per Person</Th><Th align="right">Total Package</Th>
+            </tr></thead>
+            <tbody>
+              {q.group_rows.map((r, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f7f9fa" }}>
+                  <Td>{r.arrangement}</Td>
+                  <Td>{r.rooms_label}{r.pax_covered !== q.group_total_pax ? ` (${r.pax_covered} pax)` : ""}</Td>
+                  <Td align="right"><b style={{ color: TEAL, fontSize: 11 }}>{inr(r.per_person)}</b></Td>
+                  <Td align="right"><b style={{ color: TEAL, fontSize: 11 }}>{inr(r.total_package)}</b></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 8.5, color: "#666", marginTop: 4, fontStyle: "italic" }}>
+            💡 Group package inclusive of all room GST, add-ons, markup and 5% service GST.
+          </div>
+        </div>
+      ) : (
       <div style={{ marginTop: 14 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>COST PER PERSON (BASED ON GROUP SIZE)</div>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
@@ -146,6 +172,8 @@ export function QuoteDocument({ quote: q }: Props) {
           💡 Rates shown are per person. 2-person rate assumes double room sharing. 3-person rate assumes double room + 1 extra bed.
         </div>
       </div>
+      )}
+
 
       {/* ROOM ALLOCATION DETAIL (only if custom allocation was enabled) */}
       {q.allocations && q.allocations.length > 0 && (
