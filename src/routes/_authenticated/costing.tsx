@@ -38,8 +38,11 @@ import {
   computePersonTotals, optionUsesCustomAllocation, normalizeAllocations,
   defaultAllocations, presetAllSingle, presetAllDouble, presetOneSingleRestDouble,
   personRoomTypeLabel, lookupOptionNightlyRates,
-  type OptionTotals, type PersonOptionTotal,
+  isGroupTour, autoDoubleMix, autoTripleMix, mixCoversPax, mixLabel,
+  computeGroupOption,
+  type OptionTotals, type PersonOptionTotal, type GroupOptionTotals,
 } from "@/lib/wizard/calc";
+
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
