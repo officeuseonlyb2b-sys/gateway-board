@@ -2395,6 +2395,122 @@ function Step16({ draft, set }: StepProps) {
 }
 
 // ============================================================
+// Group Costing block (Step 16, GIT tours)
+// ============================================================
+function GroupCostingBlock({ draft, set, options }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void; options: HotelOption[] }) {
+  const d = useDB();
+  const pax = Math.max(1, totalPax(draft));
+  const autoDbl = useMemo(() => autoDoubleMix(pax), [pax]);
+  const autoTrp = useMemo(() => autoTripleMix(pax), [pax]);
+  const customMix = draft.group_room_mix || autoDbl;
+
+  const setCustom = (patch: Partial<typeof customMix>) => {
+    set({ group_room_mix: { ...customMix, ...patch } });
+  };
+
+  const covered = mixCoversPax(customMix);
+  const mismatch = covered !== pax;
+
+  if (options.length === 0) {
+    return <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the group costing.</Card>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 bg-accent/5 border-accent/30">
+        <div className="text-sm font-semibold text-accent-foreground mb-2">Customize Room Mix — {pax} pax</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <div>
+            <Label className="text-xs">Double Rooms</Label>
+            <Input type="number" min={0} value={customMix.double}
+              onChange={(e) => setCustom({ double: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div>
+            <Label className="text-xs">Triple Rooms</Label>
+            <Input type="number" min={0} value={customMix.triple}
+              onChange={(e) => setCustom({ triple: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div>
+            <Label className="text-xs">Single Rooms</Label>
+            <Input type="number" min={0} value={customMix.single}
+              onChange={(e) => setCustom({ single: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => set({ group_room_mix: autoDoubleMix(pax) })}>All Double</Button>
+            <Button size="sm" variant="outline" onClick={() => set({ group_room_mix: autoTripleMix(pax) })}>All Triple</Button>
+          </div>
+        </div>
+        <div className={cn("mt-2 text-xs", mismatch ? "text-red-600 font-medium" : "text-muted-foreground")}>
+          {mismatch
+            ? `⚠ Room mix covers ${covered} persons but tour has ${pax}`
+            : `✓ Room mix covers all ${pax} persons`}
+        </div>
+      </Card>
+
+      {options.map((o) => {
+        const dblTot = computeGroupOption(draft, o, d, autoDbl);
+        const trpTot = computeGroupOption(draft, o, d, autoTrp);
+        const custTot = computeGroupOption(draft, o, d, customMix);
+        return (
+          <Card key={o.key} className="p-4">
+            <div className="text-sm font-semibold mb-3">
+              Option {o.key} · {o.label || "—"} — Group Package for {pax} pax
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="text-left p-2">Line</th>
+                    <th className="text-right p-2">Double Sharing<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(autoDbl)}</span></th>
+                    <th className="text-right p-2">Triple Sharing<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(autoTrp)}</span></th>
+                    <th className="text-right p-2">Custom Mix<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(customMix)}</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Room Cost (Net)", (t: GroupOptionTotals) => t.room_net],
+                    ["GST on Rooms", (t: GroupOptionTotals) => t.room_gst],
+                    ["Add-Ons Total", (t: GroupOptionTotals) => t.addons_total],
+                    [`Markup ${draft.markup_percent}%`, (t: GroupOptionTotals) => t.markup],
+                    ["GST 5%", (t: GroupOptionTotals) => t.gst5],
+                  ].map(([lbl, fn], i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2">{lbl as string}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(dblTot))}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(trpTot))}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(custTot))}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-primary/5 font-bold text-base">
+                    <td className="p-2">GRAND TOTAL ({pax} pax)</td>
+                    <td className="p-2 text-right tabular-nums">{inr(dblTot.grand_total)}</td>
+                    <td className="p-2 text-right tabular-nums">{inr(trpTot.grand_total)}</td>
+                    <td className="p-2 text-right tabular-nums">{inr(custTot.grand_total)}</td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="p-2 text-xs text-muted-foreground">Per Person</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(dblTot.per_person)}</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(trpTot.per_person)}</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(custTot.per_person)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {(dblTot.rate_missing > 0 || trpTot.rate_missing > 0) && (
+              <div className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> {dblTot.rate_missing} night(s) missing rates
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+
+
+// ============================================================
 // STEP 17 — Final Costing
 // ============================================================
 function Step17({ draft, set }: StepProps) {
