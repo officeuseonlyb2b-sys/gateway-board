@@ -2699,6 +2699,47 @@ function PerPersonSummaryBlock({
   );
 }
 
+function GroupFinalSummary({ draft, focusOption }: { draft: QuoteDraft; focusOption: HotelOption | undefined }) {
+  const d = useDB();
+  const pax = Math.max(1, totalPax(draft));
+  const mix = draft.group_room_mix || autoDoubleMix(pax);
+  if (!focusOption) return null;
+  const tot = computeGroupOption(draft, focusOption, d, mix);
+  return (
+    <Card className="p-6 bg-primary/5">
+      <div className="text-xs uppercase text-muted-foreground mb-2">Group Package — {focusOption.label || "Option " + focusOption.key}</div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <div className="text-xs text-muted-foreground">Total Pax</div>
+          <div className="text-2xl font-bold">{pax}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Room Configuration</div>
+          <div className="text-sm font-semibold">{mixLabel(mix)}</div>
+          <div className="text-xs text-muted-foreground">{mixCoversPax(mix)} pax covered</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Per Person</div>
+          <div className="text-2xl font-bold text-primary">{inr(tot.per_person)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Grand Total</div>
+          <div className="text-2xl font-bold text-accent-foreground">{inr(tot.grand_total)}</div>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm border-t pt-3">
+        <div><div className="text-xs text-muted-foreground">Rooms Net</div><div className="font-medium">{inr(tot.room_net)}</div></div>
+        <div><div className="text-xs text-muted-foreground">GST on Rooms</div><div className="font-medium">{inr(tot.room_gst)}</div></div>
+        <div><div className="text-xs text-muted-foreground">Add-Ons</div><div className="font-medium">{inr(tot.addons_total)}</div></div>
+        <div><div className="text-xs text-muted-foreground">Markup {draft.markup_percent}%</div><div className="font-medium">{inr(tot.markup)}</div></div>
+        <div><div className="text-xs text-muted-foreground">GST 5%</div><div className="font-medium">{inr(tot.gst5)}</div></div>
+      </div>
+    </Card>
+  );
+}
+
+
+
 
 function PersonCard({ icon, size, subtitle, badge, badgeClass, perPerson, persons, total }: {
   icon: string; size: string; subtitle: string; badge: string; badgeClass: string;
