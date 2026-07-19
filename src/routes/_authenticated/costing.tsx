@@ -2295,7 +2295,9 @@ function Step16({ draft, set }: StepProps) {
         <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
       ))}
 
-      {totals.length === 0 ? (
+      {isGroupTour(draft) ? (
+        <GroupCostingBlock draft={draft} set={set} options={includedOptions} />
+      ) : totals.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
       ) : (
 
@@ -2381,6 +2383,7 @@ function Step16({ draft, set }: StepProps) {
         </table>
       </div>
       )}
+
 
       <PerPersonSummaryBlock draft={draft} options={includedOptions} title="Per-Person Breakdown (Custom Allocation)" />
 
