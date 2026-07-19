@@ -2537,6 +2537,10 @@ function Step17({ draft, set }: StepProps) {
         </div>
       </Card>
 
+      {isGroupTour(draft) ? (
+        <GroupFinalSummary draft={draft} focusOption={draft.hotel_options[recIdx] || draft.hotel_options[0]} />
+      ) : (
+        <>
       <Card className="p-4">
         <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label || "Select Category"}</span>}</div>
         {focus && (
@@ -2601,6 +2605,9 @@ function Step17({ draft, set }: StepProps) {
           })}
         </div>
       </Card>
+        </>
+      )}
+
 
       {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
         <details className="rounded-lg border bg-card">
