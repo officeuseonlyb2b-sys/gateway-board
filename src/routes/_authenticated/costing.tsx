@@ -38,8 +38,11 @@ import {
   computePersonTotals, optionUsesCustomAllocation, normalizeAllocations,
   defaultAllocations, presetAllSingle, presetAllDouble, presetOneSingleRestDouble,
   personRoomTypeLabel, lookupOptionNightlyRates,
-  type OptionTotals, type PersonOptionTotal,
+  isGroupTour, autoDoubleMix, autoTripleMix, mixCoversPax, mixLabel,
+  computeGroupOption,
+  type OptionTotals, type PersonOptionTotal, type GroupOptionTotals,
 } from "@/lib/wizard/calc";
+
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
@@ -2292,7 +2295,9 @@ function Step16({ draft, set }: StepProps) {
         <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
       ))}
 
-      {totals.length === 0 ? (
+      {isGroupTour(draft) ? (
+        <GroupCostingBlock draft={draft} set={set} options={includedOptions} />
+      ) : totals.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
       ) : (
 
@@ -2379,6 +2384,7 @@ function Step16({ draft, set }: StepProps) {
       </div>
       )}
 
+
       <PerPersonSummaryBlock draft={draft} options={includedOptions} title="Per-Person Breakdown (Custom Allocation)" />
 
       <div className="text-xs text-muted-foreground italic">
@@ -2387,6 +2393,122 @@ function Step16({ draft, set }: StepProps) {
     </div>
   );
 }
+
+// ============================================================
+// Group Costing block (Step 16, GIT tours)
+// ============================================================
+function GroupCostingBlock({ draft, set, options }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void; options: HotelOption[] }) {
+  const d = useDB();
+  const pax = Math.max(1, totalPax(draft));
+  const autoDbl = useMemo(() => autoDoubleMix(pax), [pax]);
+  const autoTrp = useMemo(() => autoTripleMix(pax), [pax]);
+  const customMix = draft.group_room_mix || autoDbl;
+
+  const setCustom = (patch: Partial<typeof customMix>) => {
+    set({ group_room_mix: { ...customMix, ...patch } });
+  };
+
+  const covered = mixCoversPax(customMix);
+  const mismatch = covered !== pax;
+
+  if (options.length === 0) {
+    return <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the group costing.</Card>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 bg-accent/5 border-accent/30">
+        <div className="text-sm font-semibold text-accent-foreground mb-2">Customize Room Mix — {pax} pax</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <div>
+            <Label className="text-xs">Double Rooms</Label>
+            <Input type="number" min={0} value={customMix.double}
+              onChange={(e) => setCustom({ double: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div>
+            <Label className="text-xs">Triple Rooms</Label>
+            <Input type="number" min={0} value={customMix.triple}
+              onChange={(e) => setCustom({ triple: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div>
+            <Label className="text-xs">Single Rooms</Label>
+            <Input type="number" min={0} value={customMix.single}
+              onChange={(e) => setCustom({ single: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => set({ group_room_mix: autoDoubleMix(pax) })}>All Double</Button>
+            <Button size="sm" variant="outline" onClick={() => set({ group_room_mix: autoTripleMix(pax) })}>All Triple</Button>
+          </div>
+        </div>
+        <div className={cn("mt-2 text-xs", mismatch ? "text-red-600 font-medium" : "text-muted-foreground")}>
+          {mismatch
+            ? `⚠ Room mix covers ${covered} persons but tour has ${pax}`
+            : `✓ Room mix covers all ${pax} persons`}
+        </div>
+      </Card>
+
+      {options.map((o) => {
+        const dblTot = computeGroupOption(draft, o, d, autoDbl);
+        const trpTot = computeGroupOption(draft, o, d, autoTrp);
+        const custTot = computeGroupOption(draft, o, d, customMix);
+        return (
+          <Card key={o.key} className="p-4">
+            <div className="text-sm font-semibold mb-3">
+              Option {o.key} · {o.label || "—"} — Group Package for {pax} pax
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="text-left p-2">Line</th>
+                    <th className="text-right p-2">Double Sharing<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(autoDbl)}</span></th>
+                    <th className="text-right p-2">Triple Sharing<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(autoTrp)}</span></th>
+                    <th className="text-right p-2">Custom Mix<br /><span className="normal-case text-[10px] text-muted-foreground/80">{mixLabel(customMix)}</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Room Cost (Net)", (t: GroupOptionTotals) => t.room_net],
+                    ["GST on Rooms", (t: GroupOptionTotals) => t.room_gst],
+                    ["Add-Ons Total", (t: GroupOptionTotals) => t.addons_total],
+                    [`Markup ${draft.markup_percent}%`, (t: GroupOptionTotals) => t.markup],
+                    ["GST 5%", (t: GroupOptionTotals) => t.gst5],
+                  ].map(([lbl, fn], i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2">{lbl as string}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(dblTot))}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(trpTot))}</td>
+                      <td className="p-2 text-right tabular-nums">{inr((fn as any)(custTot))}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-primary/5 font-bold text-base">
+                    <td className="p-2">GRAND TOTAL ({pax} pax)</td>
+                    <td className="p-2 text-right tabular-nums">{inr(dblTot.grand_total)}</td>
+                    <td className="p-2 text-right tabular-nums">{inr(trpTot.grand_total)}</td>
+                    <td className="p-2 text-right tabular-nums">{inr(custTot.grand_total)}</td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="p-2 text-xs text-muted-foreground">Per Person</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(dblTot.per_person)}</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(trpTot.per_person)}</td>
+                    <td className="p-2 text-right tabular-nums text-xs">{inr(custTot.per_person)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {(dblTot.rate_missing > 0 || trpTot.rate_missing > 0) && (
+              <div className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> {dblTot.rate_missing} night(s) missing rates
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+
 
 // ============================================================
 // STEP 17 — Final Costing
@@ -2415,6 +2537,10 @@ function Step17({ draft, set }: StepProps) {
         </div>
       </Card>
 
+      {isGroupTour(draft) ? (
+        <GroupFinalSummary draft={draft} focusOption={draft.hotel_options[recIdx] || draft.hotel_options[0]} />
+      ) : (
+        <>
       <Card className="p-4">
         <div className="section-label mb-3">Per Person Cost Based on Group Size {focus && <span className="text-muted-foreground normal-case">— Option {focus.key} · {focus.label || "Select Category"}</span>}</div>
         {focus && (
@@ -2479,6 +2605,9 @@ function Step17({ draft, set }: StepProps) {
           })}
         </div>
       </Card>
+        </>
+      )}
+
 
       {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
         <details className="rounded-lg border bg-card">
@@ -2569,6 +2698,47 @@ function PerPersonSummaryBlock({
     </Card>
   );
 }
+
+function GroupFinalSummary({ draft, focusOption }: { draft: QuoteDraft; focusOption: HotelOption | undefined }) {
+  const d = useDB();
+  const pax = Math.max(1, totalPax(draft));
+  const mix = draft.group_room_mix || autoDoubleMix(pax);
+  if (!focusOption) return null;
+  const tot = computeGroupOption(draft, focusOption, d, mix);
+  return (
+    <Card className="p-6 bg-primary/5">
+      <div className="text-xs uppercase text-muted-foreground mb-2">Group Package — {focusOption.label || "Option " + focusOption.key}</div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <div className="text-xs text-muted-foreground">Total Pax</div>
+          <div className="text-2xl font-bold">{pax}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Room Configuration</div>
+          <div className="text-sm font-semibold">{mixLabel(mix)}</div>
+          <div className="text-xs text-muted-foreground">{mixCoversPax(mix)} pax covered</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Per Person</div>
+          <div className="text-2xl font-bold text-primary">{inr(tot.per_person)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Grand Total</div>
+          <div className="text-2xl font-bold text-accent-foreground">{inr(tot.grand_total)}</div>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm border-t pt-3">
+        <div><div className="text-xs text-muted-foreground">Rooms Net</div><div className="font-medium">{inr(tot.room_net)}</div></div>
+        <div><div className="text-xs text-muted-foreground">GST on Rooms</div><div className="font-medium">{inr(tot.room_gst)}</div></div>
+        <div><div className="text-xs text-muted-foreground">Add-Ons</div><div className="font-medium">{inr(tot.addons_total)}</div></div>
+        <div><div className="text-xs text-muted-foreground">Markup {draft.markup_percent}%</div><div className="font-medium">{inr(tot.markup)}</div></div>
+        <div><div className="text-xs text-muted-foreground">GST 5%</div><div className="font-medium">{inr(tot.gst5)}</div></div>
+      </div>
+    </Card>
+  );
+}
+
+
 
 
 function PersonCard({ icon, size, subtitle, badge, badgeClass, perPerson, persons, total }: {
@@ -2719,7 +2889,20 @@ function Step18({ draft, set }: StepProps) {
             }));
           })()
         : undefined,
+      ...(isGroupTour(draft) && recOpt ? (() => {
+        const pax = Math.max(1, totalPax(draft));
+        const dbl = computeGroupOption(draft, recOpt, d, autoDoubleMix(pax));
+        const trp = computeGroupOption(draft, recOpt, d, autoTripleMix(pax));
+        const cust = draft.group_room_mix ? computeGroupOption(draft, recOpt, d, draft.group_room_mix) : null;
+        const rows = [
+          { arrangement: "Double Sharing", rooms_label: mixLabel(dbl.mix), total_package: dbl.grand_total, per_person: dbl.per_person, pax_covered: dbl.pax_covered },
+          { arrangement: "Triple Sharing", rooms_label: mixLabel(trp.mix), total_package: trp.grand_total, per_person: trp.per_person, pax_covered: trp.pax_covered },
+        ];
+        if (cust) rows.push({ arrangement: "Custom Mix", rooms_label: mixLabel(cust.mix), total_package: cust.grand_total, per_person: cust.per_person, pax_covered: cust.pax_covered });
+        return { is_group: true, group_total_pax: pax, group_rows: rows };
+      })() : {}),
     };
+
     return q;
   }
 

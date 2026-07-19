@@ -216,8 +216,16 @@ export interface QuoteDraft {
   recommended_option: OptionKey | null;
   optionals: ActivityLine[];
   included_option_keys?: OptionKey[];
+  group_room_mix?: GroupRoomMix;
   updated_at: string;
 }
+
+export interface GroupRoomMix {
+  double: number;
+  triple: number;
+  single: number;
+}
+
 
 export const emptyDraft = (): QuoteDraft => ({
   step: 1,

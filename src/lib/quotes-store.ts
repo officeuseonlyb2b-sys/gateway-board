@@ -58,6 +58,13 @@ export interface SavedAllocationRow {
   markup_plus_gst: number;
   grand_total: number;
 }
+export interface SavedGroupRow {
+  arrangement: string;   // e.g. "Double Sharing"
+  rooms_label: string;   // e.g. "20 rooms" or "13 Triple + 1 Single"
+  total_package: number;
+  per_person: number;
+  pax_covered: number;
+}
 export interface SavedQuote {
   id: string;
   quote_number: string;
@@ -77,7 +84,11 @@ export interface SavedQuote {
   include_dbl: boolean;
   include_trp: boolean;
   allocations?: SavedAllocationRow[];
+  is_group?: boolean;
+  group_total_pax?: number;
+  group_rows?: SavedGroupRow[];
 }
+
 
 
 const listeners = new Set<() => void>();

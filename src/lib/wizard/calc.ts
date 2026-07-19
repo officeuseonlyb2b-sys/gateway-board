@@ -338,3 +338,105 @@ export function lookupOptionNightlyRates(
   });
   return { perNight, missing, nights: perNight.length };
 }
+
+// ============================================================
+// Group (GIT) Costing — 6+ pax
+// ============================================================
+import type { GroupRoomMix } from "./types";
+
+export function isGroupTour(draft: import("./types").QuoteDraft): boolean {
+  return draft.tour_type === "GIT" || totalPax(draft) >= 6;
+}
+
+export function autoDoubleMix(pax: number): GroupRoomMix {
+  const double = Math.floor(pax / 2);
+  const single = pax % 2;
+  return { double, triple: 0, single };
+}
+
+export function autoTripleMix(pax: number): GroupRoomMix {
+  const triple = Math.floor(pax / 3);
+  const rem = pax % 3;
+  const double = rem === 2 ? 1 : 0;
+  const single = rem === 1 ? 1 : 0;
+  return { double, triple, single };
+}
+
+export function mixCoversPax(mix: GroupRoomMix): number {
+  return mix.double * 2 + mix.triple * 3 + mix.single;
+}
+
+export interface GroupOptionTotals {
+  key: string;
+  label: string;
+  mix: GroupRoomMix;
+  pax_covered: number;
+  room_net: number;
+  room_gst: number;
+  addons_total: number;
+  markup: number;
+  gst5: number;
+  grand_total: number;
+  per_person: number;
+  rate_missing: number;
+}
+
+// Compute group totals for one hotel option given a room mix.
+export function computeGroupOption(
+  draft: import("./types").QuoteDraft,
+  opt: HotelOption,
+  d: import("@/lib/mock-store").DB,
+  mix: GroupRoomMix,
+): GroupOptionTotals {
+  let roomNet = 0, roomGst = 0, missing = 0;
+  draft.routing.forEach((day, i) => {
+    if (!day.overnight) return;
+    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    if (!sel) { missing++; return; }
+    const date = addDaysISO(draft.start_date, i);
+    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    if (!plan) { missing++; return; }
+    const sgl = plan.single_rate;
+    const dbl = plan.double_rate;
+    const trp = dbl + plan.extra_bed_rate;
+    // Each room's tariff drives its own GST slab.
+    const nightNet = mix.double * dbl + mix.triple * trp + mix.single * sgl;
+    const nightGst = mix.double * dbl * gstRateFor(dbl)
+                   + mix.triple * trp * gstRateFor(trp)
+                   + mix.single * sgl * gstRateFor(sgl);
+    roomNet += nightNet;
+    roomGst += nightGst;
+  });
+
+  const addons = computeAddonsTotal(draft);
+  const mk = (draft.markup_percent || 0) / 100;
+  const sub = roomNet + roomGst + addons;
+  const markup = sub * mk;
+  const gst5 = (sub + markup) * 0.05;
+  const grand = sub + markup + gst5;
+  const covered = mixCoversPax(mix);
+  const perPerson = covered > 0 ? grand / covered : 0;
+
+  return {
+    key: opt.key,
+    label: opt.label || opt.key,
+    mix,
+    pax_covered: covered,
+    room_net: roomNet,
+    room_gst: roomGst,
+    addons_total: addons,
+    markup,
+    gst5,
+    grand_total: grand,
+    per_person: perPerson,
+    rate_missing: missing,
+  };
+}
+
+export function mixLabel(mix: GroupRoomMix): string {
+  const parts: string[] = [];
+  if (mix.double) parts.push(`${mix.double} Double`);
+  if (mix.triple) parts.push(`${mix.triple} Triple`);
+  if (mix.single) parts.push(`${mix.single} Single`);
+  return parts.join(" + ") || "No rooms";
+}
