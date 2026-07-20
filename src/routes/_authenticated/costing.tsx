@@ -66,10 +66,11 @@ const STEPS: { n: number; label: string }[] = [
   { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Pax+Type" },
   { n: 4, label: "From" }, { n: 5, label: "Travel" }, { n: 6, label: "Duration" },
   { n: 7, label: "Program" }, { n: 8, label: "Create Route" }, { n: 9, label: "Routing" },
-  { n: 10, label: "Transport" }, { n: 11, label: "Activities" }, { n: 12, label: "Entrances" },
-  { n: 13, label: "Guide" }, { n: 14, label: "Misc" }, { n: 15, label: "Hotels" },
+  { n: 10, label: "Activities" }, { n: 11, label: "Entrances" }, { n: 12, label: "Guide" },
+  { n: 13, label: "Misc" }, { n: 14, label: "Transport" }, { n: 15, label: "Hotels" },
   { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
 ];
+
 
 /** Brochure departure ex-points (Ex-City list) */
 const BROCHURE_EX_CITIES = [
@@ -379,11 +380,12 @@ function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<Quote
     case 7: return <Step4 draft={draft} set={set} />;
     case 8: return <StepCreateRoute draft={draft} set={set} />;
     case 9: return <Step9 draft={draft} set={set} />;
-    case 10: return <Step10 draft={draft} set={set} />;
-    case 11: return <Step11 draft={draft} set={set} />;
-    case 12: return <Step12 draft={draft} set={set} />;
-    case 13: return <Step13 draft={draft} set={set} />;
-    case 14: return <Step14 draft={draft} set={set} />;
+    case 10: return <Step11 draft={draft} set={set} />;
+    case 11: return <Step12 draft={draft} set={set} />;
+    case 12: return <Step13 draft={draft} set={set} />;
+    case 13: return <Step14 draft={draft} set={set} />;
+    case 14: return <Step10 draft={draft} set={set} />;
+
     case 15: return <Step15 draft={draft} set={set} />;
     case 16: return <Step16 draft={draft} set={set} />;
     case 17: return <Step17 draft={draft} set={set} />;
@@ -995,12 +997,39 @@ function Step9({ draft, set }: StepProps) {
   };
 
 
-  const renderSuggestions = (cityId: string, dayNum: number) => {
-    const cName = cityName(cityId);
-    if (!cName) return null;
-    const gs = guidesForCity(cName);
-    const es = entrancesForCity(cityId);
-    const acts = activitiesForCity(cName);
+  const filterGuidesByDayType = (gs: Guide[], dt?: RoutingDay["day_type"]) => {
+    if (!dt || dt === "excursion" || dt === "multi_dest") return gs;
+    if (dt === "half_day") {
+      // Only HDCT / AM HDCT / PM HDCT — exclude FDCT
+      return gs.filter((g) => {
+        const tp = (g.tour_program || "").toUpperCase();
+        return tp.includes("HDCT") && !tp.includes("FDCT");
+      });
+    }
+    // full_day → FDCT + HDCT (all)
+    return gs;
+  };
+
+  const renderSuggestions = (cityIds: string[], dayNum: number, dayType?: RoutingDay["day_type"]) => {
+    const ids = Array.from(new Set(cityIds.filter(Boolean)));
+    if (ids.length === 0) return null;
+    const names = ids.map(cityName).filter(Boolean);
+    const label = names.join(" + ");
+
+    // Merge & de-dup across all TO cities
+    const gsMap = new Map<string, Guide>();
+    const esMap = new Map<string, EntranceSite>();
+    const actsMap = new Map<string, Activity>();
+    for (const id of ids) {
+      const n = cityName(id);
+      if (!n) continue;
+      guidesForCity(n).forEach((g) => gsMap.set(g.id, g));
+      entrancesForCity(id).forEach((e) => esMap.set(e.id, e));
+      activitiesForCity(n).forEach((a) => actsMap.set(a.id, a));
+    }
+    const gs = filterGuidesByDayType(Array.from(gsMap.values()), dayType);
+    const es = Array.from(esMap.values());
+    const acts = Array.from(actsMap.values());
     const ms = activeMisc();
 
     const EmptyAdd = ({ label, path }: { label: string; path: string }) => (
@@ -1021,13 +1050,13 @@ function Step9({ draft, set }: StepProps) {
     return (
       <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
         <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Suggestions for {cName} · {pax} pax
+          Suggestions for {label} · {pax} pax
         </div>
 
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Guides</div>
           {gs.length === 0 ? (
-            <EmptyAdd label={`No guides for ${cName}.`} path="/guide" />
+            <EmptyAdd label={`No guides for ${label}.`} path="/guide" />
           ) : (
             <div className="space-y-1">
               {gs.map((g) => {
@@ -1048,7 +1077,7 @@ function Step9({ draft, set }: StepProps) {
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Entrances</div>
           {es.length === 0 ? (
-            <EmptyAdd label={`No entrances for ${cName}.`} path="/entrances" />
+            <EmptyAdd label={`No entrances for ${label}.`} path="/entrances" />
           ) : (
             <div className="flex flex-wrap gap-1">
               {es.map((e) => {
@@ -1069,7 +1098,7 @@ function Step9({ draft, set }: StepProps) {
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Activities</div>
           {acts.length === 0 ? (
-            <EmptyAdd label={`No activities for ${cName}.`} path="/activities" />
+            <EmptyAdd label={`No activities for ${label}.`} path="/activities" />
           ) : (
             <div className="flex flex-wrap gap-1">
               {acts.map((a) => {
@@ -1114,6 +1143,7 @@ function Step9({ draft, set }: StepProps) {
     );
   };
 
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
@@ -1156,35 +1186,81 @@ function Step9({ draft, set }: StepProps) {
                     <Input className="h-8 text-xs" value={r.from_city ?? fromDefault}
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
-                  <td className="p-2">
-                    <Select
-                      value={r.to_city_id || ""}
-                      onValueChange={(v) => {
-                        // Auto-fill overnight to same city if overnight is empty or previously mirrored TO
-                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id;
+                  <td className="p-2 min-w-[220px]">
+                    {(() => {
+                      const selected = (r.to_city_ids && r.to_city_ids.length > 0)
+                        ? r.to_city_ids
+                        : (r.to_city_id ? [r.to_city_id] : []);
+                      const available = d.cities.filter((c) => !selected.includes(c.id));
+                      const addCity = (v: string) => {
+                        const next = Array.from(new Set([...selected, v]));
+                        const primary = next[0];
+                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
                         updateRow(i, {
-                          to_city_id: v,
-                          to_city: cityName(v),
+                          to_city_ids: next,
+                          to_city_id: primary,
+                          to_city: cityName(primary),
                           ...(isLast
-                            ? { city_id: v }
-                            : shouldMirror
-                              ? { city_id: v }
-                              : {}),
+                            ? { city_id: primary }
+                            : r.day_type === "excursion"
+                              ? { city_id: "" }
+                              : shouldMirror
+                                ? { city_id: primary }
+                                : {}),
                         });
-                      }}
-                    >
-                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "Destination…"} /></SelectTrigger>
-                      <SelectContent>
-                        {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    {isLast && (
-                      <Input className="h-7 text-[11px] mt-1"
-                        placeholder="or type departure city"
-                        value={r.to_city && !r.to_city_id ? r.to_city : ""}
-                        onChange={(e) => updateRow(i, { to_city: e.target.value })} />
-                    )}
+                      };
+                      const removeCity = (id: string) => {
+                        const next = selected.filter((x) => x !== id);
+                        const primary = next[0] || "";
+                        updateRow(i, {
+                          to_city_ids: next,
+                          to_city_id: primary,
+                          to_city: cityName(primary),
+                          ...(isLast ? { city_id: primary } : {}),
+                        });
+                      };
+                      return (
+                        <>
+                          {selected.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {selected.map((id) => (
+                                <span key={id}
+                                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30">
+                                  {cityName(id) || id}
+                                  <button type="button" onClick={() => removeCity(id)}
+                                    className="hover:text-destructive" title="Remove">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <Select
+                            value=""
+                            onValueChange={addCity}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder={
+                                selected.length === 0
+                                  ? (isLast ? "Departure city…" : "Add destination…")
+                                  : "+ Add another destination"
+                              } />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {available.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          {isLast && selected.length === 0 && (
+                            <Input className="h-7 text-[11px] mt-1"
+                              placeholder="or type departure city"
+                              value={r.to_city && !r.to_city_id ? r.to_city : ""}
+                              onChange={(e) => updateRow(i, { to_city: e.target.value })} />
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
+
                   <td className="p-2">
                     {isLast ? (
                       <span className="text-[11px] text-muted-foreground italic">Departure</span>
@@ -1241,11 +1317,59 @@ function Step9({ draft, set }: StepProps) {
                         onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
                     )}
                   </td>
-                  <td className="p-2 space-y-1 min-w-[280px]">
-                    <Textarea rows={2} placeholder="Describe the day's program…"
-                      value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id, r.day)}
+                  <td className="p-2 space-y-1 min-w-[300px]">
+                    {(() => {
+                      const dt = r.day_type || "full_day";
+                      const DT_OPTS: { v: RoutingDay["day_type"]; label: string }[] = [
+                        { v: "half_day", label: "Half Day" },
+                        { v: "full_day", label: "Full Day" },
+                        { v: "excursion", label: "Excursion" },
+                        { v: "multi_dest", label: "Multi-Dest" },
+                      ];
+                      const placeholders: Record<string, string> = {
+                        half_day: "Morning or afternoon visit to…",
+                        full_day: "Full day sightseeing at…",
+                        excursion: "Day excursion to… return to base city tonight",
+                        multi_dest: "Visit [City1] then [City2]…",
+                      };
+                      const selectedToIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                        ? r.to_city_ids
+                        : (r.to_city_id ? [r.to_city_id] : []);
+                      const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
+                        // Excursion → overnight = FROM city (return to same city)
+                        if (v === "excursion" && !isLast) {
+                          const fromName = r.from_city ?? fromDefault;
+                          const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
+                          updateRow(i, { day_type: v, city_id: fromId });
+                        } else {
+                          updateRow(i, { day_type: v });
+                        }
+                      };
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-1">
+                            <span className="text-[10px] font-semibold uppercase text-muted-foreground self-center mr-1">Day Type:</span>
+                            {DT_OPTS.map((o) => (
+                              <button key={o.v} type="button"
+                                onClick={() => applyDayType(o.v!)}
+                                className={cn(
+                                  "text-[10px] px-2 py-0.5 rounded-full border",
+                                  dt === o.v
+                                    ? "bg-primary text-primary-foreground border-primary font-medium"
+                                    : "bg-background hover:bg-muted"
+                                )}>
+                                {o.label}
+                              </button>
+                            ))}
+                          </div>
+                          <Textarea rows={2} placeholder={placeholders[dt]}
+                            value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
+                          {selectedToIds.length > 0 && renderSuggestions(selectedToIds, r.day, dt)}
+                        </>
+                      );
+                    })()}
                   </td>
+
 
                 </tr>
                 {r.travel_by && r.transport_expanded && (
@@ -1538,7 +1662,11 @@ function Step10({ draft, set }: StepProps) {
 // ============================================================
 function Step11({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
+  const routingCities = new Set(draft.routing.flatMap((r) => {
+    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
+    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
+  }));
+
   const relevant = d.activities.filter((a) => {
     if (!a.is_active) return false;
     const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
@@ -1628,7 +1756,11 @@ function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amou
 // ============================================================
 function Step12({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCityNames = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
+  const routingCityNames = new Set(draft.routing.flatMap((r) => {
+    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
+    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
+  }));
+
   const cityIds = new Set(d.entrance_cities.filter((c) => routingCityNames.has(c.name)).map((c) => c.id));
   const relevant = d.entrance_sites.filter((s) => s.is_active && (cityIds.has(s.city_id) || cityIds.size === 0));
 
