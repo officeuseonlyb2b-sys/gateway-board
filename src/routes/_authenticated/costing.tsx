@@ -1178,31 +1178,12 @@ function Step9({ draft, set }: StepProps) {
                         onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
                     )}
                   </td>
-                  <td className="p-2 space-y-1">
+                  <td className="p-2 space-y-1 min-w-[280px]">
                     <Textarea rows={2} placeholder="Describe the day's program…"
                       value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                    {ents.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {ents.map((e) => (
-                          <button key={e.id} type="button"
-                            onClick={() => {
-                              const already = draft.entrances.some((x) => x.site_id === e.id);
-                              if (already) return;
-                              set({
-                                entrances: [...draft.entrances, {
-                                  id: uid(), site_id: e.id, indian_pax: totalPax(draft),
-                                  indian_rate: e.indian_rate, foreign_pax: 0, foreign_rate: e.foreigner_rate,
-                                }],
-                              });
-                              toast.success(`${e.site_name} added to entrances`);
-                            }}
-                            className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20">
-                            + {e.site_name} ₹{e.indian_rate}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id)}
                   </td>
+
                 </tr>
                 {r.travel_by && r.transport_expanded && (
                   <tr key={`${i}-details`} className="border-t bg-muted/20">
