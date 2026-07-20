@@ -912,7 +912,7 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[200px]">To</th>
               <th className="text-left p-2 w-[120px]">Overnight</th>
               <th className="text-left p-2 w-[110px]">Travel By</th>
-              <th className="text-left p-2 w-[160px]">Day Type</th>
+              <th className="text-left p-2 w-[200px]">Day Type</th>
             </tr>
           </thead>
           <tbody>
