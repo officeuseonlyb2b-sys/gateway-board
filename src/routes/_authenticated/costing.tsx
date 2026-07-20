@@ -141,6 +141,7 @@ function WizardPage() {
     }
 
     const existing = loadDraft();
+    console.log("[costing init] existing draft:", existing ? `step ${existing.step}` : "null");
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
