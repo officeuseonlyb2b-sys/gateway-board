@@ -1662,7 +1662,11 @@ function Step10({ draft, set }: StepProps) {
 // ============================================================
 function Step11({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
+  const routingCities = new Set(draft.routing.flatMap((r) => {
+    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
+    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
+  }));
+
   const relevant = d.activities.filter((a) => {
     if (!a.is_active) return false;
     const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
