@@ -140,11 +140,12 @@ function WizardPage() {
       }
     }
 
-    const existing = loadDraft();
+    // Prefer the draft already read by useSyncExternalStore; fall back to a direct read.
+    const existing = draft || loadDraft();
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
-  }, [initialized, search.id]);
+  }, [initialized, search.id, draft]);
 
   // Publish active-wizard metadata whenever the draft moves — so other
   // pages can show the "Continue Quotation" banner. Cleared on discard/save.
@@ -897,27 +898,21 @@ function Step9({ draft, set }: StepProps) {
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
-  const pax = totalPax(draft);
-
-
-
-
-
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="text-left p-2 w-14">Day</th>
-              <th className="text-left p-2 w-24">Day Name</th>
-              <th className="text-left p-2 w-28">Date</th>
-              <th className="text-left p-2">From</th>
-              <th className="text-left p-2">To</th>
-              <th className="text-left p-2">Overnight</th>
-              <th className="text-left p-2 w-28">Travel By</th>
-              <th className="text-left p-2">Day Type</th>
+      <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px] border-collapse">
+          <thead className="bg-[#F3F4F6] text-[11px] uppercase text-muted-foreground tracking-wide">
+            <tr className="border-b border-[#E5E7EB]">
+              <th className="text-left p-2 w-[50px]">Day</th>
+              <th className="text-left p-2 w-[65px]">Day Name</th>
+              <th className="text-left p-2 w-[90px]">Date</th>
+              <th className="text-left p-2 w-[80px]">From</th>
+              <th className="text-left p-2 w-[200px]">To</th>
+              <th className="text-left p-2 w-[120px]">Overnight</th>
+              <th className="text-left p-2 w-[110px]">Travel By</th>
+              <th className="text-left p-2 w-[160px]">Day Type</th>
             </tr>
           </thead>
           <tbody>
@@ -931,20 +926,19 @@ function Step9({ draft, set }: StepProps) {
                 : `Day ${r.day}`;
               return (
                 <>
-                <tr key={i} className="border-t align-top">
-                  <td className="p-2 font-semibold">Day {r.day}</td>
-                  <td className="p-2">
+                <tr key={i} className="bg-white border-b border-[#E5E7EB] align-middle" style={{ minHeight: 56 }}>
+                  <td className="p-2 font-semibold align-middle">Day {r.day}</td>
+                  <td className="p-2 align-middle">
                     <Input className="h-8 text-xs" value={r.day_name || weekday}
                       onChange={(e) => updateRow(i, { day_name: e.target.value })} />
                   </td>
-                  <td className="p-2 text-xs">
+                  <td className="p-2 text-xs align-middle">
                     {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
                   </td>
-                  <td className="p-2">
-                    <Input className="h-8 text-xs" value={r.from_city ?? fromDefault}
-                      onChange={(e) => updateRow(i, { from_city: e.target.value })} />
+                  <td className="p-2 text-xs align-middle">
+                    <span className="text-sm text-foreground">{r.from_city ?? fromDefault}</span>
                   </td>
-                  <td className="p-2 min-w-[220px]">
+                  <td className="p-2 align-middle w-[200px]">
                     {(() => {
                       const selected = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
@@ -954,13 +948,14 @@ function Step9({ draft, set }: StepProps) {
                         const next = Array.from(new Set([...selected, v]));
                         const primary = next[0];
                         const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
+                        const excursion = r.day_type === "excursion" || r.day_type === "full_day_excursion";
                         updateRow(i, {
                           to_city_ids: next,
                           to_city_id: primary,
                           to_city: cityName(primary),
                           ...(isLast
                             ? { city_id: primary }
-                            : r.day_type === "excursion"
+                            : excursion
                               ? { city_id: "" }
                               : shouldMirror
                                 ? { city_id: primary }
@@ -1019,7 +1014,7 @@ function Step9({ draft, set }: StepProps) {
                     })()}
                   </td>
 
-                  <td className="p-2">
+                  <td className="p-2 align-middle w-[120px]">
                     {isLast ? (
                       <span className="text-[11px] text-muted-foreground italic">Departure</span>
                     ) : (
@@ -1035,7 +1030,7 @@ function Step9({ draft, set }: StepProps) {
                       </Select>
                     )}
                   </td>
-                  <td className="p-2 space-y-1">
+                  <td className="p-2 align-middle w-[110px]">
                     <div className="flex gap-1">
                       <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"], transport_expanded: true })}>
                         <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
@@ -1063,29 +1058,19 @@ function Step9({ draft, set }: StepProps) {
                         </button>
                       )}
                     </div>
-                    {r.travel_by && (
-                      <Input className="h-7 text-[11px]"
-                        placeholder={
-                          r.travel_by === "Flight" ? "e.g. IndiGo 6E-214"
-                          : r.travel_by === "Train" ? "e.g. Vande Bharat"
-                          : r.travel_by === "Road" || r.travel_by === "Self Drive" ? "e.g. Tempo Traveller"
-                          : "Details (optional)"
-                        }
-                        value={r.travel_by_detail || ""}
-                        onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
-                    )}
                   </td>
-                  <td className="p-2 space-y-1 min-w-[420px]">
+                  <td className="p-2 align-middle w-[160px]">
                     {(() => {
-                      const dt = r.day_type || "full_day";
-                      const DT_OPTS: { v: RoutingDay["day_type"]; label: string }[] = [
-                        { v: "half_day", label: "Half Day" },
-                        { v: "full_day", label: "Full Day" },
-                        { v: "excursion", label: "Excursion" },
-                      ];
+                      const normalizeDayType = (dt?: RoutingDay["day_type"]) => {
+                        if (dt === "half_day") return "am_half_day";
+                        if (dt === "excursion") return "full_day_excursion";
+                        if (dt === "multi_dest") return "full_day";
+                        return dt || "full_day";
+                      };
+                      const current = normalizeDayType(r.day_type);
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
-                        // Excursion → overnight = FROM city (return to same city)
-                        if (v === "excursion" && !isLast) {
+                        const excursion = v === "excursion" || v === "full_day_excursion";
+                        if (excursion && !isLast) {
                           const fromName = r.from_city ?? fromDefault;
                           const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
                           updateRow(i, { day_type: v, city_id: fromId });
@@ -1094,28 +1079,23 @@ function Step9({ draft, set }: StepProps) {
                         }
                       };
                       return (
-                        <div className="flex flex-wrap gap-1">
-                          {DT_OPTS.map((o) => (
-                            <button key={o.v} type="button"
-                              onClick={() => applyDayType(o.v!)}
-                              className={cn(
-                                "text-[10px] px-2 py-0.5 rounded-full border",
-                                dt === o.v
-                                  ? "bg-primary text-primary-foreground border-primary font-medium"
-                                  : "bg-background hover:bg-muted"
-                              )}>
-                              {o.label}
-                            </button>
-                          ))}
-                        </div>
+                        <Select value={current} onValueChange={(v) => applyDayType(v as NonNullable<RoutingDay["day_type"]>)}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Day type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="am_half_day">AM Half Day</SelectItem>
+                            <SelectItem value="pm_half_day">PM Half Day</SelectItem>
+                            <SelectItem value="full_day">Full Day</SelectItem>
+                            <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
+                          </SelectContent>
+                        </Select>
                       );
                     })()}
                   </td>
-
-
                 </tr>
                 {r.travel_by && r.transport_expanded && (
-                  <tr key={`${i}-details`} className="border-t bg-muted/20">
+                  <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
                     <td colSpan={8} className="p-3">
                       <DayTransportPanel
                         mode={r.travel_by}
@@ -1130,80 +1110,6 @@ function Step9({ draft, set }: StepProps) {
                     </td>
                   </tr>
                 )}
-                {(() => {
-                  const cityIds = (r.to_city_ids && r.to_city_ids.length > 0)
-                    ? r.to_city_ids
-                    : (r.to_city_id ? [r.to_city_id] : []);
-                  if (cityIds.length === 0) return null;
-                  const dt = r.day_type || "full_day";
-                  const matchesDayType = (tp: string) => {
-                    const t = tp.toLowerCase();
-                    if (dt === "half_day") return t.includes("hd") || t.includes("half") || t.startsWith("am ") || t.startsWith("pm ");
-                    if (dt === "full_day") return t.includes("full") || t.includes("fd") || t.includes("hdct");
-                    if (dt === "excursion") return t.includes("excursion") || t.includes("exc");
-                    return true;
-                  };
-                  return (
-                    <tr key={`${i}-sug`} className="border-t bg-muted/10">
-                      <td colSpan={8} className="p-3">
-                        <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-2">
-                          Guide Suggestions · Day {r.day}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {cityIds.map((cid) => {
-                            const cName = cityName(cid);
-                            const guides = d.guides.filter((g) =>
-                              g.is_active && (g.city === cName || g.destination === cName)
-                            );
-                            let filtered = guides.filter((g) => matchesDayType(g.tour_program || g.name));
-                            if (filtered.length === 0) filtered = guides;
-                            return (
-                              <div key={cid} className="space-y-1">
-                                <div className="text-sm font-semibold text-primary">{cName}</div>
-                                {filtered.length === 0 ? (
-                                  <div className="text-[11px] text-muted-foreground italic">
-                                    No guides for {cName}.{" "}
-                                    <a href="/guide" target="_blank" rel="noreferrer"
-                                       className="text-accent hover:underline">+ Add →</a>
-                                  </div>
-                                ) : filtered.map((g) => {
-                                  const rate = guideRateForPax(g, pax);
-                                  const selected = draft.guides.some((x) =>
-                                    x.guide_id === g.id && (x.from_routing_days ?? []).includes(r.day)
-                                  );
-                                  const toggle = () => {
-                                    if (selected) {
-                                      set({ guides: draft.guides.filter((x) =>
-                                        !(x.guide_id === g.id && (x.from_routing_days ?? []).includes(r.day))
-                                      ) });
-                                    } else {
-                                      set({ guides: [...draft.guides, {
-                                        id: uid(), guide_id: g.id, days: 1, guides: 1, rate,
-                                        from_routing_days: [r.day],
-                                      }] });
-                                    }
-                                  };
-                                  const label = g.tour_program || g.name;
-                                  return (
-                                    <label key={g.id}
-                                      className={cn(
-                                        "flex items-center gap-2 text-[12px] px-2 py-1 rounded cursor-pointer hover:bg-muted/50",
-                                        selected && "bg-accent/10"
-                                      )}>
-                                      <Checkbox checked={selected} onCheckedChange={toggle} />
-                                      <span className="flex-1 truncate">{label}</span>
-                                      <span className="text-[10px] text-muted-foreground tabular-nums">{inr(rate)}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })()}
                 </>
               );
             })}
