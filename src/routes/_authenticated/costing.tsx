@@ -1244,7 +1244,7 @@ function Step9({ draft, set }: StepProps) {
                   <td className="p-2 space-y-1 min-w-[280px]">
                     <Textarea rows={2} placeholder="Describe the day's program…"
                       value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id)}
+                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id, r.day)}
                   </td>
 
                 </tr>
