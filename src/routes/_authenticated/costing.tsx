@@ -912,7 +912,8 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2 w-24">Day Name</th>
               <th className="text-left p-2 w-28">Date</th>
               <th className="text-left p-2">From</th>
-              <th className="text-left p-2">To / Overnight</th>
+              <th className="text-left p-2">To</th>
+              <th className="text-left p-2">Overnight</th>
               <th className="text-left p-2 w-28">Travel By</th>
               <th className="text-left p-2">Day's Program</th>
             </tr>
