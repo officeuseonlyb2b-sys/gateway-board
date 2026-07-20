@@ -123,6 +123,8 @@ function WizardPage() {
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  console.log("[WizardPage] render, draft:", draft ? `step ${draft.step}` : "null", "initialized:", initialized);
+
 
   useEffect(() => {
     if (initialized) return;
