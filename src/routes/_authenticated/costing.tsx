@@ -901,6 +901,156 @@ function Step9({ draft, set }: StepProps) {
   const OVERNIGHT_NONE = "__none__";
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+
+  const pax = totalPax(draft);
+  const guidesForCity = (cName: string) =>
+    d.guides.filter((g) => g.is_active && (g.destination === cName || g.city === cName));
+  const activitiesForCity = (cName: string) =>
+    d.activities.filter((a) => {
+      if (!a.is_active) return false;
+      const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+      return dest === cName;
+    });
+  const activeMisc = () => d.miscellaneous_items.filter((m) => m.is_active);
+  const openModule = (path: string) => {
+    if (typeof window !== "undefined") window.open(path, "_blank", "noopener");
+  };
+
+  const addGuideSug = (g: Guide) => {
+    if (draft.guides.some((x) => x.guide_id === g.id)) { toast.info("Guide already added"); return; }
+    set({ guides: [...draft.guides, { id: uid(), guide_id: g.id, days: 1, guides: 1, rate: guideRateForPax(g, pax) }] });
+    toast.success(`${g.name} added to guides`);
+  };
+  const addEntSug = (e: EntranceSite) => {
+    if (draft.entrances.some((x) => x.site_id === e.id)) return;
+    set({
+      entrances: [...draft.entrances, {
+        id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
+        foreign_pax: 0, foreign_rate: e.foreigner_rate,
+        student_pax: 0, student_rate: e.student_rate ?? 0,
+      }],
+    });
+    toast.success(`${e.site_name} added to entrances`);
+  };
+  const addActSug = (a: Activity) => {
+    if (draft.activities.some((x) => x.activity_id === a.id)) return;
+    set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
+    toast.success(`${a.activity_name} added to activities`);
+  };
+  const addMiscSug = (m: MiscellaneousItem) => {
+    if (draft.misc.some((x) => x.item_id === m.id)) return;
+    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: 1, rate: m.rate, unit: m.unit }] });
+    toast.success(`${m.name} added to miscellaneous`);
+  };
+
+  const renderSuggestions = (cityId: string) => {
+    const cName = cityName(cityId);
+    if (!cName) return null;
+    const gs = guidesForCity(cName);
+    const es = entrancesForCity(cityId);
+    const acts = activitiesForCity(cName);
+    const ms = activeMisc();
+
+    const EmptyAdd = ({ label, path }: { label: string; path: string }) => (
+      <div className="text-[11px] text-muted-foreground">
+        {label}{" "}
+        <button type="button" onClick={() => openModule(path)}
+          className="text-accent hover:underline font-medium">
+          + Add →
+        </button>
+      </div>
+    );
+
+    return (
+      <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Suggestions for {cName} · {pax} pax
+        </div>
+
+        <div className="space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Guides</div>
+          {gs.length === 0 ? (
+            <EmptyAdd label={`No guides for ${cName}.`} path="/guide" />
+          ) : (
+            <div className="space-y-1">
+              {gs.map((g) => {
+                const already = draft.guides.some((x) => x.guide_id === g.id);
+                return (
+                  <button key={g.id} type="button" disabled={already}
+                    onClick={() => addGuideSug(g)}
+                    className="w-full text-left text-[11px] px-2 py-1 rounded border hover:bg-accent/10 disabled:opacity-50 flex justify-between gap-2">
+                    <span className="truncate">{g.tour_program || g.name}</span>
+                    <span className="tabular-nums shrink-0">₹{guideRateForPax(g, pax)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Entrances</div>
+          {es.length === 0 ? (
+            <EmptyAdd label={`No entrances for ${cName}.`} path="/entrances" />
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {es.map((e) => {
+                const already = draft.entrances.some((x) => x.site_id === e.id);
+                return (
+                  <button key={e.id} type="button" disabled={already}
+                    onClick={() => addEntSug(e)}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
+                    + {e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Activities</div>
+          {acts.length === 0 ? (
+            <EmptyAdd label={`No activities for ${cName}.`} path="/activities" />
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {acts.map((a) => {
+                const already = draft.activities.some((x) => x.activity_id === a.id);
+                return (
+                  <button key={a.id} type="button" disabled={already}
+                    onClick={() => addActSug(a)}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
+                    + {a.activity_name} · ₹{activityRateForPax(a, pax)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Miscellaneous</div>
+          {ms.length === 0 ? (
+            <EmptyAdd label="No miscellaneous items." path="/miscellaneous" />
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {ms.map((m) => {
+                const already = draft.misc.some((x) => x.item_id === m.id);
+                const unitLbl = m.unit === "per_person" ? "pp" : m.unit === "per_day" ? "day" : "fx";
+                return (
+                  <button key={m.id} type="button" disabled={already}
+                    onClick={() => addMiscSug(m)}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70 disabled:opacity-50">
+                    + {m.name} · ₹{m.rate}/{unitLbl}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
