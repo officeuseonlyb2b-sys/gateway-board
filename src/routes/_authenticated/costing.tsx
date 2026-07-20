@@ -380,11 +380,12 @@ function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<Quote
     case 7: return <Step4 draft={draft} set={set} />;
     case 8: return <StepCreateRoute draft={draft} set={set} />;
     case 9: return <Step9 draft={draft} set={set} />;
-    case 10: return <Step10 draft={draft} set={set} />;
-    case 11: return <Step11 draft={draft} set={set} />;
-    case 12: return <Step12 draft={draft} set={set} />;
-    case 13: return <Step13 draft={draft} set={set} />;
-    case 14: return <Step14 draft={draft} set={set} />;
+    case 10: return <Step11 draft={draft} set={set} />;
+    case 11: return <Step12 draft={draft} set={set} />;
+    case 12: return <Step13 draft={draft} set={set} />;
+    case 13: return <Step14 draft={draft} set={set} />;
+    case 14: return <Step10 draft={draft} set={set} />;
+
     case 15: return <Step15 draft={draft} set={set} />;
     case 16: return <Step16 draft={draft} set={set} />;
     case 17: return <Step17 draft={draft} set={set} />;
