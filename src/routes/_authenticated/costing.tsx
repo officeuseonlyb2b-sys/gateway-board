@@ -953,7 +953,7 @@ function Step9({ draft, set }: StepProps) {
                           to_city_id: v,
                           to_city: cityName(v),
                           ...(isLast
-                            ? {}
+                            ? { city_id: v }
                             : shouldMirror
                               ? { city_id: v }
                               : {}),
