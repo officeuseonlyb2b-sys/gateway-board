@@ -68,7 +68,7 @@ export interface DayTransportDetails {
   arrival_time?: string;
   remarks?: string;
 }
-export type DayType = "half_day" | "full_day" | "excursion" | "multi_dest";
+export type DayType = "am_half_day" | "pm_half_day" | "full_day" | "full_day_excursion" | "half_day" | "excursion" | "multi_dest";
 export interface RoutingDay {
   day: number;
   date: string;
