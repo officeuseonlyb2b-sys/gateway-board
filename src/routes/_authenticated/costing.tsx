@@ -898,6 +898,7 @@ function Step9({ draft, set }: StepProps) {
     if (!ec) return [];
     return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
   };
+  const OVERNIGHT_NONE = "__none__";
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   return (
@@ -911,7 +912,8 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2 w-24">Day Name</th>
               <th className="text-left p-2 w-28">Date</th>
               <th className="text-left p-2">From</th>
-              <th className="text-left p-2">To / Overnight</th>
+              <th className="text-left p-2">To</th>
+              <th className="text-left p-2">Overnight</th>
               <th className="text-left p-2 w-28">Travel By</th>
               <th className="text-left p-2">Day's Program</th>
             </tr>
@@ -919,7 +921,7 @@ function Step9({ draft, set }: StepProps) {
           <tbody>
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
-              const ents = entrancesForCity(r.city_id);
+              const ents = entrancesForCity(r.to_city_id || r.city_id);
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
@@ -942,8 +944,23 @@ function Step9({ draft, set }: StepProps) {
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
-                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "City…"} /></SelectTrigger>
+                    <Select
+                      value={r.to_city_id || ""}
+                      onValueChange={(v) => {
+                        // Auto-fill overnight to same city if overnight is empty or previously mirrored TO
+                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id;
+                        updateRow(i, {
+                          to_city_id: v,
+                          to_city: cityName(v),
+                          ...(isLast
+                            ? { city_id: v }
+                            : shouldMirror
+                              ? { city_id: v }
+                              : {}),
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "Destination…"} /></SelectTrigger>
                       <SelectContent>
                         {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                       </SelectContent>
@@ -951,8 +968,24 @@ function Step9({ draft, set }: StepProps) {
                     {isLast && (
                       <Input className="h-7 text-[11px] mt-1"
                         placeholder="or type departure city"
-                        value={r.to_city && !r.city_id ? r.to_city : ""}
+                        value={r.to_city && !r.to_city_id ? r.to_city : ""}
                         onChange={(e) => updateRow(i, { to_city: e.target.value })} />
+                    )}
+                  </td>
+                  <td className="p-2">
+                    {isLast ? (
+                      <span className="text-[11px] text-muted-foreground italic">Departure</span>
+                    ) : (
+                      <Select
+                        value={r.city_id || OVERNIGHT_NONE}
+                        onValueChange={(v) => updateRow(i, { city_id: v === OVERNIGHT_NONE ? "" : v })}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue placeholder="Stay city…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
+                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                     )}
                   </td>
                   <td className="p-2 space-y-1">
@@ -1023,7 +1056,7 @@ function Step9({ draft, set }: StepProps) {
                 </tr>
                 {r.travel_by && r.transport_expanded && (
                   <tr key={`${i}-details`} className="border-t bg-muted/20">
-                    <td colSpan={7} className="p-3">
+                    <td colSpan={8} className="p-3">
                       <DayTransportPanel
                         mode={r.travel_by}
                         details={r.transport_details || {}}
@@ -1031,7 +1064,7 @@ function Step9({ draft, set }: StepProps) {
                           updateRow(i, { transport_details: { ...(r.transport_details || {}), ...patch } })
                         }
                         defaultFrom={r.from_city ?? fromDefault}
-                        defaultTo={cityName(r.city_id) || r.to_city || ""}
+                        defaultTo={cityName(r.to_city_id || r.city_id) || r.to_city || ""}
                         defaultDate={r.date}
                       />
                     </td>
@@ -1311,7 +1344,7 @@ function Step10({ draft, set }: StepProps) {
 // ============================================================
 function Step11({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
   const relevant = d.activities.filter((a) => {
     if (!a.is_active) return false;
     const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
@@ -1384,7 +1417,7 @@ function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amou
 // ============================================================
 function Step12({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCityNames = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const routingCityNames = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
   const cityIds = new Set(d.entrance_cities.filter((c) => routingCityNames.has(c.name)).map((c) => c.id));
   const relevant = d.entrance_sites.filter((s) => s.is_active && (cityIds.has(s.city_id) || cityIds.size === 0));
 
@@ -2776,7 +2809,7 @@ function Step18({ draft, set }: StepProps) {
   const user = useAuth();
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
 
-  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === r.city_id)?.name).filter(Boolean) as string[]);
+  const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
   const suggActs = d.activities.filter((a) => {
     if (!a.is_active) return false;
     if (draft.activities.some((x) => x.activity_id === a.id)) return false;
