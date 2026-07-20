@@ -123,8 +123,6 @@ function WizardPage() {
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
-  console.log("[WizardPage] render, draft:", draft ? `step ${draft.step}` : "null", "initialized:", initialized);
-
 
   useEffect(() => {
     if (initialized) return;
@@ -142,12 +140,12 @@ function WizardPage() {
       }
     }
 
-    const existing = loadDraft();
-    console.log("[costing init] existing draft:", existing ? `step ${existing.step}` : "null");
+    // Prefer the draft already read by useSyncExternalStore; fall back to a direct read.
+    const existing = draft || loadDraft();
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
-  }, [initialized, search.id]);
+  }, [initialized, search.id, draft]);
 
   // Publish active-wizard metadata whenever the draft moves — so other
   // pages can show the "Continue Quotation" banner. Cleared on discard/save.
