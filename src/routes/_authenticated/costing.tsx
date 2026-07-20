@@ -898,6 +898,7 @@ function Step9({ draft, set }: StepProps) {
     if (!ec) return [];
     return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
   };
+  const OVERNIGHT_NONE = "__none__";
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   return (
