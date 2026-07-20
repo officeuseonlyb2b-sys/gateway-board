@@ -77,6 +77,7 @@ export interface RoutingDay {
   to_city_id?: string;      // DESTINATION city id — primary (kept for backward compat)
   to_city_ids?: string[];   // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
   day_type?: DayType;       // half day / full day / excursion / multi-destination
+  day_types_by_city?: Record<string, DayType>;  // per-destination day type when multiple TO cities selected
   from_city?: string;       // free-text / city id, day 1 auto from departure_city
   to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
   travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
