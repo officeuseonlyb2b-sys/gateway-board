@@ -66,10 +66,11 @@ const STEPS: { n: number; label: string }[] = [
   { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Pax+Type" },
   { n: 4, label: "From" }, { n: 5, label: "Travel" }, { n: 6, label: "Duration" },
   { n: 7, label: "Program" }, { n: 8, label: "Create Route" }, { n: 9, label: "Routing" },
-  { n: 10, label: "Transport" }, { n: 11, label: "Activities" }, { n: 12, label: "Entrances" },
-  { n: 13, label: "Guide" }, { n: 14, label: "Misc" }, { n: 15, label: "Hotels" },
+  { n: 10, label: "Activities" }, { n: 11, label: "Entrances" }, { n: 12, label: "Guide" },
+  { n: 13, label: "Misc" }, { n: 14, label: "Transport" }, { n: 15, label: "Hotels" },
   { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
 ];
+
 
 /** Brochure departure ex-points (Ex-City list) */
 const BROCHURE_EX_CITIES = [
