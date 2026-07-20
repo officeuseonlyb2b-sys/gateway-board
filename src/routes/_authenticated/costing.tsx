@@ -997,12 +997,39 @@ function Step9({ draft, set }: StepProps) {
   };
 
 
-  const renderSuggestions = (cityId: string, dayNum: number) => {
-    const cName = cityName(cityId);
-    if (!cName) return null;
-    const gs = guidesForCity(cName);
-    const es = entrancesForCity(cityId);
-    const acts = activitiesForCity(cName);
+  const filterGuidesByDayType = (gs: Guide[], dt?: RoutingDay["day_type"]) => {
+    if (!dt || dt === "excursion" || dt === "multi_dest") return gs;
+    if (dt === "half_day") {
+      // Only HDCT / AM HDCT / PM HDCT — exclude FDCT
+      return gs.filter((g) => {
+        const tp = (g.tour_program || "").toUpperCase();
+        return tp.includes("HDCT") && !tp.includes("FDCT");
+      });
+    }
+    // full_day → FDCT + HDCT (all)
+    return gs;
+  };
+
+  const renderSuggestions = (cityIds: string[], dayNum: number, dayType?: RoutingDay["day_type"]) => {
+    const ids = Array.from(new Set(cityIds.filter(Boolean)));
+    if (ids.length === 0) return null;
+    const names = ids.map(cityName).filter(Boolean);
+    const label = names.join(" + ");
+
+    // Merge & de-dup across all TO cities
+    const gsMap = new Map<string, Guide>();
+    const esMap = new Map<string, EntranceSite>();
+    const actsMap = new Map<string, Activity>();
+    for (const id of ids) {
+      const n = cityName(id);
+      if (!n) continue;
+      guidesForCity(n).forEach((g) => gsMap.set(g.id, g));
+      entrancesForCity(id).forEach((e) => esMap.set(e.id, e));
+      activitiesForCity(n).forEach((a) => actsMap.set(a.id, a));
+    }
+    const gs = filterGuidesByDayType(Array.from(gsMap.values()), dayType);
+    const es = Array.from(esMap.values());
+    const acts = Array.from(actsMap.values());
     const ms = activeMisc();
 
     const EmptyAdd = ({ label, path }: { label: string; path: string }) => (
@@ -1023,13 +1050,13 @@ function Step9({ draft, set }: StepProps) {
     return (
       <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
         <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Suggestions for {cName} · {pax} pax
+          Suggestions for {label} · {pax} pax
         </div>
 
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Guides</div>
           {gs.length === 0 ? (
-            <EmptyAdd label={`No guides for ${cName}.`} path="/guide" />
+            <EmptyAdd label={`No guides for ${label}.`} path="/guide" />
           ) : (
             <div className="space-y-1">
               {gs.map((g) => {
@@ -1050,7 +1077,7 @@ function Step9({ draft, set }: StepProps) {
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Entrances</div>
           {es.length === 0 ? (
-            <EmptyAdd label={`No entrances for ${cName}.`} path="/entrances" />
+            <EmptyAdd label={`No entrances for ${label}.`} path="/entrances" />
           ) : (
             <div className="flex flex-wrap gap-1">
               {es.map((e) => {
@@ -1071,7 +1098,7 @@ function Step9({ draft, set }: StepProps) {
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Activities</div>
           {acts.length === 0 ? (
-            <EmptyAdd label={`No activities for ${cName}.`} path="/activities" />
+            <EmptyAdd label={`No activities for ${label}.`} path="/activities" />
           ) : (
             <div className="flex flex-wrap gap-1">
               {acts.map((a) => {
@@ -1115,6 +1142,7 @@ function Step9({ draft, set }: StepProps) {
       </div>
     );
   };
+
 
   return (
     <div className="space-y-4">
