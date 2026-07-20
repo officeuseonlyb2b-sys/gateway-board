@@ -1059,7 +1059,7 @@ function Step9({ draft, set }: StepProps) {
                       )}
                     </div>
                   </td>
-                  <td className="p-2 align-middle w-[160px]">
+                  <td className="p-2 align-middle w-[200px]">
                     {(() => {
                       const normalizeDayType = (dt?: RoutingDay["day_type"]) => {
                         if (dt === "half_day") return "am_half_day";
@@ -1067,6 +1067,43 @@ function Step9({ draft, set }: StepProps) {
                         if (dt === "multi_dest") return "full_day";
                         return dt || "full_day";
                       };
+                      const selectedIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                        ? r.to_city_ids
+                        : (r.to_city_id ? [r.to_city_id] : []);
+                      const DayTypeOptions = (
+                        <>
+                          <SelectItem value="am_half_day">AM Half Day</SelectItem>
+                          <SelectItem value="pm_half_day">PM Half Day</SelectItem>
+                          <SelectItem value="full_day">Full Day</SelectItem>
+                          <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
+                        </>
+                      );
+                      if (selectedIds.length >= 2) {
+                        const map = r.day_types_by_city || {};
+                        return (
+                          <div className="flex flex-col gap-1">
+                            {selectedIds.map((cid) => {
+                              const cur = normalizeDayType(map[cid] || r.day_type);
+                              return (
+                                <div key={cid} className="flex items-center gap-1.5">
+                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={cityName(cid) || cid}>
+                                    {cityName(cid) || cid}
+                                  </span>
+                                  <Select
+                                    value={cur}
+                                    onValueChange={(v) => updateRow(i, {
+                                      day_types_by_city: { ...map, [cid]: v as NonNullable<RoutingDay["day_type"]> },
+                                    })}
+                                  >
+                                    <SelectTrigger className="h-7 text-[11px] flex-1"><SelectValue /></SelectTrigger>
+                                    <SelectContent>{DayTypeOptions}</SelectContent>
+                                  </Select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
                       const current = normalizeDayType(r.day_type);
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         const excursion = v === "excursion" || v === "full_day_excursion";
@@ -1083,12 +1120,7 @@ function Step9({ draft, set }: StepProps) {
                           <SelectTrigger className="h-8 text-xs">
                             <SelectValue placeholder="Day type" />
                           </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="am_half_day">AM Half Day</SelectItem>
-                            <SelectItem value="pm_half_day">PM Half Day</SelectItem>
-                            <SelectItem value="full_day">Full Day</SelectItem>
-                            <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
-                          </SelectContent>
+                          <SelectContent>{DayTypeOptions}</SelectContent>
                         </Select>
                       );
                     })()}
