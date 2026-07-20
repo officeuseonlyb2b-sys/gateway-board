@@ -249,7 +249,7 @@ export interface DB {
 }
 
 
-const STORAGE_KEY = "mp-tourism-db-v4";
+const STORAGE_KEY = "mp-tourism-db-v5-seed2.0";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
