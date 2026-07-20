@@ -1141,6 +1141,80 @@ function Step9({ draft, set }: StepProps) {
                     </td>
                   </tr>
                 )}
+                {(() => {
+                  const cityIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                    ? r.to_city_ids
+                    : (r.to_city_id ? [r.to_city_id] : []);
+                  if (cityIds.length === 0) return null;
+                  const dt = r.day_type || "full_day";
+                  const matchesDayType = (tp: string) => {
+                    const t = tp.toLowerCase();
+                    if (dt === "half_day") return t.includes("hd") || t.includes("half") || t.startsWith("am ") || t.startsWith("pm ");
+                    if (dt === "full_day") return t.includes("full") || t.includes("fd") || t.includes("hdct");
+                    if (dt === "excursion") return t.includes("excursion") || t.includes("exc");
+                    return true;
+                  };
+                  return (
+                    <tr key={`${i}-sug`} className="border-t bg-muted/10">
+                      <td colSpan={8} className="p-3">
+                        <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-2">
+                          Guide Suggestions · Day {r.day}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {cityIds.map((cid) => {
+                            const cName = cityName(cid);
+                            const guides = d.guides.filter((g) =>
+                              g.is_active && (g.city === cName || g.destination === cName)
+                            );
+                            let filtered = guides.filter((g) => matchesDayType(g.tour_program || g.name));
+                            if (filtered.length === 0) filtered = guides;
+                            return (
+                              <div key={cid} className="space-y-1">
+                                <div className="text-sm font-semibold text-primary">{cName}</div>
+                                {filtered.length === 0 ? (
+                                  <div className="text-[11px] text-muted-foreground italic">
+                                    No guides for {cName}.{" "}
+                                    <a href="/guide" target="_blank" rel="noreferrer"
+                                       className="text-accent hover:underline">+ Add →</a>
+                                  </div>
+                                ) : filtered.map((g) => {
+                                  const rate = guideRateForPax(g, pax);
+                                  const selected = draft.guides.some((x) =>
+                                    x.guide_id === g.id && (x.from_routing_days ?? []).includes(r.day)
+                                  );
+                                  const toggle = () => {
+                                    if (selected) {
+                                      set({ guides: draft.guides.filter((x) =>
+                                        !(x.guide_id === g.id && (x.from_routing_days ?? []).includes(r.day))
+                                      ) });
+                                    } else {
+                                      set({ guides: [...draft.guides, {
+                                        id: uid(), guide_id: g.id, days: 1, guides: 1, rate,
+                                        from_routing_days: [r.day],
+                                      }] });
+                                    }
+                                  };
+                                  const label = g.tour_program || g.name;
+                                  return (
+                                    <label key={g.id}
+                                      className={cn(
+                                        "flex items-center gap-2 text-[12px] px-2 py-1 rounded cursor-pointer hover:bg-muted/50",
+                                        selected && "bg-accent/10"
+                                      )}>
+                                      <Checkbox checked={selected} onCheckedChange={toggle} />
+                                      <span className="flex-1 truncate">{label}</span>
+                                      <span className="text-[10px] text-muted-foreground tabular-nums">{inr(rate)}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()}
                 </>
               );
             })}
