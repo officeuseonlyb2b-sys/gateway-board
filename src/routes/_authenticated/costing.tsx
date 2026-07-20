@@ -1317,11 +1317,59 @@ function Step9({ draft, set }: StepProps) {
                         onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
                     )}
                   </td>
-                  <td className="p-2 space-y-1 min-w-[280px]">
-                    <Textarea rows={2} placeholder="Describe the day's program…"
-                      value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id, r.day)}
+                  <td className="p-2 space-y-1 min-w-[300px]">
+                    {(() => {
+                      const dt = r.day_type || "full_day";
+                      const DT_OPTS: { v: RoutingDay["day_type"]; label: string }[] = [
+                        { v: "half_day", label: "Half Day" },
+                        { v: "full_day", label: "Full Day" },
+                        { v: "excursion", label: "Excursion" },
+                        { v: "multi_dest", label: "Multi-Dest" },
+                      ];
+                      const placeholders: Record<string, string> = {
+                        half_day: "Morning or afternoon visit to…",
+                        full_day: "Full day sightseeing at…",
+                        excursion: "Day excursion to… return to base city tonight",
+                        multi_dest: "Visit [City1] then [City2]…",
+                      };
+                      const selectedToIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                        ? r.to_city_ids
+                        : (r.to_city_id ? [r.to_city_id] : []);
+                      const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
+                        // Excursion → overnight = FROM city (return to same city)
+                        if (v === "excursion" && !isLast) {
+                          const fromName = r.from_city ?? fromDefault;
+                          const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
+                          updateRow(i, { day_type: v, city_id: fromId });
+                        } else {
+                          updateRow(i, { day_type: v });
+                        }
+                      };
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-1">
+                            <span className="text-[10px] font-semibold uppercase text-muted-foreground self-center mr-1">Day Type:</span>
+                            {DT_OPTS.map((o) => (
+                              <button key={o.v} type="button"
+                                onClick={() => applyDayType(o.v!)}
+                                className={cn(
+                                  "text-[10px] px-2 py-0.5 rounded-full border",
+                                  dt === o.v
+                                    ? "bg-primary text-primary-foreground border-primary font-medium"
+                                    : "bg-background hover:bg-muted"
+                                )}>
+                                {o.label}
+                              </button>
+                            ))}
+                          </div>
+                          <Textarea rows={2} placeholder={placeholders[dt]}
+                            value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
+                          {selectedToIds.length > 0 && renderSuggestions(selectedToIds, r.day, dt)}
+                        </>
+                      );
+                    })()}
                   </td>
+
 
                 </tr>
                 {r.travel_by && r.transport_expanded && (
