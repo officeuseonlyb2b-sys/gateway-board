@@ -68,12 +68,15 @@ export interface DayTransportDetails {
   arrival_time?: string;
   remarks?: string;
 }
+export type DayType = "half_day" | "full_day" | "excursion" | "multi_dest";
 export interface RoutingDay {
   day: number;
   date: string;
   day_name?: string;
   city_id: string;          // OVERNIGHT city id — where guests sleep (used by Step 15 hotel lookups)
-  to_city_id?: string;      // DESTINATION city id — where guests travel to that day (drives suggestions)
+  to_city_id?: string;      // DESTINATION city id — primary (kept for backward compat)
+  to_city_ids?: string[];   // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
+  day_type?: DayType;       // half day / full day / excursion / multi-destination
   from_city?: string;       // free-text / city id, day 1 auto from departure_city
   to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
   travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
@@ -84,6 +87,7 @@ export interface RoutingDay {
   program_mode: "text" | "select";
   overnight: boolean;
 }
+
 
 export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
 export interface TransportLine {
