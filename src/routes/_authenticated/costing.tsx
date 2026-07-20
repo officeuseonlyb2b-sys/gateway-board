@@ -1555,17 +1555,33 @@ function Step11({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Activities & Experiences</h2>
+      {(() => {
+        const n = draft.activities.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       {relevant.length === 0 && <p className="text-sm text-muted-foreground">No activities found for routing cities.</p>}
       <div className="space-y-2">
         {relevant.map((a) => {
           const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
           const line = draft.activities.find((x) => x.activity_id === a.id);
           const on = !!line;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={a.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(a)} />
               <div className="flex-1">
-                <div className="text-sm font-medium">{a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span></div>
+                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                  {a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span>
+                  {fromDays.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      From Day {fromDays.join(", ")}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">{a.description}</div>
               </div>
               {on && (
@@ -1594,6 +1610,7 @@ function Step11({ draft, set }: StepProps) {
     </div>
   );
 }
+
 
 function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amount: number) => void }) {
   const [n, setN] = useState(""); const [a, setA] = useState(0);
