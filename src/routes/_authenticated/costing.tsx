@@ -995,7 +995,7 @@ function Step9({ draft, set }: StepProps) {
   };
 
 
-  const renderSuggestions = (cityId: string) => {
+  const renderSuggestions = (cityId: string, dayNum: number) => {
     const cName = cityName(cityId);
     if (!cName) return null;
     const gs = guidesForCity(cName);
@@ -1012,6 +1012,11 @@ function Step9({ draft, set }: StepProps) {
         </button>
       </div>
     );
+
+    const chipCls = (on: boolean) =>
+      on
+        ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
+        : "text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20";
 
     return (
       <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
@@ -1031,7 +1036,7 @@ function Step9({ draft, set }: StepProps) {
                   <button key={g.id} type="button" disabled={already}
                     onClick={() => addGuideSug(g)}
                     className="w-full text-left text-[11px] px-2 py-1 rounded border hover:bg-accent/10 disabled:opacity-50 flex justify-between gap-2">
-                    <span className="truncate">{g.tour_program || g.name}</span>
+                    <span className="truncate">{already ? "✓ " : ""}{g.tour_program || g.name}</span>
                     <span className="tabular-nums shrink-0">₹{guideRateForPax(g, pax)}</span>
                   </button>
                 );
@@ -1047,12 +1052,13 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {es.map((e) => {
-                const already = draft.entrances.some((x) => x.site_id === e.id);
+                const line = draft.entrances.find((x) => x.site_id === e.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 return (
-                  <button key={e.id} type="button" disabled={already}
-                    onClick={() => addEntSug(e)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
-                    + {e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
+                  <button key={e.id} type="button"
+                    onClick={() => toggleEntSug(e, dayNum)}
+                    className={chipCls(on)}>
+                    {on ? "✓ " : "+ "}{e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
                   </button>
                 );
               })}
@@ -1067,12 +1073,13 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {acts.map((a) => {
-                const already = draft.activities.some((x) => x.activity_id === a.id);
+                const line = draft.activities.find((x) => x.activity_id === a.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 return (
-                  <button key={a.id} type="button" disabled={already}
-                    onClick={() => addActSug(a)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
-                    + {a.activity_name} · ₹{activityRateForPax(a, pax)}
+                  <button key={a.id} type="button"
+                    onClick={() => toggleActSug(a, dayNum)}
+                    className={chipCls(on)}>
+                    {on ? "✓ " : "+ "}{a.activity_name} · ₹{activityRateForPax(a, pax)}
                   </button>
                 );
               })}
@@ -1087,13 +1094,16 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {ms.map((m) => {
-                const already = draft.misc.some((x) => x.item_id === m.id);
+                const line = draft.misc.find((x) => x.item_id === m.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 const unitLbl = m.unit === "per_person" ? "pp" : m.unit === "per_day" ? "day" : "fx";
                 return (
-                  <button key={m.id} type="button" disabled={already}
-                    onClick={() => addMiscSug(m)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70 disabled:opacity-50">
-                    + {m.name} · ₹{m.rate}/{unitLbl}
+                  <button key={m.id} type="button"
+                    onClick={() => toggleMiscSug(m, dayNum)}
+                    className={on
+                      ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
+                      : "text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70"}>
+                    {on ? "✓ " : "+ "}{m.name} · ₹{m.rate}/{unitLbl}
                   </button>
                 );
               })}
@@ -1103,6 +1113,7 @@ function Step9({ draft, set }: StepProps) {
       </div>
     );
   };
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
