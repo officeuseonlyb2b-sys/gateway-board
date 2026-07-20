@@ -1780,17 +1780,34 @@ function Step14({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Miscellaneous</h2>
+      {(() => {
+        const n = draft.misc.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       <div className="space-y-2">
         {items.map((m) => {
           const line = draft.misc.find((x) => x.item_id === m.id);
           const on = !!line;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
               <div className="flex-1">
-                <div className="text-sm font-medium">{m.name}</div>
+                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                  {m.name}
+                  {fromDays.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      From Day {fromDays.join(", ")}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">₹{m.rate} / {m.unit}</div>
               </div>
+
               {on && line && (
                 <>
                   <div><Label className="text-xs">Qty</Label><Input type="number" value={line.qty} className="w-20"
