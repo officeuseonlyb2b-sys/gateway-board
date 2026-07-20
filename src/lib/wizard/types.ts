@@ -135,6 +135,7 @@ export interface GuideLine {
   guides: number;
   rate: number;
   pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];   // day numbers this guide is assigned to
 }
 export interface MiscLine {
   id: string;
