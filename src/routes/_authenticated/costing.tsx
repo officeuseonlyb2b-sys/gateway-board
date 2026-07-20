@@ -917,7 +917,7 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2">To</th>
               <th className="text-left p-2">Overnight</th>
               <th className="text-left p-2 w-28">Travel By</th>
-              <th className="text-left p-2">Day's Program</th>
+              <th className="text-left p-2">Day Type</th>
             </tr>
           </thead>
           <tbody>
@@ -1083,11 +1083,6 @@ function Step9({ draft, set }: StepProps) {
                         { v: "full_day", label: "Full Day" },
                         { v: "excursion", label: "Excursion" },
                       ];
-                      const placeholders: Record<string, string> = {
-                        half_day: "Morning or afternoon visit to…",
-                        full_day: "Full day sightseeing at…",
-                        excursion: "Day excursion to… return to base city tonight",
-                      };
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         // Excursion → overnight = FROM city (return to same city)
                         if (v === "excursion" && !isLast) {
@@ -1099,26 +1094,20 @@ function Step9({ draft, set }: StepProps) {
                         }
                       };
                       return (
-                        <>
-                          <div className="flex flex-wrap gap-1">
-                            <span className="text-[10px] font-semibold uppercase text-muted-foreground self-center mr-1">Day Type:</span>
-                            {DT_OPTS.map((o) => (
-                              <button key={o.v} type="button"
-                                onClick={() => applyDayType(o.v!)}
-                                className={cn(
-                                  "text-[10px] px-2 py-0.5 rounded-full border",
-                                  dt === o.v
-                                    ? "bg-primary text-primary-foreground border-primary font-medium"
-                                    : "bg-background hover:bg-muted"
-                                )}>
-                                {o.label}
-                              </button>
-                            ))}
-                          </div>
-                          <Textarea rows={3} placeholder={placeholders[dt]}
-                            className="w-full"
-                            value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                        </>
+                        <div className="flex flex-wrap gap-1">
+                          {DT_OPTS.map((o) => (
+                            <button key={o.v} type="button"
+                              onClick={() => applyDayType(o.v!)}
+                              className={cn(
+                                "text-[10px] px-2 py-0.5 rounded-full border",
+                                dt === o.v
+                                  ? "bg-primary text-primary-foreground border-primary font-medium"
+                                  : "bg-background hover:bg-muted"
+                              )}>
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
                       );
                     })()}
                   </td>
