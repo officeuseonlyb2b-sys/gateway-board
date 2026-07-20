@@ -1056,7 +1056,7 @@ function Step9({ draft, set }: StepProps) {
                 </tr>
                 {r.travel_by && r.transport_expanded && (
                   <tr key={`${i}-details`} className="border-t bg-muted/20">
-                    <td colSpan={7} className="p-3">
+                    <td colSpan={8} className="p-3">
                       <DayTransportPanel
                         mode={r.travel_by}
                         details={r.transport_details || {}}
@@ -1064,7 +1064,7 @@ function Step9({ draft, set }: StepProps) {
                           updateRow(i, { transport_details: { ...(r.transport_details || {}), ...patch } })
                         }
                         defaultFrom={r.from_city ?? fromDefault}
-                        defaultTo={cityName(r.city_id) || r.to_city || ""}
+                        defaultTo={cityName(r.to_city_id || r.city_id) || r.to_city || ""}
                         defaultDate={r.date}
                       />
                     </td>
