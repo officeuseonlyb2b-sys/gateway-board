@@ -921,27 +921,79 @@ function Step9({ draft, set }: StepProps) {
     set({ guides: [...draft.guides, { id: uid(), guide_id: g.id, days: 1, guides: 1, rate: guideRateForPax(g, pax) }] });
     toast.success(`${g.name} added to guides`);
   };
-  const addEntSug = (e: EntranceSite) => {
-    if (draft.entrances.some((x) => x.site_id === e.id)) return;
-    set({
-      entrances: [...draft.entrances, {
-        id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
-        foreign_pax: 0, foreign_rate: e.foreigner_rate,
-        student_pax: 0, student_rate: e.student_rate ?? 0,
-      }],
-    });
-    toast.success(`${e.site_name} added to entrances`);
+
+  // Toggle helpers — track which routing days added the item; merge/increment qty on additional days,
+  // remove the day (or the whole line if it was routing-only) on toggle off.
+  const toggleActSug = (a: Activity, dayNum: number) => {
+    const existing = draft.activities.find((x) => x.activity_id === a.id);
+    if (!existing) {
+      set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax), from_routing_days: [dayNum] }] });
+      toast.success(`${a.activity_name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0 && existing.qty <= days.length) {
+        set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ activities: draft.activities.map((x) => x.id === existing.id
+          ? { ...x, from_routing_days: nextDays, qty: Math.max(1, x.qty - 1) } : x) });
+      }
+    } else {
+      set({ activities: draft.activities.map((x) => x.id === existing.id
+        ? { ...x, from_routing_days: [...days, dayNum], qty: x.qty + 1 } : x) });
+    }
   };
-  const addActSug = (a: Activity) => {
-    if (draft.activities.some((x) => x.activity_id === a.id)) return;
-    set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
-    toast.success(`${a.activity_name} added to activities`);
+  const toggleEntSug = (e: EntranceSite, dayNum: number) => {
+    const existing = draft.entrances.find((x) => x.site_id === e.id);
+    if (!existing) {
+      set({
+        entrances: [...draft.entrances, {
+          id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
+          foreign_pax: 0, foreign_rate: e.foreigner_rate,
+          student_pax: 0, student_rate: e.student_rate ?? 0,
+          from_routing_days: [dayNum],
+        }],
+      });
+      toast.success(`${e.site_name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
+        set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: nextDays } : x) });
+      }
+    } else {
+      set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: [...days, dayNum] } : x) });
+    }
   };
-  const addMiscSug = (m: MiscellaneousItem) => {
-    if (draft.misc.some((x) => x.item_id === m.id)) return;
-    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: 1, rate: m.rate, unit: m.unit }] });
-    toast.success(`${m.name} added to miscellaneous`);
+  const toggleMiscSug = (m: MiscellaneousItem, dayNum: number) => {
+    const existing = draft.misc.find((x) => x.item_id === m.id);
+    if (!existing) {
+      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? 1 : 1;
+      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit, from_routing_days: [dayNum] }] });
+      toast.success(`${m.name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
+        set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ misc: draft.misc.map((x) => x.id === existing.id
+          ? { ...x, from_routing_days: nextDays, qty: m.unit === "per_day" ? Math.max(1, x.qty - 1) : x.qty } : x) });
+      }
+    } else {
+      set({ misc: draft.misc.map((x) => x.id === existing.id
+        ? { ...x, from_routing_days: [...days, dayNum], qty: m.unit === "per_day" ? x.qty + 1 : x.qty } : x) });
+    }
   };
+
 
   const renderSuggestions = (cityId: string) => {
     const cName = cityName(cityId);
