@@ -110,6 +110,7 @@ export interface ActivityLine {
   qty: number;
   rate: number;
   pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];    // day numbers that added this via Step 9
 }
 export interface EntranceLine {
   id: string;
@@ -121,6 +122,7 @@ export interface EntranceLine {
   foreign_rate: number;
   student_pax?: number;
   student_rate?: number;
+  from_routing_days?: number[];    // day numbers that added this via Step 9
 }
 export interface GuideLine {
   id: string;
@@ -138,7 +140,9 @@ export interface MiscLine {
   rate: number;
   unit: string;
   pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];    // day numbers that added this via Step 9
 }
+
 
 export interface HotelSelection {
   city_id: string;

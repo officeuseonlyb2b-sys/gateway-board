@@ -921,29 +921,81 @@ function Step9({ draft, set }: StepProps) {
     set({ guides: [...draft.guides, { id: uid(), guide_id: g.id, days: 1, guides: 1, rate: guideRateForPax(g, pax) }] });
     toast.success(`${g.name} added to guides`);
   };
-  const addEntSug = (e: EntranceSite) => {
-    if (draft.entrances.some((x) => x.site_id === e.id)) return;
-    set({
-      entrances: [...draft.entrances, {
-        id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
-        foreign_pax: 0, foreign_rate: e.foreigner_rate,
-        student_pax: 0, student_rate: e.student_rate ?? 0,
-      }],
-    });
-    toast.success(`${e.site_name} added to entrances`);
+
+  // Toggle helpers — track which routing days added the item; merge/increment qty on additional days,
+  // remove the day (or the whole line if it was routing-only) on toggle off.
+  const toggleActSug = (a: Activity, dayNum: number) => {
+    const existing = draft.activities.find((x) => x.activity_id === a.id);
+    if (!existing) {
+      set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax), from_routing_days: [dayNum] }] });
+      toast.success(`${a.activity_name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0 && existing.qty <= days.length) {
+        set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ activities: draft.activities.map((x) => x.id === existing.id
+          ? { ...x, from_routing_days: nextDays, qty: Math.max(1, x.qty - 1) } : x) });
+      }
+    } else {
+      set({ activities: draft.activities.map((x) => x.id === existing.id
+        ? { ...x, from_routing_days: [...days, dayNum], qty: x.qty + 1 } : x) });
+    }
   };
-  const addActSug = (a: Activity) => {
-    if (draft.activities.some((x) => x.activity_id === a.id)) return;
-    set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
-    toast.success(`${a.activity_name} added to activities`);
+  const toggleEntSug = (e: EntranceSite, dayNum: number) => {
+    const existing = draft.entrances.find((x) => x.site_id === e.id);
+    if (!existing) {
+      set({
+        entrances: [...draft.entrances, {
+          id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
+          foreign_pax: 0, foreign_rate: e.foreigner_rate,
+          student_pax: 0, student_rate: e.student_rate ?? 0,
+          from_routing_days: [dayNum],
+        }],
+      });
+      toast.success(`${e.site_name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
+        set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: nextDays } : x) });
+      }
+    } else {
+      set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: [...days, dayNum] } : x) });
+    }
   };
-  const addMiscSug = (m: MiscellaneousItem) => {
-    if (draft.misc.some((x) => x.item_id === m.id)) return;
-    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: 1, rate: m.rate, unit: m.unit }] });
-    toast.success(`${m.name} added to miscellaneous`);
+  const toggleMiscSug = (m: MiscellaneousItem, dayNum: number) => {
+    const existing = draft.misc.find((x) => x.item_id === m.id);
+    if (!existing) {
+      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? 1 : 1;
+      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit, from_routing_days: [dayNum] }] });
+      toast.success(`${m.name} added from Day ${dayNum}`);
+      return;
+    }
+    const days = existing.from_routing_days ?? [];
+    if (days.includes(dayNum)) {
+      const nextDays = days.filter((x) => x !== dayNum);
+      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
+        set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
+      } else {
+        set({ misc: draft.misc.map((x) => x.id === existing.id
+          ? { ...x, from_routing_days: nextDays, qty: m.unit === "per_day" ? Math.max(1, x.qty - 1) : x.qty } : x) });
+      }
+    } else {
+      set({ misc: draft.misc.map((x) => x.id === existing.id
+        ? { ...x, from_routing_days: [...days, dayNum], qty: m.unit === "per_day" ? x.qty + 1 : x.qty } : x) });
+    }
   };
 
-  const renderSuggestions = (cityId: string) => {
+
+  const renderSuggestions = (cityId: string, dayNum: number) => {
     const cName = cityName(cityId);
     if (!cName) return null;
     const gs = guidesForCity(cName);
@@ -960,6 +1012,11 @@ function Step9({ draft, set }: StepProps) {
         </button>
       </div>
     );
+
+    const chipCls = (on: boolean) =>
+      on
+        ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
+        : "text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20";
 
     return (
       <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
@@ -979,7 +1036,7 @@ function Step9({ draft, set }: StepProps) {
                   <button key={g.id} type="button" disabled={already}
                     onClick={() => addGuideSug(g)}
                     className="w-full text-left text-[11px] px-2 py-1 rounded border hover:bg-accent/10 disabled:opacity-50 flex justify-between gap-2">
-                    <span className="truncate">{g.tour_program || g.name}</span>
+                    <span className="truncate">{already ? "✓ " : ""}{g.tour_program || g.name}</span>
                     <span className="tabular-nums shrink-0">₹{guideRateForPax(g, pax)}</span>
                   </button>
                 );
@@ -995,12 +1052,13 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {es.map((e) => {
-                const already = draft.entrances.some((x) => x.site_id === e.id);
+                const line = draft.entrances.find((x) => x.site_id === e.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 return (
-                  <button key={e.id} type="button" disabled={already}
-                    onClick={() => addEntSug(e)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
-                    + {e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
+                  <button key={e.id} type="button"
+                    onClick={() => toggleEntSug(e, dayNum)}
+                    className={chipCls(on)}>
+                    {on ? "✓ " : "+ "}{e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
                   </button>
                 );
               })}
@@ -1015,12 +1073,13 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {acts.map((a) => {
-                const already = draft.activities.some((x) => x.activity_id === a.id);
+                const line = draft.activities.find((x) => x.activity_id === a.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 return (
-                  <button key={a.id} type="button" disabled={already}
-                    onClick={() => addActSug(a)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50">
-                    + {a.activity_name} · ₹{activityRateForPax(a, pax)}
+                  <button key={a.id} type="button"
+                    onClick={() => toggleActSug(a, dayNum)}
+                    className={chipCls(on)}>
+                    {on ? "✓ " : "+ "}{a.activity_name} · ₹{activityRateForPax(a, pax)}
                   </button>
                 );
               })}
@@ -1035,13 +1094,16 @@ function Step9({ draft, set }: StepProps) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {ms.map((m) => {
-                const already = draft.misc.some((x) => x.item_id === m.id);
+                const line = draft.misc.find((x) => x.item_id === m.id);
+                const on = !!line?.from_routing_days?.includes(dayNum);
                 const unitLbl = m.unit === "per_person" ? "pp" : m.unit === "per_day" ? "day" : "fx";
                 return (
-                  <button key={m.id} type="button" disabled={already}
-                    onClick={() => addMiscSug(m)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70 disabled:opacity-50">
-                    + {m.name} · ₹{m.rate}/{unitLbl}
+                  <button key={m.id} type="button"
+                    onClick={() => toggleMiscSug(m, dayNum)}
+                    className={on
+                      ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
+                      : "text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70"}>
+                    {on ? "✓ " : "+ "}{m.name} · ₹{m.rate}/{unitLbl}
                   </button>
                 );
               })}
@@ -1051,6 +1113,7 @@ function Step9({ draft, set }: StepProps) {
       </div>
     );
   };
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
@@ -1181,7 +1244,7 @@ function Step9({ draft, set }: StepProps) {
                   <td className="p-2 space-y-1 min-w-[280px]">
                     <Textarea rows={2} placeholder="Describe the day's program…"
                       value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id)}
+                    {(r.to_city_id || r.city_id) && renderSuggestions(r.to_city_id || r.city_id, r.day)}
                   </td>
 
                 </tr>
@@ -1492,17 +1555,33 @@ function Step11({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Activities & Experiences</h2>
+      {(() => {
+        const n = draft.activities.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       {relevant.length === 0 && <p className="text-sm text-muted-foreground">No activities found for routing cities.</p>}
       <div className="space-y-2">
         {relevant.map((a) => {
           const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
           const line = draft.activities.find((x) => x.activity_id === a.id);
           const on = !!line;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={a.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(a)} />
               <div className="flex-1">
-                <div className="text-sm font-medium">{a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span></div>
+                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                  {a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span>
+                  {fromDays.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      From Day {fromDays.join(", ")}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">{a.description}</div>
               </div>
               {on && (
@@ -1531,6 +1610,7 @@ function Step11({ draft, set }: StepProps) {
     </div>
   );
 }
+
 
 function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amount: number) => void }) {
   const [n, setN] = useState(""); const [a, setA] = useState(0);
@@ -1562,23 +1642,40 @@ function Step12({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Entrance Fees</h2>
+      {(() => {
+        const n = draft.entrances.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       <div className="space-y-2">
         {relevant.map((s) => {
           const line = draft.entrances.find((x) => x.site_id === s.id);
           const on = !!line;
           const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={s.id} className={cn("p-3 border rounded-lg", on && "border-accent bg-accent/5")}>
               <div className="flex items-center gap-3">
                 <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span></div>
+                  <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                    {s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span>
+                    {fromDays.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        From Day {fromDays.join(", ")}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
                     {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
                   </div>
                 </div>
               </div>
+
               {on && line && (
                 <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
                   <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
@@ -1683,17 +1780,34 @@ function Step14({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Miscellaneous</h2>
+      {(() => {
+        const n = draft.misc.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       <div className="space-y-2">
         {items.map((m) => {
           const line = draft.misc.find((x) => x.item_id === m.id);
           const on = !!line;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
               <div className="flex-1">
-                <div className="text-sm font-medium">{m.name}</div>
+                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                  {m.name}
+                  {fromDays.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      From Day {fromDays.join(", ")}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">₹{m.rate} / {m.unit}</div>
               </div>
+
               {on && line && (
                 <>
                   <div><Label className="text-xs">Qty</Label><Input type="number" value={line.qty} className="w-20"
