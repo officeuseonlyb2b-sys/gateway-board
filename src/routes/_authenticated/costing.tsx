@@ -921,7 +921,7 @@ function Step9({ draft, set }: StepProps) {
           <tbody>
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
-              const ents = entrancesForCity(r.city_id);
+              const ents = entrancesForCity(r.to_city_id || r.city_id);
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
@@ -944,8 +944,23 @@ function Step9({ draft, set }: StepProps) {
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Select value={r.city_id} onValueChange={(v) => updateRow(i, { city_id: v, to_city: cityName(v) })}>
-                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "City…"} /></SelectTrigger>
+                    <Select
+                      value={r.to_city_id || ""}
+                      onValueChange={(v) => {
+                        // Auto-fill overnight to same city if overnight is empty or previously mirrored TO
+                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id;
+                        updateRow(i, {
+                          to_city_id: v,
+                          to_city: cityName(v),
+                          ...(isLast
+                            ? {}
+                            : shouldMirror
+                              ? { city_id: v }
+                              : {}),
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "Destination…"} /></SelectTrigger>
                       <SelectContent>
                         {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                       </SelectContent>
@@ -953,8 +968,24 @@ function Step9({ draft, set }: StepProps) {
                     {isLast && (
                       <Input className="h-7 text-[11px] mt-1"
                         placeholder="or type departure city"
-                        value={r.to_city && !r.city_id ? r.to_city : ""}
+                        value={r.to_city && !r.to_city_id ? r.to_city : ""}
                         onChange={(e) => updateRow(i, { to_city: e.target.value })} />
+                    )}
+                  </td>
+                  <td className="p-2">
+                    {isLast ? (
+                      <span className="text-[11px] text-muted-foreground italic">Departure</span>
+                    ) : (
+                      <Select
+                        value={r.city_id || OVERNIGHT_NONE}
+                        onValueChange={(v) => updateRow(i, { city_id: v === OVERNIGHT_NONE ? "" : v })}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue placeholder="Stay city…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
+                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                     )}
                   </td>
                   <td className="p-2 space-y-1">
