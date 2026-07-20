@@ -1756,7 +1756,11 @@ function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amou
 // ============================================================
 function Step12({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCityNames = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
+  const routingCityNames = new Set(draft.routing.flatMap((r) => {
+    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
+    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
+  }));
+
   const cityIds = new Set(d.entrance_cities.filter((c) => routingCityNames.has(c.name)).map((c) => c.id));
   const relevant = d.entrance_sites.filter((s) => s.is_active && (cityIds.has(s.city_id) || cityIds.size === 0));
 
