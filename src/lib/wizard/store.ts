@@ -53,6 +53,7 @@ export function clearDraft() {
 
 export function initDraft(): QuoteDraft {
   const d = emptyDraft();
+  console.log("[store] initDraft called, writing step 1");
   writeDraft(d);
   return d;
 }
