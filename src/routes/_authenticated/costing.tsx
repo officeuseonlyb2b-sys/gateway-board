@@ -1071,7 +1071,7 @@ function Step9({ draft, set }: StepProps) {
           <tbody>
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
-              const ents = entrancesForCity(r.to_city_id || r.city_id);
+              // suggestions rendered per-row via renderSuggestions()
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
