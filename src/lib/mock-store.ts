@@ -154,6 +154,13 @@ export interface Activity {
   unit_label: string;
   is_active: boolean;
   created_at: string;
+  // v2.0 pax-tier rates (optional; when present, wizard auto-picks by total pax)
+  group_rate_1_to_6?: number;
+  group_rate_7_to_14?: number;
+  group_rate_15_to_20?: number;
+  per_person_indian?: number;
+  per_person_inbound?: number;
+  misc_rate?: number;
 }
 
 export type GuideType = "Hindi Guide - Local" | "English Guide - Local" | "Tour Escort";
@@ -166,6 +173,30 @@ export interface Guide {
   description: string;
   is_active: boolean;
   created_at: string;
+  // v2.0 tour-program + pax-tier rates
+  city?: string;
+  tour_program?: string;
+  rate_1_to_5?: number;
+  rate_6_to_14?: number;
+  rate_15_plus?: number;
+  escort_rate?: number;
+  indian_entry?: number;
+  inbound_entry?: number;
+}
+
+// Pax-tier rate helpers (v2.0). Fall back to legacy rate_per_day / price.
+export function guideRateForPax(g: Guide, pax: number): number {
+  if (pax <= 5 && g.rate_1_to_5 != null) return g.rate_1_to_5;
+  if (pax <= 14 && g.rate_6_to_14 != null) return g.rate_6_to_14;
+  if (pax >= 15 && g.rate_15_plus != null) return g.rate_15_plus;
+  return g.rate_per_day;
+}
+export function activityRateForPax(a: Activity, pax: number): number {
+  if (pax <= 6 && a.group_rate_1_to_6 != null) return a.group_rate_1_to_6;
+  if (pax <= 14 && a.group_rate_7_to_14 != null) return a.group_rate_7_to_14;
+  if (pax <= 20 && a.group_rate_15_to_20 != null) return a.group_rate_15_to_20;
+  if (a.per_person_indian != null) return a.per_person_indian * Math.max(1, pax);
+  return a.price;
 }
 
 export interface TravelOption {
