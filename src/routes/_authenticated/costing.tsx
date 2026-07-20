@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax, type Guide, type EntranceSite, type Activity, type MiscellaneousItem } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
@@ -893,255 +893,14 @@ function Step9({ draft, set }: StepProps) {
     set({ routing: next });
   };
 
-  const entrancesForCity = (city_id: string) => {
-    const cityName = d.cities.find((c) => c.id === city_id)?.name;
-    if (!cityName) return [];
-    const ec = d.entrance_cities.find((c) => c.name === cityName);
-    if (!ec) return [];
-    return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
-  };
   const OVERNIGHT_NONE = "__none__";
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   const pax = totalPax(draft);
-  const guidesForCity = (cName: string) =>
-    d.guides.filter((g) => g.is_active && (g.destination === cName || g.city === cName));
-  const activitiesForCity = (cName: string) =>
-    d.activities.filter((a) => {
-      if (!a.is_active) return false;
-      const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-      return dest === cName;
-    });
-  const activeMisc = () => d.miscellaneous_items.filter((m) => m.is_active);
-  const openModule = (path: string) => {
-    if (typeof window !== "undefined") window.open(path, "_blank", "noopener");
-  };
-
-  const addGuideSug = (g: Guide) => {
-    if (draft.guides.some((x) => x.guide_id === g.id)) { toast.info("Guide already added"); return; }
-    set({ guides: [...draft.guides, { id: uid(), guide_id: g.id, days: 1, guides: 1, rate: guideRateForPax(g, pax) }] });
-    toast.success(`${g.name} added to guides`);
-  };
-
-  // Toggle helpers — track which routing days added the item; merge/increment qty on additional days,
-  // remove the day (or the whole line if it was routing-only) on toggle off.
-  const toggleActSug = (a: Activity, dayNum: number) => {
-    const existing = draft.activities.find((x) => x.activity_id === a.id);
-    if (!existing) {
-      set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax), from_routing_days: [dayNum] }] });
-      toast.success(`${a.activity_name} added from Day ${dayNum}`);
-      return;
-    }
-    const days = existing.from_routing_days ?? [];
-    if (days.includes(dayNum)) {
-      const nextDays = days.filter((x) => x !== dayNum);
-      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0 && existing.qty <= days.length) {
-        set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
-      } else {
-        set({ activities: draft.activities.map((x) => x.id === existing.id
-          ? { ...x, from_routing_days: nextDays, qty: Math.max(1, x.qty - 1) } : x) });
-      }
-    } else {
-      set({ activities: draft.activities.map((x) => x.id === existing.id
-        ? { ...x, from_routing_days: [...days, dayNum], qty: x.qty + 1 } : x) });
-    }
-  };
-  const toggleEntSug = (e: EntranceSite, dayNum: number) => {
-    const existing = draft.entrances.find((x) => x.site_id === e.id);
-    if (!existing) {
-      set({
-        entrances: [...draft.entrances, {
-          id: uid(), site_id: e.id, indian_pax: pax, indian_rate: e.indian_rate,
-          foreign_pax: 0, foreign_rate: e.foreigner_rate,
-          student_pax: 0, student_rate: e.student_rate ?? 0,
-          from_routing_days: [dayNum],
-        }],
-      });
-      toast.success(`${e.site_name} added from Day ${dayNum}`);
-      return;
-    }
-    const days = existing.from_routing_days ?? [];
-    if (days.includes(dayNum)) {
-      const nextDays = days.filter((x) => x !== dayNum);
-      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
-        set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
-      } else {
-        set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: nextDays } : x) });
-      }
-    } else {
-      set({ entrances: draft.entrances.map((x) => x.id === existing.id ? { ...x, from_routing_days: [...days, dayNum] } : x) });
-    }
-  };
-  const toggleMiscSug = (m: MiscellaneousItem, dayNum: number) => {
-    const existing = draft.misc.find((x) => x.item_id === m.id);
-    if (!existing) {
-      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? 1 : 1;
-      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit, from_routing_days: [dayNum] }] });
-      toast.success(`${m.name} added from Day ${dayNum}`);
-      return;
-    }
-    const days = existing.from_routing_days ?? [];
-    if (days.includes(dayNum)) {
-      const nextDays = days.filter((x) => x !== dayNum);
-      if (nextDays.length === 0 && (existing.from_routing_days?.length ?? 0) > 0) {
-        set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
-      } else {
-        set({ misc: draft.misc.map((x) => x.id === existing.id
-          ? { ...x, from_routing_days: nextDays, qty: m.unit === "per_day" ? Math.max(1, x.qty - 1) : x.qty } : x) });
-      }
-    } else {
-      set({ misc: draft.misc.map((x) => x.id === existing.id
-        ? { ...x, from_routing_days: [...days, dayNum], qty: m.unit === "per_day" ? x.qty + 1 : x.qty } : x) });
-    }
-  };
 
 
-  const filterGuidesByDayType = (gs: Guide[], dt?: RoutingDay["day_type"]) => {
-    if (!dt || dt === "excursion" || dt === "multi_dest") return gs;
-    if (dt === "half_day") {
-      // Only HDCT / AM HDCT / PM HDCT — exclude FDCT
-      return gs.filter((g) => {
-        const tp = (g.tour_program || "").toUpperCase();
-        return tp.includes("HDCT") && !tp.includes("FDCT");
-      });
-    }
-    // full_day → FDCT + HDCT (all)
-    return gs;
-  };
 
-  const renderSuggestions = (cityIds: string[], dayNum: number, dayType?: RoutingDay["day_type"]) => {
-    const ids = Array.from(new Set(cityIds.filter(Boolean)));
-    if (ids.length === 0) return null;
-    const names = ids.map(cityName).filter(Boolean);
-    const label = names.join(" + ");
-
-    // Merge & de-dup across all TO cities
-    const gsMap = new Map<string, Guide>();
-    const esMap = new Map<string, EntranceSite>();
-    const actsMap = new Map<string, Activity>();
-    for (const id of ids) {
-      const n = cityName(id);
-      if (!n) continue;
-      guidesForCity(n).forEach((g) => gsMap.set(g.id, g));
-      entrancesForCity(id).forEach((e) => esMap.set(e.id, e));
-      activitiesForCity(n).forEach((a) => actsMap.set(a.id, a));
-    }
-    const gs = filterGuidesByDayType(Array.from(gsMap.values()), dayType);
-    const es = Array.from(esMap.values());
-    const acts = Array.from(actsMap.values());
-    const ms = activeMisc();
-
-    const EmptyAdd = ({ label, path }: { label: string; path: string }) => (
-      <div className="text-[11px] text-muted-foreground">
-        {label}{" "}
-        <button type="button" onClick={() => openModule(path)}
-          className="text-accent hover:underline font-medium">
-          + Add →
-        </button>
-      </div>
-    );
-
-    const chipCls = (on: boolean) =>
-      on
-        ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
-        : "text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20";
-
-    return (
-      <div className="mt-2 border rounded-md p-2 bg-muted/20 space-y-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Suggestions for {label} · {pax} pax
-        </div>
-
-        <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Guides</div>
-          {gs.length === 0 ? (
-            <EmptyAdd label={`No guides for ${label}.`} path="/guide" />
-          ) : (
-            <div className="space-y-1">
-              {gs.map((g) => {
-                const already = draft.guides.some((x) => x.guide_id === g.id);
-                return (
-                  <button key={g.id} type="button" disabled={already}
-                    onClick={() => addGuideSug(g)}
-                    className="w-full text-left text-[11px] px-2 py-1 rounded border hover:bg-accent/10 disabled:opacity-50 flex justify-between gap-2">
-                    <span className="truncate">{already ? "✓ " : ""}{g.tour_program || g.name}</span>
-                    <span className="tabular-nums shrink-0">₹{guideRateForPax(g, pax)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Entrances</div>
-          {es.length === 0 ? (
-            <EmptyAdd label={`No entrances for ${label}.`} path="/entrances" />
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {es.map((e) => {
-                const line = draft.entrances.find((x) => x.site_id === e.id);
-                const on = !!line?.from_routing_days?.includes(dayNum);
-                return (
-                  <button key={e.id} type="button"
-                    onClick={() => toggleEntSug(e, dayNum)}
-                    className={chipCls(on)}>
-                    {on ? "✓ " : "+ "}{e.site_name} · I₹{e.indian_rate}/F₹{e.foreigner_rate}{e.student_rate ? `/S₹${e.student_rate}` : ""}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Activities</div>
-          {acts.length === 0 ? (
-            <EmptyAdd label={`No activities for ${label}.`} path="/activities" />
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {acts.map((a) => {
-                const line = draft.activities.find((x) => x.activity_id === a.id);
-                const on = !!line?.from_routing_days?.includes(dayNum);
-                return (
-                  <button key={a.id} type="button"
-                    onClick={() => toggleActSug(a, dayNum)}
-                    className={chipCls(on)}>
-                    {on ? "✓ " : "+ "}{a.activity_name} · ₹{activityRateForPax(a, pax)}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Miscellaneous</div>
-          {ms.length === 0 ? (
-            <EmptyAdd label="No miscellaneous items." path="/miscellaneous" />
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {ms.map((m) => {
-                const line = draft.misc.find((x) => x.item_id === m.id);
-                const on = !!line?.from_routing_days?.includes(dayNum);
-                const unitLbl = m.unit === "per_person" ? "pp" : m.unit === "per_day" ? "day" : "fx";
-                return (
-                  <button key={m.id} type="button"
-                    onClick={() => toggleMiscSug(m, dayNum)}
-                    className={on
-                      ? "text-[10px] px-2 py-0.5 rounded-full bg-primary text-primary-foreground font-medium"
-                      : "text-[10px] px-2 py-0.5 rounded-full bg-muted hover:bg-muted/70"}>
-                    {on ? "✓ " : "+ "}{m.name} · ₹{m.rate}/{unitLbl}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
 
 
   return (
@@ -1164,7 +923,6 @@ function Step9({ draft, set }: StepProps) {
           <tbody>
             {draft.routing.map((r, i) => {
               const isLast = i === draft.routing.length - 1;
-              // suggestions rendered per-row via renderSuggestions()
               const fromDefault = i === 0
                 ? draft.departure_city
                 : cityName(draft.routing[i - 1]?.city_id || "") || draft.routing[i - 1]?.to_city || "";
@@ -1317,24 +1075,19 @@ function Step9({ draft, set }: StepProps) {
                         onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
                     )}
                   </td>
-                  <td className="p-2 space-y-1 min-w-[300px]">
+                  <td className="p-2 space-y-1 min-w-[420px]">
                     {(() => {
                       const dt = r.day_type || "full_day";
                       const DT_OPTS: { v: RoutingDay["day_type"]; label: string }[] = [
                         { v: "half_day", label: "Half Day" },
                         { v: "full_day", label: "Full Day" },
                         { v: "excursion", label: "Excursion" },
-                        { v: "multi_dest", label: "Multi-Dest" },
                       ];
                       const placeholders: Record<string, string> = {
                         half_day: "Morning or afternoon visit to…",
                         full_day: "Full day sightseeing at…",
                         excursion: "Day excursion to… return to base city tonight",
-                        multi_dest: "Visit [City1] then [City2]…",
                       };
-                      const selectedToIds = (r.to_city_ids && r.to_city_ids.length > 0)
-                        ? r.to_city_ids
-                        : (r.to_city_id ? [r.to_city_id] : []);
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         // Excursion → overnight = FROM city (return to same city)
                         if (v === "excursion" && !isLast) {
@@ -1362,9 +1115,9 @@ function Step9({ draft, set }: StepProps) {
                               </button>
                             ))}
                           </div>
-                          <Textarea rows={2} placeholder={placeholders[dt]}
+                          <Textarea rows={3} placeholder={placeholders[dt]}
+                            className="w-full"
                             value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                          {selectedToIds.length > 0 && renderSuggestions(selectedToIds, r.day, dt)}
                         </>
                       );
                     })()}
