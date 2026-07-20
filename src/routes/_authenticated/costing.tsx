@@ -1186,35 +1186,81 @@ function Step9({ draft, set }: StepProps) {
                     <Input className="h-8 text-xs" value={r.from_city ?? fromDefault}
                       onChange={(e) => updateRow(i, { from_city: e.target.value })} />
                   </td>
-                  <td className="p-2">
-                    <Select
-                      value={r.to_city_id || ""}
-                      onValueChange={(v) => {
-                        // Auto-fill overnight to same city if overnight is empty or previously mirrored TO
-                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id;
+                  <td className="p-2 min-w-[220px]">
+                    {(() => {
+                      const selected = (r.to_city_ids && r.to_city_ids.length > 0)
+                        ? r.to_city_ids
+                        : (r.to_city_id ? [r.to_city_id] : []);
+                      const available = d.cities.filter((c) => !selected.includes(c.id));
+                      const addCity = (v: string) => {
+                        const next = Array.from(new Set([...selected, v]));
+                        const primary = next[0];
+                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
                         updateRow(i, {
-                          to_city_id: v,
-                          to_city: cityName(v),
+                          to_city_ids: next,
+                          to_city_id: primary,
+                          to_city: cityName(primary),
                           ...(isLast
-                            ? { city_id: v }
-                            : shouldMirror
-                              ? { city_id: v }
-                              : {}),
+                            ? { city_id: primary }
+                            : r.day_type === "excursion"
+                              ? { city_id: "" }
+                              : shouldMirror
+                                ? { city_id: primary }
+                                : {}),
                         });
-                      }}
-                    >
-                      <SelectTrigger className="h-8"><SelectValue placeholder={isLast ? "Departure city…" : "Destination…"} /></SelectTrigger>
-                      <SelectContent>
-                        {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    {isLast && (
-                      <Input className="h-7 text-[11px] mt-1"
-                        placeholder="or type departure city"
-                        value={r.to_city && !r.to_city_id ? r.to_city : ""}
-                        onChange={(e) => updateRow(i, { to_city: e.target.value })} />
-                    )}
+                      };
+                      const removeCity = (id: string) => {
+                        const next = selected.filter((x) => x !== id);
+                        const primary = next[0] || "";
+                        updateRow(i, {
+                          to_city_ids: next,
+                          to_city_id: primary,
+                          to_city: cityName(primary),
+                          ...(isLast ? { city_id: primary } : {}),
+                        });
+                      };
+                      return (
+                        <>
+                          {selected.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {selected.map((id) => (
+                                <span key={id}
+                                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30">
+                                  {cityName(id) || id}
+                                  <button type="button" onClick={() => removeCity(id)}
+                                    className="hover:text-destructive" title="Remove">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <Select
+                            value=""
+                            onValueChange={addCity}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder={
+                                selected.length === 0
+                                  ? (isLast ? "Departure city…" : "Add destination…")
+                                  : "+ Add another destination"
+                              } />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {available.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          {isLast && selected.length === 0 && (
+                            <Input className="h-7 text-[11px] mt-1"
+                              placeholder="or type departure city"
+                              value={r.to_city && !r.to_city_id ? r.to_city : ""}
+                              onChange={(e) => updateRow(i, { to_city: e.target.value })} />
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
+
                   <td className="p-2">
                     {isLast ? (
                       <span className="text-[11px] text-muted-foreground italic">Departure</span>
