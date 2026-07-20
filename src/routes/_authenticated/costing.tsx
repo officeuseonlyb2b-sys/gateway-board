@@ -1172,24 +1172,19 @@ function Step9({ draft, set }: StepProps) {
                         onChange={(e) => updateRow(i, { travel_by_detail: e.target.value })} />
                     )}
                   </td>
-                  <td className="p-2 space-y-1 min-w-[300px]">
+                  <td className="p-2 space-y-1 min-w-[420px]">
                     {(() => {
                       const dt = r.day_type || "full_day";
                       const DT_OPTS: { v: RoutingDay["day_type"]; label: string }[] = [
                         { v: "half_day", label: "Half Day" },
                         { v: "full_day", label: "Full Day" },
                         { v: "excursion", label: "Excursion" },
-                        { v: "multi_dest", label: "Multi-Dest" },
                       ];
                       const placeholders: Record<string, string> = {
                         half_day: "Morning or afternoon visit to…",
                         full_day: "Full day sightseeing at…",
                         excursion: "Day excursion to… return to base city tonight",
-                        multi_dest: "Visit [City1] then [City2]…",
                       };
-                      const selectedToIds = (r.to_city_ids && r.to_city_ids.length > 0)
-                        ? r.to_city_ids
-                        : (r.to_city_id ? [r.to_city_id] : []);
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         // Excursion → overnight = FROM city (return to same city)
                         if (v === "excursion" && !isLast) {
@@ -1217,9 +1212,9 @@ function Step9({ draft, set }: StepProps) {
                               </button>
                             ))}
                           </div>
-                          <Textarea rows={2} placeholder={placeholders[dt]}
+                          <Textarea rows={3} placeholder={placeholders[dt]}
+                            className="w-full"
                             value={r.program} onChange={(e) => updateRow(i, { program: e.target.value })} />
-                          {selectedToIds.length > 0 && renderSuggestions(selectedToIds, r.day, dt)}
                         </>
                       );
                     })()}
