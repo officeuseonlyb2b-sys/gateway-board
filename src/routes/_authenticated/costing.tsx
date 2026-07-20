@@ -1318,10 +1318,11 @@ function Step11({ draft, set }: StepProps) {
     return dest && (routingCities.has(dest) || routingCities.size === 0);
   });
 
+  const pax = totalPax(draft);
   const toggle = (a: typeof relevant[number]) => {
     const existing = draft.activities.find((x) => x.activity_id === a.id);
     if (existing) set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
-    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: a.price }] });
+    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
   };
 
   return (
