@@ -1642,23 +1642,40 @@ function Step12({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Entrance Fees</h2>
+      {(() => {
+        const n = draft.entrances.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
+        return n > 0 ? (
+          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
+            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
+          </div>
+        ) : null;
+      })()}
       <div className="space-y-2">
         {relevant.map((s) => {
           const line = draft.entrances.find((x) => x.site_id === s.id);
           const on = !!line;
           const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
+          const fromDays = line?.from_routing_days ?? [];
           return (
             <div key={s.id} className={cn("p-3 border rounded-lg", on && "border-accent bg-accent/5")}>
               <div className="flex items-center gap-3">
                 <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span></div>
+                  <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                    {s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span>
+                    {fromDays.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        From Day {fromDays.join(", ")}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
                     {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
                   </div>
                 </div>
               </div>
+
               {on && line && (
                 <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
                   <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
