@@ -1411,92 +1411,164 @@ function Step10({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// STEP 11 — Activities
+// Shared helpers for day-wise sync (Steps 11/12/13)
+// ============================================================
+function dayDestInfo(r: RoutingDay, cities: { id: string; name: string }[]) {
+  const ids = (r.to_city_ids && r.to_city_ids.length > 0)
+    ? r.to_city_ids
+    : [r.to_city_id || r.city_id].filter(Boolean) as string[];
+  const names = ids
+    .map((id) => cities.find((c) => c.id === id)?.name)
+    .filter(Boolean) as string[];
+  return { ids, names };
+}
+
+function DaySection({
+  day, title, subtitle, count, defaultOpen = true, children,
+}: {
+  day: number; title: string; subtitle?: string; count: number;
+  defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className="overflow-hidden">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-3 p-3 hover:bg-muted/40 text-left">
+        <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", !open && "-rotate-90")} />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold truncate">Day {day} — {title}</div>
+          {subtitle && <div className="text-[11px] text-muted-foreground truncate">{subtitle}</div>}
+        </div>
+        {count > 0 && (
+          <Badge variant="secondary" className="text-[10px]">{count} selected</Badge>
+        )}
+      </button>
+      {open && <div className="p-3 border-t bg-background/50 space-y-2">{children}</div>}
+    </Card>
+  );
+}
+
+function dayTitleFor(r: RoutingDay, cities: { id: string; name: string }[], isLast: boolean) {
+  const { names } = dayDestInfo(r, cities);
+  if (isLast && names.length === 0) return "Departure";
+  return names.length > 0 ? names.join(" + ") : "Unassigned";
+}
+
+// ============================================================
+// STEP 11 — Activities (day-wise)
 // ============================================================
 function Step11({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCities = new Set(draft.routing.flatMap((r) => {
-    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
-    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
-  }));
-
-  const relevant = d.activities.filter((a) => {
-    if (!a.is_active) return false;
-    const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-    return dest && (routingCities.has(dest) || routingCities.size === 0);
-  });
-
   const pax = totalPax(draft);
-  const toggle = (a: typeof relevant[number]) => {
-    const existing = draft.activities.find((x) => x.activity_id === a.id);
-    if (existing) set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
-    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
+
+  const findLine = (activityId: string, day: number) =>
+    draft.activities.find((x) => x.activity_id === activityId && (x.from_routing_days ?? []).includes(day));
+
+  const toggle = (activityId: string, day: number, rate: number) => {
+    const existing = findLine(activityId, day);
+    if (existing) {
+      set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
+    } else {
+      set({ activities: [...draft.activities, {
+        id: uid(), activity_id: activityId, qty: 1, rate, from_routing_days: [day],
+      }] });
+    }
   };
+
+  const updateQty = (lineId: string, qty: number) => {
+    set({ activities: draft.activities.map((x) => x.id === lineId ? { ...x, qty } : x) });
+  };
+
+  const customLines = draft.activities.filter((x) => x.custom_name);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Activities & Experiences</h2>
-      {(() => {
-        const n = draft.activities.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
-        return n > 0 ? (
-          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
-            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
-          </div>
-        ) : null;
-      })()}
-      {relevant.length === 0 && <p className="text-sm text-muted-foreground">No activities found for routing cities.</p>}
-      <div className="space-y-2">
-        {relevant.map((a) => {
-          const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-          const line = draft.activities.find((x) => x.activity_id === a.id);
-          const on = !!line;
-          const fromDays = line?.from_routing_days ?? [];
-          return (
-            <div key={a.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
-              <Checkbox checked={on} onCheckedChange={() => toggle(a)} />
-              <div className="flex-1">
-                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                  {a.activity_name} <span className="text-xs text-muted-foreground">— {dest}</span>
-                  {fromDays.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                      From Day {fromDays.join(", ")}
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">{a.description}</div>
-              </div>
-              {on && (
-                <>
-                  <div><Label className="text-xs">Qty</Label><Input type="number" min={1} value={line!.qty} className="w-20"
-                    onChange={(e) => set({ activities: draft.activities.map((x) => x.id === line!.id ? { ...x, qty: parseInt(e.target.value) || 1 } : x) })} /></div>
-                  <div className="text-sm font-semibold w-24 text-right">{inr(line!.rate * line!.qty)}</div>
-                </>
-              )}
-              <span className="text-sm">{inr(a.price)}</span>
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold">Activities & Experiences</h2>
+        <span className="text-xs text-muted-foreground">Synced with Routing — one section per itinerary day.</span>
       </div>
-      <CustomAdd label="Custom Activity" onAdd={(name, rate) => set({
-        activities: [...draft.activities, { id: uid(), custom_name: name, qty: 1, rate }],
-      })} />
-      {draft.activities.filter((x) => x.custom_name).map((x) => (
-        <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
-          <span>{x.custom_name} × {x.qty}</span>
-          <span>{inr(x.rate * x.qty)}
-            <button className="ml-2 text-destructive" onClick={() => set({ activities: draft.activities.filter((y) => y.id !== x.id) })}>×</button>
-          </span>
-        </div>
-      ))}
+
+      {draft.routing.length === 0 && (
+        <p className="text-sm text-muted-foreground">Add routing days first (Step 9).</p>
+      )}
+
+      {draft.routing.map((r, idx) => {
+        const isLast = idx === draft.routing.length - 1;
+        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
+        const dayActivities = d.activities.filter((a) => {
+          if (!a.is_active) return false;
+          const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+          return !!destName && destNames.includes(destName);
+        });
+        const selectedCount = draft.activities.filter((x) =>
+          x.activity_id && (x.from_routing_days ?? []).includes(r.day)
+        ).length;
+        const title = dayTitleFor(r, d.cities, isLast);
+        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
+
+        return (
+          <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={selectedCount}>
+            {destNames.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">
+                No destination set for this day.
+              </div>
+            ) : dayActivities.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">
+                No activities available for {destNames.join(", ")}.
+              </div>
+            ) : dayActivities.map((a) => {
+              const line = findLine(a.id, r.day);
+              const on = !!line;
+              const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+              return (
+                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3", on && "border-accent bg-accent/5")}>
+                  <Checkbox checked={on} onCheckedChange={() => toggle(a.id, r.day, activityRateForPax(a, pax))} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {a.activity_name} <span className="text-[11px] text-muted-foreground">— {destName}</span>
+                    </div>
+                    {a.description && <div className="text-[11px] text-muted-foreground truncate">{a.description}</div>}
+                  </div>
+                  {on && line && (
+                    <>
+                      <div>
+                        <Label className="text-[10px]">Qty</Label>
+                        <Input type="number" min={1} value={line.qty} className="w-16 h-8"
+                          onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
+                      </div>
+                      <div className="text-sm font-semibold w-24 text-right tabular-nums">{inr(line.rate * line.qty)}</div>
+                    </>
+                  )}
+                  {!on && <span className="text-xs text-muted-foreground w-24 text-right">{inr(activityRateForPax(a, pax))}</span>}
+                </div>
+              );
+            })}
+          </DaySection>
+        );
+      })}
+
+      <Card className="p-3 space-y-2">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">Custom / Other Activities</div>
+        <CustomAdd label="Custom Activity" onAdd={(name, rate) => set({
+          activities: [...draft.activities, { id: uid(), custom_name: name, qty: 1, rate }],
+        })} />
+        {customLines.map((x) => (
+          <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+            <span>{x.custom_name} × {x.qty}</span>
+            <span>{inr(x.rate * x.qty)}
+              <button className="ml-2 text-destructive" onClick={() => set({ activities: draft.activities.filter((y) => y.id !== x.id) })}>×</button>
+            </span>
+          </div>
+        ))}
+      </Card>
     </div>
   );
 }
 
-
 function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amount: number) => void }) {
   const [n, setN] = useState(""); const [a, setA] = useState(0);
   return (
-    <div className="flex gap-2 items-end pt-3 border-t">
+    <div className="flex gap-2 items-end pt-1">
       <div className="flex-1"><Label className="text-xs">{label}</Label><Input value={n} onChange={(e) => setN(e.target.value)} placeholder="Name" /></div>
       <div className="w-32"><Label className="text-xs">Amount</Label><Input type="number" value={a} onChange={(e) => setA(parseFloat(e.target.value) || 0)} /></div>
       <Button size="sm" onClick={() => { if (n && a > 0) { onAdd(n, a); setN(""); setA(0); } }}>Add</Button>
@@ -1505,145 +1577,270 @@ function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amou
 }
 
 // ============================================================
-// STEP 12 — Entrances
+// STEP 12 — Entrances (day-wise)
 // ============================================================
 function Step12({ draft, set }: StepProps) {
   const d = useDB();
-  const routingCityNames = new Set(draft.routing.flatMap((r) => {
-    const ids = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : [r.to_city_id || r.city_id];
-    return ids.map((id) => d.cities.find((c) => c.id === id)?.name).filter(Boolean) as string[];
-  }));
-
-  const cityIds = new Set(d.entrance_cities.filter((c) => routingCityNames.has(c.name)).map((c) => c.id));
-  const relevant = d.entrance_sites.filter((s) => s.is_active && (cityIds.has(s.city_id) || cityIds.size === 0));
-
   const pax = totalPax(draft);
-  const toggle = (s: typeof relevant[number]) => {
-    const existing = draft.entrances.find((x) => x.site_id === s.id);
-    if (existing) set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
-    else set({ entrances: [...draft.entrances, { id: uid(), site_id: s.id, indian_pax: pax, indian_rate: s.indian_rate, foreign_pax: 0, foreign_rate: s.foreigner_rate, student_pax: 0, student_rate: s.student_rate ?? 0 }] });
+
+  const findLine = (siteId: string, day: number) =>
+    draft.entrances.find((x) => x.site_id === siteId && (x.from_routing_days ?? []).includes(day));
+
+  const toggle = (s: { id: string; indian_rate: number; foreigner_rate: number; student_rate?: number }, day: number) => {
+    const existing = findLine(s.id, day);
+    if (existing) {
+      set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
+    } else {
+      set({ entrances: [...draft.entrances, {
+        id: uid(), site_id: s.id,
+        indian_pax: pax, indian_rate: s.indian_rate,
+        foreign_pax: 0, foreign_rate: s.foreigner_rate,
+        student_pax: 0, student_rate: s.student_rate ?? 0,
+        from_routing_days: [day],
+      }] });
+    }
   };
+
+  const patch = (lineId: string, p: Partial<typeof draft.entrances[number]>) => {
+    set({ entrances: draft.entrances.map((x) => x.id === lineId ? { ...x, ...p } : x) });
+  };
+
+  const customLines = draft.entrances.filter((x) => x.custom_name);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Entrance Fees</h2>
-      {(() => {
-        const n = draft.entrances.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
-        return n > 0 ? (
-          <div className="text-xs px-3 py-2 rounded-md bg-accent/10 text-accent border border-accent/30">
-            Pre-filled from routing: {n} item{n === 1 ? "" : "s"} selected
-          </div>
-        ) : null;
-      })()}
-      <div className="space-y-2">
-        {relevant.map((s) => {
-          const line = draft.entrances.find((x) => x.site_id === s.id);
-          const on = !!line;
-          const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
-          const fromDays = line?.from_routing_days ?? [];
-          return (
-            <div key={s.id} className={cn("p-3 border rounded-lg", on && "border-accent bg-accent/5")}>
-              <div className="flex items-center gap-3">
-                <Checkbox checked={on} onCheckedChange={() => toggle(s)} />
-                <div className="flex-1">
-                  <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                    {s.site_name} <span className="text-xs text-muted-foreground">— {cityName}</span>
-                    {fromDays.length > 0 && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                        From Day {fromDays.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
-                    {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
-                  </div>
-                </div>
-              </div>
-
-              {on && line && (
-                <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
-                  <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
-                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, indian_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
-                  <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
-                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, foreign_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
-                  <div><Label className="text-[10px]">Student Pax</Label><Input type="number" value={line.student_pax ?? 0}
-                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_pax: parseInt(e.target.value) || 0 } : x) })} /></div>
-                  <div><Label className="text-[10px]">Student Rate</Label><Input type="number" value={line.student_rate ?? 0}
-                    onChange={(e) => set({ entrances: draft.entrances.map((x) => x.id === line.id ? { ...x, student_rate: parseFloat(e.target.value) || 0 } : x) })} /></div>
-                  <div className="col-span-2 text-right font-semibold pt-4">
-                    {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate + (line.student_pax ?? 0) * (line.student_rate ?? 0))}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold">Entrance Fees</h2>
+        <span className="text-xs text-muted-foreground">Synced with Routing — one section per itinerary day.</span>
       </div>
-      <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
-        entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0, student_pax: 0, student_rate: 0 }],
-      })} />
-      {draft.entrances.filter((x) => x.custom_name).map((x) => (
-        <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
-          <span>{x.custom_name} — {x.indian_pax} pax × ₹{x.indian_rate}</span>
-          <span>{inr(x.indian_pax * x.indian_rate)}
-            <button className="ml-2 text-destructive" onClick={() => set({ entrances: draft.entrances.filter((y) => y.id !== x.id) })}>×</button>
-          </span>
-        </div>
-      ))}
+
+      {draft.routing.map((r, idx) => {
+        const isLast = idx === draft.routing.length - 1;
+        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
+        const dayCityIds = new Set(d.entrance_cities.filter((c) => destNames.includes(c.name)).map((c) => c.id));
+        const daySites = d.entrance_sites.filter((s) => s.is_active && dayCityIds.has(s.city_id));
+        const selectedCount = draft.entrances.filter((x) =>
+          x.site_id && (x.from_routing_days ?? []).includes(r.day)
+        ).length;
+        const title = dayTitleFor(r, d.cities, isLast);
+        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
+
+        return (
+          <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={selectedCount}>
+            {destNames.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">No destination set for this day.</div>
+            ) : daySites.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">
+                No entrances available for {destNames.join(", ")}.
+              </div>
+            ) : daySites.map((s) => {
+              const line = findLine(s.id, r.day);
+              const on = !!line;
+              const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
+              return (
+                <div key={s.id} className={cn("p-2.5 border rounded-md", on && "border-accent bg-accent/5")}>
+                  <div className="flex items-center gap-3">
+                    <Checkbox checked={on} onCheckedChange={() => toggle(s, r.day)} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {s.site_name} <span className="text-[11px] text-muted-foreground">— {cityName}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
+                        {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  {on && line && (
+                    <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
+                      <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
+                        onChange={(e) => patch(line.id, { indian_pax: parseInt(e.target.value) || 0 })} /></div>
+                      <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
+                        onChange={(e) => patch(line.id, { foreign_pax: parseInt(e.target.value) || 0 })} /></div>
+                      <div><Label className="text-[10px]">Student Pax</Label><Input type="number" value={line.student_pax ?? 0}
+                        onChange={(e) => patch(line.id, { student_pax: parseInt(e.target.value) || 0 })} /></div>
+                      <div><Label className="text-[10px]">Student Rate</Label><Input type="number" value={line.student_rate ?? 0}
+                        onChange={(e) => patch(line.id, { student_rate: parseFloat(e.target.value) || 0 })} /></div>
+                      <div className="col-span-2 text-right font-semibold pt-4 tabular-nums">
+                        {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate + (line.student_pax ?? 0) * (line.student_rate ?? 0))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </DaySection>
+        );
+      })}
+
+      <Card className="p-3 space-y-2">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">Custom / Other Entrances</div>
+        <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
+          entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0, student_pax: 0, student_rate: 0 }],
+        })} />
+        {customLines.map((x) => (
+          <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
+            <span>{x.custom_name} — {x.indian_pax} pax × ₹{x.indian_rate}</span>
+            <span>{inr(x.indian_pax * x.indian_rate)}
+              <button className="ml-2 text-destructive" onClick={() => set({ entrances: draft.entrances.filter((y) => y.id !== x.id) })}>×</button>
+            </span>
+          </div>
+        ))}
+      </Card>
     </div>
   );
 }
 
 // ============================================================
-// STEP 13 — Guide
+// STEP 13 — Guide (day-wise)
 // ============================================================
 function Step13({ draft, set }: StepProps) {
   const d = useDB();
-  const opts = d.guides.filter((g) => g.is_active);
   const pax = totalPax(draft);
+  const allGuides = d.guides.filter((g) => g.is_active);
+
+  const findLines = (guideId: string, day: number) =>
+    draft.guides.filter((x) => x.guide_id === guideId && (x.from_routing_days ?? []).includes(day));
+
+  const toggle = (guideId: string, day: number, rate: number) => {
+    const existing = findLines(guideId, day)[0];
+    if (existing) {
+      set({ guides: draft.guides.filter((x) => x.id !== existing.id) });
+    } else {
+      set({ guides: [...draft.guides, {
+        id: uid(), guide_id: guideId, days: 1, guides: 1, rate, from_routing_days: [day],
+      }] });
+    }
+  };
+
+  const patch = (lineId: string, p: Partial<typeof draft.guides[number]>) => {
+    set({ guides: draft.guides.map((x) => x.id === lineId ? { ...x, ...p } : x) });
+  };
+
+  const unassigned = draft.guides.filter((g) => !(g.from_routing_days && g.from_routing_days.length > 0));
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Guide Charges</h2>
-        <Button size="sm" onClick={() => {
-          const first = opts[0];
-          const rate = first ? guideRateForPax(first, pax) : 0;
-          set({ guides: [...draft.guides, { id: uid(), guide_id: first?.id || "", days: 1, guides: 1, rate }] });
-        }}>
-          <Plus className="h-3 w-3 mr-1" /> Add Guide
-        </Button>
+        <span className="text-xs text-muted-foreground">Synced with Routing — assign guides per itinerary day.</span>
       </div>
-      {draft.guides.map((g, i) => (
-        <Card key={g.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
-          <div>
-            <Label className="text-xs">Guide ({pax} pax)</Label>
-            <Select value={g.guide_id} onValueChange={(v) => {
-              const go = opts.find((x) => x.id === v);
-              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go ? guideRateForPax(go, pax) : g.rate };
-              set({ guides: n });
-            }}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={g.days}
-            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, days: parseInt(e.target.value) || 1 }; set({ guides: n }); }} /></div>
-          <div><Label className="text-xs"># Guides</Label><Input type="number" min={1} value={g.guides}
-            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, guides: parseInt(e.target.value) || 1 }; set({ guides: n }); }} /></div>
-          <div><Label className="text-xs">Rate/day</Label><Input type="number" value={g.rate}
-            onChange={(e) => { const n = [...draft.guides]; n[i] = { ...g, rate: parseFloat(e.target.value) || 0 }; set({ guides: n }); }} /></div>
-          <div className="text-right"><Label className="text-xs">Total</Label><div className="text-sm font-semibold pt-2">{inr(g.rate * g.guides * g.days)}</div></div>
-          <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+
+      {draft.routing.map((r, idx) => {
+        const isLast = idx === draft.routing.length - 1;
+        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
+        const dayGuides = allGuides.filter((g) => destNames.includes(g.destination));
+        const dayLines = draft.guides.filter((x) => (x.from_routing_days ?? []).includes(r.day));
+        const title = dayTitleFor(r, d.cities, isLast);
+        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
+
+        return (
+          <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={dayLines.length}>
+            {destNames.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">No destination set for this day.</div>
+            ) : dayGuides.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-1 py-2">
+                No guides available for {destNames.join(", ")}.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {dayGuides.map((g) => {
+                    const on = findLines(g.id, r.day).length > 0;
+                    return (
+                      <button key={g.id} type="button"
+                        onClick={() => toggle(g.id, r.day, guideRateForPax(g, pax))}
+                        className={cn(
+                          "text-left p-2.5 border rounded-md hover:bg-muted/40 transition-colors",
+                          on && "border-accent bg-accent/5"
+                        )}>
+                        <div className="flex items-center gap-2">
+                          <Checkbox checked={on} className="pointer-events-none" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{g.name}</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              ₹{guideRateForPax(g, pax)}/day · {pax} pax
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {dayLines.length > 0 && (
+                  <div className="pt-2 space-y-2">
+                    {dayLines.map((g) => {
+                      const gm = allGuides.find((x) => x.id === g.guide_id);
+                      return (
+                        <Card key={g.id} className="p-2 grid grid-cols-[1fr_70px_70px_100px_100px_36px] gap-2 items-end">
+                          <div className="text-xs">
+                            <Label className="text-[10px]">Guide</Label>
+                            <div className="text-sm font-medium truncate">{gm?.name || "—"}</div>
+                          </div>
+                          <div><Label className="text-[10px]">Days</Label><Input type="number" min={1} value={g.days}
+                            onChange={(e) => patch(g.id, { days: parseInt(e.target.value) || 1 })} /></div>
+                          <div><Label className="text-[10px]"># Guides</Label><Input type="number" min={1} value={g.guides}
+                            onChange={(e) => patch(g.id, { guides: parseInt(e.target.value) || 1 })} /></div>
+                          <div><Label className="text-[10px]">Rate/day</Label><Input type="number" value={g.rate}
+                            onChange={(e) => patch(g.id, { rate: parseFloat(e.target.value) || 0 })} /></div>
+                          <div className="text-right"><Label className="text-[10px]">Total</Label>
+                            <div className="text-sm font-semibold pt-1 tabular-nums">{inr(g.rate * g.guides * g.days)}</div>
+                          </div>
+                          <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </DaySection>
+        );
+      })}
+
+      {unassigned.length > 0 && (
+        <Card className="p-3 space-y-2">
+          <div className="text-xs font-semibold uppercase text-muted-foreground">Unassigned Guides (legacy)</div>
+          {unassigned.map((g, i) => {
+            const gm = allGuides.find((x) => x.id === g.guide_id);
+            return (
+              <Card key={g.id} className="p-2 grid grid-cols-[1fr_70px_70px_100px_100px_36px] gap-2 items-end">
+                <div className="text-xs">
+                  <Label className="text-[10px]">Guide</Label>
+                  <Select value={g.guide_id} onValueChange={(v) => {
+                    const go = allGuides.find((x) => x.id === v);
+                    patch(g.id, { guide_id: v, rate: go ? guideRateForPax(go, pax) : g.rate });
+                  }}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue>{gm?.name || "Select"}</SelectValue></SelectTrigger>
+                    <SelectContent>
+                      {allGuides.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label className="text-[10px]">Days</Label><Input type="number" min={1} value={g.days}
+                  onChange={(e) => patch(g.id, { days: parseInt(e.target.value) || 1 })} /></div>
+                <div><Label className="text-[10px]"># Guides</Label><Input type="number" min={1} value={g.guides}
+                  onChange={(e) => patch(g.id, { guides: parseInt(e.target.value) || 1 })} /></div>
+                <div><Label className="text-[10px]">Rate/day</Label><Input type="number" value={g.rate}
+                  onChange={(e) => patch(g.id, { rate: parseFloat(e.target.value) || 0 })} /></div>
+                <div className="text-right"><Label className="text-[10px]">Total</Label>
+                  <div className="text-sm font-semibold pt-1 tabular-nums">{inr(g.rate * g.guides * g.days)}</div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </Card>
+            );
+          })}
         </Card>
-      ))}
+      )}
     </div>
   );
 }
+
 
 // ============================================================
 // STEP 14 — Miscellaneous
