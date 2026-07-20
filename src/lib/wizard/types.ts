@@ -72,9 +72,10 @@ export interface RoutingDay {
   day: number;
   date: string;
   day_name?: string;
-  city_id: string;          // primary storage — still used by Step 15 hotel lookups
+  city_id: string;          // OVERNIGHT city id — where guests sleep (used by Step 15 hotel lookups)
+  to_city_id?: string;      // DESTINATION city id — where guests travel to that day (drives suggestions)
   from_city?: string;       // free-text / city id, day 1 auto from departure_city
-  to_city?: string;         // mirror of city_id (kept in sync); "Departure" on last day
+  to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
   travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
   travel_by_detail?: string;   // optional free-text: vehicle, flight no, train name
   transport_details?: DayTransportDetails;  // per-day detailed transport info (see Step 9)
