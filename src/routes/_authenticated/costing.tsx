@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
@@ -1318,10 +1318,11 @@ function Step11({ draft, set }: StepProps) {
     return dest && (routingCities.has(dest) || routingCities.size === 0);
   });
 
+  const pax = totalPax(draft);
   const toggle = (a: typeof relevant[number]) => {
     const existing = draft.activities.find((x) => x.activity_id === a.id);
     if (existing) set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
-    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: a.price }] });
+    else set({ activities: [...draft.activities, { id: uid(), activity_id: a.id, qty: 1, rate: activityRateForPax(a, pax) }] });
   };
 
   return (
@@ -1454,26 +1455,31 @@ function Step12({ draft, set }: StepProps) {
 function Step13({ draft, set }: StepProps) {
   const d = useDB();
   const opts = d.guides.filter((g) => g.is_active);
+  const pax = totalPax(draft);
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">Guide Charges</h2>
-        <Button size="sm" onClick={() => set({ guides: [...draft.guides, { id: uid(), guide_id: opts[0]?.id || "", days: 1, guides: 1, rate: opts[0]?.rate_per_day || 0 }] })}>
+        <Button size="sm" onClick={() => {
+          const first = opts[0];
+          const rate = first ? guideRateForPax(first, pax) : 0;
+          set({ guides: [...draft.guides, { id: uid(), guide_id: first?.id || "", days: 1, guides: 1, rate }] });
+        }}>
           <Plus className="h-3 w-3 mr-1" /> Add Guide
         </Button>
       </div>
       {draft.guides.map((g, i) => (
         <Card key={g.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
           <div>
-            <Label className="text-xs">Guide</Label>
+            <Label className="text-xs">Guide ({pax} pax)</Label>
             <Select value={g.guide_id} onValueChange={(v) => {
               const go = opts.find((x) => x.id === v);
-              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go?.rate_per_day || g.rate };
+              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go ? guideRateForPax(go, pax) : g.rate };
               set({ guides: n });
             }}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name} ({o.guide_type})</SelectItem>)}
+                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
