@@ -1454,26 +1454,31 @@ function Step12({ draft, set }: StepProps) {
 function Step13({ draft, set }: StepProps) {
   const d = useDB();
   const opts = d.guides.filter((g) => g.is_active);
+  const pax = totalPax(draft);
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">Guide Charges</h2>
-        <Button size="sm" onClick={() => set({ guides: [...draft.guides, { id: uid(), guide_id: opts[0]?.id || "", days: 1, guides: 1, rate: opts[0]?.rate_per_day || 0 }] })}>
+        <Button size="sm" onClick={() => {
+          const first = opts[0];
+          const rate = first ? guideRateForPax(first, pax) : 0;
+          set({ guides: [...draft.guides, { id: uid(), guide_id: first?.id || "", days: 1, guides: 1, rate }] });
+        }}>
           <Plus className="h-3 w-3 mr-1" /> Add Guide
         </Button>
       </div>
       {draft.guides.map((g, i) => (
         <Card key={g.id} className="p-3 grid grid-cols-[1fr_80px_80px_100px_100px_36px] gap-2 items-end">
           <div>
-            <Label className="text-xs">Guide</Label>
+            <Label className="text-xs">Guide ({pax} pax)</Label>
             <Select value={g.guide_id} onValueChange={(v) => {
               const go = opts.find((x) => x.id === v);
-              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go?.rate_per_day || g.rate };
+              const n = [...draft.guides]; n[i] = { ...g, guide_id: v, rate: go ? guideRateForPax(go, pax) : g.rate };
               set({ guides: n });
             }}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name} ({o.guide_type})</SelectItem>)}
+                {opts.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
