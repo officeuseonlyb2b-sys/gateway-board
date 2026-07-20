@@ -350,35 +350,90 @@ function seed(): DB {
       is_active: true, created_at: now(),
     },
   ];
-  const activity_destinations: ActivityDestination[] = [
-    { id: uid(), name: "Kanha", created_at: now() },
-    { id: uid(), name: "Bandhavgarh", created_at: now() },
+  // v2.0 seed: destinations mirror rate-sheet cities so wizard filters by routing city.
+  const ACT_CITY_NAMES = [
+    "Gwalior", "Khajuraho", "Omkareshwar", "Ujjain",
+    "Maheshwar", "Mandu", "Bhopal", "Kanha", "Bandhavgarh",
   ];
+  const activity_destinations: ActivityDestination[] = ACT_CITY_NAMES.map((n) => ({
+    id: uid(), name: n, created_at: now(),
+  }));
+  const destId = (name: string) => activity_destinations.find((d) => d.name === name)!.id;
+
+  const mkAct = (
+    dest: string, name: string,
+    fields: Partial<Activity> & { unit?: string; price?: number },
+  ): Activity => {
+    const price = fields.price ?? fields.group_rate_7_to_14 ?? fields.per_person_indian ?? 0;
+    const pricing_type: ActivityPricingType =
+      fields.group_rate_7_to_14 != null ? "total_fixed" : "per_person";
+    return {
+      id: uid(), destination_id: destId(dest),
+      activity_name: name, description: "",
+      pricing_type, price, unit_label: fields.unit ?? "",
+      is_active: true, created_at: now(),
+      group_rate_1_to_6: fields.group_rate_1_to_6,
+      group_rate_7_to_14: fields.group_rate_7_to_14,
+      group_rate_15_to_20: fields.group_rate_15_to_20,
+      per_person_indian: fields.per_person_indian,
+      per_person_inbound: fields.per_person_inbound,
+      misc_rate: fields.misc_rate,
+    };
+  };
+
   const activities: Activity[] = [
-    {
-      id: uid(), destination_id: activity_destinations[0].id,
-      activity_name: "Jungle Safari", description: "Shared jeep safari inside core zone (up to 6 pax)",
-      pricing_type: "total_fixed", price: 12500, unit_label: "Jungle Safari Total",
-      is_active: true, created_at: now(),
-    },
-    {
-      id: uid(), destination_id: activity_destinations[0].id,
-      activity_name: "Boat Safari", description: "Guided boat safari on Banjar river",
-      pricing_type: "total_fixed", price: 8500, unit_label: "Total",
-      is_active: true, created_at: now(),
-    },
-    {
-      id: uid(), destination_id: activity_destinations[1].id,
-      activity_name: "Jungle Safari", description: "Shared jeep safari, Tala zone",
-      pricing_type: "total_fixed", price: 13500, unit_label: "Total",
-      is_active: true, created_at: now(),
-    },
+    mkAct("Gwalior", "Sound & Light Show", { per_person_indian: 350, per_person_inbound: 850, misc_rate: 100, unit: "Per Person" }),
+    mkAct("Gwalior", "Heritage Walk", { group_rate_1_to_6: 2500, group_rate_7_to_14: 3500, group_rate_15_to_20: 4000, unit: "Group Total (Inbound)" }),
+    mkAct("Gwalior", "Meditation Session in Mitaoli", { group_rate_1_to_6: 2000, group_rate_7_to_14: 2500, group_rate_15_to_20: 3000, unit: "Group Total" }),
+    mkAct("Khajuraho", "Sound & Light Show", { per_person_indian: 350, per_person_inbound: 750, unit: "Per Person" }),
+    mkAct("Omkareshwar", "Abhishekam", { group_rate_1_to_6: 2500, group_rate_7_to_14: 3500, group_rate_15_to_20: 4000, unit: "Group Total" }),
+    mkAct("Ujjain", "Batik Art Experience", { group_rate_1_to_6: 200, group_rate_7_to_14: 3000, group_rate_15_to_20: 4000, unit: "Group Total" }),
+    mkAct("Maheshwar", "Boat Ride", { group_rate_1_to_6: 2500, group_rate_7_to_14: 3000, group_rate_15_to_20: 3500, unit: "Group Total" }),
+    mkAct("Mandu", "Traditional Malwa Village Outdoor", { per_person_inbound: 1750, unit: "Per Person (Inbound)" }),
+    mkAct("Mandu", "Sound & Light Show", { per_person_indian: 400, per_person_inbound: 850, unit: "Per Person" }),
+    mkAct("Bhopal", "Boat Ride", { per_person_inbound: 250, unit: "Per Person (Inbound)" }),
   ];
 
+  const mkGuide = (
+    city: string, tour_program: string,
+    r5: number, r14: number, r15: number,
+    escort: number, indian?: number, inbound?: number,
+  ): Guide => ({
+    id: uid(),
+    name: `${city} — ${tour_program}`,
+    guide_type: "English Guide - Local",
+    destination: city,
+    rate_per_day: r14,
+    description: "",
+    is_active: true, created_at: now(),
+    city, tour_program,
+    rate_1_to_5: r5, rate_6_to_14: r14, rate_15_plus: r15,
+    escort_rate: escort,
+    indian_entry: indian, inbound_entry: inbound,
+  });
+
   const guides: Guide[] = [
-    { id: uid(), name: "Ravi Sharma", guide_type: "Hindi Guide - Local", destination: "Any", rate_per_day: 1500, description: "Half-day / full-day local city guide (Hindi)", is_active: true, created_at: now() },
-    { id: uid(), name: "Ananya Menon", guide_type: "English Guide - Local", destination: "Kanha/Bandhavgarh", rate_per_day: 2200, description: "English-speaking local guide", is_active: true, created_at: now() },
-    { id: uid(), name: "Suresh Rao", guide_type: "Tour Escort", destination: "Multi-city", rate_per_day: 2500, description: "Tour escort accompanying full circuit", is_active: true, created_at: now() },
+    mkGuide("Gwalior", "PM Fort", 2000, 2500, 3000, 5000, 100, 500),
+    mkGuide("Gwalior", "HDCT + PM Fort", 3000, 4000, 4500, 5000, 700, 1500),
+    mkGuide("Gwalior", "HDCT (Without JVP) + HD Eve Fort", 2500, 3500, 4000, 5000, 100, 500),
+    mkGuide("Gwalior", "HDCT", 2500, 3000, 3500, 5000, 700, 1000),
+    mkGuide("Orchha", "HDCT", 2500, 3000, 3500, 5000, 100, 750),
+    mkGuide("Orchha", "HDCT + Aarti", 3000, 3500, 4000, 5000, 100, 750),
+    mkGuide("Khajuraho", "FDCT", 3000, 3500, 4000, 5000, 100, 700),
+    mkGuide("Khajuraho", "AM HDCT", 2500, 3000, 4000, 5000, 100, 700),
+    mkGuide("Khajuraho", "PM HDCT", 2500, 3000, 4000, 5000, 100, 700),
+    mkGuide("Bhopal", "PM HDCT (Taj-ul-Masajid + Lake)", 3000, 3500, 4000, 5000),
+    mkGuide("Bhopal", "AM HDCT (Tribal Museum)", 3000, 3500, 4000, 5000, 350, 1250),
+    mkGuide("Bhopal", "Excursion Bhoj & Bhim", 4000, 4500, 5000, 5000),
+    mkGuide("Bhopal", "Excursion Sanchi", 3500, 4000, 5000, 5000, 100, 600),
+    mkGuide("Bhopal", "Excursion Sanchi & Udayagiri", 4000, 4500, 5000, 5000, 100, 900),
+    mkGuide("Ujjain", "HDCT + Aarti", 4000, 4500, 5000, 5000, 300, 300),
+    mkGuide("Omkareshwar", "HDCT", 2500, 3000, 3500, 5000, 500, 500),
+    mkGuide("Maheshwar", "HDCT", 2500, 3000, 3500, 5000, 30, 100),
+    mkGuide("Mandu", "FDCT", 3000, 3500, 4000, 5000, 100, 1200),
+    mkGuide("Mandu", "PM HDCT", 2500, 3000, 3500, 5000, 50, 600),
+    mkGuide("Mandu", "AM HDCT", 2500, 3000, 3500, 5000, 50, 600),
+    mkGuide("Indore", "FDCT", 4000, 4500, 5000, 5000, 100, 1200),
   ];
   const travel_options: TravelOption[] = VEHICLE_ALLOCATION.map((v) => ({
     id: uid(),
