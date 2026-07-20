@@ -893,30 +893,11 @@ function Step9({ draft, set }: StepProps) {
     set({ routing: next });
   };
 
-  const entrancesForCity = (city_id: string) => {
-    const cityName = d.cities.find((c) => c.id === city_id)?.name;
-    if (!cityName) return [];
-    const ec = d.entrance_cities.find((c) => c.name === cityName);
-    if (!ec) return [];
-    return d.entrance_sites.filter((s) => s.city_id === ec.id && s.is_active);
-  };
   const OVERNIGHT_NONE = "__none__";
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   const pax = totalPax(draft);
-  const guidesForCity = (cName: string) =>
-    d.guides.filter((g) => g.is_active && (g.destination === cName || g.city === cName));
-  const activitiesForCity = (cName: string) =>
-    d.activities.filter((a) => {
-      if (!a.is_active) return false;
-      const dest = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-      return dest === cName;
-    });
-  const activeMisc = () => d.miscellaneous_items.filter((m) => m.is_active);
-  const openModule = (path: string) => {
-    if (typeof window !== "undefined") window.open(path, "_blank", "noopener");
-  };
 
   const addGuideSug = (g: Guide) => {
     if (draft.guides.some((x) => x.guide_id === g.id)) { toast.info("Guide already added"); return; }
