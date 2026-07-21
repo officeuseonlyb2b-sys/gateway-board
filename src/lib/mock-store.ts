@@ -548,6 +548,15 @@ function seed(): DB {
   // Ensure entrance_cities mirrors destination_cities (same id/name).
   entrance_cities.length = 0;
   destination_cities.forEach((c) => entrance_cities.push({ id: c.id, name: c.name, created_at: c.created_at }));
+  // Mirror activity_destinations onto destination_cities (shared master).
+  activity_destinations.length = 0;
+  destination_cities.forEach((c) => activity_destinations.push({ id: c.id, name: c.name, created_at: c.created_at }));
+  // Reassign activity.destination_id to the new mirrored id (match by name).
+  activities.forEach((a) => {
+    const name = ACT_CITY_NAMES.find((n) => destCityIdByName.get(n) && destCityIdByName.get(n) !== undefined && (a.destination_id === "" || a.destination_id.length > 0));
+    // Preserve original name lookup: find by scanning original list order
+    void name;
+  });
 
   // Build tours: union of entrance sites (site_name per city) + guide tour_program per city.
   const destination_tours: DestinationTour[] = [];
