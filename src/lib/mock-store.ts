@@ -970,8 +970,9 @@ export const db = {
     if (d.destination_cities.some((c) => c.name.toLowerCase() === n.toLowerCase())) return null;
     const c: DestinationCity = { id: uid(), name: n, created_at: now() };
     d.destination_cities.push(c);
-    // Mirror to entrance_cities (same id) and guide_cities (by name).
+    // Mirror to entrance_cities, activity_destinations (same id) + guide_cities (by name).
     d.entrance_cities.push({ id: c.id, name: n, created_at: c.created_at });
+    d.activity_destinations.push({ id: c.id, name: n, created_at: c.created_at });
     if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
     persist(); emit();
     return c;
