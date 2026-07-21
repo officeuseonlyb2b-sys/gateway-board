@@ -136,7 +136,24 @@ export interface EntranceSite {
   notes?: string;
   is_active: boolean;
   created_at: string;
+  tour_id?: string;
 }
+
+export interface DestinationCity {
+  id: string;
+  name: string;
+  created_at: string;
+}
+export interface DestinationTour {
+  id: string;
+  city_id: string;
+  title: string;
+  description?: string;
+  created_at: string;
+}
+
+export const GUIDE_LANGUAGES = ["Hindi", "English", "Other"] as const;
+export type GuideLanguage = (typeof GUIDE_LANGUAGES)[number];
 
 export interface ActivityDestination {
   id: string;
