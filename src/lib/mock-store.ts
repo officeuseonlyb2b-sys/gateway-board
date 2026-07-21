@@ -1006,6 +1006,8 @@ export const db = {
     d.destination_cities = d.destination_cities.filter((x) => x.id !== id);
     d.entrance_cities = d.entrance_cities.filter((x) => x.id !== id);
     d.entrance_sites = d.entrance_sites.filter((s) => s.city_id !== id && !(s.tour_id && tourIds.includes(s.tour_id)));
+    d.activity_destinations = d.activity_destinations.filter((x) => x.id !== id);
+    d.activities = d.activities.filter((a) => a.destination_id !== id);
     d.guide_cities = d.guide_cities.filter((x) => x !== name);
     d.guides = d.guides.filter((g) => (g.city ?? g.destination) !== name && !(g.tour_id && tourIds.includes(g.tour_id)));
     persist(); emit();
