@@ -199,6 +199,8 @@ export interface Guide {
   escort_rate?: number;
   indian_entry?: number;
   inbound_entry?: number;
+  tour_id?: string;
+  languages?: GuideLanguage[];
 }
 
 // Pax-tier rate helpers (v2.0). Fall back to legacy rate_per_day / price.
