@@ -23,6 +23,7 @@ const SECTIONS: Item[][] = [
   [{ label: "Dashboard", to: "/dashboard", icon: LayoutDashboard }],
   [
     { label: "Hotels", to: "/hotels", icon: Building2 },
+    { label: "Destinations", to: "/destinations", icon: MapPin },
     { label: "Travels", to: "/travels", icon: Plane },
     { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
     { label: "Entrances", to: "/entrances", icon: Landmark },
