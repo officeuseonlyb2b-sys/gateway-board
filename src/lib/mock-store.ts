@@ -470,11 +470,64 @@ function seed(): DB {
     created_at: now(),
   }));
 
+  const guide_cities_list = ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"];
+
+  // Build shared Destinations from union of entrance cities + guide cities.
+  const destCityNames = Array.from(new Set([
+    ...entrance_cities.map((c) => c.name),
+    ...guide_cities_list,
+  ]));
+  const destination_cities: DestinationCity[] = destCityNames.map((name) => {
+    const existing = entrance_cities.find((c) => c.name === name);
+    return { id: existing?.id ?? uid(), name, created_at: now() };
+  });
+  const destCityIdByName = new Map(destination_cities.map((c) => [c.name, c.id]));
+  // Ensure entrance_cities mirrors destination_cities (same id/name).
+  entrance_cities.length = 0;
+  destination_cities.forEach((c) => entrance_cities.push({ id: c.id, name: c.name, created_at: c.created_at }));
+
+  // Build tours: union of entrance sites (site_name per city) + guide tour_program per city.
+  const destination_tours: DestinationTour[] = [];
+  const tourKey = (cityId: string, title: string) => `${cityId}||${title.trim().toLowerCase()}`;
+  const tourIndex = new Map<string, DestinationTour>();
+  const addTour = (cityId: string, title: string) => {
+    const k = tourKey(cityId, title);
+    if (tourIndex.has(k)) return tourIndex.get(k)!;
+    const t: DestinationTour = { id: uid(), city_id: cityId, title: title.trim(), created_at: now() };
+    destination_tours.push(t);
+    tourIndex.set(k, t);
+    return t;
+  };
+  // Link entrance sites → tours
+  entrance_sites.forEach((s) => {
+    const t = addTour(s.city_id, s.site_name);
+    s.tour_id = t.id;
+  });
+  // Link guides → tours; create tours for guide-only cities
+  guides.forEach((g) => {
+    const cityName = g.city ?? g.destination;
+    const cityId = destCityIdByName.get(cityName);
+    if (!cityId || !g.tour_program) return;
+    const t = addTour(cityId, g.tour_program);
+    g.tour_id = t.id;
+    // Ensure a matching entrance_site row exists for this tour (empty prices).
+    if (!entrance_sites.some((s) => s.tour_id === t.id)) {
+      entrance_sites.push({
+        id: uid(), city_id: cityId, site_name: t.title,
+        indian_rate: 0, foreigner_rate: 0,
+        notes: "", is_active: true,
+        created_at: now(), tour_id: t.id,
+      });
+    }
+    if (!g.languages || g.languages.length === 0) g.languages = ["English"];
+  });
+
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
     miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
     guides,
-    guide_cities: ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"],
+    guide_cities: guide_cities_list,
+    destination_cities, destination_tours,
     travel_options,
   };
 }
