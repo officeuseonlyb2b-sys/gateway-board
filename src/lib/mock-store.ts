@@ -569,6 +569,54 @@ function load(): DB {
         const s = seed();
         parsed.travel_options = s.travel_options;
       }
+      // Destinations migration: ensure destination_cities & destination_tours exist,
+      // and back-link entrance_sites / guides to matching tour_id.
+      if (!parsed.destination_cities || !parsed.destination_tours || parsed.destination_cities.length === 0) {
+        const cityNames = Array.from(new Set([
+          ...parsed.entrance_cities.map((c) => c.name),
+          ...(parsed.guide_cities ?? []),
+        ]));
+        const dc: DestinationCity[] = cityNames.map((name) => {
+          const existing = parsed.entrance_cities.find((c) => c.name === name);
+          return { id: existing?.id ?? uid(), name, created_at: now() };
+        });
+        parsed.destination_cities = dc;
+        const idByName = new Map(dc.map((c) => [c.name, c.id]));
+        // Ensure entrance_cities mirrors destination_cities exactly.
+        parsed.entrance_cities = dc.map((c) => ({ id: c.id, name: c.name, created_at: c.created_at }));
+
+        const tours: DestinationTour[] = [];
+        const idx = new Map<string, DestinationTour>();
+        const upsertTour = (cityId: string, title: string): DestinationTour => {
+          const k = `${cityId}||${title.trim().toLowerCase()}`;
+          const hit = idx.get(k);
+          if (hit) return hit;
+          const t: DestinationTour = { id: uid(), city_id: cityId, title: title.trim(), created_at: now() };
+          tours.push(t); idx.set(k, t); return t;
+        };
+        parsed.entrance_sites.forEach((s) => {
+          if (!s.city_id || !s.site_name) return;
+          const t = upsertTour(s.city_id, s.site_name);
+          s.tour_id = t.id;
+        });
+        parsed.guides.forEach((g) => {
+          const cityName = g.city ?? g.destination;
+          const cityId = idByName.get(cityName);
+          if (!cityId || !g.tour_program) return;
+          const t = upsertTour(cityId, g.tour_program);
+          g.tour_id = t.id;
+          if (!parsed.entrance_sites.some((s) => s.tour_id === t.id)) {
+            parsed.entrance_sites.push({
+              id: uid(), city_id: cityId, site_name: t.title,
+              indian_rate: 0, foreigner_rate: 0,
+              notes: "", is_active: true,
+              created_at: now(), tour_id: t.id,
+            });
+          }
+          if (!g.languages || g.languages.length === 0) g.languages = ["English"];
+        });
+        parsed.destination_tours = tours;
+      }
       _db = parsed;
       return _db;
     }
