@@ -987,6 +987,8 @@ export const db = {
     c.name = n;
     const ec = d.entrance_cities.find((x) => x.id === id);
     if (ec) ec.name = n;
+    const ad = d.activity_destinations.find((x) => x.id === id);
+    if (ad) ad.name = n;
     d.guide_cities = d.guide_cities.map((x) => x === old ? n : x);
     d.guides.forEach((g) => {
       if (g.city === old) g.city = n;
