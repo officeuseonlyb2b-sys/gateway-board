@@ -152,8 +152,18 @@ export interface DestinationTour {
   created_at: string;
 }
 
-export const GUIDE_LANGUAGES = ["Hindi", "English", "Other"] as const;
+export const GUIDE_LANGUAGES = [
+  "Hindi", "English", "French", "German", "Spanish",
+  "Japanese", "Italian", "Russian", "Portuguese", "Other",
+] as const;
 export type GuideLanguage = (typeof GUIDE_LANGUAGES)[number];
+export const DEFAULT_GUIDE_LANGUAGES: GuideLanguage[] = ["Hindi", "English"];
+
+export interface GuideLanguageRate {
+  rate_1_to_5: number;
+  rate_6_to_14: number;
+  rate_15_plus: number;
+}
 
 export interface ActivityDestination {
   id: string;
@@ -161,6 +171,13 @@ export interface ActivityDestination {
   created_at: string;
 }
 export type ActivityPricingType = "per_person" | "total_fixed" | "per_vehicle";
+export type ActivitySlabPricing = "per_person" | "total";
+export interface ActivitySlab {
+  id: string;
+  from_pax: number;
+  to_pax: number;
+  price: number;
+}
 export interface Activity {
   id: string;
   destination_id: string;
@@ -171,13 +188,16 @@ export interface Activity {
   unit_label: string;
   is_active: boolean;
   created_at: string;
-  // v2.0 pax-tier rates (optional; when present, wizard auto-picks by total pax)
+  // legacy pax-tier rates
   group_rate_1_to_6?: number;
   group_rate_7_to_14?: number;
   group_rate_15_to_20?: number;
   per_person_indian?: number;
   per_person_inbound?: number;
   misc_rate?: number;
+  // v3.0 slab-based pricing
+  slab_pricing_type?: ActivitySlabPricing;
+  pricing_slabs?: ActivitySlab[];
 }
 
 export type GuideType = "Hindi Guide - Local" | "English Guide - Local" | "Tour Escort";
@@ -190,7 +210,7 @@ export interface Guide {
   description: string;
   is_active: boolean;
   created_at: string;
-  // v2.0 tour-program + pax-tier rates
+  // legacy tour-program + pax-tier rates
   city?: string;
   tour_program?: string;
   rate_1_to_5?: number;
@@ -201,22 +221,60 @@ export interface Guide {
   inbound_entry?: number;
   tour_id?: string;
   languages?: GuideLanguage[];
+  // v3.0 per-language pricing
+  language_rates?: Partial<Record<GuideLanguage, GuideLanguageRate>>;
 }
 
-// Pax-tier rate helpers (v2.0). Fall back to legacy rate_per_day / price.
-export function guideRateForPax(g: Guide, pax: number): number {
+export function guideRateForPax(g: Guide, pax: number, language?: GuideLanguage): number {
+  const lr = g.language_rates;
+  const pick = (r: GuideLanguageRate) =>
+    pax <= 5 ? r.rate_1_to_5 : pax <= 14 ? r.rate_6_to_14 : r.rate_15_plus;
+  if (lr) {
+    if (language && lr[language]) return pick(lr[language]!);
+    if (lr.English) return pick(lr.English);
+    if (lr.Hindi) return pick(lr.Hindi);
+    const anyKey = Object.keys(lr)[0] as GuideLanguage | undefined;
+    if (anyKey && lr[anyKey]) return pick(lr[anyKey]!);
+  }
   if (pax <= 5 && g.rate_1_to_5 != null) return g.rate_1_to_5;
   if (pax <= 14 && g.rate_6_to_14 != null) return g.rate_6_to_14;
   if (pax >= 15 && g.rate_15_plus != null) return g.rate_15_plus;
   return g.rate_per_day;
 }
 export function activityRateForPax(a: Activity, pax: number): number {
+  if (a.pricing_slabs && a.pricing_slabs.length > 0) {
+    const slab = a.pricing_slabs.find((s) => pax >= s.from_pax && pax <= s.to_pax);
+    const chosen = slab ?? (() => {
+      const sorted = [...a.pricing_slabs!].sort((x, y) => x.from_pax - y.from_pax);
+      return pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1];
+    })();
+    return a.slab_pricing_type === "per_person"
+      ? chosen.price * Math.max(1, pax)
+      : chosen.price;
+  }
   if (pax <= 6 && a.group_rate_1_to_6 != null) return a.group_rate_1_to_6;
   if (pax <= 14 && a.group_rate_7_to_14 != null) return a.group_rate_7_to_14;
   if (pax <= 20 && a.group_rate_15_to_20 != null) return a.group_rate_15_to_20;
   if (a.per_person_indian != null) return a.per_person_indian * Math.max(1, pax);
   return a.price;
 }
+
+export function guidePrimaryLanguage(g: Guide): GuideLanguage | null {
+  const lr = g.language_rates;
+  if (lr?.English) return "English";
+  if (lr?.Hindi) return "Hindi";
+  if (lr) {
+    const k = Object.keys(lr)[0] as GuideLanguage | undefined;
+    if (k) return k;
+  }
+  return null;
+}
+export function guideConfiguredLanguages(g: Guide): GuideLanguage[] {
+  const lr = g.language_rates;
+  if (!lr) return g.languages ?? [];
+  return (Object.keys(lr) as GuideLanguage[]).filter((k) => !!lr[k]);
+}
+
 
 export interface TravelOption {
   id: string;
