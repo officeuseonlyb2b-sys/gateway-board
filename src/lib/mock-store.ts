@@ -265,6 +265,8 @@ export interface DB {
   activities: Activity[];
   guides: Guide[];
   guide_cities: string[];
+  destination_cities: DestinationCity[];
+  destination_tours: DestinationTour[];
   travel_options: TravelOption[];
 }
 
