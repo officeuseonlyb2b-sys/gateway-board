@@ -452,7 +452,9 @@ function seed(): DB {
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
     miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
-    guides, travel_options,
+    guides,
+    guide_cities: ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"],
+    travel_options,
   };
 }
 
