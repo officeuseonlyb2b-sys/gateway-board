@@ -490,6 +490,11 @@ function seed(): DB {
     rate_1_to_5: r5, rate_6_to_14: r14, rate_15_plus: r15,
     escort_rate: escort,
     indian_entry: indian, inbound_entry: inbound,
+    languages: ["Hindi", "English"],
+    language_rates: {
+      Hindi:   { rate_1_to_5: r5, rate_6_to_14: r14, rate_15_plus: r15 },
+      English: { rate_1_to_5: r5 + 500, rate_6_to_14: r14 + 500, rate_15_plus: r15 + 500 },
+    },
   });
 
   const guides: Guide[] = [
