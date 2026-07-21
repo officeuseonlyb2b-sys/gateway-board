@@ -722,6 +722,32 @@ export const db = {
     persist(); emit();
   },
 
+  // Guide cities
+  addGuideCity(name: string) {
+    const d = load();
+    const n = name.trim();
+    if (!n) return;
+    if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
+    persist(); emit();
+  },
+  renameGuideCity(oldName: string, newName: string) {
+    const d = load();
+    const n = newName.trim();
+    if (!n) return;
+    d.guide_cities = d.guide_cities.map((c) => c === oldName ? n : c);
+    d.guides.forEach((g) => {
+      if (g.city === oldName) g.city = n;
+      if (g.destination === oldName) g.destination = n;
+    });
+    persist(); emit();
+  },
+  deleteGuideCity(name: string) {
+    const d = load();
+    d.guide_cities = d.guide_cities.filter((c) => c !== name);
+    d.guides = d.guides.filter((g) => (g.city ?? g.destination) !== name);
+    persist(); emit();
+  },
+
   // Travel options
   addTravel(input: Omit<TravelOption, "id" | "created_at">): TravelOption {
     const d = load();
