@@ -73,8 +73,8 @@ function EntrancesPage() {
         <Card className="p-4 lg:col-span-1 h-fit">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm">Cities</h3>
-            <Button size="sm" variant="outline" onClick={() => { setEditingCity(null); setCityOpen(true); }}>
-              + Add City
+            <Button asChild size="sm" variant="outline">
+              <Link to="/destinations">Manage</Link>
             </Button>
           </div>
           {cities.length === 0 ? (
