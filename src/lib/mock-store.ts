@@ -245,11 +245,12 @@ export interface DB {
   activity_destinations: ActivityDestination[];
   activities: Activity[];
   guides: Guide[];
+  guide_cities: string[];
   travel_options: TravelOption[];
 }
 
 
-const STORAGE_KEY = "mp-tourism-db-v5-seed2.0";
+const STORAGE_KEY = "mp-tourism-db-v6-seed4.0";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
