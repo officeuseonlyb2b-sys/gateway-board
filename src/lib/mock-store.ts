@@ -482,6 +482,9 @@ function load(): DB {
         const s = seed();
         parsed.guides = s.guides;
       }
+      if (!parsed.guide_cities || parsed.guide_cities.length === 0) {
+        parsed.guide_cities = ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"];
+      }
       // Replace legacy travel_options (missing min_pax/max_pax) with the
       // standard VEHICLE_ALLOCATION seed so Step 10 filtering works.
       const needsTravelReseed =
