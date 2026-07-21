@@ -135,6 +135,7 @@ export interface GuideLine {
   days: number;
   guides: number;
   rate: number;
+  is_escort?: boolean;            // true when this line is a Tour Escort add-on
   pax_ranges?: PaxRangePrice[];   // Brochure only
   from_routing_days?: number[];   // day numbers this guide is assigned to
 }

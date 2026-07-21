@@ -1748,23 +1748,45 @@ function Step13({ draft, set }: StepProps) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {dayGuides.map((g) => {
                     const on = findLines(g.id, r.day).length > 0;
+                    const rate = guideRateForPax(g, pax);
+                    const tier = pax <= 5 ? "1-5 pax" : pax <= 14 ? "6-14 pax" : "15+ pax";
+                    const escortLine = draft.guides.find((x) => x.guide_id === g.id && x.is_escort && (x.from_routing_days ?? []).includes(r.day));
+                    const toggleEscort = () => {
+                      if (escortLine) {
+                        set({ guides: draft.guides.filter((x) => x.id !== escortLine.id) });
+                      } else {
+                        set({ guides: [...draft.guides, {
+                          id: uid(), guide_id: g.id, days: 1, guides: 1,
+                          rate: g.escort_rate ?? 5000, is_escort: true, from_routing_days: [r.day],
+                        }] });
+                      }
+                    };
                     return (
-                      <button key={g.id} type="button"
-                        onClick={() => toggle(g.id, r.day, guideRateForPax(g, pax))}
-                        className={cn(
-                          "text-left p-2.5 border rounded-md hover:bg-muted/40 transition-colors",
-                          on && "border-accent bg-accent/5"
-                        )}>
-                        <div className="flex items-center gap-2">
-                          <Checkbox checked={on} className="pointer-events-none" />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate">{g.name}</div>
-                            <div className="text-[11px] text-muted-foreground">
-                              ₹{guideRateForPax(g, pax)}/day · {pax} pax
+                      <div key={g.id} className={cn("p-2.5 border rounded-md", on && "border-accent bg-accent/5")}>
+                        <button type="button" onClick={() => toggle(g.id, r.day, rate)} className="w-full text-left">
+                          <div className="flex items-center gap-2">
+                            <Checkbox checked={on} className="pointer-events-none" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{g.tour_program ?? g.name}</div>
+                              <div className="text-[11px] text-muted-foreground">
+                                Rate: ₹{rate.toLocaleString("en-IN")} ({tier})
+                              </div>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                  Indian: {g.indian_entry != null ? `₹${g.indian_entry}/pp` : "NA"}
+                                </span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                  Inbound: {g.inbound_entry != null ? `₹${g.inbound_entry}/pp` : "NA"}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                        <label className="mt-2 flex items-center gap-2 text-[11px] cursor-pointer select-none">
+                          <Checkbox checked={!!escortLine} onCheckedChange={toggleEscort} />
+                          <span>+ Add Tour Escort: ₹{(g.escort_rate ?? 5000).toLocaleString("en-IN")}/day</span>
+                        </label>
+                      </div>
                     );
                   })}
                 </div>
@@ -1773,15 +1795,18 @@ function Step13({ draft, set }: StepProps) {
                   <div className="pt-2 space-y-2">
                     {dayLines.map((g) => {
                       const gm = allGuides.find((x) => x.id === g.guide_id);
+                      const label = g.is_escort
+                        ? `${gm?.tour_program ?? gm?.name ?? "—"} (Escort)`
+                        : (gm?.tour_program ?? gm?.name ?? "—");
                       return (
                         <Card key={g.id} className="p-2 grid grid-cols-[1fr_70px_70px_100px_100px_36px] gap-2 items-end">
                           <div className="text-xs">
-                            <Label className="text-[10px]">Guide</Label>
-                            <div className="text-sm font-medium truncate">{gm?.name || "—"}</div>
+                            <Label className="text-[10px]">{g.is_escort ? "Escort" : "Guide"}</Label>
+                            <div className="text-sm font-medium truncate">{label}</div>
                           </div>
                           <div><Label className="text-[10px]">Days</Label><Input type="number" min={1} value={g.days}
                             onChange={(e) => patch(g.id, { days: parseInt(e.target.value) || 1 })} /></div>
-                          <div><Label className="text-[10px]"># Guides</Label><Input type="number" min={1} value={g.guides}
+                          <div><Label className="text-[10px]">{g.is_escort ? "#" : "# Guides"}</Label><Input type="number" min={1} value={g.guides}
                             onChange={(e) => patch(g.id, { guides: parseInt(e.target.value) || 1 })} /></div>
                           <div><Label className="text-[10px]">Rate/day</Label><Input type="number" value={g.rate}
                             onChange={(e) => patch(g.id, { rate: parseFloat(e.target.value) || 0 })} /></div>

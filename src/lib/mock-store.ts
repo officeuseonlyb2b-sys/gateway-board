@@ -245,11 +245,12 @@ export interface DB {
   activity_destinations: ActivityDestination[];
   activities: Activity[];
   guides: Guide[];
+  guide_cities: string[];
   travel_options: TravelOption[];
 }
 
 
-const STORAGE_KEY = "mp-tourism-db-v5-seed2.0";
+const STORAGE_KEY = "mp-tourism-db-v6-seed4.0";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -451,7 +452,9 @@ function seed(): DB {
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
     miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
-    guides, travel_options,
+    guides,
+    guide_cities: ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"],
+    travel_options,
   };
 }
 
@@ -478,6 +481,9 @@ function load(): DB {
       if (!parsed.guides || parsed.guides.length === 0) {
         const s = seed();
         parsed.guides = s.guides;
+      }
+      if (!parsed.guide_cities || parsed.guide_cities.length === 0) {
+        parsed.guide_cities = ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"];
       }
       // Replace legacy travel_options (missing min_pax/max_pax) with the
       // standard VEHICLE_ALLOCATION seed so Step 10 filtering works.
@@ -713,6 +719,32 @@ export const db = {
   deleteGuide(id: string) {
     const d = load();
     d.guides = d.guides.filter((x) => x.id !== id);
+    persist(); emit();
+  },
+
+  // Guide cities
+  addGuideCity(name: string) {
+    const d = load();
+    const n = name.trim();
+    if (!n) return;
+    if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
+    persist(); emit();
+  },
+  renameGuideCity(oldName: string, newName: string) {
+    const d = load();
+    const n = newName.trim();
+    if (!n) return;
+    d.guide_cities = d.guide_cities.map((c) => c === oldName ? n : c);
+    d.guides.forEach((g) => {
+      if (g.city === oldName) g.city = n;
+      if (g.destination === oldName) g.destination = n;
+    });
+    persist(); emit();
+  },
+  deleteGuideCity(name: string) {
+    const d = load();
+    d.guide_cities = d.guide_cities.filter((c) => c !== name);
+    d.guides = d.guides.filter((g) => (g.city ?? g.destination) !== name);
     persist(); emit();
   },
 
