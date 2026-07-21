@@ -136,7 +136,24 @@ export interface EntranceSite {
   notes?: string;
   is_active: boolean;
   created_at: string;
+  tour_id?: string;
 }
+
+export interface DestinationCity {
+  id: string;
+  name: string;
+  created_at: string;
+}
+export interface DestinationTour {
+  id: string;
+  city_id: string;
+  title: string;
+  description?: string;
+  created_at: string;
+}
+
+export const GUIDE_LANGUAGES = ["Hindi", "English", "Other"] as const;
+export type GuideLanguage = (typeof GUIDE_LANGUAGES)[number];
 
 export interface ActivityDestination {
   id: string;
@@ -182,6 +199,8 @@ export interface Guide {
   escort_rate?: number;
   indian_entry?: number;
   inbound_entry?: number;
+  tour_id?: string;
+  languages?: GuideLanguage[];
 }
 
 // Pax-tier rate helpers (v2.0). Fall back to legacy rate_per_day / price.
@@ -246,6 +265,8 @@ export interface DB {
   activities: Activity[];
   guides: Guide[];
   guide_cities: string[];
+  destination_cities: DestinationCity[];
+  destination_tours: DestinationTour[];
   travel_options: TravelOption[];
 }
 
@@ -449,11 +470,64 @@ function seed(): DB {
     created_at: now(),
   }));
 
+  const guide_cities_list = ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"];
+
+  // Build shared Destinations from union of entrance cities + guide cities.
+  const destCityNames = Array.from(new Set([
+    ...entrance_cities.map((c) => c.name),
+    ...guide_cities_list,
+  ]));
+  const destination_cities: DestinationCity[] = destCityNames.map((name) => {
+    const existing = entrance_cities.find((c) => c.name === name);
+    return { id: existing?.id ?? uid(), name, created_at: now() };
+  });
+  const destCityIdByName = new Map(destination_cities.map((c) => [c.name, c.id]));
+  // Ensure entrance_cities mirrors destination_cities (same id/name).
+  entrance_cities.length = 0;
+  destination_cities.forEach((c) => entrance_cities.push({ id: c.id, name: c.name, created_at: c.created_at }));
+
+  // Build tours: union of entrance sites (site_name per city) + guide tour_program per city.
+  const destination_tours: DestinationTour[] = [];
+  const tourKey = (cityId: string, title: string) => `${cityId}||${title.trim().toLowerCase()}`;
+  const tourIndex = new Map<string, DestinationTour>();
+  const addTour = (cityId: string, title: string) => {
+    const k = tourKey(cityId, title);
+    if (tourIndex.has(k)) return tourIndex.get(k)!;
+    const t: DestinationTour = { id: uid(), city_id: cityId, title: title.trim(), created_at: now() };
+    destination_tours.push(t);
+    tourIndex.set(k, t);
+    return t;
+  };
+  // Link entrance sites → tours
+  entrance_sites.forEach((s) => {
+    const t = addTour(s.city_id, s.site_name);
+    s.tour_id = t.id;
+  });
+  // Link guides → tours; create tours for guide-only cities
+  guides.forEach((g) => {
+    const cityName = g.city ?? g.destination;
+    const cityId = destCityIdByName.get(cityName);
+    if (!cityId || !g.tour_program) return;
+    const t = addTour(cityId, g.tour_program);
+    g.tour_id = t.id;
+    // Ensure a matching entrance_site row exists for this tour (empty prices).
+    if (!entrance_sites.some((s) => s.tour_id === t.id)) {
+      entrance_sites.push({
+        id: uid(), city_id: cityId, site_name: t.title,
+        indian_rate: 0, foreigner_rate: 0,
+        notes: "", is_active: true,
+        created_at: now(), tour_id: t.id,
+      });
+    }
+    if (!g.languages || g.languages.length === 0) g.languages = ["English"];
+  });
+
   return {
     cities, hotels, room_categories: rooms, rate_plans: plans, quotes: [],
     miscellaneous_items, entrance_cities, entrance_sites, activity_destinations, activities,
     guides,
-    guide_cities: ["Gwalior", "Orchha", "Khajuraho", "Bhopal", "Ujjain", "Omkareshwar", "Maheshwar", "Mandu", "Indore"],
+    guide_cities: guide_cities_list,
+    destination_cities, destination_tours,
     travel_options,
   };
 }
@@ -494,6 +568,54 @@ function load(): DB {
       if (needsTravelReseed) {
         const s = seed();
         parsed.travel_options = s.travel_options;
+      }
+      // Destinations migration: ensure destination_cities & destination_tours exist,
+      // and back-link entrance_sites / guides to matching tour_id.
+      if (!parsed.destination_cities || !parsed.destination_tours || parsed.destination_cities.length === 0) {
+        const cityNames = Array.from(new Set([
+          ...parsed.entrance_cities.map((c) => c.name),
+          ...(parsed.guide_cities ?? []),
+        ]));
+        const dc: DestinationCity[] = cityNames.map((name) => {
+          const existing = parsed.entrance_cities.find((c) => c.name === name);
+          return { id: existing?.id ?? uid(), name, created_at: now() };
+        });
+        parsed.destination_cities = dc;
+        const idByName = new Map(dc.map((c) => [c.name, c.id]));
+        // Ensure entrance_cities mirrors destination_cities exactly.
+        parsed.entrance_cities = dc.map((c) => ({ id: c.id, name: c.name, created_at: c.created_at }));
+
+        const tours: DestinationTour[] = [];
+        const idx = new Map<string, DestinationTour>();
+        const upsertTour = (cityId: string, title: string): DestinationTour => {
+          const k = `${cityId}||${title.trim().toLowerCase()}`;
+          const hit = idx.get(k);
+          if (hit) return hit;
+          const t: DestinationTour = { id: uid(), city_id: cityId, title: title.trim(), created_at: now() };
+          tours.push(t); idx.set(k, t); return t;
+        };
+        parsed.entrance_sites.forEach((s) => {
+          if (!s.city_id || !s.site_name) return;
+          const t = upsertTour(s.city_id, s.site_name);
+          s.tour_id = t.id;
+        });
+        parsed.guides.forEach((g) => {
+          const cityName = g.city ?? g.destination;
+          const cityId = idByName.get(cityName);
+          if (!cityId || !g.tour_program) return;
+          const t = upsertTour(cityId, g.tour_program);
+          g.tour_id = t.id;
+          if (!parsed.entrance_sites.some((s) => s.tour_id === t.id)) {
+            parsed.entrance_sites.push({
+              id: uid(), city_id: cityId, site_name: t.title,
+              indian_rate: 0, foreigner_rate: 0,
+              notes: "", is_active: true,
+              created_at: now(), tour_id: t.id,
+            });
+          }
+          if (!g.languages || g.languages.length === 0) g.languages = ["English"];
+        });
+        parsed.destination_tours = tours;
       }
       _db = parsed;
       return _db;
@@ -764,7 +886,172 @@ export const db = {
     d.travel_options = d.travel_options.filter((x) => x.id !== id);
     persist(); emit();
   },
+
+  // ── Destinations (shared master for cities + tours) ───────────────────
+  addDestinationCity(name: string): DestinationCity | null {
+    const d = load();
+    const n = name.trim();
+    if (!n) return null;
+    if (d.destination_cities.some((c) => c.name.toLowerCase() === n.toLowerCase())) return null;
+    const c: DestinationCity = { id: uid(), name: n, created_at: now() };
+    d.destination_cities.push(c);
+    // Mirror to entrance_cities (same id) and guide_cities (by name).
+    d.entrance_cities.push({ id: c.id, name: n, created_at: c.created_at });
+    if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
+    persist(); emit();
+    return c;
+  },
+  renameDestinationCity(id: string, newName: string) {
+    const d = load();
+    const n = newName.trim();
+    if (!n) return;
+    const c = d.destination_cities.find((x) => x.id === id);
+    if (!c) return;
+    const old = c.name;
+    c.name = n;
+    const ec = d.entrance_cities.find((x) => x.id === id);
+    if (ec) ec.name = n;
+    d.guide_cities = d.guide_cities.map((x) => x === old ? n : x);
+    d.guides.forEach((g) => {
+      if (g.city === old) g.city = n;
+      if (g.destination === old) g.destination = n;
+    });
+    persist(); emit();
+  },
+  deleteDestinationCity(id: string) {
+    const d = load();
+    const c = d.destination_cities.find((x) => x.id === id);
+    if (!c) return;
+    const name = c.name;
+    const tourIds = d.destination_tours.filter((t) => t.city_id === id).map((t) => t.id);
+    d.destination_tours = d.destination_tours.filter((t) => t.city_id !== id);
+    d.destination_cities = d.destination_cities.filter((x) => x.id !== id);
+    d.entrance_cities = d.entrance_cities.filter((x) => x.id !== id);
+    d.entrance_sites = d.entrance_sites.filter((s) => s.city_id !== id && !(s.tour_id && tourIds.includes(s.tour_id)));
+    d.guide_cities = d.guide_cities.filter((x) => x !== name);
+    d.guides = d.guides.filter((g) => (g.city ?? g.destination) !== name && !(g.tour_id && tourIds.includes(g.tour_id)));
+    persist(); emit();
+  },
+  addDestinationTour(input: { city_id: string; title: string; description?: string }): DestinationTour | null {
+    const d = load();
+    const title = input.title.trim();
+    if (!title) return null;
+    const city = d.destination_cities.find((c) => c.id === input.city_id);
+    if (!city) return null;
+    if (d.destination_tours.some((t) => t.city_id === city.id && t.title.toLowerCase() === title.toLowerCase())) return null;
+    const t: DestinationTour = {
+      id: uid(), city_id: city.id, title,
+      description: input.description?.trim() || undefined,
+      created_at: now(),
+    };
+    d.destination_tours.push(t);
+    // Mirror empty rows in entrance_sites and guides linked by tour_id.
+    d.entrance_sites.push({
+      id: uid(), city_id: city.id, site_name: title,
+      indian_rate: 0, foreigner_rate: 0,
+      notes: t.description ?? "", is_active: true,
+      created_at: now(), tour_id: t.id,
+    });
+    d.guides.push({
+      id: uid(),
+      name: `${city.name} — ${title}`,
+      guide_type: "English Guide - Local",
+      destination: city.name,
+      city: city.name,
+      tour_program: title,
+      rate_per_day: 0,
+      description: t.description ?? "",
+      is_active: true,
+      created_at: now(),
+      tour_id: t.id,
+      languages: ["English"],
+    });
+    persist(); emit();
+    return t;
+  },
+  updateDestinationTour(id: string, patch: { title?: string; description?: string }) {
+    const d = load();
+    const t = d.destination_tours.find((x) => x.id === id);
+    if (!t) return;
+    if (patch.title != null) {
+      const newTitle = patch.title.trim();
+      if (!newTitle) return;
+      t.title = newTitle;
+      d.entrance_sites.forEach((s) => { if (s.tour_id === id) s.site_name = newTitle; });
+      const cityName = d.destination_cities.find((c) => c.id === t.city_id)?.name ?? "";
+      d.guides.forEach((g) => {
+        if (g.tour_id === id) {
+          g.tour_program = newTitle;
+          g.name = `${cityName} — ${newTitle}`;
+        }
+      });
+    }
+    if (patch.description !== undefined) {
+      t.description = patch.description.trim() || undefined;
+    }
+    persist(); emit();
+  },
+  deleteDestinationTour(id: string) {
+    const d = load();
+    d.destination_tours = d.destination_tours.filter((t) => t.id !== id);
+    d.entrance_sites = d.entrance_sites.filter((s) => s.tour_id !== id);
+    d.guides = d.guides.filter((g) => g.tour_id !== id);
+    persist(); emit();
+  },
+
+  // Upsert entrance pricing bound to a destination tour.
+  upsertEntrancePricingForTour(tour_id: string, patch: Partial<EntranceSite>) {
+    const d = load();
+    const tour = d.destination_tours.find((t) => t.id === tour_id);
+    if (!tour) return;
+    let row = d.entrance_sites.find((s) => s.tour_id === tour_id);
+    if (!row) {
+      row = {
+        id: uid(), city_id: tour.city_id, site_name: tour.title,
+        indian_rate: 0, foreigner_rate: 0,
+        notes: "", is_active: true, created_at: now(), tour_id,
+      };
+      d.entrance_sites.push(row);
+    }
+    Object.assign(row, patch);
+    row.site_name = tour.title;
+    row.city_id = tour.city_id;
+    row.tour_id = tour_id;
+    persist(); emit();
+  },
+  upsertGuidePricingForTour(tour_id: string, patch: Partial<Guide>) {
+    const d = load();
+    const tour = d.destination_tours.find((t) => t.id === tour_id);
+    if (!tour) return;
+    const cityName = d.destination_cities.find((c) => c.id === tour.city_id)?.name ?? "";
+    let row = d.guides.find((g) => g.tour_id === tour_id);
+    if (!row) {
+      row = {
+        id: uid(),
+        name: `${cityName} — ${tour.title}`,
+        guide_type: "English Guide - Local",
+        destination: cityName,
+        city: cityName,
+        tour_program: tour.title,
+        rate_per_day: 0,
+        description: "",
+        is_active: true,
+        created_at: now(),
+        tour_id,
+        languages: ["English"],
+      };
+      d.guides.push(row);
+    }
+    Object.assign(row, patch);
+    row.tour_program = tour.title;
+    row.name = `${cityName} — ${tour.title}`;
+    row.city = cityName;
+    row.destination = cityName;
+    row.tour_id = tour_id;
+    persist(); emit();
+  },
 };
+
 
 
 // React helpers

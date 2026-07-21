@@ -1,32 +1,25 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Landmark, MapPin, ArrowRight } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Route as RouteIcon } from "lucide-react";
 import { toast } from "sonner";
-import { db, useDB, type DestinationCity, type DestinationTour, type EntranceSite } from "@/lib/mock-store";
+import { db, useDB, type DestinationCity, type DestinationTour } from "@/lib/mock-store";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { inr } from "@/lib/format";
 import { notify } from "@/lib/notify";
 
-export const Route = createFileRoute("/_authenticated/entrances")({
-  head: () => ({ meta: [{ title: "Entrances — MP Tourism Hub" }] }),
-  component: EntrancesPage,
+export const Route = createFileRoute("/_authenticated/destinations")({
+  head: () => ({ meta: [{ title: "Destinations — MP Tourism Hub" }] }),
+  component: DestinationsPage,
 });
 
-type Row = {
-  tour: DestinationTour;
-  site: EntranceSite | undefined;
-};
-
-function EntrancesPage() {
+function DestinationsPage() {
   const data = useDB();
   const cities = useMemo(
     () => [...data.destination_cities].sort((a, b) => a.name.localeCompare(b.name)),
@@ -39,32 +32,38 @@ function EntrancesPage() {
     if (selectedId && !cities.find((c) => c.id === selectedId)) setSelectedId(cities[0]?.id ?? "");
   }, [cities, selectedId]);
 
-  const rows: Row[] = useMemo(() => {
-    const tours = data.destination_tours
-      .filter((t) => t.city_id === selectedId)
-      .sort((a, b) => a.title.localeCompare(b.title));
-    return tours.map((tour) => ({
-      tour,
-      site: data.entrance_sites.find((s) => s.tour_id === tour.id),
-    }));
-  }, [data.destination_tours, data.entrance_sites, selectedId]);
+  const tours = useMemo(
+    () => data.destination_tours.filter((t) => t.city_id === selectedId).sort((a, b) => a.title.localeCompare(b.title)),
+    [data.destination_tours, selectedId],
+  );
 
   const [cityOpen, setCityOpen] = useState(false);
   const [editingCity, setEditingCity] = useState<DestinationCity | null>(null);
-  const [editRow, setEditRow] = useState<Row | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [editingTour, setEditingTour] = useState<DestinationTour | null>(null);
 
   const tourCount = (cityId: string) =>
     data.destination_tours.filter((t) => t.city_id === cityId).length;
+
+  function deleteCity(c: DestinationCity) {
+    if (!confirm(`Delete "${c.name}"?\n\nThis will remove the city from Entrances and Guide.`)) return;
+    db.deleteDestinationCity(c.id);
+    toast.success("City deleted.");
+  }
+  function deleteTour(t: DestinationTour) {
+    if (!confirm(`Delete "${t.title}"?\n\nThis will remove it from Entrances and Guide.`)) return;
+    db.deleteDestinationTour(t.id);
+    toast.success("Tour deleted.");
+  }
 
   const selectedCity = cities.find((c) => c.id === selectedId);
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Entrances</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Destinations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Manage entrance / monument charges by destination. Tour titles are managed inside{" "}
-          <Link to="/destinations" className="text-primary underline underline-offset-2">Destinations</Link>.
+          Master data for cities & tour titles. Used by Entrances and Guide modules.
         </p>
       </div>
 
@@ -74,7 +73,7 @@ function EntrancesPage() {
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm">Cities</h3>
             <Button size="sm" variant="outline" onClick={() => { setEditingCity(null); setCityOpen(true); }}>
-              + Add City
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add City
             </Button>
           </div>
           {cities.length === 0 ? (
@@ -91,7 +90,7 @@ function EntrancesPage() {
                     <button
                       onClick={() => setSelectedId(c.id)}
                       className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors group",
                         active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
                       )}
                     >
@@ -103,6 +102,25 @@ function EntrancesPage() {
                       >
                         {tourCount(c.id)}
                       </Badge>
+                      <span
+                        className="opacity-0 group-hover:opacity-100 flex gap-0.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span
+                          role="button"
+                          className={cn("p-0.5 rounded hover:bg-black/10", active && "hover:bg-white/20")}
+                          onClick={() => { setEditingCity(c); setCityOpen(true); }}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </span>
+                        <span
+                          role="button"
+                          className={cn("p-0.5 rounded hover:bg-black/10", active && "hover:bg-white/20")}
+                          onClick={() => deleteCity(c)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </span>
+                      </span>
                     </button>
                   </li>
                 );
@@ -111,30 +129,29 @@ function EntrancesPage() {
           )}
         </Card>
 
-        {/* Rows panel */}
+        {/* Tours panel */}
         <Card className="p-0 lg:col-span-3 overflow-hidden">
           {!selectedCity ? (
             <div className="p-12 text-center">
-              <Landmark className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-              <div className="font-medium">Select or add a city.</div>
+              <RouteIcon className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
+              <div className="font-medium">Select or add a city to manage tours.</div>
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between px-5 py-3 border-b">
                 <div>
-                  <div className="font-semibold">Entrance Fees in {selectedCity.name}</div>
-                  <div className="text-xs text-muted-foreground">{rows.length} tour(s)</div>
+                  <div className="font-semibold">Tours in {selectedCity.name}</div>
+                  <div className="text-xs text-muted-foreground">{tours.length} tour(s)</div>
                 </div>
+                <Button size="sm" onClick={() => { setEditingTour(null); setTourOpen(true); }}>
+                  <Plus className="h-4 w-4 mr-1.5" /> Add Tour
+                </Button>
               </div>
-              {rows.length === 0 ? (
-                <div className="p-12 text-center space-y-3">
-                  <div className="text-sm text-muted-foreground">
-                    No tours defined for this city. Add tour titles in Destinations.
-                  </div>
-                  <Button asChild variant="outline" size="sm">
-                    <Link to="/destinations">
-                      Go to Destinations <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-                    </Link>
+              {tours.length === 0 ? (
+                <div className="p-12 text-center">
+                  <div className="text-sm text-muted-foreground mb-3">No tours for this city yet.</div>
+                  <Button variant="outline" size="sm" onClick={() => { setEditingTour(null); setTourOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-1.5" /> Add First Tour
                   </Button>
                 </div>
               ) : (
@@ -142,31 +159,23 @@ function EntrancesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Tour Title</TableHead>
-                      <TableHead>Indian (₹/pp)</TableHead>
-                      <TableHead>Foreigner (₹/pp)</TableHead>
-                      <TableHead>Student (₹/pp)</TableHead>
-                      <TableHead>Notes</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-16 text-right">Actions</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead className="w-24 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((r) => (
-                      <TableRow key={r.tour.id}>
-                        <TableCell className="font-medium">{r.tour.title}</TableCell>
-                        <TableCell className="tabular-nums">{r.site?.indian_rate ? inr(r.site.indian_rate) : "—"}</TableCell>
-                        <TableCell className="tabular-nums">{r.site?.foreigner_rate ? inr(r.site.foreigner_rate) : "—"}</TableCell>
-                        <TableCell className="tabular-nums">{r.site?.student_rate ? inr(r.site.student_rate) : "—"}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs max-w-xs">{r.site?.notes || "—"}</TableCell>
-                        <TableCell>
-                          <Switch
-                            checked={r.site?.is_active ?? true}
-                            onCheckedChange={(v) => db.upsertEntrancePricingForTour(r.tour.id, { is_active: v })}
-                          />
+                    {tours.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="font-medium">{t.title}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs max-w-xl">
+                          {t.description || "—"}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => setEditRow(r)}>
+                          <Button variant="ghost" size="icon" onClick={() => { setEditingTour(t); setTourOpen(true); }}>
                             <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => deleteTour(t)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -180,7 +189,7 @@ function EntrancesPage() {
       </div>
 
       <CityDialog open={cityOpen} onOpenChange={setCityOpen} editing={editingCity} onSaved={(id) => setSelectedId(id)} />
-      <PriceDialog row={editRow} onOpenChange={(v) => !v && setEditRow(null)} />
+      <TourDialog open={tourOpen} onOpenChange={setTourOpen} editing={editingTour} cityId={selectedId} />
     </div>
   );
 }
@@ -200,6 +209,7 @@ function CityDialog({
     if (editing) {
       db.renameDestinationCity(editing.id, n);
       toast.success("City updated.");
+      notify.info("Destination Updated", `${n} updated.`);
       onSaved(editing.id);
     } else {
       const c = db.addDestinationCity(n);
@@ -218,7 +228,6 @@ function CityDialog({
         <div>
           <Label>City Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gwalior" />
-          <p className="text-xs text-muted-foreground mt-2">Cities are shared with Guide and Destinations.</p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -229,68 +238,54 @@ function CityDialog({
   );
 }
 
-function PriceDialog({
-  row, onOpenChange,
-}: { row: Row | null; onOpenChange: (v: boolean) => void }) {
-  const open = !!row;
-  const [indianRate, setIndianRate] = useState<number>(0);
-  const [foreignerRate, setForeignerRate] = useState<number>(0);
-  const [studentRate, setStudentRate] = useState<number>(0);
-  const [notes, setNotes] = useState("");
-  const [active, setActive] = useState(true);
-
+function TourDialog({
+  open, onOpenChange, editing, cityId,
+}: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  editing: DestinationTour | null; cityId: string;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   useEffect(() => {
-    if (row) {
-      setIndianRate(row.site?.indian_rate ?? 0);
-      setForeignerRate(row.site?.foreigner_rate ?? 0);
-      setStudentRate(row.site?.student_rate ?? 0);
-      setNotes(row.site?.notes ?? "");
-      setActive(row.site?.is_active ?? true);
+    if (open) {
+      setTitle(editing?.title ?? "");
+      setDescription(editing?.description ?? "");
     }
-  }, [row]);
+  }, [open, editing]);
 
   function save() {
-    if (!row) return;
-    db.upsertEntrancePricingForTour(row.tour.id, {
-      indian_rate: indianRate,
-      foreigner_rate: foreignerRate,
-      student_rate: studentRate,
-      notes,
-      is_active: active,
-    });
-    toast.success("Entrance updated.");
+    if (!cityId) return toast.error("Select a city first.");
+    const t = title.trim();
+    if (!t) return toast.error("Tour title is required.");
+    if (editing) {
+      db.updateDestinationTour(editing.id, { title: t, description });
+      toast.success("Tour updated.");
+      notify.info("Tour Updated", `${t} updated across Entrances & Guide.`);
+    } else {
+      const created = db.addDestinationTour({ city_id: cityId, title: t, description });
+      if (!created) return toast.error("Tour already exists in this city.");
+      toast.success("Tour added.");
+      notify.success("Tour Added", `${t} is now available in Entrances & Guide.`);
+    }
     onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Edit Entrance — {row?.tour.title}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{editing ? "Edit Tour" : "Add Tour"}</DialogTitle></DialogHeader>
         <div className="space-y-4">
-          <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
-            Tour title is managed in Destinations and cannot be changed here.
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Indian (₹/pp)</Label>
-              <Input type="number" min={0} value={indianRate} onChange={(e) => setIndianRate(+e.target.value || 0)} />
-            </div>
-            <div>
-              <Label>Foreigner (₹/pp)</Label>
-              <Input type="number" min={0} value={foreignerRate} onChange={(e) => setForeignerRate(+e.target.value || 0)} />
-            </div>
-            <div>
-              <Label>Student (₹/pp)</Label>
-              <Input type="number" min={0} value={studentRate} onChange={(e) => setStudentRate(+e.target.value || 0)} />
-            </div>
+          <div>
+            <Label>Tour Title *</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. AM HDCT, FDCT, PM Fort" />
           </div>
           <div>
-            <Label>Notes (optional)</Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            <Label>Description (optional)</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <Switch checked={active} onCheckedChange={setActive} /> Active
-          </label>
+          <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
+            This tour will automatically appear inside <strong>Entrances</strong> and <strong>Guide</strong> for the selected city.
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
