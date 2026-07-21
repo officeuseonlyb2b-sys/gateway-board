@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Landmark, MapPin } from "lucide-react";
+import { Pencil, Landmark, MapPin, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { db, useDB, type EntranceCity, type EntranceSite } from "@/lib/mock-store";
+import { db, useDB, type DestinationCity, type DestinationTour, type EntranceSite } from "@/lib/mock-store";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,11 +21,16 @@ export const Route = createFileRoute("/_authenticated/entrances")({
   component: EntrancesPage,
 });
 
+type Row = {
+  tour: DestinationTour;
+  site: EntranceSite | undefined;
+};
+
 function EntrancesPage() {
   const data = useDB();
   const cities = useMemo(
-    () => [...data.entrance_cities].sort((a, b) => a.name.localeCompare(b.name)),
-    [data.entrance_cities],
+    () => [...data.destination_cities].sort((a, b) => a.name.localeCompare(b.name)),
+    [data.destination_cities],
   );
   const [selectedId, setSelectedId] = useState<string>("");
 
@@ -34,34 +39,33 @@ function EntrancesPage() {
     if (selectedId && !cities.find((c) => c.id === selectedId)) setSelectedId(cities[0]?.id ?? "");
   }, [cities, selectedId]);
 
-  const sites = useMemo(
-    () => data.entrance_sites.filter((s) => s.city_id === selectedId),
-    [data.entrance_sites, selectedId],
-  );
+  const rows: Row[] = useMemo(() => {
+    const tours = data.destination_tours
+      .filter((t) => t.city_id === selectedId)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    return tours.map((tour) => ({
+      tour,
+      site: data.entrance_sites.find((s) => s.tour_id === tour.id),
+    }));
+  }, [data.destination_tours, data.entrance_sites, selectedId]);
 
   const [cityOpen, setCityOpen] = useState(false);
-  const [editingCity, setEditingCity] = useState<EntranceCity | null>(null);
-  const [siteOpen, setSiteOpen] = useState(false);
-  const [editingSite, setEditingSite] = useState<EntranceSite | null>(null);
+  const [editingCity, setEditingCity] = useState<DestinationCity | null>(null);
+  const [editRow, setEditRow] = useState<Row | null>(null);
 
-  function siteCount(cityId: string) {
-    return data.entrance_sites.filter((s) => s.city_id === cityId).length;
-  }
+  const tourCount = (cityId: string) =>
+    data.destination_tours.filter((t) => t.city_id === cityId).length;
 
-  function deleteCity(c: EntranceCity) {
-    if (!confirm(`Delete "${c.name}" and all its sites?`)) return;
-    db.deleteEntranceCity(c.id); toast.success("City deleted.");
-  }
-  function deleteSite(s: EntranceSite) {
-    if (!confirm(`Delete "${s.site_name}"?`)) return;
-    db.deleteEntranceSite(s.id); toast.success("Site deleted.");
-  }
+  const selectedCity = cities.find((c) => c.id === selectedId);
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Entrances</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage entrance / monument charges by destination.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Manage entrance / monument charges by destination. Tour titles are managed inside{" "}
+          <Link to="/destinations" className="text-primary underline underline-offset-2">Destinations</Link>.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -70,7 +74,7 @@ function EntrancesPage() {
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm">Cities</h3>
             <Button size="sm" variant="outline" onClick={() => { setEditingCity(null); setCityOpen(true); }}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add
+              + Add City
             </Button>
           </div>
           {cities.length === 0 ? (
@@ -87,7 +91,7 @@ function EntrancesPage() {
                     <button
                       onClick={() => setSelectedId(c.id)}
                       className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors group",
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
                         active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
                       )}
                     >
@@ -97,27 +101,8 @@ function EntrancesPage() {
                         variant="secondary"
                         className={cn("text-[10px]", active && "bg-primary-foreground/20 text-primary-foreground")}
                       >
-                        {siteCount(c.id)}
+                        {tourCount(c.id)}
                       </Badge>
-                      <span
-                        className="opacity-0 group-hover:opacity-100 flex gap-0.5"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span
-                          role="button"
-                          className={cn("p-0.5 rounded hover:bg-black/10", active && "hover:bg-white/20")}
-                          onClick={() => { setEditingCity(c); setCityOpen(true); }}
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </span>
-                        <span
-                          role="button"
-                          className={cn("p-0.5 rounded hover:bg-black/10", active && "hover:bg-white/20")}
-                          onClick={() => deleteCity(c)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </span>
-                      </span>
                     </button>
                   </li>
                 );
@@ -126,63 +111,62 @@ function EntrancesPage() {
           )}
         </Card>
 
-        {/* Sites panel */}
+        {/* Rows panel */}
         <Card className="p-0 lg:col-span-3 overflow-hidden">
-          {!selectedId ? (
+          {!selectedCity ? (
             <div className="p-12 text-center">
               <Landmark className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-              <div className="font-medium">Select or add a city to manage sites.</div>
+              <div className="font-medium">Select or add a city.</div>
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between px-5 py-3 border-b">
                 <div>
-                  <div className="font-semibold">
-                    Sites in {cities.find((c) => c.id === selectedId)?.name}
-                  </div>
-                  <div className="text-xs text-muted-foreground">{sites.length} site(s)</div>
+                  <div className="font-semibold">Entrance Fees in {selectedCity.name}</div>
+                  <div className="text-xs text-muted-foreground">{rows.length} tour(s)</div>
                 </div>
-                <Button size="sm" onClick={() => { setEditingSite(null); setSiteOpen(true); }}>
-                  <Plus className="h-4 w-4 mr-1.5" /> Add Site
-                </Button>
               </div>
-              {sites.length === 0 ? (
-                <div className="p-12 text-center">
-                  <div className="text-sm text-muted-foreground mb-3">No sites for this city yet.</div>
-                  <Button variant="outline" size="sm" onClick={() => { setEditingSite(null); setSiteOpen(true); }}>
-                    <Plus className="h-4 w-4 mr-1.5" /> Add First Site
+              {rows.length === 0 ? (
+                <div className="p-12 text-center space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    No tours defined for this city. Add tour titles in Destinations.
+                  </div>
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/destinations">
+                      Go to Destinations <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                    </Link>
                   </Button>
                 </div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Site Name</TableHead>
+                      <TableHead>Tour Title</TableHead>
                       <TableHead>Indian (₹/pp)</TableHead>
                       <TableHead>Foreigner (₹/pp)</TableHead>
                       <TableHead>Student (₹/pp)</TableHead>
                       <TableHead>Notes</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-24 text-right">Actions</TableHead>
+                      <TableHead className="w-16 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sites.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-medium">{s.site_name}</TableCell>
-                        <TableCell className="tabular-nums">{inr(s.indian_rate)}</TableCell>
-                        <TableCell className="tabular-nums">{inr(s.foreigner_rate)}</TableCell>
-                        <TableCell className="tabular-nums">{s.student_rate ? inr(s.student_rate) : "—"}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs max-w-xs">{s.notes || "—"}</TableCell>
+                    {rows.map((r) => (
+                      <TableRow key={r.tour.id}>
+                        <TableCell className="font-medium">{r.tour.title}</TableCell>
+                        <TableCell className="tabular-nums">{r.site?.indian_rate ? inr(r.site.indian_rate) : "—"}</TableCell>
+                        <TableCell className="tabular-nums">{r.site?.foreigner_rate ? inr(r.site.foreigner_rate) : "—"}</TableCell>
+                        <TableCell className="tabular-nums">{r.site?.student_rate ? inr(r.site.student_rate) : "—"}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs max-w-xs">{r.site?.notes || "—"}</TableCell>
                         <TableCell>
-                          <Switch checked={s.is_active} onCheckedChange={(v) => db.updateEntranceSite(s.id, { is_active: v })} />
+                          <Switch
+                            checked={r.site?.is_active ?? true}
+                            onCheckedChange={(v) => db.upsertEntrancePricingForTour(r.tour.id, { is_active: v })}
+                          />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => { setEditingSite(s); setSiteOpen(true); }}>
+                          <Button variant="ghost" size="icon" onClick={() => setEditRow(r)}>
                             <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => deleteSite(s)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -195,27 +179,35 @@ function EntrancesPage() {
         </Card>
       </div>
 
-      <CityDialog open={cityOpen} onOpenChange={setCityOpen} editing={editingCity} />
-      <SiteDialog
-        open={siteOpen}
-        onOpenChange={setSiteOpen}
-        editing={editingSite}
-        cityId={selectedId}
-      />
+      <CityDialog open={cityOpen} onOpenChange={setCityOpen} editing={editingCity} onSaved={(id) => setSelectedId(id)} />
+      <PriceDialog row={editRow} onOpenChange={(v) => !v && setEditRow(null)} />
     </div>
   );
 }
 
 function CityDialog({
-  open, onOpenChange, editing,
-}: { open: boolean; onOpenChange: (v: boolean) => void; editing: EntranceCity | null }) {
+  open, onOpenChange, editing, onSaved,
+}: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  editing: DestinationCity | null; onSaved: (id: string) => void;
+}) {
   const [name, setName] = useState("");
-  useMemo(() => { if (open) setName(editing?.name ?? ""); }, [open, editing]);
+  useEffect(() => { if (open) setName(editing?.name ?? ""); }, [open, editing]);
 
   function save() {
-    if (!name.trim()) return toast.error("City name is required.");
-    if (editing) { db.updateEntranceCity(editing.id, name.trim()); toast.success("City updated."); notify.info("City Updated", `${name.trim()} entrance city updated.`); }
-    else { db.addEntranceCity(name.trim()); toast.success("City added."); notify.success("City Added", `${name.trim()} has been added to entrance cities.`); }
+    const n = name.trim();
+    if (!n) return toast.error("City name is required.");
+    if (editing) {
+      db.renameDestinationCity(editing.id, n);
+      toast.success("City updated.");
+      onSaved(editing.id);
+    } else {
+      const c = db.addDestinationCity(n);
+      if (!c) return toast.error("City already exists.");
+      toast.success("City added.");
+      notify.success("Destination Added", `${n} has been added.`);
+      onSaved(c.id);
+    }
     onOpenChange(false);
   }
 
@@ -226,6 +218,7 @@ function CityDialog({
         <div>
           <Label>City Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gwalior" />
+          <p className="text-xs text-muted-foreground mt-2">Cities are shared with Guide and Destinations.</p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -236,52 +229,46 @@ function CityDialog({
   );
 }
 
-function SiteDialog({
-  open, onOpenChange, editing, cityId,
-}: {
-  open: boolean; onOpenChange: (v: boolean) => void;
-  editing: EntranceSite | null; cityId: string;
-}) {
-  const [name, setName] = useState("");
-  const [indianRate, setIndianRate] = useState(0);
-  const [foreignerRate, setForeignerRate] = useState(0);
-  const [studentRate, setStudentRate] = useState(0);
+function PriceDialog({
+  row, onOpenChange,
+}: { row: Row | null; onOpenChange: (v: boolean) => void }) {
+  const open = !!row;
+  const [indianRate, setIndianRate] = useState<number>(0);
+  const [foreignerRate, setForeignerRate] = useState<number>(0);
+  const [studentRate, setStudentRate] = useState<number>(0);
   const [notes, setNotes] = useState("");
   const [active, setActive] = useState(true);
 
-  useMemo(() => {
-    if (open) {
-      setName(editing?.site_name ?? "");
-      setIndianRate(editing?.indian_rate ?? 0);
-      setForeignerRate(editing?.foreigner_rate ?? 0);
-      setStudentRate(editing?.student_rate ?? 0);
-      setNotes(editing?.notes ?? "");
-      setActive(editing?.is_active ?? true);
+  useEffect(() => {
+    if (row) {
+      setIndianRate(row.site?.indian_rate ?? 0);
+      setForeignerRate(row.site?.foreigner_rate ?? 0);
+      setStudentRate(row.site?.student_rate ?? 0);
+      setNotes(row.site?.notes ?? "");
+      setActive(row.site?.is_active ?? true);
     }
-  }, [open, editing]);
+  }, [row]);
 
   function save() {
-    if (!cityId) return toast.error("Select a city first.");
-    if (!name.trim()) return toast.error("Site name is required.");
-    const payload = {
-      city_id: cityId, site_name: name.trim(),
-      indian_rate: indianRate, foreigner_rate: foreignerRate, student_rate: studentRate,
-      notes, is_active: active,
-    };
-    const cityName = db.get().entrance_cities.find((c) => c.id === cityId)?.name ?? "";
-    if (editing) { db.updateEntranceSite(editing.id, payload); toast.success("Site updated."); notify.info("Entrance Updated", `${name.trim()} details updated.`); }
-    else { db.addEntranceSite(payload); toast.success("Site added."); notify.success("Entrance Added", `${name.trim()}${cityName ? ` in ${cityName}` : ""} has been added.`); }
+    if (!row) return;
+    db.upsertEntrancePricingForTour(row.tour.id, {
+      indian_rate: indianRate,
+      foreigner_rate: foreignerRate,
+      student_rate: studentRate,
+      notes,
+      is_active: active,
+    });
+    toast.success("Entrance updated.");
     onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{editing ? "Edit Site" : "Add Site"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Edit Entrance — {row?.tour.title}</DialogTitle></DialogHeader>
         <div className="space-y-4">
-          <div>
-            <Label>Site Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gwalior Fort" />
+          <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
+            Tour title is managed in Destinations and cannot be changed here.
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>

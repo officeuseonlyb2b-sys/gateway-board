@@ -22,6 +22,7 @@ import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authen
 import { Route as AuthenticatedGuideRouteImport } from './routes/_authenticated/guide'
 import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
 import { Route as AuthenticatedDraftsRouteImport } from './routes/_authenticated/drafts'
+import { Route as AuthenticatedDestinationsRouteImport } from './routes/_authenticated/destinations'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
@@ -95,6 +96,12 @@ const AuthenticatedDraftsRoute = AuthenticatedDraftsRouteImport.update({
   path: '/drafts',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedDestinationsRoute =
+  AuthenticatedDestinationsRouteImport.update({
+    id: '/destinations',
+    path: '/destinations',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -134,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AuthenticatedAgentsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/destinations': typeof AuthenticatedDestinationsRoute
   '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
@@ -154,6 +162,7 @@ export interface FileRoutesByTo {
   '/agents': typeof AuthenticatedAgentsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/destinations': typeof AuthenticatedDestinationsRoute
   '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
@@ -176,6 +185,7 @@ export interface FileRoutesById {
   '/_authenticated/agents': typeof AuthenticatedAgentsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/destinations': typeof AuthenticatedDestinationsRoute
   '/_authenticated/drafts': typeof AuthenticatedDraftsRoute
   '/_authenticated/entrances': typeof AuthenticatedEntrancesRoute
   '/_authenticated/guide': typeof AuthenticatedGuideRoute
@@ -198,6 +208,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/costing'
     | '/dashboard'
+    | '/destinations'
     | '/drafts'
     | '/entrances'
     | '/guide'
@@ -218,6 +229,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/costing'
     | '/dashboard'
+    | '/destinations'
     | '/drafts'
     | '/entrances'
     | '/guide'
@@ -239,6 +251,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agents'
     | '/_authenticated/costing'
     | '/_authenticated/dashboard'
+    | '/_authenticated/destinations'
     | '/_authenticated/drafts'
     | '/_authenticated/entrances'
     | '/_authenticated/guide'
@@ -352,6 +365,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDraftsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/destinations': {
+      id: '/_authenticated/destinations'
+      path: '/destinations'
+      fullPath: '/destinations'
+      preLoaderRoute: typeof AuthenticatedDestinationsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -402,6 +422,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedDestinationsRoute: typeof AuthenticatedDestinationsRoute
   AuthenticatedDraftsRoute: typeof AuthenticatedDraftsRoute
   AuthenticatedEntrancesRoute: typeof AuthenticatedEntrancesRoute
   AuthenticatedGuideRoute: typeof AuthenticatedGuideRoute
@@ -421,6 +442,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgentsRoute: AuthenticatedAgentsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedDestinationsRoute: AuthenticatedDestinationsRoute,
   AuthenticatedDraftsRoute: AuthenticatedDraftsRoute,
   AuthenticatedEntrancesRoute: AuthenticatedEntrancesRoute,
   AuthenticatedGuideRoute: AuthenticatedGuideRoute,
