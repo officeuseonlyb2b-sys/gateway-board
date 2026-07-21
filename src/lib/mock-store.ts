@@ -549,13 +549,16 @@ function seed(): DB {
   entrance_cities.length = 0;
   destination_cities.forEach((c) => entrance_cities.push({ id: c.id, name: c.name, created_at: c.created_at }));
   // Mirror activity_destinations onto destination_cities (shared master).
+  // Remap activity.destination_id from old activity-destination uid → mirrored id.
+  const oldActNameById = new Map(activity_destinations.map((d) => [d.id, d.name]));
   activity_destinations.length = 0;
   destination_cities.forEach((c) => activity_destinations.push({ id: c.id, name: c.name, created_at: c.created_at }));
-  // Reassign activity.destination_id to the new mirrored id (match by name).
   activities.forEach((a) => {
-    const name = ACT_CITY_NAMES.find((n) => destCityIdByName.get(n) && destCityIdByName.get(n) !== undefined && (a.destination_id === "" || a.destination_id.length > 0));
-    // Preserve original name lookup: find by scanning original list order
-    void name;
+    const oldName = oldActNameById.get(a.destination_id);
+    if (oldName) {
+      const newId = destCityIdByName.get(oldName);
+      if (newId) a.destination_id = newId;
+    }
   });
 
   // Build tours: union of entrance sites (site_name per city) + guide tour_program per city.
