@@ -1,9 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, Compass, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import {
-  db, useDB, type Activity, type ActivityDestination, type ActivityPricingType,
+  db, useDB,
+  type Activity, type ActivitySlab, type ActivitySlabPricing,
 } from "@/lib/mock-store";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,17 +25,17 @@ export const Route = createFileRoute("/_authenticated/activities")({
   component: ActivitiesPage,
 });
 
-const PRICING_LABEL: Record<ActivityPricingType, string> = {
-  per_person: "Per Person",
-  total_fixed: "Total Fixed",
-  per_vehicle: "Per Vehicle",
-};
+const uid = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
 
 function ActivitiesPage() {
   const data = useDB();
+  // Cities come from Destinations master (shared).
   const destinations = useMemo(
-    () => [...data.activity_destinations].sort((a, b) => a.name.localeCompare(b.name)),
-    [data.activity_destinations],
+    () => [...data.destination_cities].sort((a, b) => a.name.localeCompare(b.name)),
+    [data.destination_cities],
   );
   const [selectedId, setSelectedId] = useState("");
 
@@ -48,34 +49,42 @@ function ActivitiesPage() {
     [data.activities, selectedId],
   );
 
-  const [destOpen, setDestOpen] = useState(false);
-  const [editingDest, setEditingDest] = useState<ActivityDestination | null>(null);
   const [actOpen, setActOpen] = useState(false);
   const [editingAct, setEditingAct] = useState<Activity | null>(null);
 
   function actCount(id: string) { return data.activities.filter((a) => a.destination_id === id).length; }
-  function deleteDest(d: ActivityDestination) {
-    if (!confirm(`Delete "${d.name}" and all its activities?`)) return;
-    db.deleteActivityDestination(d.id); toast.success("Destination deleted.");
-  }
   function deleteAct(a: Activity) {
     if (!confirm(`Delete "${a.activity_name}"?`)) return;
     db.deleteActivity(a.id); toast.success("Activity deleted.");
+  }
+
+  function slabsSummary(a: Activity): string {
+    if (a.pricing_slabs && a.pricing_slabs.length > 0) {
+      return a.pricing_slabs
+        .slice()
+        .sort((x, y) => x.from_pax - y.from_pax)
+        .map((s) => `${s.from_pax}-${s.to_pax}: ${inr(s.price)}`)
+        .join(" · ");
+    }
+    return a.price ? inr(a.price) : "—";
   }
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Activity &amp; Experience</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage destination-wise activities and experiences with pricing.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Manage destination-wise activities with pax-range slab pricing. Cities are shared from{" "}
+          <Link to="/destinations" className="text-primary underline underline-offset-2">Destinations</Link>.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="p-4 lg:col-span-1 h-fit">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm">Destinations</h3>
-            <Button size="sm" variant="outline" onClick={() => { setEditingDest(null); setDestOpen(true); }}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add
+            <Button asChild size="sm" variant="outline">
+              <Link to="/destinations">Manage</Link>
             </Button>
           </div>
           {destinations.length === 0 ? (
@@ -92,7 +101,7 @@ function ActivitiesPage() {
                     <button
                       onClick={() => setSelectedId(d.id)}
                       className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors group",
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
                         active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
                       )}
                     >
@@ -104,17 +113,6 @@ function ActivitiesPage() {
                       >
                         {actCount(d.id)}
                       </Badge>
-                      <span
-                        className="opacity-0 group-hover:opacity-100 flex gap-0.5"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span role="button" onClick={() => { setEditingDest(d); setDestOpen(true); }}>
-                          <Pencil className="h-3 w-3" />
-                        </span>
-                        <span role="button" onClick={() => deleteDest(d)}>
-                          <Trash2 className="h-3 w-3" />
-                        </span>
-                      </span>
                     </button>
                   </li>
                 );
@@ -127,7 +125,7 @@ function ActivitiesPage() {
           {!selectedId ? (
             <div className="p-12 text-center">
               <Compass className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-              <div className="font-medium">Select or add a destination to manage activities.</div>
+              <div className="font-medium">Add a destination in the Destinations module to manage activities.</div>
             </div>
           ) : (
             <>
@@ -154,8 +152,8 @@ function ActivitiesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Activity Name</TableHead>
-                      <TableHead>Price</TableHead>
                       <TableHead>Pricing Type</TableHead>
+                      <TableHead>Slabs</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-24 text-right">Actions</TableHead>
@@ -164,12 +162,11 @@ function ActivitiesPage() {
                   <TableBody>
                     {activities.map((a) => (
                       <TableRow key={a.id}>
-                        <TableCell className="font-medium">
-                          {a.activity_name}
-                          {a.unit_label && <div className="text-[11px] text-muted-foreground">{a.unit_label}</div>}
+                        <TableCell className="font-medium">{a.activity_name}</TableCell>
+                        <TableCell className="text-xs">
+                          {a.slab_pricing_type === "total" ? "Total" : "Per Person"}
                         </TableCell>
-                        <TableCell className="tabular-nums">{inr(a.price)}</TableCell>
-                        <TableCell>{PRICING_LABEL[a.pricing_type]}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{slabsSummary(a)}</TableCell>
                         <TableCell className="text-muted-foreground text-xs max-w-xs">{a.description || "—"}</TableCell>
                         <TableCell>
                           <Switch checked={a.is_active} onCheckedChange={(v) => db.updateActivity(a.id, { is_active: v })} />
@@ -192,40 +189,13 @@ function ActivitiesPage() {
         </Card>
       </div>
 
-      <DestDialog open={destOpen} onOpenChange={setDestOpen} editing={editingDest} />
       <ActDialog open={actOpen} onOpenChange={setActOpen} editing={editingAct} destId={selectedId} />
     </div>
   );
 }
 
-function DestDialog({
-  open, onOpenChange, editing,
-}: { open: boolean; onOpenChange: (v: boolean) => void; editing: ActivityDestination | null }) {
-  const [name, setName] = useState("");
-  useMemo(() => { if (open) setName(editing?.name ?? ""); }, [open, editing]);
-
-  function save() {
-    if (!name.trim()) return toast.error("Destination name is required.");
-    if (editing) { db.updateActivityDestination(editing.id, name.trim()); toast.success("Updated."); notify.info("Destination Updated", `${name.trim()} updated.`); }
-    else { db.addActivityDestination(name.trim()); toast.success("Added."); notify.success("Destination Added", `${name.trim()} added to activity destinations.`); }
-    onOpenChange(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>{editing ? "Edit Destination" : "Add Destination"}</DialogTitle></DialogHeader>
-        <div>
-          <Label>Destination Name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kanha" />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+function newSlab(): ActivitySlab {
+  return { id: uid(), from_pax: 1, to_pax: 5, price: 0 };
 }
 
 function ActDialog({
@@ -236,39 +206,87 @@ function ActDialog({
 }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  const [price, setPrice] = useState(0);
-  const [type, setType] = useState<ActivityPricingType>("per_person");
-  const [unitLabel, setUnitLabel] = useState("");
+  const [pricingType, setPricingType] = useState<ActivitySlabPricing>("per_person");
+  const [slabs, setSlabs] = useState<ActivitySlab[]>([]);
   const [active, setActive] = useState(true);
 
-  useMemo(() => {
-    if (open) {
-      setName(editing?.activity_name ?? "");
-      setDesc(editing?.description ?? "");
-      setPrice(editing?.price ?? 0);
-      setType(editing?.pricing_type ?? "per_person");
-      setUnitLabel(editing?.unit_label ?? "");
-      setActive(editing?.is_active ?? true);
-    }
+  useEffect(() => {
+    if (!open) return;
+    setName(editing?.activity_name ?? "");
+    setDesc(editing?.description ?? "");
+    setPricingType(editing?.slab_pricing_type ?? "per_person");
+    setSlabs(
+      editing?.pricing_slabs && editing.pricing_slabs.length > 0
+        ? editing.pricing_slabs.map((s) => ({ ...s }))
+        : [newSlab()],
+    );
+    setActive(editing?.is_active ?? true);
   }, [open, editing]);
+
+  function updateSlab(id: string, patch: Partial<ActivitySlab>) {
+    setSlabs((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
+  function addSlab() {
+    setSlabs((prev) => {
+      const last = [...prev].sort((a, b) => a.to_pax - b.to_pax).pop();
+      const from = last ? last.to_pax + 1 : 1;
+      return [...prev, { id: uid(), from_pax: from, to_pax: from + 4, price: 0 }];
+    });
+  }
+  function removeSlab(id: string) {
+    setSlabs((prev) => (prev.length <= 1 ? prev : prev.filter((s) => s.id !== id)));
+  }
+
+  function validate(): string | null {
+    if (!name.trim()) return "Activity name is required.";
+    if (slabs.length === 0) return "At least one pricing slab is required.";
+    for (const s of slabs) {
+      if (s.from_pax < 1) return "From Pax must be at least 1.";
+      if (s.to_pax < s.from_pax) return "To Pax must be greater than or equal to From Pax.";
+    }
+    // overlap check
+    const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].from_pax <= sorted[i - 1].to_pax) {
+        return `Slabs overlap between ${sorted[i - 1].from_pax}-${sorted[i - 1].to_pax} and ${sorted[i].from_pax}-${sorted[i].to_pax}.`;
+      }
+    }
+    return null;
+  }
 
   function save() {
     if (!destId) return toast.error("Select a destination first.");
-    if (!name.trim()) return toast.error("Activity name is required.");
+    const err = validate();
+    if (err) return toast.error(err);
+    const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
+    const displayPrice = sorted[0]?.price ?? 0;
     const payload = {
-      destination_id: destId, activity_name: name.trim(), description: desc,
-      pricing_type: type, price, unit_label: unitLabel || PRICING_LABEL[type],
+      destination_id: destId,
+      activity_name: name.trim(),
+      description: desc,
+      pricing_type: pricingType === "per_person" ? ("per_person" as const) : ("total_fixed" as const),
+      price: displayPrice,
+      unit_label: pricingType === "per_person" ? "Per Person" : "Total",
       is_active: active,
+      slab_pricing_type: pricingType,
+      pricing_slabs: sorted,
     };
-    const destName = db.get().activity_destinations.find((d) => d.id === destId)?.name ?? "";
-    if (editing) { db.updateActivity(editing.id, payload); toast.success("Activity updated."); notify.info("Activity Updated", `${name.trim()} updated.`); }
-    else { db.addActivity(payload); toast.success("Activity added."); notify.success("Activity Added", `${name.trim()}${destName ? ` in ${destName}` : ""} has been added.`); }
+    const destName = db.get().destination_cities.find((d) => d.id === destId)?.name ?? "";
+    if (editing) {
+      db.updateActivity(editing.id, payload);
+      toast.success("Activity updated.");
+      notify.info("Activity Updated", `${name.trim()} updated.`);
+    } else {
+      db.addActivity(payload);
+      toast.success("Activity added.");
+      notify.success("Activity Added", `${name.trim()}${destName ? ` in ${destName}` : ""} has been added.`);
+    }
     onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{editing ? "Edit Activity" : "Add Activity"}</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div>
@@ -279,27 +297,61 @@ function ActDialog({
             <Label>Description</Label>
             <Textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Price (₹)</Label>
-              <Input type="number" min={0} value={price} onChange={(e) => setPrice(+e.target.value || 0)} />
-            </div>
-            <div>
-              <Label>Pricing Type</Label>
-              <Select value={type} onValueChange={(v) => setType(v as ActivityPricingType)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="per_person">Per Person</SelectItem>
-                  <SelectItem value="total_fixed">Total Fixed</SelectItem>
-                  <SelectItem value="per_vehicle">Per Vehicle</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
           <div>
-            <Label>Unit Label</Label>
-            <Input value={unitLabel} onChange={(e) => setUnitLabel(e.target.value)} placeholder="e.g. Jungle Safari Total" />
+            <Label>Pricing Type</Label>
+            <Select value={pricingType} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="per_person">Per Person</SelectItem>
+                <SelectItem value="total">Total</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {pricingType === "per_person"
+                ? "Price × pax count."
+                : "Fixed total for the whole group in the matching slab."}
+            </p>
           </div>
+
+          <div className="border rounded-md p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-sm">Pricing Slabs</div>
+              <Button size="sm" variant="outline" onClick={addSlab}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {slabs.map((s, i) => (
+                <div key={s.id} className="grid grid-cols-[auto,1fr,1fr,1fr,auto] gap-2 items-end">
+                  <div className="text-xs text-muted-foreground pb-2 w-14">Slab {i + 1}</div>
+                  <div>
+                    <Label className="text-[11px]">From Pax</Label>
+                    <Input type="number" min={1} value={s.from_pax}
+                      onChange={(e) => updateSlab(s.id, { from_pax: +e.target.value || 1 })} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">To Pax</Label>
+                    <Input type="number" min={1} value={s.to_pax}
+                      onChange={(e) => updateSlab(s.id, { to_pax: +e.target.value || 1 })} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">Price (₹)</Label>
+                    <Input type="number" min={0} value={s.price}
+                      onChange={(e) => updateSlab(s.id, { price: +e.target.value || 0 })} />
+                  </div>
+                  <Button variant="ghost" size="icon"
+                    onClick={() => removeSlab(s.id)}
+                    disabled={slabs.length <= 1}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Ranges cannot overlap. Example: 1–5, 6–20, 21–50.
+            </p>
+          </div>
+
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={active} onCheckedChange={setActive} /> Active
           </label>
