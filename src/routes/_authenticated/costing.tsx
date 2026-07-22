@@ -912,7 +912,7 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[200px]">To</th>
               <th className="text-left p-2 w-[120px]">Overnight</th>
               <th className="text-left p-2 w-[110px]">Travel By</th>
-              <th className="text-left p-2 w-[200px]">Day Type</th>
+              <th className="text-left p-2 w-[200px]">Tour Title</th>
             </tr>
           </thead>
           <tbody>
@@ -967,18 +967,15 @@ function Step9({ draft, set }: StepProps) {
                         const next = Array.from(new Set([...selected, v]));
                         const primary = next[0];
                         const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
-                        const excursion = r.day_type === "excursion" || r.day_type === "full_day_excursion";
                         updateRow(i, {
                           to_city_ids: next,
                           to_city_id: primary,
                           to_city: cityName(primary),
                           ...(isLast
                             ? { city_id: primary }
-                            : excursion
-                              ? { city_id: "" }
-                              : shouldMirror
-                                ? { city_id: primary }
-                                : {}),
+                            : shouldMirror
+                              ? { city_id: primary }
+                              : {}),
                         });
                       };
                       const removeCity = (id: string) => {
@@ -1080,12 +1077,6 @@ function Step9({ draft, set }: StepProps) {
                   </td>
                   <td className="p-2 align-middle w-[200px]">
                     {(() => {
-                      const normalizeDayType = (dt?: RoutingDay["day_type"]) => {
-                        if (dt === "half_day") return "am_half_day";
-                        if (dt === "excursion") return "full_day_excursion";
-                        if (dt === "multi_dest") return "full_day";
-                        return dt || "full_day";
-                      };
                       const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
                         : (r.to_city_id ? [r.to_city_id] : []);
@@ -1096,20 +1087,29 @@ function Step9({ draft, set }: StepProps) {
                       if (fromId) allIds.push(fromId);
                       toIds.forEach((id) => { if (id && !allIds.includes(id)) allIds.push(id); });
                       if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
-                      const DayTypeOptions = (
-                        <>
-                          <SelectItem value="am_half_day">AM Half Day</SelectItem>
-                          <SelectItem value="pm_half_day">PM Half Day</SelectItem>
-                          <SelectItem value="full_day">Full Day</SelectItem>
-                          <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
-                        </>
-                      );
+                      const getTourOptionsForCity = (routingCityId: string) => {
+                        if (!routingCityId) return [] as Array<{ id: string; title: string }>;
+                        // d.cities (routing/hotel table) has different IDs than d.destination_cities.
+                        // Bridge: resolve the name from d.cities, then match destination_cities by
+                        // normalized name (trim + lowercase) to get the correct destination city ID.
+                        const cityNameRaw = d.cities.find((c) => c.id === routingCityId)?.name ?? "";
+                        const normalized = cityNameRaw.trim().toLowerCase();
+                        if (!normalized) return [] as Array<{ id: string; title: string }>;
+                        const destCity = d.destination_cities.find(
+                          (c) => c.name.trim().toLowerCase() === normalized
+                        );
+                        if (!destCity) return [] as Array<{ id: string; title: string }>;
+                        return [...d.destination_tours]
+                          .filter((tour) => tour.city_id === destCity.id)
+                          .sort((a, b) => a.title.localeCompare(b.title));
+                      };
                       if (allIds.length >= 2) {
-                        const map = r.day_types_by_city || {};
+                        const tourMap = r.tour_titles_by_city || {};
                         return (
                           <div className="flex flex-col gap-1">
                             {allIds.map((cid) => {
-                              const cur = normalizeDayType(map[cid] || r.day_type);
+                              const cityTours = getTourOptionsForCity(cid);
+                              const currentTour = tourMap[cid] || "";
                               const nm = cityName(cid) || cid;
                               return (
                                 <div key={cid} className="flex items-center gap-1.5">
@@ -1117,13 +1117,19 @@ function Step9({ draft, set }: StepProps) {
                                     {nm}
                                   </span>
                                   <Select
-                                    value={cur}
-                                    onValueChange={(v) => updateRow(i, {
-                                      day_types_by_city: { ...map, [cid]: v as NonNullable<RoutingDay["day_type"]> },
-                                    })}
+                                    value={currentTour}
+                                    onValueChange={(v) => {
+                                      updateRow(i, {
+                                        tour_titles_by_city: { ...tourMap, [cid]: v },
+                                      });
+                                    }}
                                   >
-                                    <SelectTrigger className="h-7 text-[11px] flex-1"><SelectValue /></SelectTrigger>
-                                    <SelectContent>{DayTypeOptions}</SelectContent>
+                                    <SelectTrigger className="h-7 text-[11px] flex-1"><SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} /></SelectTrigger>
+                                    <SelectContent>
+                                      {cityTours.map((tour) => (
+                                        <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
+                                      ))}
+                                    </SelectContent>
                                   </Select>
                                 </div>
                               );
@@ -1131,23 +1137,20 @@ function Step9({ draft, set }: StepProps) {
                           </div>
                         );
                       }
-                      const current = normalizeDayType(r.day_type);
-                      const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
-                        const excursion = v === "excursion" || v === "full_day_excursion";
-                        if (excursion && !isLast) {
-                          const fnm = r.from_city ?? fromDefault;
-                          const fid = d.cities.find((c) => c.name === fnm)?.id || "";
-                          updateRow(i, { day_type: v, city_id: fid });
-                        } else {
-                          updateRow(i, { day_type: v });
-                        }
-                      };
+                      const selectedCityId = toIds[0] || "";
+                      const cityTours = getTourOptionsForCity(selectedCityId);
                       return (
-                        <Select value={current} onValueChange={(v) => applyDayType(v as NonNullable<RoutingDay["day_type"]>)}>
+                        <Select value={r.tour_title || ""} onValueChange={(v) => {
+                          updateRow(i, { tour_title: v });
+                        }}>
                           <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Day type" />
+                            <SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} />
                           </SelectTrigger>
-                          <SelectContent>{DayTypeOptions}</SelectContent>
+                          <SelectContent>
+                            {cityTours.map((tour) => (
+                              <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
+                            ))}
+                          </SelectContent>
                         </Select>
                       );
 
