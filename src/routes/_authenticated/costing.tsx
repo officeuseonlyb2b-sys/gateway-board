@@ -1950,7 +1950,7 @@ function Step13({ draft, set }: StepProps) {
               }
 
               const escort = findEscort(r.day);
-              const rowNodes: JSX.Element[] = [];
+              const rowNodes: React.ReactElement[] = [];
               let firstCell = true;
               cityGuides.forEach(({ city, guides }) => {
                 if (guides.length === 0) {
