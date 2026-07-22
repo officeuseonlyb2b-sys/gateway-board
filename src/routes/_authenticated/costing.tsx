@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax, GUIDE_LANGUAGES, guideConfiguredLanguages, type GuideLanguage } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
