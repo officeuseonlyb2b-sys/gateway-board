@@ -936,8 +936,27 @@ function Step9({ draft, set }: StepProps) {
                     {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
                   </td>
                   <td className="p-2 text-xs align-middle">
-                    <span className="text-sm text-foreground">{r.from_city ?? fromDefault}</span>
+                    {(() => {
+                      const currentName = r.from_city ?? fromDefault;
+                      const currentId = d.cities.find((c) => c.name === currentName)?.id || "";
+                      return (
+                        <Select
+                          value={currentId || "__custom__"}
+                          onValueChange={(v) => {
+                            if (v === "__custom__") return;
+                            const nm = d.cities.find((c) => c.id === v)?.name || "";
+                            updateRow(i, { from_city: nm });
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={currentName || "From city…"}>{currentName || "Select"}</SelectValue></SelectTrigger>
+                          <SelectContent>
+                            {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                   </td>
+
                   <td className="p-2 align-middle w-[200px]">
                     {(() => {
                       const selected = (r.to_city_ids && r.to_city_ids.length > 0)
