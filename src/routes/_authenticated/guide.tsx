@@ -80,6 +80,11 @@ function GuidePage() {
 
   function displayRates(g: Guide | undefined) {
     if (!g) return { lang: null as GuideLanguage | null, r5: 0, r14: 0, r15: 0 };
+    // If a specific language filter is active, show that language's rates.
+    if (languageFilter !== "all" && g.language_rates?.[languageFilter as GuideLanguage]) {
+      const r = g.language_rates[languageFilter as GuideLanguage]!;
+      return { lang: languageFilter as GuideLanguage, r5: r.rate_1_to_5, r14: r.rate_6_to_14, r15: r.rate_15_plus };
+    }
     const primary = guidePrimaryLanguage(g);
     if (primary && g.language_rates?.[primary]) {
       const r = g.language_rates[primary]!;
@@ -87,6 +92,7 @@ function GuidePage() {
     }
     return { lang: null, r5: g.rate_1_to_5 ?? 0, r14: g.rate_6_to_14 ?? 0, r15: g.rate_15_plus ?? 0 };
   }
+
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">

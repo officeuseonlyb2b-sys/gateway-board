@@ -229,7 +229,12 @@ export interface QuoteDraft {
   optionals: ActivityLine[];
   included_option_keys?: OptionKey[];
   group_room_mix?: GroupRoomMix;
+  // Guide step UI state (Step 12) — non-calc
+  guide_language?: string;
+  guide_reporting_cost?: number;
+  guide_remarks?: string;
   updated_at: string;
+
 }
 
 export interface GroupRoomMix {

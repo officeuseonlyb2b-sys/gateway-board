@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Calculator, Check, ChevronLeft, ChevronRight, ChevronDown, Save, Plus, Trash2,
   Building2, User, Users, FileText, Printer, FileDown, FileSpreadsheet,
@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax, GUIDE_LANGUAGES, guideConfiguredLanguages, type GuideLanguage } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
@@ -936,8 +936,27 @@ function Step9({ draft, set }: StepProps) {
                     {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
                   </td>
                   <td className="p-2 text-xs align-middle">
-                    <span className="text-sm text-foreground">{r.from_city ?? fromDefault}</span>
+                    {(() => {
+                      const currentName = r.from_city ?? fromDefault;
+                      const currentId = d.cities.find((c) => c.name === currentName)?.id || "";
+                      return (
+                        <Select
+                          value={currentId || "__custom__"}
+                          onValueChange={(v) => {
+                            if (v === "__custom__") return;
+                            const nm = d.cities.find((c) => c.id === v)?.name || "";
+                            updateRow(i, { from_city: nm });
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={currentName || "From city…"}>{currentName || "Select"}</SelectValue></SelectTrigger>
+                          <SelectContent>
+                            {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                   </td>
+
                   <td className="p-2 align-middle w-[200px]">
                     {(() => {
                       const selected = (r.to_city_ids && r.to_city_ids.length > 0)
@@ -1067,9 +1086,16 @@ function Step9({ draft, set }: StepProps) {
                         if (dt === "multi_dest") return "full_day";
                         return dt || "full_day";
                       };
-                      const selectedIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                      const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
                         : (r.to_city_id ? [r.to_city_id] : []);
+                      // Build combined city list: FROM + TO(s) + OVERNIGHT (deduped)
+                      const fromName = r.from_city ?? fromDefault;
+                      const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
+                      const allIds: string[] = [];
+                      if (fromId) allIds.push(fromId);
+                      toIds.forEach((id) => { if (id && !allIds.includes(id)) allIds.push(id); });
+                      if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
                       const DayTypeOptions = (
                         <>
                           <SelectItem value="am_half_day">AM Half Day</SelectItem>
@@ -1078,16 +1104,17 @@ function Step9({ draft, set }: StepProps) {
                           <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
                         </>
                       );
-                      if (selectedIds.length >= 2) {
+                      if (allIds.length >= 2) {
                         const map = r.day_types_by_city || {};
                         return (
                           <div className="flex flex-col gap-1">
-                            {selectedIds.map((cid) => {
+                            {allIds.map((cid) => {
                               const cur = normalizeDayType(map[cid] || r.day_type);
+                              const nm = cityName(cid) || cid;
                               return (
                                 <div key={cid} className="flex items-center gap-1.5">
-                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={cityName(cid) || cid}>
-                                    {cityName(cid) || cid}
+                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={nm}>
+                                    {nm}
                                   </span>
                                   <Select
                                     value={cur}
@@ -1108,9 +1135,9 @@ function Step9({ draft, set }: StepProps) {
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         const excursion = v === "excursion" || v === "full_day_excursion";
                         if (excursion && !isLast) {
-                          const fromName = r.from_city ?? fromDefault;
-                          const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
-                          updateRow(i, { day_type: v, city_id: fromId });
+                          const fnm = r.from_city ?? fromDefault;
+                          const fid = d.cities.find((c) => c.name === fnm)?.id || "";
+                          updateRow(i, { day_type: v, city_id: fid });
                         } else {
                           updateRow(i, { day_type: v });
                         }
@@ -1123,6 +1150,7 @@ function Step9({ draft, set }: StepProps) {
                           <SelectContent>{DayTypeOptions}</SelectContent>
                         </Select>
                       );
+
                     })()}
                   </td>
                 </tr>
@@ -1252,164 +1280,172 @@ function DayTransportPanel({
 // ============================================================
 function Step10({ draft, set }: StepProps) {
   const d = useDB();
-  const totalPax = draft.adults + draft.ss + draft.children.length;
+  const pax = totalPax(draft);
   const opts = d.travel_options.filter((t) => {
     if (!t.is_active) return false;
     const min = t.min_pax ?? 1;
     const max = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
-    return totalPax >= min && totalPax <= max;
+    return pax >= min && pax <= max;
   });
-  const labelFor = (o: typeof opts[number]) => {
-    const min = o.min_pax ?? 1;
-    const max = o.max_pax ?? o.capacity_persons;
-    const range = min === max ? `${max} pax` : min <= 1 ? `up to ${max} pax` : `${min}-${max} pax`;
-    return `${o.vehicle_type} (${range})`;
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+  const routing = draft.routing;
+  const total = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
+
+  const addVehicle = () => {
+    const first = opts[0];
+    set({
+      transport: [...draft.transport, {
+        id: uid(), travel_id: first?.id || "", vehicles: 1, days: routing.length || 1,
+        rate: first?.rate_per_day || 0, rate_format: "per_route",
+        per_route_rates: Array(routing.length).fill(first?.rate_per_day || 0),
+        reporting_cost: 0, remarks: "",
+      }],
+    });
   };
-  const lineTotal = transportLineTotal;
-  const total = draft.transport.reduce((s, l) => s + lineTotal(l), 0);
-  const noMatch = opts.length === 0;
+
+  const patchLine = (i: number, p: Partial<typeof draft.transport[number]>) => {
+    const n = [...draft.transport]; n[i] = { ...n[i], ...p }; set({ transport: n });
+  };
+
+  const removeLine = (id: string) =>
+    set({ transport: draft.transport.filter((x) => x.id !== id) });
+
+  const vehLabel = (t: typeof draft.transport[number]) => {
+    const v = d.travel_options.find((x) => x.id === t.travel_id);
+    return v?.vehicle_type || "Vehicle";
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold">Transport Options</h2>
-          <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-3 py-1 text-xs font-medium">
-            Showing vehicles suitable for {totalPax} pax
-          </span>
-        </div>
-        <Button
-          size="sm"
-          disabled={noMatch}
-          onClick={() => set({ transport: [...draft.transport, { id: uid(), travel_id: opts[0]?.id || "", vehicles: 1, days: draft.nights + 1, rate: opts[0]?.rate_per_day || 0, rate_format: "per_day", reporting_cost: 0 }] })}
-        >
-          <Plus className="h-3 w-3 mr-1" /> Add Transport
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold">Transport — Per Route</h2>
+        <Button size="sm" onClick={addVehicle} disabled={opts.length === 0}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Add Transport
         </Button>
       </div>
-      {noMatch && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 text-destructive text-sm p-3">
-          No standard vehicle found for {totalPax} pax. Please contact operations.
-        </div>
+
+      {draft.transport.length === 0 && (
+        <p className="text-sm text-muted-foreground">No transport added yet. Click "Add Transport" to add a vehicle column.</p>
       )}
-      {!noMatch && draft.transport.length === 0 && <p className="text-sm text-muted-foreground">No transport added yet.</p>}
-      {draft.transport.map((t, i) => {
-        const current = d.travel_options.find((x) => x.id === t.travel_id);
-        const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
-        const format = t.rate_format ?? "per_day";
-        const patch = (p: Partial<typeof t>) => {
-          const n = [...draft.transport]; n[i] = { ...t, ...p }; set({ transport: n });
-        };
-        return (
-        <Card key={t.id} className="p-3 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_80px_36px] gap-2 items-end">
-            <div>
-              <Label className="text-xs">Vehicle</Label>
-              <Select value={t.travel_id} onValueChange={(v) => {
-                const to = rowOpts.find((x) => x.id === v);
-                patch({ travel_id: v, rate: to?.rate_per_day ? to.rate_per_day : t.rate });
-              }}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
-                <SelectContent>
-                  {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{labelFor(o)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Rate Format</Label>
-              <Select value={format} onValueChange={(v) => patch({ rate_format: v as "per_day" | "total" | "prefilled" | "per_route" })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="per_day">Per Day</SelectItem>
-                  <SelectItem value="total">Total Program</SelectItem>
-                  <SelectItem value="prefilled">Pre-filled</SelectItem>
-                  <SelectItem value="per_route">Per Route / Per Day</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div><Label className="text-xs">Vehicles</Label><Input type="number" min={1} value={t.vehicles}
-              onChange={(e) => patch({ vehicles: parseInt(e.target.value) || 1 })} /></div>
-            <Button size="icon" variant="ghost" onClick={() => set({ transport: draft.transport.filter((x) => x.id !== t.id) })}>
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
+
+      {draft.transport.length > 0 && (
+        <>
+          {/* Vehicle selector cards (one per column) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {draft.transport.map((t, i) => {
+              const current = d.travel_options.find((x) => x.id === t.travel_id);
+              const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
+              return (
+                <Card key={t.id} className="p-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-muted-foreground">Vehicle {i + 1}</div>
+                    <Button size="icon" variant="ghost" onClick={() => removeLine(t.id)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-[1fr_70px] gap-2">
+                    <div>
+                      <Label className="text-[10px]">Vehicle Type</Label>
+                      <Select value={t.travel_id} onValueChange={(v) => {
+                        const to = rowOpts.find((x) => x.id === v);
+                        const perDay = to?.rate_per_day || 0;
+                        patchLine(i, {
+                          travel_id: v,
+                          per_route_rates: (t.per_route_rates ?? Array(routing.length).fill(0)).map((r) => r || perDay),
+                        });
+                      }}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
+                        <SelectContent>
+                          {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{o.vehicle_type}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[10px]"># Veh</Label>
+                      <Input type="number" min={1} value={t.vehicles} className="h-8 text-xs"
+                        onChange={(e) => patchLine(i, { vehicles: parseInt(e.target.value) || 1 })} />
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
-          {format === "per_route" ? (
-            <div className="space-y-2">
-              <Label className="text-xs">Per-Route Rates (₹ per routing day)</Label>
-              <div className="border rounded-md overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/40 text-[10px] uppercase text-muted-foreground">
-                    <tr>
-                      <th className="text-left p-2 w-16">Day</th>
-                      <th className="text-left p-2">Route</th>
-                      <th className="text-right p-2 w-32">Rate (₹)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.routing.map((r, ri) => {
-                      const fromLabel = r.from_city
-                        || (ri === 0 ? draft.departure_city : (d.cities.find((c) => c.id === draft.routing[ri - 1]?.city_id)?.name || "—"));
-                      const toLabel = d.cities.find((c) => c.id === r.city_id)?.name || r.to_city || "—";
-                      const rateVal = t.per_route_rates?.[ri] ?? 0;
-                      return (
-                        <tr key={ri} className="border-t">
-                          <td className="p-2 font-medium">Day {r.day}</td>
-                          <td className="p-2 text-muted-foreground">
-                            {fromLabel && toLabel && fromLabel !== toLabel ? `${fromLabel} → ${toLabel}` : `${toLabel} Local`}
-                          </td>
-                          <td className="p-2 text-right">
-                            <Input type="number" min={0} className="h-7 text-xs text-right" value={rateVal || ""}
+
+          {/* Per-route rates table */}
+          <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-[#F3F4F6] text-[10px] uppercase text-muted-foreground tracking-wide">
+                <tr className="border-b border-[#E5E7EB]">
+                  <th className="text-left p-2 w-[70px]">Day</th>
+                  <th className="text-left p-2">Route</th>
+                  {draft.transport.map((t, i) => (
+                    <th key={t.id} className="text-right p-2 w-[120px]">{vehLabel(t) || `V${i + 1}`}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {routing.map((r, ri) => {
+                  const fromLabel = r.from_city
+                    || (ri === 0 ? draft.departure_city : (cityName(routing[ri - 1]?.city_id || "") || "—"));
+                  const toLabel = cityName(r.city_id) || r.to_city || "—";
+                  const route = fromLabel && toLabel && fromLabel !== toLabel ? `${fromLabel} → ${toLabel}` : `${toLabel} Local`;
+                  return (
+                    <tr key={ri} className="border-b border-[#E5E7EB] bg-white">
+                      <td className="p-2 font-medium">Day {r.day}</td>
+                      <td className="p-2 text-muted-foreground">{route}</td>
+                      {draft.transport.map((t, ti) => {
+                        const arr = t.per_route_rates ?? Array(routing.length).fill(0);
+                        const val = arr[ri] ?? 0;
+                        return (
+                          <td key={t.id} className="p-2">
+                            <Input type="number" min={0} className="h-7 text-xs text-right" value={val || ""}
                               onChange={(e) => {
-                                const next = [...(t.per_route_rates ?? Array(draft.routing.length).fill(0))];
-                                while (next.length < draft.routing.length) next.push(0);
+                                const next = [...(t.per_route_rates ?? Array(routing.length).fill(0))];
+                                while (next.length < routing.length) next.push(0);
                                 next[ri] = parseFloat(e.target.value) || 0;
-                                patch({ per_route_rates: next.slice(0, draft.routing.length) });
+                                patchLine(ti, { per_route_rates: next.slice(0, routing.length) });
                               }} />
                           </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-end">
-                <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
-                  onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
-                <div className="text-right"><Label className="text-xs">Line Total</Label>
-                  <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-              {format === "total" ? (
-                <div className="md:col-span-2">
-                  <Label className="text-xs">Total Program Rate (₹)</Label>
-                  <Input type="number" value={t.total_override ?? 0}
-                    onChange={(e) => patch({ total_override: parseFloat(e.target.value) || 0 })} />
-                </div>
-              ) : (
-                <>
-                  <div><Label className="text-xs">Days</Label><Input type="number" min={1} value={t.days}
-                    onChange={(e) => patch({ days: parseInt(e.target.value) || 1 })} /></div>
-                  <div><Label className="text-xs">Rate / day (₹)</Label><Input type="number" value={t.rate || ""}
-                    onChange={(e) => patch({ rate: parseFloat(e.target.value) || 0 })} /></div>
-                </>
-              )}
-              <div><Label className="text-xs">Reporting Cost (₹)</Label><Input type="number" value={t.reporting_cost ?? 0}
-                onChange={(e) => patch({ reporting_cost: parseFloat(e.target.value) || 0 })} /></div>
-              <div className="text-right"><Label className="text-xs">Line Total</Label>
-                <div className="text-sm font-semibold pt-2">{inr(lineTotal(t))}</div>
-              </div>
-            </div>
-          )}
-          <Input placeholder="Remarks (optional)" value={t.remarks || ""}
-            onChange={(e) => patch({ remarks: e.target.value })} className="text-xs" />
-        </Card>
-        );
-      })}
-      <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+                <tr className="bg-muted/30 border-b border-[#E5E7EB]">
+                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Reporting Cost</td>
+                  {draft.transport.map((t, ti) => (
+                    <td key={t.id} className="p-2">
+                      <Input type="number" min={0} className="h-7 text-xs text-right" value={t.reporting_cost || ""}
+                        onChange={(e) => patchLine(ti, { reporting_cost: parseFloat(e.target.value) || 0 })} />
+                    </td>
+                  ))}
+                </tr>
+                <tr className="bg-muted/10 border-b border-[#E5E7EB]">
+                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Remarks</td>
+                  {draft.transport.map((t, ti) => (
+                    <td key={t.id} className="p-2">
+                      <Input className="h-7 text-xs" value={t.remarks || ""}
+                        onChange={(e) => patchLine(ti, { remarks: e.target.value })} />
+                    </td>
+                  ))}
+                </tr>
+                <tr className="bg-primary/5 font-semibold">
+                  <td colSpan={2} className="p-2 text-right text-xs">Line Total</td>
+                  {draft.transport.map((t) => (
+                    <td key={t.id} className="p-2 text-right tabular-nums">{inr(transportLineTotal(t))}</td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
+        </>
+      )}
     </div>
   );
 }
+
 
 // ============================================================
 // Shared helpers for day-wise sync (Steps 11/12/13)
@@ -1578,14 +1614,47 @@ function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amou
 }
 
 // ============================================================
-// STEP 12 — Entrances (day-wise)
+// STEP 11 — Entrances (day-wise table) & STEP 12 — Guide (day-wise table)
 // ============================================================
+
+type CityRef = { id: string; name: string };
+
+function dayAllCities(
+  r: RoutingDay,
+  cities: CityRef[],
+  fromDefault: string,
+): CityRef[] {
+  const out: CityRef[] = [];
+  const push = (id: string | undefined, nameFallback?: string) => {
+    if (id) {
+      const c = cities.find((x) => x.id === id);
+      if (c && !out.some((o) => o.id === c.id)) out.push(c);
+      return;
+    }
+    if (nameFallback) {
+      const c = cities.find((x) => x.name === nameFallback);
+      if (c && !out.some((o) => o.id === c.id)) out.push(c);
+    }
+  };
+  push(undefined, r.from_city ?? fromDefault);
+  const toIds = (r.to_city_ids && r.to_city_ids.length > 0) ? r.to_city_ids : (r.to_city_id ? [r.to_city_id] : []);
+  toIds.forEach((id) => push(id));
+  push(r.city_id);
+  return out;
+}
+
 function Step12({ draft, set }: StepProps) {
   const d = useDB();
-  const pax = totalPax(draft);
+  const [travellerFilter, setTravellerFilter] = useState<"all" | "indian" | "foreign" | "student">("all");
+  const totalPaxCount = totalPax(draft);
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   const findLine = (siteId: string, day: number) =>
     draft.entrances.find((x) => x.site_id === siteId && (x.from_routing_days ?? []).includes(day));
+
+  const patch = (lineId: string, p: Partial<typeof draft.entrances[number]>) => {
+    set({ entrances: draft.entrances.map((x) => x.id === lineId ? { ...x, ...p } : x) });
+  };
 
   const toggle = (s: { id: string; indian_rate: number; foreigner_rate: number; student_rate?: number }, day: number) => {
     const existing = findLine(s.id, day);
@@ -1594,7 +1663,7 @@ function Step12({ draft, set }: StepProps) {
     } else {
       set({ entrances: [...draft.entrances, {
         id: uid(), site_id: s.id,
-        indian_pax: pax, indian_rate: s.indian_rate,
+        indian_pax: totalPaxCount, indian_rate: s.indian_rate,
         foreign_pax: 0, foreign_rate: s.foreigner_rate,
         student_pax: 0, student_rate: s.student_rate ?? 0,
         from_routing_days: [day],
@@ -1602,270 +1671,382 @@ function Step12({ draft, set }: StepProps) {
     }
   };
 
-  const patch = (lineId: string, p: Partial<typeof draft.entrances[number]>) => {
-    set({ entrances: draft.entrances.map((x) => x.id === lineId ? { ...x, ...p } : x) });
-  };
+  const lineTotal = (l: typeof draft.entrances[number]) =>
+    l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate + (l.student_pax ?? 0) * (l.student_rate ?? 0);
+  const grandTotal = draft.entrances.reduce((s, l) => s + lineTotal(l), 0);
 
-  const customLines = draft.entrances.filter((x) => x.custom_name);
+  const showI = travellerFilter === "all" || travellerFilter === "indian";
+  const showF = travellerFilter === "all" || travellerFilter === "foreign";
+  const showS = travellerFilter === "all" || travellerFilter === "student";
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Entrance Fees</h2>
-        <span className="text-xs text-muted-foreground">Synced with Routing — one section per itinerary day.</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Traveller:</span>
+          <Select value={travellerFilter} onValueChange={(v) => setTravellerFilter(v as typeof travellerFilter)}>
+            <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="indian">Indian</SelectItem>
+              <SelectItem value="foreign">Foreigner</SelectItem>
+              <SelectItem value="student">Student</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {draft.routing.map((r, idx) => {
-        const isLast = idx === draft.routing.length - 1;
-        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
-        const dayCityIds = new Set(d.entrance_cities.filter((c) => destNames.includes(c.name)).map((c) => c.id));
-        const daySites = d.entrance_sites.filter((s) => s.is_active && dayCityIds.has(s.city_id));
-        const selectedCount = draft.entrances.filter((x) =>
-          x.site_id && (x.from_routing_days ?? []).includes(r.day)
-        ).length;
-        const title = dayTitleFor(r, d.cities, isLast);
-        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
-
-        return (
-          <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={selectedCount}>
-            {destNames.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">No destination set for this day.</div>
-            ) : daySites.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">
-                No entrances available for {destNames.join(", ")}.
-              </div>
-            ) : daySites.map((s) => {
-              const line = findLine(s.id, r.day);
-              const on = !!line;
-              const cityName = d.entrance_cities.find((c) => c.id === s.city_id)?.name;
-              return (
-                <div key={s.id} className={cn("p-2.5 border rounded-md", on && "border-accent bg-accent/5")}>
-                  <div className="flex items-center gap-3">
-                    <Checkbox checked={on} onCheckedChange={() => toggle(s, r.day)} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {s.site_name} <span className="text-[11px] text-muted-foreground">— {cityName}</span>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Indian ₹{s.indian_rate} / Foreign ₹{s.foreigner_rate}
-                        {s.student_rate ? ` / Student ₹${s.student_rate}` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  {on && line && (
-                    <div className="mt-2 pl-8 grid grid-cols-6 gap-2 text-xs items-end">
-                      <div><Label className="text-[10px]">Indian Pax</Label><Input type="number" value={line.indian_pax}
-                        onChange={(e) => patch(line.id, { indian_pax: parseInt(e.target.value) || 0 })} /></div>
-                      <div><Label className="text-[10px]">Foreign Pax</Label><Input type="number" value={line.foreign_pax}
-                        onChange={(e) => patch(line.id, { foreign_pax: parseInt(e.target.value) || 0 })} /></div>
-                      <div><Label className="text-[10px]">Student Pax</Label><Input type="number" value={line.student_pax ?? 0}
-                        onChange={(e) => patch(line.id, { student_pax: parseInt(e.target.value) || 0 })} /></div>
-                      <div><Label className="text-[10px]">Student Rate</Label><Input type="number" value={line.student_rate ?? 0}
-                        onChange={(e) => patch(line.id, { student_rate: parseFloat(e.target.value) || 0 })} /></div>
-                      <div className="col-span-2 text-right font-semibold pt-4 tabular-nums">
-                        {inr(line.indian_pax * line.indian_rate + line.foreign_pax * line.foreign_rate + (line.student_pax ?? 0) * (line.student_rate ?? 0))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+      <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead className="bg-[#F3F4F6] text-[10px] uppercase text-muted-foreground tracking-wide">
+            <tr className="border-b border-[#E5E7EB]">
+              <th className="text-left p-2 w-[60px]">Day</th>
+              <th className="text-left p-2 w-[160px]">Route</th>
+              <th className="text-left p-2">City + Tour</th>
+              {showI && <th className="text-left p-2 w-[140px]">Indian</th>}
+              {showF && <th className="text-left p-2 w-[140px]">Foreigner</th>}
+              {showS && <th className="text-left p-2 w-[140px]">Student</th>}
+              <th className="text-right p-2 w-[100px]">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.routing.map((r, ri) => {
+              const fromDefault = ri === 0 ? draft.departure_city : cityName(draft.routing[ri - 1]?.city_id || "");
+              const dayCities = dayAllCities(r, d.cities, fromDefault);
+              const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
+              const rows: { city: CityRef; site: typeof d.entrance_sites[number] }[] = [];
+              dayCities.forEach((c) => {
+                d.entrance_sites
+                  .filter((s) => s.is_active && d.entrance_cities.find((ec) => ec.name === c.name && ec.id === s.city_id))
+                  .forEach((s) => rows.push({ city: c, site: s }));
+              });
+              if (rows.length === 0) {
+                return (
+                  <tr key={ri} className="border-b border-[#E5E7EB]">
+                    <td className="p-2 font-semibold">Day {r.day}</td>
+                    <td className="p-2 text-muted-foreground">{routeLabel}</td>
+                    <td colSpan={5} className="p-2 text-muted-foreground italic">No entrance sites for this day's cities.</td>
+                  </tr>
+                );
+              }
+              let daySubtotal = 0;
+              const rowNodes = rows.map((row, i) => {
+                const line = findLine(row.site.id, r.day);
+                const on = !!line;
+                const sub = line ? lineTotal(line) : 0;
+                daySubtotal += sub;
+                return (
+                  <tr key={`${ri}-${row.site.id}`} className="border-b border-[#E5E7EB] bg-white">
+                    {i === 0 ? (
+                      <>
+                        <td rowSpan={rows.length} className="p-2 font-semibold align-top">Day {r.day}</td>
+                        <td rowSpan={rows.length} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
+                      </>
+                    ) : null}
+                    <td className="p-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox checked={on} onCheckedChange={() => toggle(row.site, r.day)} />
+                        <span>
+                          <span className="text-[10px] text-muted-foreground">{row.city.name}</span>
+                          <span className="block text-sm font-medium">{row.site.site_name}</span>
+                        </span>
+                      </label>
+                    </td>
+                    {showI && (
+                      <td className="p-2">
+                        {on && line ? (
+                          <div className="flex items-center gap-1">
+                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.indian_pax}
+                              onChange={(e) => patch(line.id, { indian_pax: parseInt(e.target.value) || 0 })} />
+                            <span className="text-[10px] text-muted-foreground">×</span>
+                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.indian_rate}
+                              onChange={(e) => patch(line.id, { indian_rate: parseFloat(e.target.value) || 0 })} />
+                          </div>
+                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.indian_rate}</span>}
+                      </td>
+                    )}
+                    {showF && (
+                      <td className="p-2">
+                        {on && line ? (
+                          <div className="flex items-center gap-1">
+                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.foreign_pax}
+                              onChange={(e) => patch(line.id, { foreign_pax: parseInt(e.target.value) || 0 })} />
+                            <span className="text-[10px] text-muted-foreground">×</span>
+                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.foreign_rate}
+                              onChange={(e) => patch(line.id, { foreign_rate: parseFloat(e.target.value) || 0 })} />
+                          </div>
+                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.foreigner_rate}</span>}
+                      </td>
+                    )}
+                    {showS && (
+                      <td className="p-2">
+                        {on && line ? (
+                          <div className="flex items-center gap-1">
+                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.student_pax ?? 0}
+                              onChange={(e) => patch(line.id, { student_pax: parseInt(e.target.value) || 0 })} />
+                            <span className="text-[10px] text-muted-foreground">×</span>
+                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.student_rate ?? 0}
+                              onChange={(e) => patch(line.id, { student_rate: parseFloat(e.target.value) || 0 })} />
+                          </div>
+                        ) : <span className="text-[11px] text-muted-foreground">{row.site.student_rate ? `₹${row.site.student_rate}` : "—"}</span>}
+                      </td>
+                    )}
+                    <td className="p-2 text-right tabular-nums font-medium">{on ? inr(sub) : "—"}</td>
+                  </tr>
+                );
+              });
+              rowNodes.push(
+                <tr key={`${ri}-sub`} className="bg-muted/20 border-b border-[#E5E7EB]">
+                  <td colSpan={3 + (showI ? 1 : 0) + (showF ? 1 : 0) + (showS ? 1 : 0)} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Day {r.day} Subtotal</td>
+                  <td className="p-2 text-right tabular-nums font-semibold">{inr(daySubtotal)}</td>
+                </tr>,
               );
+              return <>{rowNodes}</>;
             })}
-          </DaySection>
-        );
-      })}
-
-      <Card className="p-3 space-y-2">
-        <div className="text-xs font-semibold uppercase text-muted-foreground">Custom / Other Entrances</div>
-        <CustomAdd label="Custom Entrance" onAdd={(name, rate) => set({
-          entrances: [...draft.entrances, { id: uid(), custom_name: name, indian_pax: pax, indian_rate: rate, foreign_pax: 0, foreign_rate: 0, student_pax: 0, student_rate: 0 }],
-        })} />
-        {customLines.map((x) => (
-          <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
-            <span>{x.custom_name} — {x.indian_pax} pax × ₹{x.indian_rate}</span>
-            <span>{inr(x.indian_pax * x.indian_rate)}
-              <button className="ml-2 text-destructive" onClick={() => set({ entrances: draft.entrances.filter((y) => y.id !== x.id) })}>×</button>
-            </span>
-          </div>
-        ))}
-      </Card>
+            <tr className="bg-primary/5 font-bold">
+              <td colSpan={3 + (showI ? 1 : 0) + (showF ? 1 : 0) + (showS ? 1 : 0)} className="p-2 text-right text-sm">TOTAL ENTRANCES</td>
+              <td className="p-2 text-right tabular-nums text-sm">{inr(grandTotal)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
 // ============================================================
-// STEP 13 — Guide (day-wise)
+// STEP 12 — Guide (day-wise table)
 // ============================================================
 function Step13({ draft, set }: StepProps) {
   const d = useDB();
   const pax = totalPax(draft);
+  const paxTier = pax <= 5 ? "1-5" : pax <= 14 ? "6-14" : "15+";
+  const [langFilter, setLangFilter] = useState<string>(draft.guide_language || "all");
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+  useEffect(() => { set({ guide_language: langFilter }); /* eslint-disable-line */ }, [langFilter]);
+
   const allGuides = d.guides.filter((g) => g.is_active);
 
-  const findLines = (guideId: string, day: number) =>
-    draft.guides.filter((x) => x.guide_id === guideId && (x.from_routing_days ?? []).includes(day));
+  // Available languages across configured guides
+  const availableLanguages = useMemo(() => {
+    const s = new Set<GuideLanguage>();
+    allGuides.forEach((g) => guideConfiguredLanguages(g).forEach((l) => s.add(l)));
+    return GUIDE_LANGUAGES.filter((l) => s.has(l));
+  }, [allGuides]);
 
-  const toggle = (guideId: string, day: number, rate: number) => {
-    const existing = findLines(guideId, day)[0];
-    if (existing) {
-      set({ guides: draft.guides.filter((x) => x.id !== existing.id) });
+  const rateForGuide = (g: typeof allGuides[number]) => {
+    if (langFilter !== "all" && g.language_rates?.[langFilter as GuideLanguage]) {
+      const r = g.language_rates[langFilter as GuideLanguage]!;
+      return pax <= 5 ? r.rate_1_to_5 : pax <= 14 ? r.rate_6_to_14 : r.rate_15_plus;
+    }
+    return guideRateForPax(g, pax);
+  };
+
+  const findLine = (guideId: string, day: number) =>
+    draft.guides.find((x) => x.guide_id === guideId && !x.is_escort && (x.from_routing_days ?? []).includes(day));
+
+  const findEscort = (day: number) =>
+    draft.guides.find((x) => x.is_escort && (x.from_routing_days ?? []).includes(day));
+
+  const selectGuide = (g: typeof allGuides[number], day: number, dayCityIds: string[]) => {
+    // Remove any existing non-escort selection for this city on this day
+    const cityGuideIds = allGuides
+      .filter((gx) => dayCityIds.some((cid) => cityName(cid) === (gx.city ?? gx.destination)))
+      .map((gx) => gx.id);
+    // Only clear guides in the SAME city as `g` on this day
+    const gCity = g.city ?? g.destination;
+    const cleared = draft.guides.filter((x) => {
+      if (x.is_escort) return true;
+      if (!(x.from_routing_days ?? []).includes(day)) return true;
+      const gm = allGuides.find((y) => y.id === x.guide_id);
+      const xCity = gm?.city ?? gm?.destination;
+      return xCity !== gCity;
+    });
+    const already = draft.guides.find((x) => x.guide_id === g.id && !x.is_escort && (x.from_routing_days ?? []).includes(day));
+    if (already) {
+      // toggle off
+      set({ guides: cleared.filter((x) => x.id !== already.id) });
     } else {
-      set({ guides: [...draft.guides, {
-        id: uid(), guide_id: guideId, days: 1, guides: 1, rate, from_routing_days: [day],
+      set({ guides: [...cleared, {
+        id: uid(), guide_id: g.id, days: 1, guides: 1, rate: rateForGuide(g), from_routing_days: [day],
       }] });
     }
+    // dayCityIds/cityGuideIds unused warning suppression
+    void cityGuideIds;
   };
 
-  const patch = (lineId: string, p: Partial<typeof draft.guides[number]>) => {
-    set({ guides: draft.guides.map((x) => x.id === lineId ? { ...x, ...p } : x) });
+  const toggleEscort = (day: number) => {
+    const existing = findEscort(day);
+    if (existing) set({ guides: draft.guides.filter((x) => x.id !== existing.id) });
+    else set({ guides: [...draft.guides, { id: uid(), guide_id: "", days: 1, guides: 1, rate: 5000, is_escort: true, from_routing_days: [day] }] });
   };
 
-  const unassigned = draft.guides.filter((g) => !(g.from_routing_days && g.from_routing_days.length > 0));
+  const patch = (id: string, p: Partial<typeof draft.guides[number]>) =>
+    set({ guides: draft.guides.map((x) => x.id === id ? { ...x, ...p } : x) });
+
+  const guideDayTotal = (day: number) =>
+    draft.guides
+      .filter((x) => (x.from_routing_days ?? []).includes(day))
+      .reduce((s, l) => s + l.rate * l.guides * l.days, 0);
+
+  const grandTotal = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0)
+    + (draft.guide_reporting_cost ?? 0);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Guide Charges</h2>
-        <span className="text-xs text-muted-foreground">Synced with Routing — assign guides per itinerary day.</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Language:</span>
+          <Select value={langFilter} onValueChange={setLangFilter}>
+            <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              {availableLanguages.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Badge variant="secondary" className="text-[10px]">Rate applied: {paxTier} Pax</Badge>
+        </div>
       </div>
 
-      {draft.routing.map((r, idx) => {
-        const isLast = idx === draft.routing.length - 1;
-        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
-        const dayGuides = allGuides.filter((g) => destNames.includes(g.destination));
-        const dayLines = draft.guides.filter((x) => (x.from_routing_days ?? []).includes(r.day));
-        const title = dayTitleFor(r, d.cities, isLast);
-        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
+      <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead className="bg-[#F3F4F6] text-[10px] uppercase text-muted-foreground tracking-wide">
+            <tr className="border-b border-[#E5E7EB]">
+              <th className="text-left p-2 w-[60px]">Day</th>
+              <th className="text-left p-2 w-[160px]">Route</th>
+              <th className="text-left p-2">City + Tour</th>
+              <th className="text-left p-2 w-[100px]">Rate (₹)</th>
+              <th className="text-left p-2 w-[120px]">Tour Escort</th>
+              <th className="text-right p-2 w-[100px]">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.routing.map((r, ri) => {
+              const fromDefault = ri === 0 ? draft.departure_city : cityName(draft.routing[ri - 1]?.city_id || "");
+              const dayCities = dayAllCities(r, d.cities, fromDefault);
+              const dayCityIds = dayCities.map((c) => c.id);
+              const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
 
-        return (
-          <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={dayLines.length}>
-            {destNames.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">No destination set for this day.</div>
-            ) : dayGuides.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">
-                No guides available for {destNames.join(", ")}.
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {dayGuides.map((g) => {
-                    const on = findLines(g.id, r.day).length > 0;
-                    const rate = guideRateForPax(g, pax);
-                    const tier = pax <= 5 ? "1-5 pax" : pax <= 14 ? "6-14 pax" : "15+ pax";
-                    const escortLine = draft.guides.find((x) => x.guide_id === g.id && x.is_escort && (x.from_routing_days ?? []).includes(r.day));
-                    const toggleEscort = () => {
-                      if (escortLine) {
-                        set({ guides: draft.guides.filter((x) => x.id !== escortLine.id) });
-                      } else {
-                        set({ guides: [...draft.guides, {
-                          id: uid(), guide_id: g.id, days: 1, guides: 1,
-                          rate: g.escort_rate ?? 5000, is_escort: true, from_routing_days: [r.day],
-                        }] });
-                      }
-                    };
-                    return (
-                      <div key={g.id} className={cn("p-2.5 border rounded-md", on && "border-accent bg-accent/5")}>
-                        <button type="button" onClick={() => toggle(g.id, r.day, rate)} className="w-full text-left">
-                          <div className="flex items-center gap-2">
-                            <Checkbox checked={on} className="pointer-events-none" />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{g.tour_program ?? g.name}</div>
-                              <div className="text-[11px] text-muted-foreground">
-                                Rate: ₹{rate.toLocaleString("en-IN")} ({tier})
-                              </div>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                                  Indian: {g.indian_entry != null ? `₹${g.indian_entry}/pp` : "NA"}
-                                </span>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                                  Inbound: {g.inbound_entry != null ? `₹${g.inbound_entry}/pp` : "NA"}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                        <label className="mt-2 flex items-center gap-2 text-[11px] cursor-pointer select-none">
-                          <Checkbox checked={!!escortLine} onCheckedChange={toggleEscort} />
-                          <span>+ Add Tour Escort: ₹{(g.escort_rate ?? 5000).toLocaleString("en-IN")}/day</span>
+              const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => ({
+                city: c,
+                guides: allGuides.filter((g) => {
+                  const gCity = g.city ?? g.destination;
+                  if (gCity !== c.name) return false;
+                  if (langFilter === "all") return true;
+                  return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
+                }),
+              }));
+              const totalRows = cityGuides.reduce((s, x) => s + Math.max(x.guides.length, 1), 0);
+              if (totalRows === 0) {
+                return (
+                  <tr key={ri} className="border-b border-[#E5E7EB]">
+                    <td className="p-2 font-semibold">Day {r.day}</td>
+                    <td className="p-2 text-muted-foreground">{routeLabel}</td>
+                    <td colSpan={4} className="p-2 text-muted-foreground italic">No guides available.</td>
+                  </tr>
+                );
+              }
+
+              const escort = findEscort(r.day);
+              const rowNodes: React.ReactElement[] = [];
+              let firstCell = true;
+              cityGuides.forEach(({ city, guides }) => {
+                if (guides.length === 0) {
+                  rowNodes.push(
+                    <tr key={`${ri}-${city.id}-empty`} className="border-b border-[#E5E7EB]">
+                      {firstCell && (
+                        <>
+                          <td rowSpan={totalRows + 1} className="p-2 font-semibold align-top">Day {r.day}</td>
+                          <td rowSpan={totalRows + 1} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
+                        </>
+                      )}
+                      <td colSpan={4} className="p-2 text-muted-foreground italic text-[11px]">{city.name}: no guides</td>
+                    </tr>,
+                  );
+                  firstCell = false;
+                  return;
+                }
+                guides.forEach((g, gi) => {
+                  const line = findLine(g.id, r.day);
+                  const on = !!line;
+                  const rate = rateForGuide(g);
+                  rowNodes.push(
+                    <tr key={`${ri}-${g.id}`} className="border-b border-[#E5E7EB] bg-white">
+                      {firstCell && (
+                        <>
+                          <td rowSpan={totalRows + 1} className="p-2 font-semibold align-top">Day {r.day}</td>
+                          <td rowSpan={totalRows + 1} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
+                        </>
+                      )}
+                      <td className="p-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name={`d${r.day}-${city.id}`} checked={on}
+                            onChange={() => selectGuide(g, r.day, dayCityIds)} />
+                          <span>
+                            {gi === 0 && <span className="text-[10px] text-muted-foreground">{city.name}</span>}
+                            <span className="block text-sm font-medium">{g.tour_program ?? g.name}</span>
+                          </span>
                         </label>
-                      </div>
-                    );
-                  })}
-                </div>
+                      </td>
+                      <td className="p-2">
+                        {on && line ? (
+                          <Input type="number" min={0} className="h-7 w-24 text-xs" value={line.rate}
+                            onChange={(e) => patch(line.id, { rate: parseFloat(e.target.value) || 0 })} />
+                        ) : <span className="text-[11px] text-muted-foreground">₹{rate.toLocaleString("en-IN")}</span>}
+                      </td>
+                      {gi === 0 && firstCell ? (
+                        <td rowSpan={totalRows} className="p-2 align-top">
+                          <label className="flex items-center gap-2 text-[11px] cursor-pointer">
+                            <Checkbox checked={!!escort} onCheckedChange={() => toggleEscort(r.day)} />
+                            <span>+ Escort</span>
+                          </label>
+                          {escort && (
+                            <Input type="number" min={0} className="h-7 w-20 text-xs mt-1" value={escort.rate}
+                              onChange={(e) => patch(escort.id, { rate: parseFloat(e.target.value) || 0 })} />
+                          )}
+                        </td>
+                      ) : null}
+                      <td className="p-2 text-right tabular-nums font-medium">{on && line ? inr(line.rate * line.days * line.guides) : "—"}</td>
+                    </tr>,
+                  );
+                  firstCell = false;
+                });
+              });
+              rowNodes.push(
+                <tr key={`${ri}-sub`} className="bg-muted/20 border-b border-[#E5E7EB]">
+                  <td colSpan={4} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Day {r.day} Subtotal</td>
+                  <td className="p-2 text-right tabular-nums font-semibold">{inr(guideDayTotal(r.day))}</td>
+                </tr>,
+              );
+              return <>{rowNodes}</>;
+            })}
+          </tbody>
+        </table>
+      </div>
 
-                {dayLines.length > 0 && (
-                  <div className="pt-2 space-y-2">
-                    {dayLines.map((g) => {
-                      const gm = allGuides.find((x) => x.id === g.guide_id);
-                      const label = g.is_escort
-                        ? `${gm?.tour_program ?? gm?.name ?? "—"} (Escort)`
-                        : (gm?.tour_program ?? gm?.name ?? "—");
-                      return (
-                        <Card key={g.id} className="p-2 grid grid-cols-[1fr_70px_70px_100px_100px_36px] gap-2 items-end">
-                          <div className="text-xs">
-                            <Label className="text-[10px]">{g.is_escort ? "Escort" : "Guide"}</Label>
-                            <div className="text-sm font-medium truncate">{label}</div>
-                          </div>
-                          <div><Label className="text-[10px]">Days</Label><Input type="number" min={1} value={g.days}
-                            onChange={(e) => patch(g.id, { days: parseInt(e.target.value) || 1 })} /></div>
-                          <div><Label className="text-[10px]">{g.is_escort ? "#" : "# Guides"}</Label><Input type="number" min={1} value={g.guides}
-                            onChange={(e) => patch(g.id, { guides: parseInt(e.target.value) || 1 })} /></div>
-                          <div><Label className="text-[10px]">Rate/day</Label><Input type="number" value={g.rate}
-                            onChange={(e) => patch(g.id, { rate: parseFloat(e.target.value) || 0 })} /></div>
-                          <div className="text-right"><Label className="text-[10px]">Total</Label>
-                            <div className="text-sm font-semibold pt-1 tabular-nums">{inr(g.rate * g.guides * g.days)}</div>
-                          </div>
-                          <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </DaySection>
-        );
-      })}
+      <Card className="p-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <Label className="text-xs">Reporting Cost (₹)</Label>
+          <Input type="number" min={0} value={draft.guide_reporting_cost ?? 0}
+            onChange={(e) => set({ guide_reporting_cost: parseFloat(e.target.value) || 0 })} />
+          <div className="text-[10px] text-muted-foreground mt-1">Cost for guide travel/reporting from a different location.</div>
+        </div>
+        <div className="md:col-span-2">
+          <Label className="text-xs">Remarks (optional)</Label>
+          <Input value={draft.guide_remarks ?? ""} onChange={(e) => set({ guide_remarks: e.target.value })} />
+        </div>
+      </Card>
 
-      {unassigned.length > 0 && (
-        <Card className="p-3 space-y-2">
-          <div className="text-xs font-semibold uppercase text-muted-foreground">Unassigned Guides (legacy)</div>
-          {unassigned.map((g, i) => {
-            const gm = allGuides.find((x) => x.id === g.guide_id);
-            return (
-              <Card key={g.id} className="p-2 grid grid-cols-[1fr_70px_70px_100px_100px_36px] gap-2 items-end">
-                <div className="text-xs">
-                  <Label className="text-[10px]">Guide</Label>
-                  <Select value={g.guide_id} onValueChange={(v) => {
-                    const go = allGuides.find((x) => x.id === v);
-                    patch(g.id, { guide_id: v, rate: go ? guideRateForPax(go, pax) : g.rate });
-                  }}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue>{gm?.name || "Select"}</SelectValue></SelectTrigger>
-                    <SelectContent>
-                      {allGuides.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div><Label className="text-[10px]">Days</Label><Input type="number" min={1} value={g.days}
-                  onChange={(e) => patch(g.id, { days: parseInt(e.target.value) || 1 })} /></div>
-                <div><Label className="text-[10px]"># Guides</Label><Input type="number" min={1} value={g.guides}
-                  onChange={(e) => patch(g.id, { guides: parseInt(e.target.value) || 1 })} /></div>
-                <div><Label className="text-[10px]">Rate/day</Label><Input type="number" value={g.rate}
-                  onChange={(e) => patch(g.id, { rate: parseFloat(e.target.value) || 0 })} /></div>
-                <div className="text-right"><Label className="text-[10px]">Total</Label>
-                  <div className="text-sm font-semibold pt-1 tabular-nums">{inr(g.rate * g.guides * g.days)}</div>
-                </div>
-                <Button size="icon" variant="ghost" onClick={() => set({ guides: draft.guides.filter((x) => x.id !== g.id) })}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </Card>
-            );
-          })}
-        </Card>
-      )}
+      <div className="text-right font-semibold">
+        Guide Total: {inr(grandTotal)}
+        {draft.guide_reporting_cost ? <span className="text-xs text-muted-foreground ml-2">(incl. reporting ₹{draft.guide_reporting_cost.toLocaleString("en-IN")})</span> : null}
+      </div>
     </div>
   );
 }
+
 
 
 // ============================================================
