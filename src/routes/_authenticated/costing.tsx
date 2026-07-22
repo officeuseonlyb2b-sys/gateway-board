@@ -1086,9 +1086,16 @@ function Step9({ draft, set }: StepProps) {
                         if (dt === "multi_dest") return "full_day";
                         return dt || "full_day";
                       };
-                      const selectedIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                      const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
                         : (r.to_city_id ? [r.to_city_id] : []);
+                      // Build combined city list: FROM + TO(s) + OVERNIGHT (deduped)
+                      const fromName = r.from_city ?? fromDefault;
+                      const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
+                      const allIds: string[] = [];
+                      if (fromId) allIds.push(fromId);
+                      toIds.forEach((id) => { if (id && !allIds.includes(id)) allIds.push(id); });
+                      if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
                       const DayTypeOptions = (
                         <>
                           <SelectItem value="am_half_day">AM Half Day</SelectItem>
@@ -1097,16 +1104,17 @@ function Step9({ draft, set }: StepProps) {
                           <SelectItem value="full_day_excursion">Full Day Excursion</SelectItem>
                         </>
                       );
-                      if (selectedIds.length >= 2) {
+                      if (allIds.length >= 2) {
                         const map = r.day_types_by_city || {};
                         return (
                           <div className="flex flex-col gap-1">
-                            {selectedIds.map((cid) => {
+                            {allIds.map((cid) => {
                               const cur = normalizeDayType(map[cid] || r.day_type);
+                              const nm = cityName(cid) || cid;
                               return (
                                 <div key={cid} className="flex items-center gap-1.5">
-                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={cityName(cid) || cid}>
-                                    {cityName(cid) || cid}
+                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={nm}>
+                                    {nm}
                                   </span>
                                   <Select
                                     value={cur}
@@ -1127,9 +1135,9 @@ function Step9({ draft, set }: StepProps) {
                       const applyDayType = (v: NonNullable<RoutingDay["day_type"]>) => {
                         const excursion = v === "excursion" || v === "full_day_excursion";
                         if (excursion && !isLast) {
-                          const fromName = r.from_city ?? fromDefault;
-                          const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
-                          updateRow(i, { day_type: v, city_id: fromId });
+                          const fnm = r.from_city ?? fromDefault;
+                          const fid = d.cities.find((c) => c.name === fnm)?.id || "";
+                          updateRow(i, { day_type: v, city_id: fid });
                         } else {
                           updateRow(i, { day_type: v });
                         }
@@ -1142,6 +1150,7 @@ function Step9({ draft, set }: StepProps) {
                           <SelectContent>{DayTypeOptions}</SelectContent>
                         </Select>
                       );
+
                     })()}
                   </td>
                 </tr>
