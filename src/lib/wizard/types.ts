@@ -116,6 +116,7 @@ export interface ActivityLine {
   custom_name?: string;
   qty: number;
   rate: number;
+  pricing_mode?: "per_person" | "slab"; // NEW: chosen pricing mode in Step 10
   pax_ranges?: PaxRangePrice[];   // Brochure only
   from_routing_days?: number[];    // day numbers that added this via Step 9
 }
