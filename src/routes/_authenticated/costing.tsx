@@ -2120,14 +2120,15 @@ function Step14({ draft, set }: StepProps) {
   const d = useDB();
   const items = d.miscellaneous_items.filter((x) => x.is_active);
   const pax = totalPax(draft);
+  const nights = draft.nights || 1;
+
+  const effType = (m: typeof items[number]) => (m.pricing_type ?? m.unit) as "per_person" | "per_day" | "fixed" | "slab";
 
   const toggle = (m: typeof items[number]) => {
     const existing = draft.misc.find((x) => x.item_id === m.id);
-    if (existing) set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
-    else {
-      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? draft.nights : 1;
-      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit }] });
-    }
+    if (existing) { set({ misc: draft.misc.filter((x) => x.id !== existing.id) }); return; }
+    const info = miscRateForPax(m, pax, nights);
+    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: info.qty, rate: info.rate, unit: m.unit }] });
   };
 
   return (
@@ -2146,10 +2147,13 @@ function Step14({ draft, set }: StepProps) {
           const line = draft.misc.find((x) => x.item_id === m.id);
           const on = !!line;
           const fromDays = line?.from_routing_days ?? [];
+          const type = effType(m);
+          const info = miscRateForPax(m, pax, nights);
+          const qtyEditable = type === "per_person" || type === "per_day";
           return (
-            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
+            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                   {m.name}
                   {fromDays.length > 0 && (
@@ -2157,15 +2161,28 @@ function Step14({ draft, set }: StepProps) {
                       From Day {fromDays.join(", ")}
                     </span>
                   )}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{info.label}</span>
                 </div>
-                <div className="text-xs text-muted-foreground">₹{m.rate} / {m.unit}</div>
+                <div className="text-xs text-muted-foreground">
+                  {type === "slab"
+                    ? `₹${info.rate.toLocaleString("en-IN")} · auto-selected for ${pax} pax`
+                    : `₹${m.rate.toLocaleString("en-IN")} / ${type.replace("_", " ")}`}
+                </div>
               </div>
 
               {on && line && (
                 <>
-                  <div><Label className="text-xs">Qty</Label><Input type="number" value={line.qty} className="w-20"
-                    onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })} /></div>
-                  <div className="w-24 text-right font-semibold">{inr(line.qty * line.rate)}</div>
+                  <div>
+                    <Label className="text-xs">Qty</Label>
+                    <Input
+                      type="number"
+                      value={line.qty}
+                      disabled={!qtyEditable}
+                      className="w-20"
+                      onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })}
+                    />
+                  </div>
+                  <div className="w-28 text-right font-semibold tabular-nums">{inr(line.qty * line.rate)}</div>
                 </>
               )}
             </div>
@@ -2183,9 +2200,13 @@ function Step14({ draft, set }: StepProps) {
           </span>
         </div>
       ))}
+      <div className="text-right font-semibold">
+        Misc Total: {inr(draft.misc.reduce((s, l) => s + l.rate * l.qty, 0))}
+      </div>
     </div>
   );
 }
+
 
 // ============================================================
 // STEP 15 — Accommodation
