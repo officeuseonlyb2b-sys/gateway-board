@@ -1075,12 +1075,11 @@ function Step9({ draft, set }: StepProps) {
                       )}
                     </div>
                   </td>
-                  <td className="p-2 align-middle w-[200px]">
+                  <td className="p-2 align-middle w-[240px]">
                     {(() => {
                       const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
                         : (r.to_city_id ? [r.to_city_id] : []);
-                      // Build combined city list: FROM + TO(s) + OVERNIGHT (deduped)
                       const fromName = r.from_city ?? fromDefault;
                       const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
                       const allIds: string[] = [];
@@ -1089,9 +1088,6 @@ function Step9({ draft, set }: StepProps) {
                       if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
                       const getTourOptionsForCity = (routingCityId: string) => {
                         if (!routingCityId) return [] as Array<{ id: string; title: string }>;
-                        // d.cities (routing/hotel table) has different IDs than d.destination_cities.
-                        // Bridge: resolve the name from d.cities, then match destination_cities by
-                        // normalized name (trim + lowercase) to get the correct destination city ID.
                         const cityNameRaw = d.cities.find((c) => c.id === routingCityId)?.name ?? "";
                         const normalized = cityNameRaw.trim().toLowerCase();
                         if (!normalized) return [] as Array<{ id: string; title: string }>;
@@ -1103,60 +1099,66 @@ function Step9({ draft, set }: StepProps) {
                           .filter((tour) => tour.city_id === destCity.id)
                           .sort((a, b) => a.title.localeCompare(b.title));
                       };
-                      if (allIds.length >= 2) {
-                        const tourMap = r.tour_titles_by_city || {};
-                        return (
-                          <div className="flex flex-col gap-1">
-                            {allIds.map((cid) => {
-                              const cityTours = getTourOptionsForCity(cid);
-                              const currentTour = tourMap[cid] || "";
-                              const nm = cityName(cid) || cid;
-                              return (
-                                <div key={cid} className="flex items-center gap-1.5">
-                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={nm}>
-                                    {nm}
-                                  </span>
-                                  <Select
-                                    value={currentTour}
-                                    onValueChange={(v) => {
-                                      updateRow(i, {
-                                        tour_titles_by_city: { ...tourMap, [cid]: v },
-                                      });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 text-[11px] flex-1"><SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} /></SelectTrigger>
-                                    <SelectContent>
-                                      {cityTours.map((tour) => (
-                                        <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
+                      const selectedMap = r.tours_selected_by_city || {};
+                      const toggle = (cid: string, title: string) => {
+                        const list = selectedMap[cid] || [];
+                        const next = list.includes(title)
+                          ? list.filter((t) => t !== title)
+                          : [...list, title];
+                        updateRow(i, {
+                          tours_selected_by_city: { ...selectedMap, [cid]: next },
+                        });
+                      };
+                      if (allIds.length === 0) {
+                        return <span className="text-[11px] text-muted-foreground italic">Set FROM/TO first</span>;
                       }
-                      const selectedCityId = toIds[0] || "";
-                      const cityTours = getTourOptionsForCity(selectedCityId);
                       return (
-                        <Select value={r.tour_title || ""} onValueChange={(v) => {
-                          updateRow(i, { tour_title: v });
-                        }}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {cityTours.map((tour) => (
-                              <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex flex-col gap-1">
+                          {allIds.map((cid) => {
+                            const cityTours = getTourOptionsForCity(cid);
+                            const selected = selectedMap[cid] || [];
+                            const nm = cityName(cid) || cid;
+                            return (
+                              <Popover key={cid}>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="h-7 w-full flex items-center gap-1.5 text-[11px] px-2 border rounded hover:bg-muted text-left"
+                                  >
+                                    <span className="text-muted-foreground truncate w-[64px]" title={nm}>{nm}</span>
+                                    <span className="flex-1 truncate">
+                                      {selected.length === 0
+                                        ? (cityTours.length ? "Select tours…" : "No tours")
+                                        : `${selected.length} tour${selected.length === 1 ? "" : "s"}`}
+                                    </span>
+                                    <ChevronDown className="h-3 w-3 shrink-0" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-72 p-2 max-h-72 overflow-auto">
+                                  {cityTours.length === 0 ? (
+                                    <div className="text-xs text-muted-foreground p-2">
+                                      No tours defined for {nm}.
+                                    </div>
+                                  ) : cityTours.map((tour) => (
+                                    <label key={tour.id} className="flex items-start gap-2 py-1 px-1 rounded hover:bg-muted cursor-pointer text-xs">
+                                      <Checkbox
+                                        checked={selected.includes(tour.title)}
+                                        onCheckedChange={() => toggle(cid, tour.title)}
+                                        className="mt-0.5"
+                                      />
+                                      <span className="flex-1">{tour.title}</span>
+                                    </label>
+                                  ))}
+                                </PopoverContent>
+                              </Popover>
+                            );
+                          })}
+                        </div>
                       );
-
                     })()}
                   </td>
                 </tr>
+
                 {r.travel_by && r.transport_expanded && (
                   <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
                     <td colSpan={8} className="p-3">
