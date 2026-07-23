@@ -1942,15 +1942,21 @@ function Step13({ draft, set }: StepProps) {
               const dayCityIds = dayCities.map((c) => c.id);
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
 
-              const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => ({
-                city: c,
-                guides: allGuides.filter((g) => {
-                  const gCity = g.city ?? g.destination;
-                  if (gCity !== c.name) return false;
-                  if (langFilter === "all") return true;
-                  return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
-                }),
-              }));
+              const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => {
+                const selectedTitles = (r.tours_selected_by_city?.[c.id])
+                  ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
+                return {
+                  city: c,
+                  guides: selectedTitles.length === 0 ? [] : allGuides.filter((g) => {
+                    const gCity = g.city ?? g.destination;
+                    if (gCity !== c.name) return false;
+                    const gTour = g.tour_program ?? g.name;
+                    if (!selectedTitles.includes(gTour)) return false;
+                    if (langFilter === "all") return true;
+                    return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
+                  }),
+                };
+              });
               const totalRows = cityGuides.reduce((s, x) => s + Math.max(x.guides.length, 1), 0);
               if (totalRows === 0) {
                 return (
