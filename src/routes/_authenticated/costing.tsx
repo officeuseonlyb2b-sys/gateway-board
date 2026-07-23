@@ -1722,8 +1722,16 @@ function Step12({ draft, set }: StepProps) {
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
               const rows: { city: CityRef; site: typeof d.entrance_sites[number] }[] = [];
               dayCities.forEach((c) => {
+                // Filter by tours selected in Step 9 routing for this city
+                const selectedTitles = (r.tours_selected_by_city?.[c.id])
+                  ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
+                if (selectedTitles.length === 0) return;
                 d.entrance_sites
-                  .filter((s) => s.is_active && d.entrance_cities.find((ec) => ec.name === c.name && ec.id === s.city_id))
+                  .filter((s) =>
+                    s.is_active
+                    && d.entrance_cities.some((ec) => ec.name === c.name && ec.id === s.city_id)
+                    && selectedTitles.includes(s.site_name)
+                  )
                   .forEach((s) => rows.push({ city: c, site: s }));
               });
               if (rows.length === 0) {
