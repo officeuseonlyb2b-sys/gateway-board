@@ -78,7 +78,8 @@ export interface RoutingDay {
   to_city_ids?: string[];   // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
 
   tour_title?: string;      // selected destination tour title for the row
-  tour_titles_by_city?: Record<string, string>; // per-destination tour title when multiple TO cities selected
+  tour_titles_by_city?: Record<string, string>; // legacy single tour per city
+  tours_selected_by_city?: Record<string, string[]>; // NEW multi-select: routing city id → array of tour titles
   from_city?: string;       // free-text / city id, day 1 auto from departure_city
   to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
   travel_by?: "Road" | "Train" | "Flight" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
@@ -115,6 +116,7 @@ export interface ActivityLine {
   custom_name?: string;
   qty: number;
   rate: number;
+  pricing_mode?: "per_person" | "slab"; // NEW: chosen pricing mode in Step 10
   pax_ranges?: PaxRangePrice[];   // Brochure only
   from_routing_days?: number[];    // day numbers that added this via Step 9
 }

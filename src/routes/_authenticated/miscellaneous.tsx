@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ShoppingBag } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Pencil, Trash2, ShoppingBag, X } from "lucide-react";
 import { toast } from "sonner";
-import { db, useDB, type MiscellaneousItem, type MiscUnit } from "@/lib/mock-store";
+import {
+  db, useDB,
+  type MiscellaneousItem, type MiscUnit, type MiscPricingType, type MiscPriceRange,
+} from "@/lib/mock-store";
 import { notify } from "@/lib/notify";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,13 +13,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  RadioGroup, RadioGroupItem,
+} from "@/components/ui/radio-group";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -27,11 +32,27 @@ export const Route = createFileRoute("/_authenticated/miscellaneous")({
   component: MiscPage,
 });
 
-const UNIT_LABELS: Record<MiscUnit, string> = {
+const TYPE_LABEL: Record<MiscPricingType, string> = {
   per_person: "Per Person",
   per_day: "Per Day",
   fixed: "Fixed",
+  slab: "Slab (Range)",
 };
+
+function itemType(it: MiscellaneousItem): MiscPricingType {
+  return (it.pricing_type ?? it.unit) as MiscPricingType;
+}
+
+function rateSummary(it: MiscellaneousItem): string {
+  const t = itemType(it);
+  if (t === "slab") {
+    const ranges = it.price_ranges ?? [];
+    if (!ranges.length) return "—";
+    const per = it.slab_is_per_person ? " · per pp" : " · total";
+    return `${ranges.length} slab${ranges.length === 1 ? "" : "s"}${per}`;
+  }
+  return inr(it.rate);
+}
 
 function MiscPage() {
   const data = useDB();
@@ -44,7 +65,6 @@ function MiscPage() {
 
   function openNew() { setEditing(null); setOpen(true); }
   function openEdit(it: MiscellaneousItem) { setEditing(it); setOpen(true); }
-
   function onDelete(it: MiscellaneousItem) {
     if (!confirm(`Delete "${it.name}"?`)) return;
     db.deleteMisc(it.id); toast.success("Item deleted.");
@@ -65,7 +85,7 @@ function MiscPage() {
           <div className="p-12 text-center">
             <ShoppingBag className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
             <div className="font-medium">No miscellaneous items yet</div>
-            <div className="text-sm text-muted-foreground mt-1 mb-4">Add your first add-on item to include in tour packages.</div>
+            <div className="text-sm text-muted-foreground mt-1 mb-4">Add your first add-on item.</div>
             <Button onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Add Item</Button>
           </div>
         ) : (
@@ -75,7 +95,7 @@ function MiscPage() {
                 <TableHead>Item Name</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Rate</TableHead>
-                <TableHead>Unit</TableHead>
+                <TableHead>Pricing Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
@@ -85,8 +105,8 @@ function MiscPage() {
                 <TableRow key={it.id}>
                   <TableCell className="font-medium">{it.name}</TableCell>
                   <TableCell className="text-muted-foreground max-w-md">{it.description || "—"}</TableCell>
-                  <TableCell className="tabular-nums">{inr(it.rate)}</TableCell>
-                  <TableCell>{UNIT_LABELS[it.unit]}</TableCell>
+                  <TableCell className="tabular-nums">{rateSummary(it)}</TableCell>
+                  <TableCell>{TYPE_LABEL[itemType(it)]}</TableCell>
                   <TableCell>
                     <Switch checked={it.is_active} onCheckedChange={(v) => db.updateMisc(it.id, { is_active: v })} />
                   </TableCell>
@@ -112,36 +132,65 @@ function MiscDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [rate, setRate] = useState<number>(0);
-  const [unit, setUnit] = useState<MiscUnit>("per_person");
+  const [type, setType] = useState<MiscPricingType>("per_person");
+  const [ranges, setRanges] = useState<MiscPriceRange[]>([]);
+  const [slabPerPerson, setSlabPerPerson] = useState(false);
   const [active, setActive] = useState(true);
 
-  useMemo(() => {
-    if (open) {
-      setName(editing?.name ?? "");
-      setDescription(editing?.description ?? "");
-      setRate(editing?.rate ?? 0);
-      setUnit(editing?.unit ?? "per_person");
-      setActive(editing?.is_active ?? true);
-    }
+  useEffect(() => {
+    if (!open) return;
+    setName(editing?.name ?? "");
+    setDescription(editing?.description ?? "");
+    setRate(editing?.rate ?? 0);
+    setType((editing?.pricing_type ?? editing?.unit ?? "per_person") as MiscPricingType);
+    setRanges(editing?.price_ranges ?? [
+      { from_pax: 1, to_pax: 6, price: 0 },
+      { from_pax: 7, to_pax: 20, price: 0 },
+    ]);
+    setSlabPerPerson(editing?.slab_is_per_person ?? false);
+    setActive(editing?.is_active ?? true);
   }, [open, editing]);
+
+  function updateRange(i: number, patch: Partial<MiscPriceRange>) {
+    setRanges((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  }
+  function addRange() {
+    const last = ranges[ranges.length - 1];
+    const nextFrom = last ? last.to_pax + 1 : 1;
+    setRanges([...ranges, { from_pax: nextFrom, to_pax: nextFrom + 5, price: 0 }]);
+  }
+  function removeRange(i: number) {
+    setRanges((prev) => prev.filter((_, idx) => idx !== i));
+  }
 
   function save() {
     if (!name.trim()) return toast.error("Item name is required.");
+    const unit: MiscUnit = type === "slab" ? "fixed" : type;
+    const payload = {
+      name: name.trim(),
+      description,
+      rate,
+      unit,
+      pricing_type: type,
+      price_ranges: type === "slab" ? ranges : undefined,
+      slab_is_per_person: type === "slab" ? slabPerPerson : undefined,
+      is_active: active,
+    };
     if (editing) {
-      db.updateMisc(editing.id, { name: name.trim(), description, rate, unit, is_active: active });
+      db.updateMisc(editing.id, payload);
       toast.success("Item updated.");
       notify.info("Item Updated", `${name.trim()} has been updated.`);
     } else {
-      db.addMisc({ name: name.trim(), description, rate, unit, is_active: active });
+      db.addMisc(payload);
       toast.success("Item added.");
-      notify.success("Item Added", `${name.trim()} has been added to miscellaneous items.`);
+      notify.success("Item Added", `${name.trim()} has been added.`);
     }
     onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{editing ? "Edit Item" : "Add Item"}</DialogTitle>
         </DialogHeader>
@@ -154,23 +203,57 @@ function MiscDialog({
             <Label>Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          <div>
+            <Label>Pricing Type</Label>
+            <RadioGroup value={type} onValueChange={(v) => setType(v as MiscPricingType)} className="grid grid-cols-4 gap-2 mt-1">
+              {(["per_person", "per_day", "fixed", "slab"] as MiscPricingType[]).map((t) => (
+                <label key={t} className="flex items-center gap-2 text-sm border rounded-md p-2 cursor-pointer">
+                  <RadioGroupItem value={t} /> {TYPE_LABEL[t]}
+                </label>
+              ))}
+            </RadioGroup>
+          </div>
+
+          {type !== "slab" ? (
             <div>
               <Label>Rate (₹)</Label>
               <Input type="number" min={0} value={rate} onChange={(e) => setRate(+e.target.value || 0)} />
             </div>
-            <div>
-              <Label>Unit</Label>
-              <Select value={unit} onValueChange={(v) => setUnit(v as MiscUnit)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="per_person">Per Person</SelectItem>
-                  <SelectItem value="per_day">Per Day</SelectItem>
-                  <SelectItem value="fixed">Fixed</SelectItem>
-                </SelectContent>
-              </Select>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Pax Range Slabs</Label>
+                <Button size="sm" variant="outline" onClick={addRange}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Range
+                </Button>
+              </div>
+              <div className="border rounded-md divide-y">
+                <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/50 text-[10px] uppercase text-muted-foreground">
+                  <div>From Pax</div><div>To Pax</div><div>Price (₹)</div><div></div>
+                </div>
+                {ranges.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 items-center">
+                    <Input type="number" min={1} value={r.from_pax} onChange={(e) => updateRange(i, { from_pax: +e.target.value || 1 })} className="h-8" />
+                    <Input type="number" min={1} value={r.to_pax} onChange={(e) => updateRange(i, { to_pax: +e.target.value || 1 })} className="h-8" />
+                    <Input type="number" min={0} value={r.price} onChange={(e) => updateRange(i, { price: +e.target.value || 0 })} className="h-8" />
+                    <Button size="icon" variant="ghost" onClick={() => removeRange(i)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <RadioGroup value={slabPerPerson ? "pp" : "total"} onValueChange={(v) => setSlabPerPerson(v === "pp")} className="flex gap-4 pt-1">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <RadioGroupItem value="total" /> Rate is total for group
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <RadioGroupItem value="pp" /> Rate is per person
+                </label>
+              </RadioGroup>
             </div>
-          </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={active} onCheckedChange={setActive} /> Active
           </label>

@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax, GUIDE_LANGUAGES, guideConfiguredLanguages, type GuideLanguage } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan, guideRateForPax, activityRateForPax, GUIDE_LANGUAGES, guideConfiguredLanguages, miscRateForPax, type GuideLanguage } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import {
   useDraft, writeDraft, clearDraft, initDraft, loadDraft,
@@ -1075,12 +1075,11 @@ function Step9({ draft, set }: StepProps) {
                       )}
                     </div>
                   </td>
-                  <td className="p-2 align-middle w-[200px]">
+                  <td className="p-2 align-middle w-[240px]">
                     {(() => {
                       const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
                         ? r.to_city_ids
                         : (r.to_city_id ? [r.to_city_id] : []);
-                      // Build combined city list: FROM + TO(s) + OVERNIGHT (deduped)
                       const fromName = r.from_city ?? fromDefault;
                       const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
                       const allIds: string[] = [];
@@ -1089,9 +1088,6 @@ function Step9({ draft, set }: StepProps) {
                       if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
                       const getTourOptionsForCity = (routingCityId: string) => {
                         if (!routingCityId) return [] as Array<{ id: string; title: string }>;
-                        // d.cities (routing/hotel table) has different IDs than d.destination_cities.
-                        // Bridge: resolve the name from d.cities, then match destination_cities by
-                        // normalized name (trim + lowercase) to get the correct destination city ID.
                         const cityNameRaw = d.cities.find((c) => c.id === routingCityId)?.name ?? "";
                         const normalized = cityNameRaw.trim().toLowerCase();
                         if (!normalized) return [] as Array<{ id: string; title: string }>;
@@ -1103,60 +1099,66 @@ function Step9({ draft, set }: StepProps) {
                           .filter((tour) => tour.city_id === destCity.id)
                           .sort((a, b) => a.title.localeCompare(b.title));
                       };
-                      if (allIds.length >= 2) {
-                        const tourMap = r.tour_titles_by_city || {};
-                        return (
-                          <div className="flex flex-col gap-1">
-                            {allIds.map((cid) => {
-                              const cityTours = getTourOptionsForCity(cid);
-                              const currentTour = tourMap[cid] || "";
-                              const nm = cityName(cid) || cid;
-                              return (
-                                <div key={cid} className="flex items-center gap-1.5">
-                                  <span className="text-[11px] text-muted-foreground truncate w-[70px]" title={nm}>
-                                    {nm}
-                                  </span>
-                                  <Select
-                                    value={currentTour}
-                                    onValueChange={(v) => {
-                                      updateRow(i, {
-                                        tour_titles_by_city: { ...tourMap, [cid]: v },
-                                      });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 text-[11px] flex-1"><SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} /></SelectTrigger>
-                                    <SelectContent>
-                                      {cityTours.map((tour) => (
-                                        <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
+                      const selectedMap = r.tours_selected_by_city || {};
+                      const toggle = (cid: string, title: string) => {
+                        const list = selectedMap[cid] || [];
+                        const next = list.includes(title)
+                          ? list.filter((t) => t !== title)
+                          : [...list, title];
+                        updateRow(i, {
+                          tours_selected_by_city: { ...selectedMap, [cid]: next },
+                        });
+                      };
+                      if (allIds.length === 0) {
+                        return <span className="text-[11px] text-muted-foreground italic">Set FROM/TO first</span>;
                       }
-                      const selectedCityId = toIds[0] || "";
-                      const cityTours = getTourOptionsForCity(selectedCityId);
                       return (
-                        <Select value={r.tour_title || ""} onValueChange={(v) => {
-                          updateRow(i, { tour_title: v });
-                        }}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder={cityTours.length > 0 ? "Select tour…" : "No tours for city"} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {cityTours.map((tour) => (
-                              <SelectItem key={tour.id} value={tour.title}>{tour.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex flex-col gap-1">
+                          {allIds.map((cid) => {
+                            const cityTours = getTourOptionsForCity(cid);
+                            const selected = selectedMap[cid] || [];
+                            const nm = cityName(cid) || cid;
+                            return (
+                              <Popover key={cid}>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="h-7 w-full flex items-center gap-1.5 text-[11px] px-2 border rounded hover:bg-muted text-left"
+                                  >
+                                    <span className="text-muted-foreground truncate w-[64px]" title={nm}>{nm}</span>
+                                    <span className="flex-1 truncate">
+                                      {selected.length === 0
+                                        ? (cityTours.length ? "Select tours…" : "No tours")
+                                        : `${selected.length} tour${selected.length === 1 ? "" : "s"}`}
+                                    </span>
+                                    <ChevronDown className="h-3 w-3 shrink-0" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-72 p-2 max-h-72 overflow-auto">
+                                  {cityTours.length === 0 ? (
+                                    <div className="text-xs text-muted-foreground p-2">
+                                      No tours defined for {nm}.
+                                    </div>
+                                  ) : cityTours.map((tour) => (
+                                    <label key={tour.id} className="flex items-start gap-2 py-1 px-1 rounded hover:bg-muted cursor-pointer text-xs">
+                                      <Checkbox
+                                        checked={selected.includes(tour.title)}
+                                        onCheckedChange={() => toggle(cid, tour.title)}
+                                        className="mt-0.5"
+                                      />
+                                      <span className="flex-1">{tour.title}</span>
+                                    </label>
+                                  ))}
+                                </PopoverContent>
+                              </Popover>
+                            );
+                          })}
+                        </div>
                       );
-
                     })()}
                   </td>
                 </tr>
+
                 {r.travel_by && r.transport_expanded && (
                   <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
                     <td colSpan={8} className="p-3">
@@ -1560,8 +1562,34 @@ function Step11({ draft, set }: StepProps) {
               const line = findLine(a.id, r.day);
               const on = !!line;
               const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+              const hasSlabs = !!(a.pricing_slabs && a.pricing_slabs.length > 0);
+              const perPersonRate = a.per_person_indian ?? a.per_person_inbound ?? a.price ?? 0;
+              const slabInfo = (() => {
+                if (!hasSlabs) return null;
+                const sorted = [...a.pricing_slabs!].sort((x, y) => x.from_pax - y.from_pax);
+                const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+                  ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
+                return { slab, total: slab.price };
+              })();
+              const mode: "per_person" | "slab" =
+                line?.pricing_mode ?? (hasSlabs ? "slab" : "per_person");
+              const changeMode = (m: "per_person" | "slab") => {
+                if (!line) return;
+                if (m === "slab" && slabInfo) {
+                  set({ activities: draft.activities.map((x) =>
+                    x.id === line.id ? { ...x, pricing_mode: "slab", qty: 1, rate: slabInfo.total } : x
+                  )});
+                } else {
+                  set({ activities: draft.activities.map((x) =>
+                    x.id === line.id ? { ...x, pricing_mode: "per_person", qty: pax || 1, rate: perPersonRate } : x
+                  )});
+                }
+              };
+              const previewRate = mode === "slab" && slabInfo
+                ? slabInfo.total
+                : perPersonRate * (pax || 1);
               return (
-                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3", on && "border-accent bg-accent/5")}>
+                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
                   <Checkbox checked={on} onCheckedChange={() => toggle(a.id, r.day, activityRateForPax(a, pax))} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">
@@ -1569,20 +1597,39 @@ function Step11({ draft, set }: StepProps) {
                     </div>
                     {a.description && <div className="text-[11px] text-muted-foreground truncate">{a.description}</div>}
                   </div>
-                  {on && line && (
+                  {on && line ? (
                     <>
-                      <div>
-                        <Label className="text-[10px]">Qty</Label>
-                        <Input type="number" min={1} value={line.qty} className="w-16 h-8"
-                          onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
+                      <div className="flex items-center gap-3 text-[11px]">
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input type="radio" checked={mode === "per_person"} onChange={() => changeMode("per_person")} />
+                          Per Person
+                        </label>
+                        <label className={cn("flex items-center gap-1", hasSlabs ? "cursor-pointer" : "opacity-40")}>
+                          <input type="radio" checked={mode === "slab"} onChange={() => changeMode("slab")} disabled={!hasSlabs} />
+                          Total (Slab)
+                        </label>
                       </div>
+                      {mode === "per_person" ? (
+                        <div>
+                          <Label className="text-[10px]">Pax</Label>
+                          <Input type="number" min={1} value={line.qty} className="w-16 h-8"
+                            onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
+                        </div>
+                      ) : slabInfo && (
+                        <span className="text-[11px] text-muted-foreground">
+                          Slab {slabInfo.slab.from_pax}-{slabInfo.slab.to_pax} · {inr(slabInfo.total)}
+                          {" "}({inr(slabInfo.total / Math.max(1, pax))}/pp)
+                        </span>
+                      )}
                       <div className="text-sm font-semibold w-24 text-right tabular-nums">{inr(line.rate * line.qty)}</div>
                     </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground w-24 text-right">{inr(previewRate)}</span>
                   )}
-                  {!on && <span className="text-xs text-muted-foreground w-24 text-right">{inr(activityRateForPax(a, pax))}</span>}
                 </div>
               );
             })}
+
           </DaySection>
         );
       })}
@@ -1720,8 +1767,16 @@ function Step12({ draft, set }: StepProps) {
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
               const rows: { city: CityRef; site: typeof d.entrance_sites[number] }[] = [];
               dayCities.forEach((c) => {
+                // Filter by tours selected in Step 9 routing for this city
+                const selectedTitles = (r.tours_selected_by_city?.[c.id])
+                  ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
+                if (selectedTitles.length === 0) return;
                 d.entrance_sites
-                  .filter((s) => s.is_active && d.entrance_cities.find((ec) => ec.name === c.name && ec.id === s.city_id))
+                  .filter((s) =>
+                    s.is_active
+                    && d.entrance_cities.some((ec) => ec.name === c.name && ec.id === s.city_id)
+                    && selectedTitles.includes(s.site_name)
+                  )
                   .forEach((s) => rows.push({ city: c, site: s }));
               });
               if (rows.length === 0) {
@@ -1932,15 +1987,21 @@ function Step13({ draft, set }: StepProps) {
               const dayCityIds = dayCities.map((c) => c.id);
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
 
-              const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => ({
-                city: c,
-                guides: allGuides.filter((g) => {
-                  const gCity = g.city ?? g.destination;
-                  if (gCity !== c.name) return false;
-                  if (langFilter === "all") return true;
-                  return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
-                }),
-              }));
+              const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => {
+                const selectedTitles = (r.tours_selected_by_city?.[c.id])
+                  ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
+                return {
+                  city: c,
+                  guides: selectedTitles.length === 0 ? [] : allGuides.filter((g) => {
+                    const gCity = g.city ?? g.destination;
+                    if (gCity !== c.name) return false;
+                    const gTour = g.tour_program ?? g.name;
+                    if (!selectedTitles.includes(gTour)) return false;
+                    if (langFilter === "all") return true;
+                    return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
+                  }),
+                };
+              });
               const totalRows = cityGuides.reduce((s, x) => s + Math.max(x.guides.length, 1), 0);
               if (totalRows === 0) {
                 return (
@@ -2059,14 +2120,15 @@ function Step14({ draft, set }: StepProps) {
   const d = useDB();
   const items = d.miscellaneous_items.filter((x) => x.is_active);
   const pax = totalPax(draft);
+  const nights = draft.nights || 1;
+
+  const effType = (m: typeof items[number]) => (m.pricing_type ?? m.unit) as "per_person" | "per_day" | "fixed" | "slab";
 
   const toggle = (m: typeof items[number]) => {
     const existing = draft.misc.find((x) => x.item_id === m.id);
-    if (existing) set({ misc: draft.misc.filter((x) => x.id !== existing.id) });
-    else {
-      const qty = m.unit === "per_person" ? pax : m.unit === "per_day" ? draft.nights : 1;
-      set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty, rate: m.rate, unit: m.unit }] });
-    }
+    if (existing) { set({ misc: draft.misc.filter((x) => x.id !== existing.id) }); return; }
+    const info = miscRateForPax(m, pax, nights);
+    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: info.qty, rate: info.rate, unit: m.unit }] });
   };
 
   return (
@@ -2085,10 +2147,13 @@ function Step14({ draft, set }: StepProps) {
           const line = draft.misc.find((x) => x.item_id === m.id);
           const on = !!line;
           const fromDays = line?.from_routing_days ?? [];
+          const type = effType(m);
+          const info = miscRateForPax(m, pax, nights);
+          const qtyEditable = type === "per_person" || type === "per_day";
           return (
-            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3", on && "border-accent bg-accent/5")}>
+            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
               <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                   {m.name}
                   {fromDays.length > 0 && (
@@ -2096,15 +2161,28 @@ function Step14({ draft, set }: StepProps) {
                       From Day {fromDays.join(", ")}
                     </span>
                   )}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{info.label}</span>
                 </div>
-                <div className="text-xs text-muted-foreground">₹{m.rate} / {m.unit}</div>
+                <div className="text-xs text-muted-foreground">
+                  {type === "slab"
+                    ? `₹${info.rate.toLocaleString("en-IN")} · auto-selected for ${pax} pax`
+                    : `₹${m.rate.toLocaleString("en-IN")} / ${type.replace("_", " ")}`}
+                </div>
               </div>
 
               {on && line && (
                 <>
-                  <div><Label className="text-xs">Qty</Label><Input type="number" value={line.qty} className="w-20"
-                    onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })} /></div>
-                  <div className="w-24 text-right font-semibold">{inr(line.qty * line.rate)}</div>
+                  <div>
+                    <Label className="text-xs">Qty</Label>
+                    <Input
+                      type="number"
+                      value={line.qty}
+                      disabled={!qtyEditable}
+                      className="w-20"
+                      onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })}
+                    />
+                  </div>
+                  <div className="w-28 text-right font-semibold tabular-nums">{inr(line.qty * line.rate)}</div>
                 </>
               )}
             </div>
@@ -2122,9 +2200,13 @@ function Step14({ draft, set }: StepProps) {
           </span>
         </div>
       ))}
+      <div className="text-right font-semibold">
+        Misc Total: {inr(draft.misc.reduce((s, l) => s + l.rate * l.qty, 0))}
+      </div>
     </div>
   );
 }
+
 
 // ============================================================
 // STEP 15 — Accommodation
