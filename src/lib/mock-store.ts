@@ -111,14 +111,47 @@ export interface Quote {
 }
 
 export type MiscUnit = "per_person" | "per_day" | "fixed";
+export type MiscPricingType = "per_person" | "per_day" | "fixed" | "slab";
+export interface MiscPriceRange {
+  from_pax: number;
+  to_pax: number;
+  price: number;
+}
 export interface MiscellaneousItem {
   id: string;
   name: string;
   description: string;
   rate: number;
   unit: MiscUnit;
+  // NEW: slab-based pricing (backward compat — unit still populated for legacy code)
+  pricing_type?: MiscPricingType;
+  price_ranges?: MiscPriceRange[];
+  slab_is_per_person?: boolean;
   is_active: boolean;
   created_at: string;
+}
+
+/**
+ * Resolves the effective per-total cost for a miscellaneous item at a given pax count.
+ * Returns { rate, qty, total, label } — qty defaults to 1 for fixed/slab, pax for per_person, nights for per_day.
+ */
+export function miscRateForPax(m: MiscellaneousItem, pax: number, nights: number): {
+  rate: number; qty: number; total: number; label: string;
+} {
+  const type = m.pricing_type ?? m.unit;
+  if (type === "slab" && m.price_ranges && m.price_ranges.length > 0) {
+    const sorted = [...m.price_ranges].sort((a, b) => a.from_pax - b.from_pax);
+    const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+      ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
+    if (m.slab_is_per_person) {
+      const total = slab.price * Math.max(1, pax);
+      return { rate: slab.price, qty: pax, total, label: `${slab.from_pax}-${slab.to_pax} pax · per person` };
+    }
+    return { rate: slab.price, qty: 1, total: slab.price, label: `${slab.from_pax}-${slab.to_pax} pax · total` };
+  }
+  if (type === "per_person") return { rate: m.rate, qty: pax, total: m.rate * pax, label: "Per person" };
+  if (type === "per_day") return { rate: m.rate, qty: nights, total: m.rate * nights, label: "Per day" };
+  return { rate: m.rate, qty: 1, total: m.rate, label: "Fixed" };
 }
 
 export interface EntranceCity {
