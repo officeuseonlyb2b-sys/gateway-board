@@ -1562,8 +1562,34 @@ function Step11({ draft, set }: StepProps) {
               const line = findLine(a.id, r.day);
               const on = !!line;
               const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
+              const hasSlabs = !!(a.pricing_slabs && a.pricing_slabs.length > 0);
+              const perPersonRate = a.per_person_indian ?? a.per_person_inbound ?? a.price ?? 0;
+              const slabInfo = (() => {
+                if (!hasSlabs) return null;
+                const sorted = [...a.pricing_slabs!].sort((x, y) => x.from_pax - y.from_pax);
+                const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+                  ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
+                return { slab, total: slab.price };
+              })();
+              const mode: "per_person" | "slab" =
+                line?.pricing_mode ?? (hasSlabs ? "slab" : "per_person");
+              const changeMode = (m: "per_person" | "slab") => {
+                if (!line) return;
+                if (m === "slab" && slabInfo) {
+                  set({ activities: draft.activities.map((x) =>
+                    x.id === line.id ? { ...x, pricing_mode: "slab", qty: 1, rate: slabInfo.total } : x
+                  )});
+                } else {
+                  set({ activities: draft.activities.map((x) =>
+                    x.id === line.id ? { ...x, pricing_mode: "per_person", qty: pax || 1, rate: perPersonRate } : x
+                  )});
+                }
+              };
+              const previewRate = mode === "slab" && slabInfo
+                ? slabInfo.total
+                : perPersonRate * (pax || 1);
               return (
-                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3", on && "border-accent bg-accent/5")}>
+                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
                   <Checkbox checked={on} onCheckedChange={() => toggle(a.id, r.day, activityRateForPax(a, pax))} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">
@@ -1571,20 +1597,39 @@ function Step11({ draft, set }: StepProps) {
                     </div>
                     {a.description && <div className="text-[11px] text-muted-foreground truncate">{a.description}</div>}
                   </div>
-                  {on && line && (
+                  {on && line ? (
                     <>
-                      <div>
-                        <Label className="text-[10px]">Qty</Label>
-                        <Input type="number" min={1} value={line.qty} className="w-16 h-8"
-                          onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
+                      <div className="flex items-center gap-3 text-[11px]">
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input type="radio" checked={mode === "per_person"} onChange={() => changeMode("per_person")} />
+                          Per Person
+                        </label>
+                        <label className={cn("flex items-center gap-1", hasSlabs ? "cursor-pointer" : "opacity-40")}>
+                          <input type="radio" checked={mode === "slab"} onChange={() => changeMode("slab")} disabled={!hasSlabs} />
+                          Total (Slab)
+                        </label>
                       </div>
+                      {mode === "per_person" ? (
+                        <div>
+                          <Label className="text-[10px]">Pax</Label>
+                          <Input type="number" min={1} value={line.qty} className="w-16 h-8"
+                            onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
+                        </div>
+                      ) : slabInfo && (
+                        <span className="text-[11px] text-muted-foreground">
+                          Slab {slabInfo.slab.from_pax}-{slabInfo.slab.to_pax} · {inr(slabInfo.total)}
+                          {" "}({inr(slabInfo.total / Math.max(1, pax))}/pp)
+                        </span>
+                      )}
                       <div className="text-sm font-semibold w-24 text-right tabular-nums">{inr(line.rate * line.qty)}</div>
                     </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground w-24 text-right">{inr(previewRate)}</span>
                   )}
-                  {!on && <span className="text-xs text-muted-foreground w-24 text-right">{inr(activityRateForPax(a, pax))}</span>}
                 </div>
               );
             })}
+
           </DaySection>
         );
       })}
