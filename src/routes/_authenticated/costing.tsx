@@ -2266,8 +2266,8 @@ function Step14({ draft, set }: StepProps) {
     set({ misc: [...draft.misc, {
       id: uid(), item_id: m.id, qty: info.qty, rate: info.rate,
       unit: effType(m) === "slab" ? "fixed" : "per_person",
-      pricing_mode: effType(m) === "slab" ? undefined : "per_person",
     }] });
+
   };
 
   // Keep line qty/rate in sync when pax changes (auto).
