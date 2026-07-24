@@ -164,9 +164,10 @@ function ActivitiesPage() {
                       <TableRow key={a.id}>
                         <TableCell className="font-medium">{a.activity_name}</TableCell>
                         <TableCell className="text-xs">
-                          {a.slab_pricing_type === "total" ? "Total" : "Per Person"}
+                          {a.slab_pricing_type === "total" ? "Slab" : "Per Person"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{slabsSummary(a)}</TableCell>
+
                         <TableCell className="text-muted-foreground text-xs max-w-xs">{a.description || "—"}</TableCell>
                         <TableCell>
                           <Switch checked={a.is_active} onCheckedChange={(v) => db.updateActivity(a.id, { is_active: v })} />
@@ -303,15 +304,16 @@ function ActDialog({
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="per_person">Per Person</SelectItem>
-                <SelectItem value="total">Total</SelectItem>
+                <SelectItem value="total">Slab (Total)</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground mt-1">
               {pricingType === "per_person"
-                ? "Price × pax count."
-                : "Fixed total for the whole group in the matching slab."}
+                ? "Price per person × actual pax. Slab determines the per-person rate."
+                : "Fixed TOTAL for the whole group in the matching pax slab."}
             </p>
           </div>
+
 
           <div className="border rounded-md p-3 space-y-3">
             <div className="flex items-center justify-between">
@@ -335,10 +337,11 @@ function ActDialog({
                       onChange={(e) => updateSlab(s.id, { to_pax: +e.target.value || 1 })} />
                   </div>
                   <div>
-                    <Label className="text-[11px]">Price (₹)</Label>
+                    <Label className="text-[11px]">{pricingType === "per_person" ? "Price Per Person (₹)" : "Total Price (₹)"}</Label>
                     <Input type="number" min={0} value={s.price}
                       onChange={(e) => updateSlab(s.id, { price: +e.target.value || 0 })} />
                   </div>
+
                   <Button variant="ghost" size="icon"
                     onClick={() => removeSlab(s.id)}
                     disabled={slabs.length <= 1}>

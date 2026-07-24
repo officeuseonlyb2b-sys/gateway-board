@@ -34,14 +34,17 @@ export const Route = createFileRoute("/_authenticated/miscellaneous")({
 
 const TYPE_LABEL: Record<MiscPricingType, string> = {
   per_person: "Per Person",
-  per_day: "Per Day",
-  fixed: "Fixed",
+  per_day: "Per Day (legacy)",
+  fixed: "Fixed (legacy)",
   slab: "Slab (Range)",
 };
 
+// Normalize legacy per_day/fixed → per_person for display + editing.
 function itemType(it: MiscellaneousItem): MiscPricingType {
-  return (it.pricing_type ?? it.unit) as MiscPricingType;
+  const t = (it.pricing_type ?? it.unit) as MiscPricingType;
+  return t === "slab" ? "slab" : t === "per_person" ? "per_person" : "per_person";
 }
+
 
 function rateSummary(it: MiscellaneousItem): string {
   const t = itemType(it);
@@ -165,17 +168,19 @@ function MiscDialog({
 
   function save() {
     if (!name.trim()) return toast.error("Item name is required.");
-    const unit: MiscUnit = type === "slab" ? "fixed" : type;
+    const unit: MiscUnit = type === "per_person" ? "per_person" : "fixed";
+    const firstRate = ranges[0]?.price ?? rate;
     const payload = {
       name: name.trim(),
       description,
-      rate,
+      rate: firstRate,
       unit,
       pricing_type: type,
-      price_ranges: type === "slab" ? ranges : undefined,
-      slab_is_per_person: type === "slab" ? slabPerPerson : undefined,
+      price_ranges: ranges,
+      slab_is_per_person: type === "per_person",
       is_active: active,
     };
+
     if (editing) {
       db.updateMisc(editing.id, payload);
       toast.success("Item updated.");
@@ -206,31 +211,31 @@ function MiscDialog({
 
           <div>
             <Label>Pricing Type</Label>
-            <RadioGroup value={type} onValueChange={(v) => setType(v as MiscPricingType)} className="grid grid-cols-4 gap-2 mt-1">
-              {(["per_person", "per_day", "fixed", "slab"] as MiscPricingType[]).map((t) => (
+            <RadioGroup value={type === "slab" ? "slab" : "per_person"} onValueChange={(v) => setType(v as MiscPricingType)} className="grid grid-cols-2 gap-2 mt-1">
+              {(["per_person", "slab"] as MiscPricingType[]).map((t) => (
                 <label key={t} className="flex items-center gap-2 text-sm border rounded-md p-2 cursor-pointer">
                   <RadioGroupItem value={t} /> {TYPE_LABEL[t]}
                 </label>
               ))}
             </RadioGroup>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {type === "slab"
+                ? "Set a price for each pax range. Rate can be per-person or total for the group."
+                : "Price applies per person × pax count. Use slabs to vary price by group size."}
+            </p>
           </div>
 
-          {type !== "slab" ? (
-            <div>
-              <Label>Rate (₹)</Label>
-              <Input type="number" min={0} value={rate} onChange={(e) => setRate(+e.target.value || 0)} />
-            </div>
-          ) : (
+          {type === "per_person" ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Pax Range Slabs</Label>
+                <Label>Per-Person Slabs</Label>
                 <Button size="sm" variant="outline" onClick={addRange}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Range
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
                 </Button>
               </div>
               <div className="border rounded-md divide-y">
                 <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/50 text-[10px] uppercase text-muted-foreground">
-                  <div>From Pax</div><div>To Pax</div><div>Price (₹)</div><div></div>
+                  <div>From Pax</div><div>To Pax</div><div>Price Per Person (₹)</div><div></div>
                 </div>
                 {ranges.map((r, i) => (
                   <div key={i} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 items-center">
@@ -243,16 +248,39 @@ function MiscDialog({
                   </div>
                 ))}
               </div>
-              <RadioGroup value={slabPerPerson ? "pp" : "total"} onValueChange={(v) => setSlabPerPerson(v === "pp")} className="flex gap-4 pt-1">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <RadioGroupItem value="total" /> Rate is total for group
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <RadioGroupItem value="pp" /> Rate is per person
-                </label>
-              </RadioGroup>
+              <p className="text-[11px] text-muted-foreground">
+                Wizard applies the slab that matches total pax, then multiplies by pax count.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Total-Price Slabs</Label>
+                <Button size="sm" variant="outline" onClick={addRange}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
+                </Button>
+              </div>
+              <div className="border rounded-md divide-y">
+                <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/50 text-[10px] uppercase text-muted-foreground">
+                  <div>From Pax</div><div>To Pax</div><div>Total Price (₹)</div><div></div>
+                </div>
+                {ranges.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 items-center">
+                    <Input type="number" min={1} value={r.from_pax} onChange={(e) => updateRange(i, { from_pax: +e.target.value || 1 })} className="h-8" />
+                    <Input type="number" min={1} value={r.to_pax} onChange={(e) => updateRange(i, { to_pax: +e.target.value || 1 })} className="h-8" />
+                    <Input type="number" min={0} value={r.price} onChange={(e) => updateRange(i, { price: +e.target.value || 0 })} className="h-8" />
+                    <Button size="icon" variant="ghost" onClick={() => removeRange(i)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Fixed total for the whole group in the matching pax range.
+              </p>
             </div>
           )}
+
 
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={active} onCheckedChange={setActive} /> Active

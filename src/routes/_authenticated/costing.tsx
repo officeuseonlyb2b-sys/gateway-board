@@ -1497,37 +1497,133 @@ function dayTitleFor(r: RoutingDay, cities: { id: string; name: string }[], isLa
 }
 
 // ============================================================
-// STEP 11 — Activities (day-wise)
+// STEP 10 (Activities) — day-wise, city-grouped, with per-pax breakdown
 // ============================================================
+function CityActivitiesGroup({
+  cityName, activities, day, pax, draft, set,
+}: {
+  cityName: string;
+  activities: ReturnType<typeof useDB>["activities"];
+  day: number;
+  pax: number;
+  draft: QuoteDraft;
+  set: (p: Partial<QuoteDraft>) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  const findLine = (activityId: string) =>
+    draft.activities.find((x) => x.activity_id === activityId && (x.from_routing_days ?? []).includes(day));
+
+  const slabRate = (a: typeof activities[number]) => {
+    if (!a.pricing_slabs || a.pricing_slabs.length === 0) {
+      return { rate: a.per_person_indian ?? a.per_person_inbound ?? a.price ?? 0, slab: null as null | { from_pax: number; to_pax: number; price: number } };
+    }
+    const sorted = [...a.pricing_slabs].sort((x, y) => x.from_pax - y.from_pax);
+    const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+      ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
+    return { rate: slab.price, slab };
+  };
+
+  const isSlab = (a: typeof activities[number]) => a.slab_pricing_type === "total";
+
+  const toggle = (a: typeof activities[number]) => {
+    const existing = findLine(a.id);
+    if (existing) {
+      set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
+      return;
+    }
+    const { rate } = slabRate(a);
+    const mode: "per_person" | "slab" = isSlab(a) ? "slab" : "per_person";
+    set({
+      activities: [...draft.activities, {
+        id: uid(),
+        activity_id: a.id,
+        qty: mode === "slab" ? 1 : (pax || 1),
+        rate,
+        pricing_mode: mode,
+        from_routing_days: [day],
+      }],
+    });
+  };
+
+  const selectedCount = activities.filter((a) => !!findLine(a.id)).length;
+
+  return (
+    <div className="border rounded-md overflow-hidden">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 p-2 hover:bg-muted/40 text-left bg-muted/20">
+        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", !open && "-rotate-90")} />
+        <span className="text-xs font-semibold flex-1">{cityName}</span>
+        {selectedCount > 0 && <Badge variant="secondary" className="text-[10px]">{selectedCount} selected</Badge>}
+        <span className="text-[10px] text-muted-foreground">{activities.length} activity{activities.length === 1 ? "" : "s"}</span>
+      </button>
+      {open && (
+        <div className="divide-y">
+          {activities.length === 0 ? (
+            <div className="px-3 py-2 text-[11px] text-muted-foreground italic">No activities configured for {cityName}.</div>
+          ) : activities.map((a) => {
+            const line = findLine(a.id);
+            const on = !!line;
+            const { rate, slab } = slabRate(a);
+            const slabMode = isSlab(a);
+            const qty = line?.qty ?? (slabMode ? 1 : pax);
+            const total = slabMode ? rate : rate * (qty || 0);
+            return (
+              <div key={a.id} className={cn("px-3 py-2 flex items-center gap-3 flex-wrap", on && "bg-accent/5")}>
+                <Checkbox checked={on} onCheckedChange={() => toggle(a)} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{a.activity_name}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {slabMode
+                      ? (slab ? `Slab ${slab.from_pax}-${slab.to_pax}: ₹${rate.toLocaleString("en-IN")} total` : `₹${rate.toLocaleString("en-IN")} total`)
+                      : (slab ? `Slab ${slab.from_pax}-${slab.to_pax}: ₹${rate.toLocaleString("en-IN")}/pp` : `₹${rate.toLocaleString("en-IN")}/pp`)}
+                    {on && slabMode && qty > 0 && ` · ${inr(rate / Math.max(1, qty * pax === 0 ? 1 : pax))}/pp for ${pax} pax`}
+                  </div>
+                </div>
+                {on && line && !slabMode && (
+                  <div>
+                    <Label className="text-[10px]">Pax</Label>
+                    <Input type="number" min={1} value={line.qty} className="w-16 h-8"
+                      onChange={(e) => set({ activities: draft.activities.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 1 } : x) })} />
+                  </div>
+                )}
+                <div className={cn("w-28 text-right tabular-nums text-sm font-semibold", !on && "opacity-40")}>
+                  {inr(on ? (slabMode ? rate : rate * (line?.qty ?? 0)) : total)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Step11({ draft, set }: StepProps) {
   const d = useDB();
   const pax = totalPax(draft);
-
-  const findLine = (activityId: string, day: number) =>
-    draft.activities.find((x) => x.activity_id === activityId && (x.from_routing_days ?? []).includes(day));
-
-  const toggle = (activityId: string, day: number, rate: number) => {
-    const existing = findLine(activityId, day);
-    if (existing) {
-      set({ activities: draft.activities.filter((x) => x.id !== existing.id) });
-    } else {
-      set({ activities: [...draft.activities, {
-        id: uid(), activity_id: activityId, qty: 1, rate, from_routing_days: [day],
-      }] });
-    }
-  };
-
-  const updateQty = (lineId: string, qty: number) => {
-    set({ activities: draft.activities.map((x) => x.id === lineId ? { ...x, qty } : x) });
-  };
-
   const customLines = draft.activities.filter((x) => x.custom_name);
+
+  // Build per-person breakdown rows for all selected activities.
+  const selectedActivities = useMemo(() => {
+    return draft.activities
+      .filter((x) => x.activity_id)
+      .map((l) => {
+        const a = d.activities.find((x) => x.id === l.activity_id);
+        if (!a) return null;
+        const isSlab = a.slab_pricing_type === "total";
+        return { line: l, activity: a, isSlab };
+      })
+      .filter(Boolean) as Array<{ line: typeof draft.activities[number]; activity: typeof d.activities[number]; isSlab: boolean }>;
+  }, [draft.activities, d.activities]);
+
+  const grandTotal = draft.activities.reduce((s, l) => s + (l.pricing_mode === "slab" ? l.rate : l.rate * l.qty), 0);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Activities & Experiences</h2>
-        <span className="text-xs text-muted-foreground">Synced with Routing — one section per itinerary day.</span>
+        <span className="text-xs text-muted-foreground">Grouped by day → city. Pax used: {pax}.</span>
       </div>
 
       {draft.routing.length === 0 && (
@@ -1536,103 +1632,81 @@ function Step11({ draft, set }: StepProps) {
 
       {draft.routing.map((r, idx) => {
         const isLast = idx === draft.routing.length - 1;
-        const { ids: destIds, names: destNames } = dayDestInfo(r, d.cities);
+        const { names: destNames } = dayDestInfo(r, d.cities);
+        const title = dayTitleFor(r, d.cities, isLast);
         const dayActivities = d.activities.filter((a) => {
           if (!a.is_active) return false;
           const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
           return !!destName && destNames.includes(destName);
         });
-        const selectedCount = draft.activities.filter((x) =>
-          x.activity_id && (x.from_routing_days ?? []).includes(r.day)
-        ).length;
-        const title = dayTitleFor(r, d.cities, isLast);
-        const subtitle = destIds.length > 1 ? `${destIds.length} destinations` : undefined;
+        const byCity: Record<string, typeof dayActivities> = {};
+        destNames.forEach((n) => (byCity[n] = []));
+        dayActivities.forEach((a) => {
+          const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name ?? "";
+          if (!byCity[destName]) byCity[destName] = [];
+          byCity[destName].push(a);
+        });
+        const selectedCount = draft.activities.filter((x) => x.activity_id && (x.from_routing_days ?? []).includes(r.day)).length;
+        const subtitle = destNames.length > 0 ? destNames.join(", ") : undefined;
 
         return (
           <DaySection key={r.day} day={r.day} title={title} subtitle={subtitle} count={selectedCount}>
             {destNames.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">
-                No destination set for this day.
-              </div>
-            ) : dayActivities.length === 0 ? (
-              <div className="text-xs text-muted-foreground italic px-1 py-2">
-                No activities available for {destNames.join(", ")}.
-              </div>
-            ) : dayActivities.map((a) => {
-              const line = findLine(a.id, r.day);
-              const on = !!line;
-              const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-              const hasSlabs = !!(a.pricing_slabs && a.pricing_slabs.length > 0);
-              const perPersonRate = a.per_person_indian ?? a.per_person_inbound ?? a.price ?? 0;
-              const slabInfo = (() => {
-                if (!hasSlabs) return null;
-                const sorted = [...a.pricing_slabs!].sort((x, y) => x.from_pax - y.from_pax);
-                const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
-                  ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
-                return { slab, total: slab.price };
-              })();
-              const mode: "per_person" | "slab" =
-                line?.pricing_mode ?? (hasSlabs ? "slab" : "per_person");
-              const changeMode = (m: "per_person" | "slab") => {
-                if (!line) return;
-                if (m === "slab" && slabInfo) {
-                  set({ activities: draft.activities.map((x) =>
-                    x.id === line.id ? { ...x, pricing_mode: "slab", qty: 1, rate: slabInfo.total } : x
-                  )});
-                } else {
-                  set({ activities: draft.activities.map((x) =>
-                    x.id === line.id ? { ...x, pricing_mode: "per_person", qty: pax || 1, rate: perPersonRate } : x
-                  )});
-                }
-              };
-              const previewRate = mode === "slab" && slabInfo
-                ? slabInfo.total
-                : perPersonRate * (pax || 1);
-              return (
-                <div key={a.id} className={cn("p-2.5 border rounded-md flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
-                  <Checkbox checked={on} onCheckedChange={() => toggle(a.id, r.day, activityRateForPax(a, pax))} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {a.activity_name} <span className="text-[11px] text-muted-foreground">— {destName}</span>
-                    </div>
-                    {a.description && <div className="text-[11px] text-muted-foreground truncate">{a.description}</div>}
-                  </div>
-                  {on && line ? (
-                    <>
-                      <div className="flex items-center gap-3 text-[11px]">
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input type="radio" checked={mode === "per_person"} onChange={() => changeMode("per_person")} />
-                          Per Person
-                        </label>
-                        <label className={cn("flex items-center gap-1", hasSlabs ? "cursor-pointer" : "opacity-40")}>
-                          <input type="radio" checked={mode === "slab"} onChange={() => changeMode("slab")} disabled={!hasSlabs} />
-                          Total (Slab)
-                        </label>
-                      </div>
-                      {mode === "per_person" ? (
-                        <div>
-                          <Label className="text-[10px]">Pax</Label>
-                          <Input type="number" min={1} value={line.qty} className="w-16 h-8"
-                            onChange={(e) => updateQty(line.id, parseInt(e.target.value) || 1)} />
-                        </div>
-                      ) : slabInfo && (
-                        <span className="text-[11px] text-muted-foreground">
-                          Slab {slabInfo.slab.from_pax}-{slabInfo.slab.to_pax} · {inr(slabInfo.total)}
-                          {" "}({inr(slabInfo.total / Math.max(1, pax))}/pp)
-                        </span>
-                      )}
-                      <div className="text-sm font-semibold w-24 text-right tabular-nums">{inr(line.rate * line.qty)}</div>
-                    </>
-                  ) : (
-                    <span className="text-xs text-muted-foreground w-24 text-right">{inr(previewRate)}</span>
-                  )}
-                </div>
-              );
-            })}
-
+              <div className="text-xs text-muted-foreground italic">No destination set for this day.</div>
+            ) : destNames.map((cityName) => (
+              <CityActivitiesGroup
+                key={cityName}
+                cityName={cityName}
+                activities={byCity[cityName] ?? []}
+                day={r.day}
+                pax={pax}
+                draft={draft}
+                set={set}
+              />
+            ))}
           </DaySection>
         );
       })}
+
+      {/* Per-person cost breakdown */}
+      {selectedActivities.length > 0 && (
+        <Card className="p-3">
+          <div className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+            Per Person Cost Breakdown
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="text-left p-2 w-[110px]">Person Range</th>
+                  {selectedActivities.map(({ activity }) => (
+                    <th key={activity.id} className="text-right p-2 truncate">{activity.activity_name}</th>
+                  ))}
+                  <th className="text-right p-2 w-[110px]">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: Math.max(1, pax) }, (_, i) => i + 1).map((n) => {
+                  const row = selectedActivities.map(({ line, isSlab }) => isSlab ? line.rate : line.rate * n);
+                  const rowTotal = row.reduce((s, v) => s + v, 0);
+                  return (
+                    <tr key={n} className="border-b">
+                      <td className="p-2 font-medium">{n} pax</td>
+                      {row.map((v, ci) => (
+                        <td key={ci} className="p-2 text-right tabular-nums">{inr(v)}</td>
+                      ))}
+                      <td className="p-2 text-right tabular-nums font-semibold">{inr(rowTotal)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Slab activities keep the same total; per-person activities scale linearly.
+          </p>
+        </Card>
+      )}
 
       <Card className="p-3 space-y-2">
         <div className="text-xs font-semibold uppercase text-muted-foreground">Custom / Other Activities</div>
@@ -1648,9 +1722,12 @@ function Step11({ draft, set }: StepProps) {
           </div>
         ))}
       </Card>
+
+      <div className="text-right font-semibold">Activities Total: {inr(grandTotal)}</div>
     </div>
   );
 }
+
 
 function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: string, amount: number) => void }) {
   const [n, setN] = useState(""); const [a, setA] = useState(0);
@@ -1702,11 +1779,8 @@ function Step12({ draft, set }: StepProps) {
   const findLine = (siteId: string, day: number) =>
     draft.entrances.find((x) => x.site_id === siteId && (x.from_routing_days ?? []).includes(day));
 
-  const patch = (lineId: string, p: Partial<typeof draft.entrances[number]>) => {
-    set({ entrances: draft.entrances.map((x) => x.id === lineId ? { ...x, ...p } : x) });
-  };
-
-  const toggle = (s: { id: string; indian_rate: number; foreigner_rate: number; student_rate?: number }, day: number) => {
+  // Ensure line exists / removed on toggle. Prices always sourced from master module.
+  const toggle = (s: typeof d.entrance_sites[number], day: number) => {
     const existing = findLine(s.id, day);
     if (existing) {
       set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
@@ -1721,13 +1795,44 @@ function Step12({ draft, set }: StepProps) {
     }
   };
 
-  const lineTotal = (l: typeof draft.entrances[number]) =>
-    l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate + (l.student_pax ?? 0) * (l.student_rate ?? 0);
-  const grandTotal = draft.entrances.reduce((s, l) => s + lineTotal(l), 0);
+  // Keep line rates + Indian pax in sync with master + Step 3 (auto — no editing here).
+  useEffect(() => {
+    let dirty = false;
+    const next = draft.entrances.map((l) => {
+      if (!l.site_id) return l;
+      const s = d.entrance_sites.find((x) => x.id === l.site_id);
+      if (!s) return l;
+      const patched = { ...l };
+      if (patched.indian_rate !== s.indian_rate) { patched.indian_rate = s.indian_rate; dirty = true; }
+      if (patched.foreign_rate !== s.foreigner_rate) { patched.foreign_rate = s.foreigner_rate; dirty = true; }
+      const sr = s.student_rate ?? 0;
+      if ((patched.student_rate ?? 0) !== sr) { patched.student_rate = sr; dirty = true; }
+      if (patched.indian_pax !== totalPaxCount) { patched.indian_pax = totalPaxCount; dirty = true; }
+      return patched;
+    });
+    if (dirty) set({ entrances: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPaxCount, d.entrance_sites]);
+
+  const lineTotals = (l: typeof draft.entrances[number]) => ({
+    indian: l.indian_pax * l.indian_rate,
+    foreign: l.foreign_pax * l.foreign_rate,
+    student: (l.student_pax ?? 0) * (l.student_rate ?? 0),
+  });
+  const sumLine = (l: typeof draft.entrances[number]) => {
+    const t = lineTotals(l);
+    return t.indian + t.foreign + t.student;
+  };
+  const grandIndian = draft.entrances.reduce((s, l) => s + lineTotals(l).indian, 0);
+  const grandForeign = draft.entrances.reduce((s, l) => s + lineTotals(l).foreign, 0);
+  const grandStudent = draft.entrances.reduce((s, l) => s + lineTotals(l).student, 0);
+  const grandTotal = grandIndian + grandForeign + grandStudent;
 
   const showI = travellerFilter === "all" || travellerFilter === "indian";
   const showF = travellerFilter === "all" || travellerFilter === "foreign";
   const showS = travellerFilter === "all" || travellerFilter === "student";
+  const colHilite = (col: "indian" | "foreign" | "student") =>
+    travellerFilter !== "all" && travellerFilter === col ? "bg-primary/5 font-semibold" : "";
 
   return (
     <div className="space-y-4">
@@ -1735,15 +1840,19 @@ function Step12({ draft, set }: StepProps) {
         <h2 className="text-lg font-semibold">Entrance Fees</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Traveller:</span>
-          <Select value={travellerFilter} onValueChange={(v) => setTravellerFilter(v as typeof travellerFilter)}>
-            <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="indian">Indian</SelectItem>
-              <SelectItem value="foreign">Foreigner</SelectItem>
-              <SelectItem value="student">Student</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex gap-1">
+            {(["all", "indian", "foreign", "student"] as const).map((t) => (
+              <button key={t} type="button"
+                onClick={() => setTravellerFilter(t)}
+                className={cn(
+                  "text-[11px] px-2 py-1 rounded border transition-colors capitalize",
+                  travellerFilter === t ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"
+                )}>
+                {t === "foreign" ? "Foreigner" : t}
+              </button>
+            ))}
+          </div>
+          <Badge variant="secondary" className="text-[10px]">Pax: {totalPaxCount} Indian (auto)</Badge>
         </div>
       </div>
 
@@ -1754,10 +1863,10 @@ function Step12({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[160px]">Route</th>
               <th className="text-left p-2">City + Tour</th>
-              {showI && <th className="text-left p-2 w-[140px]">Indian</th>}
-              {showF && <th className="text-left p-2 w-[140px]">Foreigner</th>}
-              {showS && <th className="text-left p-2 w-[140px]">Student</th>}
-              <th className="text-right p-2 w-[100px]">Subtotal</th>
+              {showI && <th className={cn("text-right p-2 w-[140px]", colHilite("indian"))}>Indian Total</th>}
+              {showF && <th className={cn("text-right p-2 w-[140px]", colHilite("foreign"))}>Foreigner Total</th>}
+              {showS && <th className={cn("text-right p-2 w-[140px]", colHilite("student"))}>Student Total</th>}
+              <th className="text-right p-2 w-[110px]">Subtotal</th>
             </tr>
           </thead>
           <tbody>
@@ -1767,7 +1876,6 @@ function Step12({ draft, set }: StepProps) {
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
               const rows: { city: CityRef; site: typeof d.entrance_sites[number] }[] = [];
               dayCities.forEach((c) => {
-                // Filter by tours selected in Step 9 routing for this city
                 const selectedTitles = (r.tours_selected_by_city?.[c.id])
                   ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
                 if (selectedTitles.length === 0) return;
@@ -1792,8 +1900,10 @@ function Step12({ draft, set }: StepProps) {
               const rowNodes = rows.map((row, i) => {
                 const line = findLine(row.site.id, r.day);
                 const on = !!line;
-                const sub = line ? lineTotal(line) : 0;
+                const t = line ? lineTotals(line) : { indian: 0, foreign: 0, student: 0 };
+                const sub = on ? t.indian + t.foreign + t.student : 0;
                 daySubtotal += sub;
+                const missing = row.site.indian_rate === 0 && row.site.foreigner_rate === 0;
                 return (
                   <tr key={`${ri}-${row.site.id}`} className="border-b border-[#E5E7EB] bg-white">
                     {i === 0 ? (
@@ -1803,51 +1913,47 @@ function Step12({ draft, set }: StepProps) {
                       </>
                     ) : null}
                     <td className="p-2">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <Checkbox checked={on} onCheckedChange={() => toggle(row.site, r.day)} />
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <Checkbox checked={on} onCheckedChange={() => toggle(row.site, r.day)} className="mt-0.5" />
                         <span>
                           <span className="text-[10px] text-muted-foreground">{row.city.name}</span>
                           <span className="block text-sm font-medium">{row.site.site_name}</span>
+                          {missing && (
+                            <span className="block text-[10px] text-amber-600 mt-0.5">
+                              Price not set — update in Entrances module
+                            </span>
+                          )}
                         </span>
                       </label>
                     </td>
                     {showI && (
-                      <td className="p-2">
-                        {on && line ? (
-                          <div className="flex items-center gap-1">
-                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.indian_pax}
-                              onChange={(e) => patch(line.id, { indian_pax: parseInt(e.target.value) || 0 })} />
-                            <span className="text-[10px] text-muted-foreground">×</span>
-                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.indian_rate}
-                              onChange={(e) => patch(line.id, { indian_rate: parseFloat(e.target.value) || 0 })} />
-                          </div>
-                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.indian_rate}</span>}
+                      <td className={cn("p-2 text-right tabular-nums", colHilite("indian"))}>
+                        {on ? (
+                          <>
+                            <div>{inr(t.indian)}</div>
+                            <div className="text-[10px] text-muted-foreground">{line!.indian_pax} × ₹{line!.indian_rate}</div>
+                          </>
+                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.indian_rate}/pp</span>}
                       </td>
                     )}
                     {showF && (
-                      <td className="p-2">
-                        {on && line ? (
-                          <div className="flex items-center gap-1">
-                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.foreign_pax}
-                              onChange={(e) => patch(line.id, { foreign_pax: parseInt(e.target.value) || 0 })} />
-                            <span className="text-[10px] text-muted-foreground">×</span>
-                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.foreign_rate}
-                              onChange={(e) => patch(line.id, { foreign_rate: parseFloat(e.target.value) || 0 })} />
-                          </div>
-                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.foreigner_rate}</span>}
+                      <td className={cn("p-2 text-right tabular-nums", colHilite("foreign"))}>
+                        {on ? (
+                          <>
+                            <div>{inr(t.foreign)}</div>
+                            <div className="text-[10px] text-muted-foreground">{line!.foreign_pax} × ₹{line!.foreign_rate}</div>
+                          </>
+                        ) : <span className="text-[11px] text-muted-foreground">₹{row.site.foreigner_rate}/pp</span>}
                       </td>
                     )}
                     {showS && (
-                      <td className="p-2">
-                        {on && line ? (
-                          <div className="flex items-center gap-1">
-                            <Input type="number" min={0} className="h-7 w-14 text-xs" value={line.student_pax ?? 0}
-                              onChange={(e) => patch(line.id, { student_pax: parseInt(e.target.value) || 0 })} />
-                            <span className="text-[10px] text-muted-foreground">×</span>
-                            <Input type="number" min={0} className="h-7 w-16 text-xs" value={line.student_rate ?? 0}
-                              onChange={(e) => patch(line.id, { student_rate: parseFloat(e.target.value) || 0 })} />
-                          </div>
-                        ) : <span className="text-[11px] text-muted-foreground">{row.site.student_rate ? `₹${row.site.student_rate}` : "—"}</span>}
+                      <td className={cn("p-2 text-right tabular-nums", colHilite("student"))}>
+                        {on ? (
+                          <>
+                            <div>{inr(t.student)}</div>
+                            <div className="text-[10px] text-muted-foreground">{line!.student_pax ?? 0} × ₹{line!.student_rate ?? 0}</div>
+                          </>
+                        ) : <span className="text-[11px] text-muted-foreground">{row.site.student_rate ? `₹${row.site.student_rate}/pp` : "—"}</span>}
                       </td>
                     )}
                     <td className="p-2 text-right tabular-nums font-medium">{on ? inr(sub) : "—"}</td>
@@ -1862,6 +1968,13 @@ function Step12({ draft, set }: StepProps) {
               );
               return <>{rowNodes}</>;
             })}
+            <tr className="bg-muted/40 border-b border-[#E5E7EB]">
+              <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground font-semibold">Column Totals</td>
+              {showI && <td className={cn("p-2 text-right tabular-nums font-semibold", colHilite("indian"))}>{inr(grandIndian)}</td>}
+              {showF && <td className={cn("p-2 text-right tabular-nums font-semibold", colHilite("foreign"))}>{inr(grandForeign)}</td>}
+              {showS && <td className={cn("p-2 text-right tabular-nums font-semibold", colHilite("student"))}>{inr(grandStudent)}</td>}
+              <td className="p-2 text-right tabular-nums font-semibold">{inr(grandTotal)}</td>
+            </tr>
             <tr className="bg-primary/5 font-bold">
               <td colSpan={3 + (showI ? 1 : 0) + (showF ? 1 : 0) + (showS ? 1 : 0)} className="p-2 text-right text-sm">TOTAL ENTRANCES</td>
               <td className="p-2 text-right tabular-nums text-sm">{inr(grandTotal)}</td>
@@ -1869,9 +1982,12 @@ function Step12({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
+      {/* Suppress unused helper reference in strict mode */}
+      {false && <span>{sumLine(draft.entrances[0]!)}</span>}
     </div>
   );
 }
+
 
 // ============================================================
 // STEP 12 — Guide (day-wise table)
@@ -1975,8 +2091,7 @@ function Step13({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[160px]">Route</th>
               <th className="text-left p-2">City + Tour</th>
-              <th className="text-left p-2 w-[100px]">Rate (₹)</th>
-              <th className="text-left p-2 w-[120px]">Tour Escort</th>
+              <th className="text-left p-2 w-[120px]">Rate (₹)</th>
               <th className="text-right p-2 w-[100px]">Subtotal</th>
             </tr>
           </thead>
@@ -2008,12 +2123,11 @@ function Step13({ draft, set }: StepProps) {
                   <tr key={ri} className="border-b border-[#E5E7EB]">
                     <td className="p-2 font-semibold">Day {r.day}</td>
                     <td className="p-2 text-muted-foreground">{routeLabel}</td>
-                    <td colSpan={4} className="p-2 text-muted-foreground italic">No guides available.</td>
+                    <td colSpan={3} className="p-2 text-muted-foreground italic">No guides available for selected tours.</td>
                   </tr>
                 );
               }
 
-              const escort = findEscort(r.day);
               const rowNodes: React.ReactElement[] = [];
               let firstCell = true;
               cityGuides.forEach(({ city, guides }) => {
@@ -2026,7 +2140,7 @@ function Step13({ draft, set }: StepProps) {
                           <td rowSpan={totalRows + 1} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
                         </>
                       )}
-                      <td colSpan={4} className="p-2 text-muted-foreground italic text-[11px]">{city.name}: no guides</td>
+                      <td colSpan={3} className="p-2 text-muted-foreground italic text-[11px]">{city.name}: no guides</td>
                     </tr>,
                   );
                   firstCell = false;
@@ -2035,9 +2149,9 @@ function Step13({ draft, set }: StepProps) {
                 guides.forEach((g, gi) => {
                   const line = findLine(g.id, r.day);
                   const on = !!line;
-                  const rate = rateForGuide(g);
+                  const rate = on ? line!.rate : rateForGuide(g);
                   rowNodes.push(
-                    <tr key={`${ri}-${g.id}`} className="border-b border-[#E5E7EB] bg-white">
+                    <tr key={`${ri}-${g.id}`} className={cn("border-b border-[#E5E7EB]", on ? "bg-accent/5" : "bg-white")}>
                       {firstCell && (
                         <>
                           <td rowSpan={totalRows + 1} className="p-2 font-semibold align-top">Day {r.day}</td>
@@ -2054,25 +2168,10 @@ function Step13({ draft, set }: StepProps) {
                           </span>
                         </label>
                       </td>
-                      <td className="p-2">
-                        {on && line ? (
-                          <Input type="number" min={0} className="h-7 w-24 text-xs" value={line.rate}
-                            onChange={(e) => patch(line.id, { rate: parseFloat(e.target.value) || 0 })} />
-                        ) : <span className="text-[11px] text-muted-foreground">₹{rate.toLocaleString("en-IN")}</span>}
+                      <td className="p-2 tabular-nums">₹{rate.toLocaleString("en-IN")}</td>
+                      <td className="p-2 text-right tabular-nums font-medium">
+                        {on && line ? inr(line.rate * line.days * line.guides) : "—"}
                       </td>
-                      {gi === 0 && firstCell ? (
-                        <td rowSpan={totalRows} className="p-2 align-top">
-                          <label className="flex items-center gap-2 text-[11px] cursor-pointer">
-                            <Checkbox checked={!!escort} onCheckedChange={() => toggleEscort(r.day)} />
-                            <span>+ Escort</span>
-                          </label>
-                          {escort && (
-                            <Input type="number" min={0} className="h-7 w-20 text-xs mt-1" value={escort.rate}
-                              onChange={(e) => patch(escort.id, { rate: parseFloat(e.target.value) || 0 })} />
-                          )}
-                        </td>
-                      ) : null}
-                      <td className="p-2 text-right tabular-nums font-medium">{on && line ? inr(line.rate * line.days * line.guides) : "—"}</td>
                     </tr>,
                   );
                   firstCell = false;
@@ -2080,7 +2179,7 @@ function Step13({ draft, set }: StepProps) {
               });
               rowNodes.push(
                 <tr key={`${ri}-sub`} className="bg-muted/20 border-b border-[#E5E7EB]">
-                  <td colSpan={4} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Day {r.day} Subtotal</td>
+                  <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Day {r.day} Subtotal</td>
                   <td className="p-2 text-right tabular-nums font-semibold">{inr(guideDayTotal(r.day))}</td>
                 </tr>,
               );
@@ -2089,6 +2188,37 @@ function Step13({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Tour Escort — separate section at bottom */}
+      <Card className="p-4 border-dashed">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold">Tour Escort (optional)</h3>
+            <p className="text-[11px] text-muted-foreground">Add an escort for any day of the tour. Default rate ₹5,000/day.</p>
+          </div>
+          <Badge variant="secondary" className="text-[10px]">
+            {draft.guides.filter((x) => x.is_escort).length} day{draft.guides.filter((x) => x.is_escort).length === 1 ? "" : "s"} selected
+          </Badge>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+          {draft.routing.map((r) => {
+            const escort = findEscort(r.day);
+            const on = !!escort;
+            return (
+              <div key={r.day} className={cn("p-2 border rounded-md flex items-center gap-2", on && "border-accent bg-accent/5")}>
+                <Checkbox checked={on} onCheckedChange={() => toggleEscort(r.day)} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium">Day {r.day}</div>
+                  {on && (
+                    <Input type="number" min={0} className="h-6 w-full text-[11px] mt-1" value={escort!.rate}
+                      onChange={(e) => patch(escort!.id, { rate: parseFloat(e.target.value) || 0 })} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
 
       <Card className="p-3 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
@@ -2107,6 +2237,7 @@ function Step13({ draft, set }: StepProps) {
         Guide Total: {inr(grandTotal)}
         {draft.guide_reporting_cost ? <span className="text-xs text-muted-foreground ml-2">(incl. reporting ₹{draft.guide_reporting_cost.toLocaleString("en-IN")})</span> : null}
       </div>
+
     </div>
   );
 }
@@ -2122,18 +2253,44 @@ function Step14({ draft, set }: StepProps) {
   const pax = totalPax(draft);
   const nights = draft.nights || 1;
 
-  const effType = (m: typeof items[number]) => (m.pricing_type ?? m.unit) as "per_person" | "per_day" | "fixed" | "slab";
+  // Normalize legacy pricing_type -> binary (per_person | slab)
+  const effType = (m: typeof items[number]): "per_person" | "slab" => {
+    const raw = (m.pricing_type ?? m.unit) as string;
+    return raw === "slab" ? "slab" : "per_person";
+  };
 
   const toggle = (m: typeof items[number]) => {
     const existing = draft.misc.find((x) => x.item_id === m.id);
     if (existing) { set({ misc: draft.misc.filter((x) => x.id !== existing.id) }); return; }
     const info = miscRateForPax(m, pax, nights);
-    set({ misc: [...draft.misc, { id: uid(), item_id: m.id, qty: info.qty, rate: info.rate, unit: m.unit }] });
+    set({ misc: [...draft.misc, {
+      id: uid(), item_id: m.id, qty: info.qty, rate: info.rate,
+      unit: effType(m) === "slab" ? "fixed" : "per_person",
+      pricing_mode: effType(m) === "slab" ? undefined : "per_person",
+    }] });
   };
+
+  // Keep line qty/rate in sync when pax changes (auto).
+  useEffect(() => {
+    let dirty = false;
+    const next = draft.misc.map((l) => {
+      if (!l.item_id) return l;
+      const m = items.find((x) => x.id === l.item_id);
+      if (!m) return l;
+      const info = miscRateForPax(m, pax, nights);
+      if (l.rate !== info.rate || l.qty !== info.qty) { dirty = true; return { ...l, rate: info.rate, qty: info.qty }; }
+      return l;
+    });
+    if (dirty) set({ misc: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pax, nights, d.miscellaneous_items]);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Miscellaneous</h2>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold">Miscellaneous</h2>
+        <Badge variant="secondary" className="text-[10px]">Auto-priced for {pax} pax</Badge>
+      </div>
       {(() => {
         const n = draft.misc.filter((x) => (x.from_routing_days?.length ?? 0) > 0).length;
         return n > 0 ? (
@@ -2149,41 +2306,48 @@ function Step14({ draft, set }: StepProps) {
           const fromDays = line?.from_routing_days ?? [];
           const type = effType(m);
           const info = miscRateForPax(m, pax, nights);
-          const qtyEditable = type === "per_person" || type === "per_day";
+          const isSlabPP = type === "slab" && !!m.slab_is_per_person;
+          const typeLabel = type === "slab" ? (isSlabPP ? "Slab · Per Person" : "Slab · Total") : "Per Person";
           return (
-            <div key={m.id} className={cn("p-3 border rounded-lg flex items-center gap-3 flex-wrap", on && "border-accent bg-accent/5")}>
-              <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                  {m.name}
-                  {fromDays.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                      From Day {fromDays.join(", ")}
-                    </span>
-                  )}
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{info.label}</span>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {type === "slab"
-                    ? `₹${info.rate.toLocaleString("en-IN")} · auto-selected for ${pax} pax`
-                    : `₹${m.rate.toLocaleString("en-IN")} / ${type.replace("_", " ")}`}
-                </div>
-              </div>
-
-              {on && line && (
-                <>
-                  <div>
-                    <Label className="text-xs">Qty</Label>
-                    <Input
-                      type="number"
-                      value={line.qty}
-                      disabled={!qtyEditable}
-                      className="w-20"
-                      onChange={(e) => set({ misc: draft.misc.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 0 } : x) })}
-                    />
+            <div key={m.id} className={cn("p-3 border rounded-lg", on && "border-accent bg-accent/5")}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Checkbox checked={on} onCheckedChange={() => toggle(m)} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                    {m.name}
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{typeLabel}</span>
+                    {fromDays.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        From Day {fromDays.join(", ")}
+                      </span>
+                    )}
                   </div>
-                  <div className="w-28 text-right font-semibold tabular-nums">{inr(line.qty * line.rate)}</div>
-                </>
+                  <div className="text-xs text-muted-foreground">
+                    ₹{info.rate.toLocaleString("en-IN")} · {info.label}
+                  </div>
+                </div>
+                {on && line && (
+                  <div className="w-32 text-right font-semibold tabular-nums">
+                    {inr(line.qty * line.rate)}
+                    <div className="text-[10px] text-muted-foreground font-normal">
+                      {line.qty} × ₹{line.rate.toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {type === "slab" && (m.price_ranges ?? []).length > 0 && (
+                <div className="mt-2 ml-8 text-[11px] text-muted-foreground">
+                  <span className="uppercase mr-2">Slabs:</span>
+                  {(m.price_ranges ?? []).map((s, i) => {
+                    const active = pax >= s.from_pax && pax <= s.to_pax;
+                    return (
+                      <span key={i} className={cn("inline-block mr-2 px-1.5 py-0.5 rounded",
+                        active ? "bg-accent/20 text-accent font-semibold" : "bg-muted")}>
+                        {s.from_pax}-{s.to_pax}: ₹{s.price.toLocaleString("en-IN")}{isSlabPP ? "/pp" : ""}
+                      </span>
+                    );
+                  })}
+                </div>
               )}
             </div>
           );
@@ -2206,6 +2370,7 @@ function Step14({ draft, set }: StepProps) {
     </div>
   );
 }
+
 
 
 // ============================================================
