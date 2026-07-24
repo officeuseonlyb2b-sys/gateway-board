@@ -139,20 +139,29 @@ export function miscRateForPax(m: MiscellaneousItem, pax: number, nights: number
   rate: number; qty: number; total: number; label: string;
 } {
   const type = m.pricing_type ?? m.unit;
-  if (type === "slab" && m.price_ranges && m.price_ranges.length > 0) {
-    const sorted = [...m.price_ranges].sort((a, b) => a.from_pax - b.from_pax);
-    const slab = sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+  const hasSlabs = !!(m.price_ranges && m.price_ranges.length > 0);
+  const pickSlab = () => {
+    const sorted = [...(m.price_ranges ?? [])].sort((a, b) => a.from_pax - b.from_pax);
+    return sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
       ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
+  };
+  if (type === "slab" && hasSlabs) {
+    const slab = pickSlab();
     if (m.slab_is_per_person) {
       const total = slab.price * Math.max(1, pax);
       return { rate: slab.price, qty: pax, total, label: `${slab.from_pax}-${slab.to_pax} pax · per person` };
     }
     return { rate: slab.price, qty: 1, total: slab.price, label: `${slab.from_pax}-${slab.to_pax} pax · total` };
   }
-  if (type === "per_person") return { rate: m.rate, qty: pax, total: m.rate * pax, label: "Per person" };
+  if (type === "per_person") {
+    // Slab-aware per-person: pick slab rate then multiply by pax.
+    const perRate = hasSlabs ? pickSlab().price : m.rate;
+    return { rate: perRate, qty: pax, total: perRate * pax, label: hasSlabs ? `Per person · slab ${pickSlab().from_pax}-${pickSlab().to_pax}` : "Per person" };
+  }
   if (type === "per_day") return { rate: m.rate, qty: nights, total: m.rate * nights, label: "Per day" };
   return { rate: m.rate, qty: 1, total: m.rate, label: "Fixed" };
 }
+
 
 export interface EntranceCity {
   id: string;

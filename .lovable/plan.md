@@ -1,84 +1,92 @@
-## Goal
+# Plan: Refactor Costing Wizard + 5 Fixes
 
-Add an **optional** "Per-Person Room Allocation" mode to each hotel option (A/B/C/D) in the New Quotation wizard. When enabled, each pax picks a room type (Single / Double sharing / Triple sharing / Extra Bed / CWB) with a sharing partner, and Steps 15–17 plus the exported quote show a per-person cost breakdown. When disabled (default), the existing SGL/DBL/TRP display and calculations are unchanged.
+## Scope
 
-Agents module already exists (`src/routes/_authenticated/agents.tsx` + Step 2 integration), so Change 8 is a no-op — I'll verify only.
+Split the monolithic `src/routes/_authenticated/costing.tsx` into modular components and apply 4 functional fixes to Activities, Entrances, Guide, and Miscellaneous.
 
-## Data model (`src/lib/wizard/types.ts`)
+## FIX 1 — File Split (Zero UI/Behavior Change)
 
-Add per-option allocation to `HotelOption`:
+Extract from `src/routes/_authenticated/costing.tsx`:
 
-```ts
-export type PersonRoomType = "single" | "double" | "triple" | "extra_bed" | "cwb";
-
-export interface PersonAllocation {
-  person_id: number;         // 1-based, stable
-  label: string;             // editable, default "Person N"
-  room_type: PersonRoomType;
-  sharing_with: number[];    // other person_ids in the same room
-}
-
-export interface HotelOption {
-  // ...existing...
-  use_custom_allocation?: boolean;
-  pax_allocations?: PersonAllocation[];
-}
+```text
+src/components/quotation/
+  hooks/
+    useWizardState.ts        # draft load/save + step nav helpers
+    useCostCalculation.ts    # memoized totals used across steps 15-17
+  utils/
+    gstCalculator.ts         # 5% vs 18% slab helpers
+    paxRateSelector.ts       # tier lookup (1-5 / 6-14 / 15+, slab match)
+  steps/
+    StepActivities.tsx       # Step 10
+    StepEntrances.tsx        # Step 11
+    StepGuide.tsx            # Step 12
+    StepMisc.tsx             # Step 13
+    StepTransport.tsx        # Step 14
+    StepHotels.tsx           # Step 15
+    StepCosting.tsx          # Step 16
+    StepFinal.tsx            # Step 17
 ```
 
-`emptyDraft()` unchanged (flag defaults to falsy = existing behaviour).
+`costing.tsx` becomes a thin shell: stepper header + switch on `draft.step` rendering the extracted components. Steps 1-9, 18 stay inline for now (out of scope). All existing prop-less step functions are lifted verbatim — same JSX, same handlers, same imports — just receive `draft` + updater via a shared hook.
 
-## Calculation helpers (`src/lib/wizard/calc.ts`)
+Verification: `tsgo` clean, preview loads all steps, no visual diff.
 
-Add pure helpers, do not touch `computeOption`:
+## FIX 2 — Activities
 
-- `computePersonRoomCostForDay(person, allocations, plan)` returns `{ net, gst }` using:
-  - single → `sgl_rate`, GST slab on `sgl_rate`
-  - double → `dbl_rate / 2`, GST slab on `dbl_rate`
-  - triple → `(dbl_rate + extra_bed_rate) / 3`, slab on `(dbl_rate + extra_bed_rate)`
-  - extra_bed → `extra_bed_rate`, slab on `extra_bed_rate`
-  - cwb → `cwb_rate` (fallback 0), slab on `cwb_rate`
-- `computePersonTotals(draft, opt, d)` → array of `{ person_id, label, room_type, room_net, room_gst, room_total, shared_addons, markup, gst5, grand_total }`. Shared add-ons = `computeAddonsTotal(draft) / totalPax(draft)`. Markup = `(room_total + shared_addons) * markup%`. GST5 on markup only, per spec Change 4.
-- `optionUsesCustomAllocation(opt)` guard.
+**Module (`/activity-experience` modal):**
+- Reduce pricing type to exactly two radios: `per_person` | `slab`.
+- `per_person`: slabs table `From Pax | To Pax | Price Per Person`.
+- `slab`: slabs table `From Pax | To Pax | Total Price`.
+- Drop any combined/legacy toggle.
 
-## Step 15 UI (`src/routes/_authenticated/costing.tsx`)
+**Wizard Step 10 (rebuild):**
+- Day-by-day accordion; per day, one collapsible group per routing city.
+- Inside each city: checkbox list of activities linked to tours selected in Step 9 for that city.
+- On check:
+  - `per_person`: `rate × pax` (rate from slab matching `total_pax`), pax input editable, default `total_pax`.
+  - `slab`: fixed total from slab matching `total_pax`, no qty input, show per-person share as info.
+- Bottom "Per Person Cost Breakdown" table: rows for 1..`total_pax`, columns per checked activity, plus Total column. Slab activities keep total constant; per-person scale linearly.
+- Activities Total footer.
 
-Per option card, above the day-wise hotel rows:
+## FIX 3 — Entrances (Step 11) Read-Only
 
-- Switch: **"Use custom room allocation"** (bound to `opt.use_custom_allocation`).
-- When ON, render `<PaxAllocator>`:
-  - Header: "Room allocation for N persons" (N = `totalPax(draft)`).
-  - Presets row: `All Single`, `All Double Sharing`, `Mixed: 1 Single + Rest Double`.
-  - One row per person: editable name input, `room_type` select, `sharing_with` select filtered to pax not already paired (except self / current partner). Auto-mirror pairing both ways; keep read-only on the mirror.
-  - Auto-init `pax_allocations` from pax count when switch flips ON; auto-resize when pax count changes while ON.
-- Below allocator, extend the existing **Cost Preview** box: when custom mode is ON, replace the SGL/DBL/TRP mini-summary with the per-person block described in Change 3 (nights × rate + GST per person, then combined total). Default mode preview is untouched.
+- Remove all editable price inputs.
+- Table columns: `DAY | ROUTE | CITY + TOUR | INDIAN TOTAL | FOREIGNER TOTAL | STUDENT TOTAL | SUBTOTAL`.
+- Rows derived from routing `tours_selected_by_city`; prices pulled from Entrances module by tour match.
+- Pax defaults: Indian = `total_pax`, Foreign = 0, Student = 0 (no editing here).
+- Missing price → amber "Price not set — update in Entrances module".
+- Include/exclude checkbox per row, pre-checked from routing.
+- Traveller filter chips (All / Indian / Foreigner / Student) highlight that column.
+- Per-day subtotal row + grand Total Entrances footer.
+- Column-total layout: each nationality column shows its own running total under its cells; grand total sums all three.
 
-Helper `PaxAllocator` and preset functions live in the same file (matching the file's current pattern of local step components).
+## FIX 4 — Guide (Step 12) Simplify + Escort Split
 
-## Step 16 (Costing Variations)
+- Table columns: `DAY | ROUTE | CITY + TOUR | RATE (₹) | SUBTOTAL` (remove Escort/Entry columns).
+- Radio per city selecting one tour; rate auto-filled from Guide module using language filter + pax tier; editable override.
+- Language filter chips + "Rate applied: X-Y Pax" badge at top.
+- Per-day subtotal; Guide Subtotal footer.
+- **Separate Tour Escort section below**: checkbox toggle → Type, Language, Days, Rate/day (default from module escort rate), Total, Remarks, Extra Cost. Escort Total shown.
+- **Reporting Cost section**: numeric input + remarks.
+- Grand `GUIDE TOTAL = fees + escort + reporting`.
+- Store escort as an existing `GuideLine` with `is_escort=true` (schema already supports it) so Step 16 math untouched.
 
-For each selected option:
+## FIX 5 — Miscellaneous
 
-- If `use_custom_allocation`: render a new **"Cost Per Person"** table above the existing SGL/DBL/TRP block with columns Person / Room Type / Room Cost / GST / Room Total, then Shared Costs breakdown (transport, guide, entrances, misc, activities, optionals — using existing `computeAddonsTotal` split), then Markup per person, GST 5% on markup per person, Grand Total per person, and Package Total.
-- Keep the existing SGL/DBL/TRP summary rows untouched below (spec Change 4 explicitly says "keep for reference").
+**Module modal:** collapse pricing types to `per_person` | `slab` (drop `per_day`, `fixed`). Migration: existing `per_day`/`fixed` rows treated as `per_person` with a single 1..∞ slab of their `rate` on read. Slab tables mirror Activities.
 
-## Step 17 (Final)
+**Wizard Step 13:**
+- `per_person`: rate from slab for `total_pax`, `rate × qty` with editable qty default `total_pax`, label "₹X × N pax = ₹Y".
+- `slab`: fixed total from slab, no qty, show per-person share as info.
+- Misc Total footer.
 
-For options with custom allocation, add a per-person summary card (Change 5 layout) alongside the existing final blocks. Non-custom options render exactly as today.
+## Out of Scope (untouched)
 
-## PDF export (`src/components/QuoteDocument.tsx`)
+Steps 1-9, 14 (Transport), 15 (Hotels), 16-18 costing math, PDF export, other master modules.
 
-For each included option with custom allocation, add a **"Room Allocation & Cost Per Person"** table (Change 6 columns: Person, Room Type, Accommodation, Shared Costs, Markup+GST, Total) with the footnote about shared costs. Options without custom allocation render unchanged.
+## Technical Notes
 
-## Backward compatibility
-
-- New fields are optional; existing drafts and saved quotes without them fall through to today's behaviour.
-- `computeOption`, `transportLineTotal`, `gstRateFor`, and add-ons breakdown are not modified.
-- Hotels module, notifications, drafts store, saved quotes store, styling: untouched.
-
-## Change 8 (Agents)
-
-Verify `src/routes/_authenticated/agents.tsx` and Step 2 combobox still work; no code changes expected. If a regression is found I'll note it but not expand scope.
-
-## Out of scope
-
-Per-day allocation overrides, per-person meal-plan overrides, editing allocations from Step 16/17 (Step 15 remains the single edit surface).
+- No changes to `QuoteDraft` line-item shapes; enrich `MiscellaneousItem` migration path in `miscRateForPax`.
+- `Activity` slab shape already supports both modes via `pricing_mode` + `pax_ranges`; module UI just enforces the binary choice.
+- Refactor lands first as pure moves (one commit worth), then each fix layered on top file-by-file to keep diffs reviewable.
+- Verification per fix: `tsgo`, load wizard through Steps 10-13 in preview, spot-check totals feed unchanged into Step 16.
