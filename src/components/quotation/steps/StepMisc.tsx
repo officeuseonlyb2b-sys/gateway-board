@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB, miscRateForPax } from "@/lib/mock-store";
 import { totalPax } from "@/lib/wizard/calc";
-import { uid, CustomAdd, type StepProps } from "../shared";
+import { uid, CustomAdd, WIZARD_HOTEL_CATEGORIES, type StepProps } from "../shared";
 
 export function Step14({ draft, set }: StepProps) {
   const d = useDB();

@@ -20,6 +20,7 @@ import type { QuoteDraft, HotelOption, OptionKey, PersonAllocation, PersonRoomTy
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
+import { WIZARD_HOTEL_CATEGORIES } from "../shared";
 import type { StepProps } from "../shared";
 
 export function Step15({ draft, set }: StepProps) {

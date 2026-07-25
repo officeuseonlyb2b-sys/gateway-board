@@ -91,3 +91,16 @@ export function CustomAdd({ label, onAdd }: { label: string; onAdd: (name: strin
     </div>
   );
 }
+
+export const WIZARD_HOTEL_CATEGORIES = [
+  "Home Stay",
+  "Excellent Budget",
+  "3 Star",
+  "3 Star Deluxe",
+  "4 Star",
+  "4 Star Superior",
+  "5 Star",
+  "5 Star Deluxe",
+  "Heritage",
+  "Experiential",
+] as const;

@@ -52,7 +52,7 @@ import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { AgentFormDialog } from "@/components/AgentFormDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { uid } from "@/components/quotation/shared";
+import { uid, CustomAdd } from "@/components/quotation/shared";
 import { Step10 } from "@/components/quotation/steps/StepTransport";
 import { Step11 } from "@/components/quotation/steps/StepActivities";
 import { Step12 } from "@/components/quotation/steps/StepEntrances";
