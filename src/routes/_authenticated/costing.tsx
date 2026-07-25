@@ -52,6 +52,15 @@ import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { AgentFormDialog } from "@/components/AgentFormDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { uid } from "@/components/quotation/shared";
+import { Step10 } from "@/components/quotation/steps/StepTransport";
+import { Step11 } from "@/components/quotation/steps/StepActivities";
+import { Step12 } from "@/components/quotation/steps/StepEntrances";
+import { Step13 } from "@/components/quotation/steps/StepGuide";
+import { Step14 } from "@/components/quotation/steps/StepMisc";
+import { Step15 } from "@/components/quotation/steps/StepHotels";
+import { Step16 } from "@/components/quotation/steps/StepCosting";
+import { Step17 } from "@/components/quotation/steps/StepFinal";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
