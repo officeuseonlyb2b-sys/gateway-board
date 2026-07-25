@@ -11,6 +11,6 @@ export function useCostCalculation(draft: QuoteDraft) {
     () => draft.hotel_options.map((o) => computeOption(draft, o, d)),
     [draft, d],
   );
-  const addonsTotal = useMemo(() => computeAddonsTotal(draft, d), [draft, d]);
+  const addonsTotal = useMemo(() => computeAddonsTotal(draft), [draft]);
   return { optionTotals, addonsTotal };
 }
