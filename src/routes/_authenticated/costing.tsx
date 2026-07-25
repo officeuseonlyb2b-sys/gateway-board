@@ -1686,20 +1686,41 @@ function Step11({ draft, set }: StepProps) {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: Math.max(1, pax) }, (_, i) => i + 1).map((n) => {
-                  const row = selectedActivities.map(({ line, isSlab }) => isSlab ? line.rate : line.rate * n);
-                  const rowTotal = row.reduce((s, v) => s + v, 0);
-                  return (
-                    <tr key={n} className="border-b">
-                      <td className="p-2 font-medium">{n} pax</td>
-                      {row.map((v, ci) => (
-                        <td key={ci} className="p-2 text-right tabular-nums">{inr(v)}</td>
-                      ))}
-                      <td className="p-2 text-right tabular-nums font-semibold">{inr(rowTotal)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+  {Array.from({ length: Math.max(1, pax) }, (_, i) => i + 1).map((n) => {
+    const rowPerPerson = selectedActivities.map(({ activity, line, isSlab }) => {
+      if (!isSlab) {
+        return line.rate; // per-person rate directly
+      }
+      // Slab logic: find the correct slab for this 'n'
+      const slabs = [...(activity.pricing_slabs ?? [])].sort(
+        (a, b) => a.from_pax - b.from_pax
+      );
+      if (slabs.length === 0) {
+        return line.rate / Math.max(1, n); // fallback
+      }
+      const slab =
+        slabs.find((s) => n >= s.from_pax && n <= s.to_pax) ??
+        (n < slabs[0].from_pax ? slabs[0] : slabs[slabs.length - 1]);
+      return slab.price / n; // per-person = slab total ÷ n
+    });
+
+    const rowTotal = rowPerPerson.reduce((s, v) => s + v, 0);
+
+    return (
+      <tr key={n} className="border-b">
+        <td className="p-2 font-medium">{n} pax</td>
+        {rowPerPerson.map((v, ci) => (
+          <td key={ci} className="p-2 text-right tabular-nums">
+            {inr(v)}
+          </td>
+        ))}
+        <td className="p-2 text-right tabular-nums font-semibold">
+          {inr(rowTotal)}
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
             </table>
           </div>
           <p className="text-[10px] text-muted-foreground mt-2">
