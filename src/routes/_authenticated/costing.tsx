@@ -292,19 +292,32 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
         {STEPS.map((s, i) => {
           const done = step > s.n;
           const active = step === s.n;
-          const canJump = s.n <= step;
+          const isFuture = s.n > step;
+          const handleClick = () => {
+            if (isFuture) {
+              toast.info("Complete previous steps first");
+              return;
+            }
+            if (active) {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+              return;
+            }
+            onJump(s.n);
+          };
           return (
             <div key={s.n} className="flex items-start">
               <button
                 type="button"
-                disabled={!canJump}
-                onClick={() => canJump && onJump(s.n)}
-                className="flex flex-col items-center gap-1 min-w-[68px] group"
+                onClick={handleClick}
+                className={cn(
+                  "flex flex-col items-center gap-1 min-w-[68px] group",
+                  isFuture ? "cursor-not-allowed" : "cursor-pointer",
+                )}
               >
                 <div
                   className={cn(
                     "h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold border-2 transition-colors",
-                    done && "bg-primary border-primary text-primary-foreground",
+                    done && "bg-primary border-primary text-primary-foreground group-hover:brightness-110",
                     active && "bg-accent border-accent text-accent-foreground",
                     !done && !active && "bg-background border-muted-foreground/30 text-muted-foreground",
                   )}
