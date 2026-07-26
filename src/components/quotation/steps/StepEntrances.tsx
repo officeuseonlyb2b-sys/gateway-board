@@ -155,8 +155,8 @@ export function Step12({ draft, set }: StepProps) {
                               field === "indian_rate" ? row.site.indian_rate :
                               field === "foreign_rate" ? row.site.foreigner_rate :
                               row.site.student_rate ?? 0;
-                            const lineVal = on ? (line as Record<string, unknown>)[field] as number : masterVal;
-                            const pax = on ? ((line as Record<string, unknown>)[pxKey] as number) ?? 0 : 0;
+                            const lineVal = on ? (line as unknown as Record<string, number>)[field] : masterVal;
+                            const pax = on ? (line as unknown as Record<string, number>)[pxKey] ?? 0 : 0;
                             const missing = masterVal === 0;
                             if (on && missing) {
                               return (
