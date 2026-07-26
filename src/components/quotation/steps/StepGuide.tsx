@@ -1,5 +1,6 @@
-// Extracted verbatim from src/routes/_authenticated/costing.tsx (Step 12 UI — Guide).
+// Step 12 — Guide charges. All configured languages stacked per tour row with radio selection.
 import { useEffect, useMemo, useState } from "react";
+import React from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
-import { useDB, GUIDE_LANGUAGES, guideConfiguredLanguages, guideRateForPax, type GuideLanguage } from "@/lib/mock-store";
+import { useDB, GUIDE_LANGUAGES, guideConfiguredLanguages, guideRateForPax, guidePrimaryLanguage, type GuideLanguage } from "@/lib/mock-store";
 import { totalPax } from "@/lib/wizard/calc";
 import { uid, dayAllCities, type CityRef, type StepProps } from "../shared";
 
@@ -22,19 +23,16 @@ export function Step13({ draft, set }: StepProps) {
 
   const allGuides = d.guides.filter((g) => g.is_active);
 
-  // Available languages across configured guides
   const availableLanguages = useMemo(() => {
     const s = new Set<GuideLanguage>();
     allGuides.forEach((g) => guideConfiguredLanguages(g).forEach((l) => s.add(l)));
     return GUIDE_LANGUAGES.filter((l) => s.has(l));
   }, [allGuides]);
 
-  const rateForGuide = (g: typeof allGuides[number]) => {
-    if (langFilter !== "all" && g.language_rates?.[langFilter as GuideLanguage]) {
-      const r = g.language_rates[langFilter as GuideLanguage]!;
-      return pax <= 5 ? r.rate_1_to_5 : pax <= 14 ? r.rate_6_to_14 : r.rate_15_plus;
-    }
-    return guideRateForPax(g, pax);
+  const rateForGuideLang = (g: typeof allGuides[number], lang: GuideLanguage) => {
+    const r = g.language_rates?.[lang];
+    if (r) return pax <= 5 ? r.rate_1_to_5 : pax <= 14 ? r.rate_6_to_14 : r.rate_15_plus;
+    return guideRateForPax(g, pax, lang);
   };
 
   const findLine = (guideId: string, day: number) =>
@@ -43,12 +41,8 @@ export function Step13({ draft, set }: StepProps) {
   const findEscort = (day: number) =>
     draft.guides.find((x) => x.is_escort && (x.from_routing_days ?? []).includes(day));
 
-  const selectGuide = (g: typeof allGuides[number], day: number, dayCityIds: string[]) => {
-    // Remove any existing non-escort selection for this city on this day
-    const cityGuideIds = allGuides
-      .filter((gx) => dayCityIds.some((cid) => cityName(cid) === (gx.city ?? gx.destination)))
-      .map((gx) => gx.id);
-    // Only clear guides in the SAME city as `g` on this day
+  // Select/change guide + language for a day. Enforces one guide per city per day.
+  const selectGuideLang = (g: typeof allGuides[number], day: number, lang: GuideLanguage) => {
     const gCity = g.city ?? g.destination;
     const cleared = draft.guides.filter((x) => {
       if (x.is_escort) return true;
@@ -57,17 +51,17 @@ export function Step13({ draft, set }: StepProps) {
       const xCity = gm?.city ?? gm?.destination;
       return xCity !== gCity;
     });
-    const already = draft.guides.find((x) => x.guide_id === g.id && !x.is_escort && (x.from_routing_days ?? []).includes(day));
-    if (already) {
-      // toggle off
-      set({ guides: cleared.filter((x) => x.id !== already.id) });
-    } else {
-      set({ guides: [...cleared, {
-        id: uid(), guide_id: g.id, days: 1, guides: 1, rate: rateForGuide(g), from_routing_days: [day],
-      }] });
-    }
-    // dayCityIds/cityGuideIds unused warning suppression
-    void cityGuideIds;
+    set({ guides: [...cleared, {
+      id: uid(), guide_id: g.id, days: 1, guides: 1,
+      rate: rateForGuideLang(g, lang),
+      language: lang,
+      from_routing_days: [day],
+    }] });
+  };
+
+  const removeGuide = (guideId: string, day: number) => {
+    const existing = findLine(guideId, day);
+    if (existing) set({ guides: draft.guides.filter((x) => x.id !== existing.id) });
   };
 
   const toggleEscort = (day: number) => {
@@ -92,15 +86,15 @@ export function Step13({ draft, set }: StepProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Guide Charges</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Language:</span>
+          <span className="text-xs text-muted-foreground">Filter language:</span>
           <Select value={langFilter} onValueChange={setLangFilter}>
             <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="all">All languages</SelectItem>
               {availableLanguages.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Badge variant="secondary" className="text-[10px]">Rate applied: {paxTier} Pax</Badge>
+          <Badge variant="secondary" className="text-[10px]">Rate tier: {paxTier} pax</Badge>
         </div>
       </div>
 
@@ -111,15 +105,14 @@ export function Step13({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[160px]">Route</th>
               <th className="text-left p-2">City + Tour</th>
-              <th className="text-left p-2 w-[120px]">Rate (₹)</th>
-              <th className="text-right p-2 w-[100px]">Subtotal</th>
+              <th className="text-left p-2 w-[240px]">Language & Rate</th>
+              <th className="text-right p-2 w-[110px]">Subtotal</th>
             </tr>
           </thead>
           <tbody>
             {draft.routing.map((r, ri) => {
               const fromDefault = ri === 0 ? draft.departure_city : cityName(draft.routing[ri - 1]?.city_id || "");
               const dayCities = dayAllCities(r, d.cities, fromDefault);
-              const dayCityIds = dayCities.map((c) => c.id);
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
 
               const cityGuides: { city: CityRef; guides: typeof allGuides }[] = dayCities.map((c) => {
@@ -132,17 +125,17 @@ export function Step13({ draft, set }: StepProps) {
                     if (gCity !== c.name) return false;
                     const gTour = g.tour_program ?? g.name;
                     if (!selectedTitles.includes(gTour)) return false;
-                    if (langFilter === "all") return true;
-                    return guideConfiguredLanguages(g).includes(langFilter as GuideLanguage);
+                    return true;
                   }),
                 };
               });
-              const totalRows = cityGuides.reduce((s, x) => s + Math.max(x.guides.length, 1), 0);
-              if (totalRows === 0) {
+
+              const totalGuideRows = cityGuides.reduce((s, x) => s + Math.max(x.guides.length, 1), 0);
+              if (totalGuideRows === 0) {
                 return (
                   <tr key={ri} className="border-b border-[#E5E7EB]">
                     <td className="p-2 font-semibold">Day {r.day}</td>
-                    <td className="p-2 text-muted-foreground">{routeLabel}</td>
+                    <td className="p-2 text-muted-foreground text-[11px]">{routeLabel}</td>
                     <td colSpan={3} className="p-2 text-muted-foreground italic">No guides available for selected tours.</td>
                   </tr>
                 );
@@ -150,14 +143,15 @@ export function Step13({ draft, set }: StepProps) {
 
               const rowNodes: React.ReactElement[] = [];
               let firstCell = true;
+              const spanRows = totalGuideRows + 1;
               cityGuides.forEach(({ city, guides }) => {
                 if (guides.length === 0) {
                   rowNodes.push(
                     <tr key={`${ri}-${city.id}-empty`} className="border-b border-[#E5E7EB]">
                       {firstCell && (
                         <>
-                          <td rowSpan={totalRows + 1} className="p-2 font-semibold align-top">Day {r.day}</td>
-                          <td rowSpan={totalRows + 1} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
+                          <td rowSpan={spanRows} className="p-2 font-semibold align-top">Day {r.day}</td>
+                          <td rowSpan={spanRows} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
                         </>
                       )}
                       <td colSpan={3} className="p-2 text-muted-foreground italic text-[11px]">{city.name}: no guides</td>
@@ -169,26 +163,56 @@ export function Step13({ draft, set }: StepProps) {
                 guides.forEach((g, gi) => {
                   const line = findLine(g.id, r.day);
                   const on = !!line;
-                  const rate = on ? line!.rate : rateForGuide(g);
+                  const configuredLangs = guideConfiguredLanguages(g);
+                  const langsToShow = configuredLangs.length > 0
+                    ? configuredLangs
+                    : (guidePrimaryLanguage(g) ? [guidePrimaryLanguage(g)!] : (["English"] as GuideLanguage[]));
+                  const visibleLangs = langFilter === "all"
+                    ? langsToShow
+                    : langsToShow.filter((l) => l === langFilter);
+                  const selectedLang = (line?.language as GuideLanguage | undefined) ?? null;
+
                   rowNodes.push(
-                    <tr key={`${ri}-${g.id}`} className={cn("border-b border-[#E5E7EB]", on ? "bg-accent/5" : "bg-white")}>
+                    <tr key={`${ri}-${g.id}`} className={cn("border-b border-[#E5E7EB] align-top", on ? "bg-accent/5" : "bg-white")}>
                       {firstCell && (
                         <>
-                          <td rowSpan={totalRows + 1} className="p-2 font-semibold align-top">Day {r.day}</td>
-                          <td rowSpan={totalRows + 1} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
+                          <td rowSpan={spanRows} className="p-2 font-semibold align-top">Day {r.day}</td>
+                          <td rowSpan={spanRows} className="p-2 text-muted-foreground align-top text-[11px]">{routeLabel}</td>
                         </>
                       )}
                       <td className="p-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="radio" name={`d${r.day}-${city.id}`} checked={on}
-                            onChange={() => selectGuide(g, r.day, dayCityIds)} />
-                          <span>
-                            {gi === 0 && <span className="text-[10px] text-muted-foreground">{city.name}</span>}
-                            <span className="block text-sm font-medium">{g.tour_program ?? g.name}</span>
-                          </span>
-                        </label>
+                        {gi === 0 && <div className="text-[10px] uppercase text-muted-foreground mb-0.5">{city.name}</div>}
+                        <div className="text-sm font-medium">{g.tour_program ?? g.name}</div>
+                        {on && (
+                          <button type="button"
+                            className="text-[10px] text-destructive mt-1 hover:underline"
+                            onClick={() => removeGuide(g.id, r.day)}>
+                            Remove
+                          </button>
+                        )}
                       </td>
-                      <td className="p-2 tabular-nums">₹{rate.toLocaleString("en-IN")}</td>
+                      <td className="p-2">
+                        <div className="space-y-1">
+                          {visibleLangs.length === 0 ? (
+                            <div className="text-[11px] text-muted-foreground italic">No language configured.</div>
+                          ) : visibleLangs.map((lang) => {
+                            const rate = rateForGuideLang(g, lang);
+                            const isSel = on && selectedLang === lang;
+                            return (
+                              <label key={lang}
+                                className={cn(
+                                  "flex items-center gap-2 rounded px-2 py-1 cursor-pointer text-[11px]",
+                                  isSel ? "bg-primary/10 border border-primary/40 font-semibold" : "hover:bg-muted/40",
+                                )}>
+                                <input type="radio" name={`d${r.day}-${g.id}`} checked={isSel}
+                                  onChange={() => selectGuideLang(g, r.day, lang)} />
+                                <span className="flex-1">{lang}</span>
+                                <span className="tabular-nums">₹{rate.toLocaleString("en-IN")}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </td>
                       <td className="p-2 text-right tabular-nums font-medium">
                         {on && line ? inr(line.rate * line.days * line.guides) : "—"}
                       </td>
@@ -203,7 +227,7 @@ export function Step13({ draft, set }: StepProps) {
                   <td className="p-2 text-right tabular-nums font-semibold">{inr(guideDayTotal(r.day))}</td>
                 </tr>,
               );
-              return <>{rowNodes}</>;
+              return <React.Fragment key={ri}>{rowNodes}</React.Fragment>;
             })}
           </tbody>
         </table>
@@ -261,6 +285,7 @@ export function Step13({ draft, set }: StepProps) {
     </div>
   );
 }
+
 
 
 
