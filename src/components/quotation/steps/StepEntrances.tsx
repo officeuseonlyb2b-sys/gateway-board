@@ -320,7 +320,7 @@ export function Step12({ draft, set }: StepProps) {
                         {inr(foreignTot)}
                       </div>
                       <div className="text-[9px] text-muted-foreground mt-0.5">
-                        0 pax × rates
+                        {totalPaxCount} pax × rates
                       </div>
                       {rows.map((row) => {
                         const line = findLine(row.site.id, r.day);
@@ -346,7 +346,7 @@ export function Step12({ draft, set }: StepProps) {
                         {inr(studentTot)}
                       </div>
                       <div className="text-[9px] text-muted-foreground mt-0.5">
-                        0 pax × rates
+                        {totalPaxCount} pax × rates
                       </div>
                       {rows.map((row) => {
                         const line = findLine(row.site.id, r.day);
