@@ -80,7 +80,6 @@ function GuidePage() {
 
   function displayRates(g: Guide | undefined) {
     if (!g) return { lang: null as GuideLanguage | null, r5: 0, r14: 0, r15: 0 };
-    // If a specific language filter is active, show that language's rates.
     if (languageFilter !== "all" && g.language_rates?.[languageFilter as GuideLanguage]) {
       const r = g.language_rates[languageFilter as GuideLanguage]!;
       return { lang: languageFilter as GuideLanguage, r5: r.rate_1_to_5, r14: r.rate_6_to_14, r15: r.rate_15_plus };
@@ -92,7 +91,6 @@ function GuidePage() {
     }
     return { lang: null, r5: g.rate_1_to_5 ?? 0, r14: g.rate_6_to_14 ?? 0, r15: g.rate_15_plus ?? 0 };
   }
-
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
@@ -221,6 +219,10 @@ function GuidePage() {
                     {rows.map((r) => {
                       const g = r.guide;
                       const langs = g ? guideConfiguredLanguages(g) : [];
+                      // Filter language badges if a specific language is selected
+                      const filteredLangs = languageFilter === "all"
+                        ? langs
+                        : langs.filter((l) => l === languageFilter);
                       const disp = displayRates(g);
                       return (
                         <TableRow key={r.tour.id}>
@@ -236,11 +238,11 @@ function GuidePage() {
                           <TableCell className="tabular-nums">{disp.r14 ? inr(disp.r14) : "—"}</TableCell>
                           <TableCell className="tabular-nums">{disp.r15 ? inr(disp.r15) : "—"}</TableCell>
                           <TableCell>
-                            {langs.length === 0 ? (
+                            {filteredLangs.length === 0 ? (
                               <span className="text-muted-foreground">—</span>
                             ) : (
                               <div className="flex flex-wrap gap-1">
-                                {langs.map((l) => (
+                                {filteredLangs.map((l) => (
                                   <Badge key={l} variant="secondary" className="text-[10px]">{l}</Badge>
                                 ))}
                               </div>
@@ -289,7 +291,6 @@ function GuidePricingDialog({
   useEffect(() => {
     if (row) {
       const existing = row.guide?.language_rates ?? {};
-      // Ensure defaults exist
       const seeded: Partial<Record<GuideLanguage, GuideLanguageRate>> = {
         Hindi: existing.Hindi ?? {
           rate_1_to_5: row.guide?.rate_1_to_5 ?? 0,
@@ -335,8 +336,6 @@ function GuidePricingDialog({
 
   function save() {
     if (!row) return;
-    // Also mirror English (or Hindi fallback) into legacy top-level rates
-    // so wizard calculations that reference rate_1_to_5 etc. keep working.
     const primary = rates.English ?? rates.Hindi;
     db.upsertGuidePricingForTour(row.tour.id, {
       language_rates: rates,

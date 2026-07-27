@@ -3,8 +3,6 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
@@ -76,13 +74,11 @@ export function Step11({ draft, set }: StepProps) {
       .filter(Boolean) as Array<{ line: typeof draft.activities[number]; activity: typeof d.activities[number]; isSlab: boolean }>;
   }, [draft.activities, d.activities]);
 
-  let grandTotal = 0;
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Activities & Experiences</h2>
-        <Badge variant="secondary" className="text-[10px]">Pax used: {pax}</Badge>
+        {/* <Badge variant="secondary" className="text-[10px]">Pax used: {pax}</Badge> */}
       </div>
 
       {draft.routing.length === 0 && (
@@ -96,7 +92,6 @@ export function Step11({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[170px]">Route</th>
               <th className="text-left p-2">City + Activity</th>
-              <th className="text-right p-2 w-[140px]">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -105,10 +100,6 @@ export function Step11({ draft, set }: StepProps) {
               const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${cityName(r.city_id) || r.to_city || "—"}`;
               const groups = perDayGroups(r);
               const hasAny = groups.some((g) => g.activities.length > 0);
-              // Sum enabled lines for this day.
-              const enabled = groups.flatMap((g) => g.activities.map((a) => ({ a, line: findLine(a.id, r.day) }))).filter((x) => !!x.line);
-              const daySub = enabled.reduce((s, { line }) => s + (line!.pricing_mode === "slab" ? line!.rate : line!.rate * line!.qty), 0);
-              grandTotal += daySub;
 
               return (
                 <tr key={ri} className="border-b border-[#E5E7EB] align-top bg-white">
@@ -130,7 +121,6 @@ export function Step11({ draft, set }: StepProps) {
                                 const on = !!line;
                                 const { rate, slab } = slabRate(a);
                                 const slabMode = isSlab(a);
-                                const qty = line?.qty ?? (slabMode ? 1 : pax);
                                 return (
                                   <div key={a.id} className={cn("flex items-center gap-2 rounded px-1.5 py-1", on && "bg-accent/5")}>
                                     <Checkbox checked={on} onCheckedChange={() => toggle(a, r.day)} />
@@ -142,15 +132,9 @@ export function Step11({ draft, set }: StepProps) {
                                           : (slab ? `Slab ${slab.from_pax}-${slab.to_pax}: ₹${rate.toLocaleString("en-IN")}/pp` : `₹${rate.toLocaleString("en-IN")}/pp`)}
                                       </div>
                                     </div>
-                                    {on && line && !slabMode && (
-                                      <div className="flex items-center gap-1">
-                                        <Label className="text-[9px]">Pax</Label>
-                                        <Input type="number" min={1} value={line.qty} className="w-14 h-7 text-[11px]"
-                                          onChange={(e) => set({ activities: draft.activities.map((x) => x.id === line.id ? { ...x, qty: parseInt(e.target.value) || 1 } : x) })} />
-                                      </div>
-                                    )}
+                                    {/* Amount: per-person rate (or slab total) */}
                                     <div className={cn("w-24 text-right tabular-nums text-[11px] font-semibold", !on && "opacity-40")}>
-                                      {on ? inr(slabMode ? rate : rate * qty) : inr(0)}
+                                      {on ? inr(rate) : inr(0)}
                                     </div>
                                   </div>
                                 );
@@ -161,14 +145,9 @@ export function Step11({ draft, set }: StepProps) {
                       </div>
                     )}
                   </td>
-                  <td className="p-2 text-right tabular-nums font-semibold">{inr(daySub)}</td>
                 </tr>
               );
             })}
-            <tr className="bg-primary/5 font-bold">
-              <td colSpan={3} className="p-2 text-right text-sm">TOTAL ACTIVITIES</td>
-              <td className="p-2 text-right tabular-nums text-sm">{inr(grandTotal)}</td>
-            </tr>
           </tbody>
         </table>
       </div>

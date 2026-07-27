@@ -196,10 +196,10 @@ export interface DestinationTour {
 
 export const GUIDE_LANGUAGES = [
   "Hindi", "English", "French", "German", "Spanish",
-  "Japanese", "Italian", "Russian", "Portuguese", "Other",
+  "Japanese", "Italian", "Russian", "Portuguese", "Language",
 ] as const;
 export type GuideLanguage = (typeof GUIDE_LANGUAGES)[number];
-export const DEFAULT_GUIDE_LANGUAGES: GuideLanguage[] = ["Hindi", "English"];
+export const DEFAULT_GUIDE_LANGUAGES: GuideLanguage[] = ["English"];
 
 export interface GuideLanguageRate {
   rate_1_to_5: number;
