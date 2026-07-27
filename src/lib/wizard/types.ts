@@ -236,6 +236,10 @@ export interface QuoteDraft {
   // Guide step UI state (Step 12) — non-calc
   guide_language?: string;
   guide_reporting_cost?: number;
+  guide_reporting_cost_hindi?: number;
+  guide_reporting_cost_english?: number;
+  guide_reporting_cost_language?: number;
+  guide_day_escort?: Record<number, number>;
   guide_remarks?: string;
   updated_at: string;
 

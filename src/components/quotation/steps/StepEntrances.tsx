@@ -33,9 +33,9 @@ export function Step12({ draft, set }: StepProps) {
             site_id: s.id,
             indian_pax: totalPaxCount,
             indian_rate: s.indian_rate,
-            foreign_pax: 0,
+            foreign_pax: totalPaxCount,
             foreign_rate: s.foreigner_rate,
-            student_pax: 0,
+            student_pax: totalPaxCount,
             student_rate: s.student_rate ?? 0,
             from_routing_days: [day],
           },
@@ -67,6 +67,14 @@ export function Step12({ draft, set }: StepProps) {
       }
       if (patched.indian_pax !== totalPaxCount) {
         patched.indian_pax = totalPaxCount;
+        dirty = true;
+      }
+      if (patched.foreign_pax !== totalPaxCount) {
+        patched.foreign_pax = totalPaxCount;
+        dirty = true;
+      }
+      if ((patched.student_pax ?? 0) !== totalPaxCount) {
+        patched.student_pax = totalPaxCount;
         dirty = true;
       }
       return patched;
@@ -144,7 +152,7 @@ export function Step12({ draft, set }: StepProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Entrance Fees</h2>
         <Badge variant="secondary" className="text-[10px]">
-          Indian pax: {totalPaxCount} · Foreigner: 0 · Student: 0
+          Pax: {totalPaxCount} (Indian · Foreigner · Student)
         </Badge>
       </div>
 
@@ -312,7 +320,7 @@ export function Step12({ draft, set }: StepProps) {
                         {inr(foreignTot)}
                       </div>
                       <div className="text-[9px] text-muted-foreground mt-0.5">
-                        0 pax × rates
+                        {totalPaxCount} pax × rates
                       </div>
                       {rows.map((row) => {
                         const line = findLine(row.site.id, r.day);
@@ -338,7 +346,7 @@ export function Step12({ draft, set }: StepProps) {
                         {inr(studentTot)}
                       </div>
                       <div className="text-[9px] text-muted-foreground mt-0.5">
-                        0 pax × rates
+                        {totalPaxCount} pax × rates
                       </div>
                       {rows.map((row) => {
                         const line = findLine(row.site.id, r.day);
