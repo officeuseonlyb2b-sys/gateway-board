@@ -69,6 +69,14 @@ export function Step12({ draft, set }: StepProps) {
         patched.indian_pax = totalPaxCount;
         dirty = true;
       }
+      if (patched.foreign_pax !== totalPaxCount) {
+        patched.foreign_pax = totalPaxCount;
+        dirty = true;
+      }
+      if ((patched.student_pax ?? 0) !== totalPaxCount) {
+        patched.student_pax = totalPaxCount;
+        dirty = true;
+      }
       return patched;
     });
     if (dirty) set({ entrances: next });
