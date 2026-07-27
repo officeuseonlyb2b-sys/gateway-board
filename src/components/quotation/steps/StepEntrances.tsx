@@ -152,7 +152,7 @@ export function Step12({ draft, set }: StepProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Entrance Fees</h2>
         <Badge variant="secondary" className="text-[10px]">
-          Indian pax: {totalPaxCount} · Foreigner: 0 · Student: 0
+          Pax: {totalPaxCount} (Indian · Foreigner · Student)
         </Badge>
       </div>
 
