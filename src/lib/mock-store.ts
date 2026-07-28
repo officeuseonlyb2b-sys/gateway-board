@@ -29,6 +29,35 @@ export const MEAL_PLANS: MealPlan[] = ["CP", "MAP", "AP"];
 
 export type SupplementType = "fixed" | "per_person";
 
+export type HotelType =
+  | "Box Building"
+  | "Resort Property"
+  | "Home Stay"
+  | "Wildlife - Jungle Resort"
+  | "Wildlife - Jungle Lodge"
+  | "Wildlife - Tree House"
+  | "Camps / Tents"
+  | "Heritage"
+  | "Experiential";
+
+export const HOTEL_TYPES: HotelType[] = [
+  "Box Building",
+  "Resort Property",
+  "Home Stay",
+  "Wildlife - Jungle Resort",
+  "Wildlife - Jungle Lodge",
+  "Wildlife - Tree House",
+  "Camps / Tents",
+  "Heritage",
+  "Experiential",
+];
+
+export interface BlackoutRange {
+  id: string;
+  from: string; // ISO date
+  to: string;   // ISO date
+}
+
 export interface City {
   id: string;
   name: string;
@@ -39,12 +68,14 @@ export interface Hotel {
   city_id: string;
   name: string;
   hotel_category: HotelCategory;
+  hotel_type?: HotelType;
   contact_name: string;
   contact_phone: string;
   email: string;
   has_wifi: boolean;
   has_pool: boolean;
   address: string;
+  blackout_ranges?: BlackoutRange[];
   created_at: string;
   updated_at: string;
 }
