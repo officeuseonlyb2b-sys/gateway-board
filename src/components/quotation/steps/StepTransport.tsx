@@ -101,6 +101,28 @@ export function Step10({ draft, set }: StepProps) {
                         onChange={(e) => patchLine(i, { vehicles: parseInt(e.target.value) || 1 })} />
                     </div>
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">Rate Mode</Label>
+                    <div className="flex gap-1 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => patchLine(i, { rate_mode: "daywise" })}
+                        className={`flex-1 px-2 py-1 rounded ${(t.rate_mode ?? "daywise") === "daywise" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+                      >Day-wise</button>
+                      <button
+                        type="button"
+                        onClick={() => patchLine(i, { rate_mode: "total" })}
+                        className={`flex-1 px-2 py-1 rounded ${t.rate_mode === "total" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+                      >Total</button>
+                    </div>
+                    {t.rate_mode === "total" && (
+                      <div>
+                        <Label className="text-[10px]">Total Rate (₹)</Label>
+                        <Input type="number" min={0} className="h-8 text-xs text-right" value={t.total_rate || ""}
+                          onChange={(e) => patchLine(i, { total_rate: parseFloat(e.target.value) || 0 })} />
+                      </div>
+                    )}
+                  </div>
                 </Card>
               );
             })}
