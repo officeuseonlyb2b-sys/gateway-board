@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { db, useDB, HOTEL_CATEGORIES, type Hotel, type HotelCategory } from "@/lib/mock-store";
+import { db, useDB, HOTEL_CATEGORIES, HOTEL_TYPES, type Hotel, type HotelCategory, type HotelType, type BlackoutRange } from "@/lib/mock-store";
 import { notify } from "@/lib/notify";
 import {
   HotelRatesEditor,
@@ -40,6 +40,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     city_id: hotel?.city_id ?? data.cities[0]?.id ?? "",
     name: hotel?.name ?? "",
     hotel_category: (hotel?.hotel_category ?? "3 Star") as HotelCategory,
+    hotel_type: (hotel?.hotel_type ?? "") as HotelType | "",
     contact_name: hotel?.contact_name ?? "",
     contact_phone: hotel?.contact_phone ?? "",
     email: hotel?.email ?? "",
@@ -47,6 +48,8 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     has_wifi: hotel?.has_wifi ?? true,
     has_pool: hotel?.has_pool ?? false,
   }));
+  const [blackouts, setBlackouts] = useState<BlackoutRange[]>(hotel?.blackout_ranges ?? []);
+  const rid = () => Math.random().toString(36).slice(2);
   const [newCity, setNewCity] = useState("");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
