@@ -231,6 +231,71 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
             <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
           </div>
 
+          <div className="border-t pt-4">
+            <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
+          </div>
+
+          <div className="border-t pt-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold">Blackout Dates</h3>
+              <p className="text-xs text-muted-foreground">
+                Block-out ranges applied across all seasons for this hotel. Add one or more From → To ranges.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {blackouts.length === 0 && (
+                <p className="text-xs text-muted-foreground italic">No blackout ranges added yet.</p>
+              )}
+              {blackouts.map((b, idx) => (
+                <div key={b.id} className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">From</Label>
+                    <Input
+                      type="date"
+                      value={b.from}
+                      onChange={(e) =>
+                        setBlackouts((arr) =>
+                          arr.map((x, i) => (i === idx ? { ...x, from: e.target.value } : x)),
+                        )
+                      }
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">To</Label>
+                    <Input
+                      type="date"
+                      value={b.to}
+                      onChange={(e) =>
+                        setBlackouts((arr) =>
+                          arr.map((x, i) => (i === idx ? { ...x, to: e.target.value } : x)),
+                        )
+                      }
+                      className="h-9"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive ml-auto"
+                    onClick={() => setBlackouts((arr) => arr.filter((_, i) => i !== idx))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setBlackouts((arr) => [...arr, { id: rid(), from: "", to: "" }])}
+            >
+              <Plus className="h-4 w-4" /> Add Blackout Range
+            </Button>
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>Cancel</Button>
             <Button type="submit" disabled={saving}>
