@@ -749,6 +749,27 @@ function Step5({ draft, set }: StepProps) {
           </div>
         ))}
         <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
+        <div className="pt-2 border-t space-y-1">
+          <Label className="text-xs">Pax Range (used for tiered pricing)</Label>
+          <div className="flex flex-wrap gap-1">
+            {(["auto", "1-5", "6-14", "15-24", "25+"] as const).map((r) => {
+              const active = (draft.pax_range ?? "auto") === r;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => set({ pax_range: r })}
+                  className={`px-2 py-1 text-[11px] rounded ${active ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+                >
+                  {r === "auto" ? "Auto (by headcount)" : r}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Auto uses the actual head count. Selecting a range forces guide, activity and misc slabs to that band.
+          </p>
+        </div>
       </Card>
     </div>
   );
