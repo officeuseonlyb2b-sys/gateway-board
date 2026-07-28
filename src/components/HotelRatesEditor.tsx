@@ -8,6 +8,22 @@ import { db, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType }
 
 export type CwbMode = "amount" | "rule";
 
+// Preset season names + fixed month/day ranges. `year` is used to build a full
+// ISO date for the currently-being-edited season; both fields remain editable.
+export const SEASON_PRESETS = ["Summer", "Winter", "Wildlife", "Wildlife Buffer"] as const;
+export type SeasonPreset = typeof SEASON_PRESETS[number];
+
+export function seasonPresetRange(preset: SeasonPreset, year = new Date().getFullYear()): { from: string; to: string } {
+  const iso = (y: number, m: number, d: number) =>
+    `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  switch (preset) {
+    case "Summer":         return { from: iso(year, 4, 1),  to: iso(year, 9, 30) };
+    case "Winter":         return { from: iso(year, 10, 1), to: iso(year + 1, 3, 31) };
+    case "Wildlife":       return { from: iso(year, 10, 1), to: iso(year + 1, 6, 30) };
+    case "Wildlife Buffer": return { from: iso(year, 7, 1),  to: iso(year, 9, 30) };
+  }
+}
+
 export interface SeasonBlock {
   season_label: string;
   validity_start: string;
@@ -21,7 +37,9 @@ export interface SeasonBlock {
   cwb_rule: string;
   lunch: string; dinner: string; extra_breakfast: string;
   xmas: string; xmas_type: SupplementType;
+  xmas_date_from: string; xmas_date_to: string;
   newyear: string; newyear_type: SupplementType;
+  newyear_date_from: string; newyear_date_to: string;
   remarks: string;
 }
 
@@ -39,8 +57,8 @@ export const emptySeason = (): SeasonBlock => ({
   extra_bed: "",
   cwb_mode: "amount", cwb_amount: "", cwb_rule: "",
   lunch: "", dinner: "", extra_breakfast: "",
-  xmas: "", xmas_type: "per_person",
-  newyear: "", newyear_type: "per_person",
+  xmas: "", xmas_type: "per_person", xmas_date_from: "", xmas_date_to: "",
+  newyear: "", newyear_type: "per_person", newyear_date_from: "", newyear_date_to: "",
   remarks: "",
 });
 
