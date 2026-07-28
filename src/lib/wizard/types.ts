@@ -249,7 +249,7 @@ export interface QuoteDraft {
   guide_remarks?: string;
   // Optional pax range/slab override — when set, downstream rate lookups
   // (guide, activity, misc) use this range instead of exact headcount.
-  pax_range?: "1-5" | "6-14" | "15+";
+  pax_range?: "auto" | "1-5" | "6-14" | "15-24" | "25+";
   updated_at: string;
 
 }
