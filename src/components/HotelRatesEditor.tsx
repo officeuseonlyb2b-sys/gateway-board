@@ -333,11 +333,11 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                 </div>
               </div>
 
-              <div>
-                <div className="text-xs font-medium mb-1">Festive Supplements (optional)</div>
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Festive Supplements (optional)</div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">X'mas</Label>
+                  <div className="rounded-md bg-background border p-2 space-y-2">
+                    <div className="text-xs font-medium">X'mas</div>
                     <div className="flex gap-2">
                       <Input value={sn.xmas} onChange={(e) => setSeason(ri, si, { xmas: e.target.value })} placeholder="₹" />
                       <Select value={sn.xmas_type} onValueChange={(v) => setSeason(ri, si, { xmas_type: v as SupplementType })}>
@@ -348,9 +348,19 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies From</Label>
+                        <Input type="date" value={sn.xmas_date_from} onChange={(e) => setSeason(ri, si, { xmas_date_from: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies To</Label>
+                        <Input type="date" value={sn.xmas_date_to} onChange={(e) => setSeason(ri, si, { xmas_date_to: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">New Year</Label>
+                  <div className="rounded-md bg-background border p-2 space-y-2">
+                    <div className="text-xs font-medium">New Year</div>
                     <div className="flex gap-2">
                       <Input value={sn.newyear} onChange={(e) => setSeason(ri, si, { newyear: e.target.value })} placeholder="₹" />
                       <Select value={sn.newyear_type} onValueChange={(v) => setSeason(ri, si, { newyear_type: v as SupplementType })}>
@@ -361,13 +371,23 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies From</Label>
+                        <Input type="date" value={sn.newyear_date_from} onChange={(e) => setSeason(ri, si, { newyear_date_from: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies To</Label>
+                        <Input type="date" value={sn.newyear_date_to} onChange={(e) => setSeason(ri, si, { newyear_date_to: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <Label className="text-xs">Remarks / Blackout Dates</Label>
-                <Textarea rows={2} value={sn.remarks} onChange={(e) => setSeason(ri, si, { remarks: e.target.value })} placeholder="Blackout dates, notes…" />
+              <div className="rounded-md border border-border bg-background p-3 space-y-2">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Remarks</div>
+                <Textarea rows={2} value={sn.remarks} onChange={(e) => setSeason(ri, si, { remarks: e.target.value })} placeholder="Notes about this season…" />
               </div>
             </div>
           ))}
