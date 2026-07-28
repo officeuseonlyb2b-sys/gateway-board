@@ -272,6 +272,10 @@ export function Step13({ draft, set }: StepProps) {
     return options;
   };
 
+  // Language filter: when a specific language is chosen, only render that column.
+  const visibleLanguages: GuideLanguage[] =
+    langFilter === "all" ? DISPLAY_LANGUAGES : [langFilter as GuideLanguage];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -282,7 +286,7 @@ export function Step13({ draft, set }: StepProps) {
             <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All languages</SelectItem>
-              {availableLanguages.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+              {DISPLAY_LANGUAGES.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
             </SelectContent>
           </Select>
           <Badge variant="secondary" className="text-[10px]">Current pax: {pax} ({paxTier})</Badge>
@@ -296,7 +300,7 @@ export function Step13({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[170px]">Route</th>
               <th className="text-left p-2">City + Tour</th>
-              {DISPLAY_LANGUAGES.map((lang) => (
+              {visibleLanguages.map((lang) => (
                 <th key={lang} className="text-right p-2 w-[110px]">{lang}</th>
               ))}
               <th className="text-right p-2 w-[120px]">Tour Escorted (₹)</th>
@@ -316,7 +320,7 @@ export function Step13({ draft, set }: StepProps) {
                     {cityTours && cityTours.length > 0 ? (
                       <div className="space-y-2">
                         {cityTours.map((ct) => (
-                          <div key={ct.id} className="flex items-start gap-2 rounded-md px-1 py-0.5">
+                          <label key={ct.id} className="flex items-start gap-2 rounded-md px-1 py-0.5 cursor-pointer">
                             <Checkbox
                               checked={ct.selected}
                               onCheckedChange={() => toggleTourSelection(r.day, ct.city, ct.tour)}
@@ -330,14 +334,14 @@ export function Step13({ draft, set }: StepProps) {
                                 <div className="text-[10px] text-muted-foreground italic">No matching guide found.</div>
                               )}
                             </div>
-                          </div>
+                          </label>
                         ))}
                       </div>
                     ) : (
                       <span className="text-[11px] text-muted-foreground italic">No guide/tour selected.</span>
                     )}
                   </td>
-                  {DISPLAY_LANGUAGES.map((lang) => {
+                  {visibleLanguages.map((lang) => {
                     const total = dayTotalForLang(r.day, lang);
                     return (
                       <td key={lang} className="p-2 text-right tabular-nums">
@@ -363,7 +367,7 @@ export function Step13({ draft, set }: StepProps) {
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
                 Guide charges subtotal
               </td>
-              {DISPLAY_LANGUAGES.map((lang) => {
+              {visibleLanguages.map((lang) => {
                 let sum = 0;
                 draft.routing.forEach((r) => { sum += dayTotalForLang(r.day, lang); });
                 return (
@@ -373,17 +377,43 @@ export function Step13({ draft, set }: StepProps) {
               <td className="p-2 text-right tabular-nums">—</td>
             </tr>
 
-            {/* Reporting cost row — one input per language column */}
-            <tr className="bg-muted/10 border-t border-[#E5E7EB]">
+            {/* Reporting cost — split by pax category (Indian / Foreigner / Student). */}
+            {PAX_CATS.map((cat, ci) => (
+              <tr
+                key={`rep-${cat}`}
+                className={ci === 0 ? "bg-muted/10 border-t border-[#E5E7EB]" : "bg-muted/10"}
+              >
+                <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
+                  Reporting cost — {paxCatLabel[cat]} (₹)
+                </td>
+                {visibleLanguages.map((lang) => (
+                  <td key={lang} className="p-2 text-right">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={getReportingByPax(lang, cat) || ""}
+                      onChange={(e) =>
+                        setReportingByPax(lang, cat, parseFloat(e.target.value) || 0)
+                      }
+                      className="h-7 w-24 text-right text-[11px] ml-auto"
+                    />
+                  </td>
+                ))}
+                <td className="p-2 text-right tabular-nums">—</td>
+              </tr>
+            ))}
+
+            {/* Optional flat reporting cost (legacy single field, kept editable). */}
+            <tr className="bg-muted/5 border-t border-[#E5E7EB]">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
-                Reporting cost (₹)
+                Reporting cost — flat (₹)
               </td>
-              {DISPLAY_LANGUAGES.map((lang) => (
+              {visibleLanguages.map((lang) => (
                 <td key={lang} className="p-2 text-right">
                   <Input
                     type="number"
                     min={0}
-                    value={getReporting(lang)}
+                    value={getReporting(lang) || ""}
                     onChange={(e) => setReporting(lang, parseFloat(e.target.value) || 0)}
                     className="h-7 w-24 text-right text-[11px] ml-auto"
                   />
@@ -392,12 +422,12 @@ export function Step13({ draft, set }: StepProps) {
               <td className="p-2 text-right tabular-nums">—</td>
             </tr>
 
-            {/* Totals per language (charges + reporting) */}
+            {/* Totals per language (charges + all reporting rows) */}
             <tr className="bg-muted/20 font-semibold">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
                 Totals per language (all days + reporting)
               </td>
-              {DISPLAY_LANGUAGES.map((lang) => (
+              {visibleLanguages.map((lang) => (
                 <td key={lang} className="p-2 text-right tabular-nums">{inr(totalForLang(lang))}</td>
               ))}
               <td className="p-2 text-right tabular-nums">—</td>
