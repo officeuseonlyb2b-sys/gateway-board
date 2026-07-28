@@ -1,6 +1,7 @@
 // Thin wrapper exposing the wizard draft store + step navigation helpers.
-// Preserves current behavior; existing step components still receive
-// `{ draft, set }` via props for zero-diff extraction.
+// `set` always reads the latest persisted draft (via loadDraft) so that
+// successive updates in the same tick never clobber each other with stale
+// closures (e.g. two `set()` calls dispatched back-to-back).
 import { useCallback } from "react";
 import { useDraft, writeDraft, initDraft, clearDraft, loadDraft } from "@/lib/wizard/store";
 import type { QuoteDraft } from "@/lib/wizard/types";
@@ -8,7 +9,9 @@ import type { QuoteDraft } from "@/lib/wizard/types";
 export function useWizardState() {
   const draft = useDraft();
   const set = useCallback((patch: Partial<QuoteDraft>) => {
-    const current = draft ?? loadDraft();
+    // ALWAYS read latest to avoid stale-closure overwrites when multiple
+    // set() calls are dispatched in quick succession from one handler.
+    const current = loadDraft() ?? draft;
     if (!current) return;
     writeDraft({ ...current, ...patch });
   }, [draft]);
