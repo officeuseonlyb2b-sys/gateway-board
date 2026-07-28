@@ -93,6 +93,7 @@ export interface RoutingDay {
 
 
 export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
+export type TransportRateMode = "daywise" | "total";
 export interface TransportLine {
   id: string;
   travel_id: string;
@@ -104,6 +105,8 @@ export interface TransportLine {
   total_override?: number;   // used when rate_format === "total"
   per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
   remarks?: string;
+  rate_mode?: TransportRateMode; // per-vehicle toggle: "daywise" (per_route days) or "total" (one lump-sum rate)
+  total_rate?: number;           // used when rate_mode === "total"
 }
 export interface PaxRangePrice {
   from_pax: number;
