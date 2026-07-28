@@ -73,6 +73,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     e.preventDefault();
     if (!form.name.trim()) return toast.error("Hotel name is required.");
     if (!form.city_id) return toast.error("Please choose a city.");
+    if (!form.hotel_type) return toast.error("Please choose a hotel type.");
 
     const roomErrors = validateRooms(rooms);
     if (Object.keys(roomErrors).length) {
@@ -85,12 +86,18 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     setSaving(true);
     await new Promise((r) => setTimeout(r, 250));
     const cityName = data.cities.find((c) => c.id === form.city_id)?.name ?? "";
+    const cleanBlackouts = blackouts.filter((b) => b.from && b.to);
+    const payload = {
+      ...form,
+      hotel_type: form.hotel_type as HotelType,
+      blackout_ranges: cleanBlackouts,
+    };
     let hotelId: string;
     if (hotel) {
-      db.updateHotel(hotel.id, form);
+      db.updateHotel(hotel.id, payload);
       hotelId = hotel.id;
     } else {
-      const created = db.addHotel(form);
+      const created = db.addHotel(payload);
       hotelId = created.id;
     }
 
