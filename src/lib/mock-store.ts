@@ -104,8 +104,12 @@ export interface RatePlan {
   extra_breakfast_rate?: number | null;
   xmas_supplement?: number | null;
   xmas_supplement_type?: SupplementType;
+  xmas_date_from?: string | null;    // ISO — festive supplement auto-applies when night falls in [from,to]
+  xmas_date_to?: string | null;
   newyear_supplement?: number | null;
   newyear_supplement_type?: SupplementType;
+  newyear_date_from?: string | null;
+  newyear_date_to?: string | null;
   remarks?: string | null;
   created_at: string;
   updated_at: string;
