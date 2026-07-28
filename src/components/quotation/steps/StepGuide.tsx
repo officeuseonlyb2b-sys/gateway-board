@@ -148,11 +148,36 @@ export function Step13({ draft, set }: StepProps) {
     return total;
   };
 
+  // Per-pax-category reporting cost helpers ---------------------------------
+  const PAX_CATS = ["indian", "foreigner", "student"] as const;
+  type PaxCat = typeof PAX_CATS[number];
+  const paxCatLabel: Record<PaxCat, string> = {
+    indian: "Indian",
+    foreigner: "Foreigner",
+    student: "Student",
+  };
+  const getReportingByPax = (lang: GuideLanguage, cat: PaxCat): number =>
+    (draft.guide_reporting_by_pax?.[lang]?.[cat] as number | undefined) ?? 0;
+  const setReportingByPax = (lang: GuideLanguage, cat: PaxCat, value: number) => {
+    const current = draft.guide_reporting_by_pax ?? {};
+    const forLang = current[lang] ?? {};
+    set({
+      guide_reporting_by_pax: {
+        ...current,
+        [lang]: { ...forLang, [cat]: value },
+      },
+    } as Partial<typeof draft>);
+  };
+  const reportingTotalForLang = (lang: GuideLanguage): number => {
+    // Sum of legacy single value + all three pax-category values.
+    const legacy = (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
+    return legacy + PAX_CATS.reduce((s, c) => s + getReportingByPax(lang, c), 0);
+  };
+
   const totalForLang = (lang: GuideLanguage) => {
     let sum = 0;
     draft.routing.forEach((r) => { sum += dayTotalForLang(r.day, lang); });
-    const rep = (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
-    return sum + rep;
+    return sum + reportingTotalForLang(lang);
   };
 
   const setReporting = (lang: GuideLanguage, value: number) => {
