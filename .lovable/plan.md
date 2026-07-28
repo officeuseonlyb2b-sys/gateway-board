@@ -1,92 +1,47 @@
-# Plan: Refactor Costing Wizard + 5 Fixes
+## Plan — 10 additive fixes to the New Quotation flow
 
-## Scope
+I'll implement each item as a focused edit, preserving all existing calculations, drafts, and step wiring.
 
-Split the monolithic `src/routes/_authenticated/costing.tsx` into modular components and apply 4 functional fixes to Activities, Entrances, Guide, and Miscellaneous.
+### 1. Step 12 Guide — checkbox toggle + reporting by pax + language filter
+- `StepGuide.tsx`: fix `toggleTourSelection` so unchecking clears the disabled key + line reliably (bug is auto-sync re-adding the line — respect `guide_tour_disabled_by_day` in `ensureGuideLine`, already done, but the row-level state derivation is stale; force checkbox to use disabledKeys as the source of truth and skip the auto-sync when disabled).
+- Add per-pax-category reporting cost row: `guide_reporting_indian / _foreigner / _student` (new optional fields in `QuoteDraft`). Render as a second Reporting sub-row grouped per language column, or as a compact 3-cell input group per language. Include in `totalForLang`.
+- Make "Filter language" hide non-matching language columns and their subtotals/reporting/totals when a specific language is picked.
 
-## FIX 1 — File Split (Zero UI/Behavior Change)
+### 2. Hotel form — Hotel Type dropdown
+- `types` in `mock-store.ts`: add `hotel_type?: HotelType` on `Hotel` with the 9 listed enum values.
+- `HotelFormDialog.tsx`: add a required Select right after Category. Persist on save. Backfill undefined as blank.
 
-Extract from `src/routes/_authenticated/costing.tsx`:
+### 3. Season Label preset dropdown with auto date ranges
+- `SeasonFormDialog.tsx`: replace the free-text season label input with a Select of {Summer, Winter, Wildlife, Wildlife Buffer}. On change, set validity_start / validity_end using the fixed month-day rules relative to the currently displayed year (or open-ended: use current year for start, roll year for Winter). Fields remain editable.
 
-```text
-src/components/quotation/
-  hooks/
-    useWizardState.ts        # draft load/save + step nav helpers
-    useCostCalculation.ts    # memoized totals used across steps 15-17
-  utils/
-    gstCalculator.ts         # 5% vs 18% slab helpers
-    paxRateSelector.ts       # tier lookup (1-5 / 6-14 / 15+, slab match)
-  steps/
-    StepActivities.tsx       # Step 10
-    StepEntrances.tsx        # Step 11
-    StepGuide.tsx            # Step 12
-    StepMisc.tsx             # Step 13
-    StepTransport.tsx        # Step 14
-    StepHotels.tsx           # Step 15
-    StepCosting.tsx          # Step 16
-    StepFinal.tsx            # Step 17
-```
+### 4. Split Festive Supplements from Remarks / Blackout
+- `HotelRatesEditor.tsx` (or SeasonFormDialog wherever they live): wrap each into its own titled Card block with spacing between them.
 
-`costing.tsx` becomes a thin shell: stepper header + switch on `draft.step` rendering the extracted components. Steps 1-9, 18 stay inline for now (out of scope). All existing prop-less step functions are lifted verbatim — same JSX, same handlers, same imports — just receive `draft` + updater via a shared hook.
+### 5. Blackout Dates — date-range picker at end of hotel form + multiple ranges
+- Add `blackout_ranges: { id, from, to }[]` on `Hotel`.
+- Move the control out of the per-season block into `HotelFormDialog.tsx` at the very end after "Add Another Room Category". Multi-row list with From/To pickers + Add/Remove buttons using the shadcn Calendar Popover pattern.
 
-Verification: `tsgo` clean, preview loads all steps, no visual diff.
+### 6. Festive Supplements — date-based trigger
+- Extend festive supplement schema with `date_from?, date_to?` (per supplement) in the rate plan.
+- `SeasonFormDialog.tsx`/rates editor: add two date-range pickers to X'mas & New Year rows.
+- `src/lib/wizard/calc.ts`: when computing a night's cost, if the night date falls in any configured festive range, add that supplement (per person or per room per its mode) on top of the base rate for that night.
 
-## FIX 2 — Activities
+### 7. Transport per-vehicle Day-wise vs Total toggle
+- Extend `TransportLine` with `rate_mode: 'daywise' | 'total'` and `total_rate?: number`.
+- `StepTransport.tsx`: add a small toggle per vehicle row/card. When "Total", collapse day rows to a single rate input.
+- `calc.ts` transport total: if `rate_mode==='total'`, use `total_rate * units`; else existing day-wise sum.
 
-**Module (`/activity-experience` modal):**
-- Reduce pricing type to exactly two radios: `per_person` | `slab`.
-- `per_person`: slabs table `From Pax | To Pax | Price Per Person`.
-- `slab`: slabs table `From Pax | To Pax | Total Price`.
-- Drop any combined/legacy toggle.
+### 8. Bug: Step 15 Accommodation Options resetting on navigation
+- Root-cause inside `StepHotels.tsx`: local `useState` initialized from draft on mount that never re-syncs when the component remounts after step navigation, OR a `useEffect` overwriting draft.hotel_options with a fresh default array whenever `draft.hotel_options.length===0` at first render. Fix by seeding from `draft.hotel_options` and only initializing when truly empty; ensure every mutation writes through `set({ hotel_options })`. Verify no `useEffect` clears selections on `pax`/`routing` changes.
 
-**Wizard Step 10 (rebuild):**
-- Day-by-day accordion; per day, one collapsible group per routing city.
-- Inside each city: checkbox list of activities linked to tours selected in Step 9 for that city.
-- On check:
-  - `per_person`: `rate × pax` (rate from slab matching `total_pax`), pax input editable, default `total_pax`.
-  - `slab`: fixed total from slab matching `total_pax`, no qty input, show per-person share as info.
-- Bottom "Per Person Cost Breakdown" table: rows for 1..`total_pax`, columns per checked activity, plus Total column. Slab activities keep total constant; per-person scale linearly.
-- Activities Total footer.
+### 9. Category fallback — next-lower categories, sorted by price desc
+- In hotel option "no hotels" branch of `StepHotels.tsx`: order categories `["5 Star","4 Star","3 Star","Budget",...]`, take those at or below the selected tier, filter hotels by city, sort by best-available rate desc, show in a labeled fallback list.
 
-## FIX 3 — Entrances (Step 11) Read-Only
+### 10. Pax Range selector alongside Adults/SS/Children
+- Add `pax_range?: '1-5' | '6-14' | '15+'` (align with existing tier boundaries used across guide/activities/misc) to `QuoteDraft`.
+- Step 1/Pax step: add a `Select` next to counters. When set, `calc.ts` helpers (`guideRateForPax`, activity slab, misc slab, transport already per-day) read from `draft.pax_range` override rather than `totalPax(draft)`. Provide `effectivePaxTier(draft)` helper used everywhere so nothing else needs changes.
 
-- Remove all editable price inputs.
-- Table columns: `DAY | ROUTE | CITY + TOUR | INDIAN TOTAL | FOREIGNER TOTAL | STUDENT TOTAL | SUBTOTAL`.
-- Rows derived from routing `tours_selected_by_city`; prices pulled from Entrances module by tour match.
-- Pax defaults: Indian = `total_pax`, Foreign = 0, Student = 0 (no editing here).
-- Missing price → amber "Price not set — update in Entrances module".
-- Include/exclude checkbox per row, pre-checked from routing.
-- Traveller filter chips (All / Indian / Foreigner / Student) highlight that column.
-- Per-day subtotal row + grand Total Entrances footer.
-- Column-total layout: each nationality column shows its own running total under its cells; grand total sums all three.
-
-## FIX 4 — Guide (Step 12) Simplify + Escort Split
-
-- Table columns: `DAY | ROUTE | CITY + TOUR | RATE (₹) | SUBTOTAL` (remove Escort/Entry columns).
-- Radio per city selecting one tour; rate auto-filled from Guide module using language filter + pax tier; editable override.
-- Language filter chips + "Rate applied: X-Y Pax" badge at top.
-- Per-day subtotal; Guide Subtotal footer.
-- **Separate Tour Escort section below**: checkbox toggle → Type, Language, Days, Rate/day (default from module escort rate), Total, Remarks, Extra Cost. Escort Total shown.
-- **Reporting Cost section**: numeric input + remarks.
-- Grand `GUIDE TOTAL = fees + escort + reporting`.
-- Store escort as an existing `GuideLine` with `is_escort=true` (schema already supports it) so Step 16 math untouched.
-
-## FIX 5 — Miscellaneous
-
-**Module modal:** collapse pricing types to `per_person` | `slab` (drop `per_day`, `fixed`). Migration: existing `per_day`/`fixed` rows treated as `per_person` with a single 1..∞ slab of their `rate` on read. Slab tables mirror Activities.
-
-**Wizard Step 13:**
-- `per_person`: rate from slab for `total_pax`, `rate × qty` with editable qty default `total_pax`, label "₹X × N pax = ₹Y".
-- `slab`: fixed total from slab, no qty, show per-person share as info.
-- Misc Total footer.
-
-## Out of Scope (untouched)
-
-Steps 1-9, 14 (Transport), 15 (Hotels), 16-18 costing math, PDF export, other master modules.
-
-## Technical Notes
-
-- No changes to `QuoteDraft` line-item shapes; enrich `MiscellaneousItem` migration path in `miscRateForPax`.
-- `Activity` slab shape already supports both modes via `pricing_mode` + `pax_ranges`; module UI just enforces the binary choice.
-- Refactor lands first as pure moves (one commit worth), then each fix layered on top file-by-file to keep diffs reviewable.
-- Verification per fix: `tsgo`, load wizard through Steps 10-13 in preview, spot-check totals feed unchanged into Step 16.
+### Technical notes
+- Storage version bumped only if schema requires migration; new optional fields don't need a bump (existing drafts keep working).
+- No route or shell changes. No changes to existing GST / markup logic.
+- After each item I'll re-run tsgo and spot-check the affected step visually via the dev preview.

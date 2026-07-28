@@ -93,6 +93,7 @@ export interface RoutingDay {
 
 
 export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
+export type TransportRateMode = "daywise" | "total";
 export interface TransportLine {
   id: string;
   travel_id: string;
@@ -104,6 +105,8 @@ export interface TransportLine {
   total_override?: number;   // used when rate_format === "total"
   per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
   remarks?: string;
+  rate_mode?: TransportRateMode; // per-vehicle toggle: "daywise" (per_route days) or "total" (one lump-sum rate)
+  total_rate?: number;           // used when rate_mode === "total"
 }
 export interface PaxRangePrice {
   from_pax: number;
@@ -239,8 +242,14 @@ export interface QuoteDraft {
   guide_reporting_cost_hindi?: number;
   guide_reporting_cost_english?: number;
   guide_reporting_cost_language?: number;
+  // Per-language reporting cost split by pax category (Indian / Foreigner / Student).
+  // Shape: { Hindi: { indian, foreigner, student }, English: {...}, Language: {...} }
+  guide_reporting_by_pax?: Record<string, { indian?: number; foreigner?: number; student?: number }>;
   guide_day_escort?: Record<number, number>;
   guide_remarks?: string;
+  // Optional pax range/slab override — when set, downstream rate lookups
+  // (guide, activity, misc) use this range instead of exact headcount.
+  pax_range?: "auto" | "1-5" | "6-14" | "15-24" | "25+";
   updated_at: string;
 
 }

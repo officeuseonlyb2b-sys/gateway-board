@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { db, useDB, HOTEL_CATEGORIES, type Hotel, type HotelCategory } from "@/lib/mock-store";
+import { db, useDB, HOTEL_CATEGORIES, HOTEL_TYPES, type Hotel, type HotelCategory, type HotelType, type BlackoutRange } from "@/lib/mock-store";
 import { notify } from "@/lib/notify";
 import {
   HotelRatesEditor,
@@ -40,6 +40,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     city_id: hotel?.city_id ?? data.cities[0]?.id ?? "",
     name: hotel?.name ?? "",
     hotel_category: (hotel?.hotel_category ?? "3 Star") as HotelCategory,
+    hotel_type: (hotel?.hotel_type ?? "") as HotelType | "",
     contact_name: hotel?.contact_name ?? "",
     contact_phone: hotel?.contact_phone ?? "",
     email: hotel?.email ?? "",
@@ -47,6 +48,8 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     has_wifi: hotel?.has_wifi ?? true,
     has_pool: hotel?.has_pool ?? false,
   }));
+  const [blackouts, setBlackouts] = useState<BlackoutRange[]>(hotel?.blackout_ranges ?? []);
+  const rid = () => Math.random().toString(36).slice(2);
   const [newCity, setNewCity] = useState("");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -70,6 +73,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     e.preventDefault();
     if (!form.name.trim()) return toast.error("Hotel name is required.");
     if (!form.city_id) return toast.error("Please choose a city.");
+    if (!form.hotel_type) return toast.error("Please choose a hotel type.");
 
     const roomErrors = validateRooms(rooms);
     if (Object.keys(roomErrors).length) {
@@ -82,12 +86,18 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     setSaving(true);
     await new Promise((r) => setTimeout(r, 250));
     const cityName = data.cities.find((c) => c.id === form.city_id)?.name ?? "";
+    const cleanBlackouts = blackouts.filter((b) => b.from && b.to);
+    const payload = {
+      ...form,
+      hotel_type: form.hotel_type as HotelType,
+      blackout_ranges: cleanBlackouts,
+    };
     let hotelId: string;
     if (hotel) {
-      db.updateHotel(hotel.id, form);
+      db.updateHotel(hotel.id, payload);
       hotelId = hotel.id;
     } else {
-      const created = db.addHotel(form);
+      const created = db.addHotel(payload);
       hotelId = created.id;
     }
 
@@ -170,6 +180,18 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
             </div>
 
             <div className="space-y-2">
+              <Label>Hotel Type <span className="text-destructive">*</span></Label>
+              <Select value={form.hotel_type} onValueChange={(v) => update("hotel_type", v as HotelType)}>
+                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                <SelectContent>
+                  {HOTEL_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label>Contact Person</Label>
               <Input value={form.contact_name} onChange={(e) => update("contact_name", e.target.value)} placeholder="Full name" />
             </div>
@@ -207,6 +229,68 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
 
           <div className="border-t pt-4">
             <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
+          </div>
+
+
+          <div className="border-t pt-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold">Blackout Dates</h3>
+              <p className="text-xs text-muted-foreground">
+                Block-out ranges applied across all seasons for this hotel. Add one or more From → To ranges.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {blackouts.length === 0 && (
+                <p className="text-xs text-muted-foreground italic">No blackout ranges added yet.</p>
+              )}
+              {blackouts.map((b, idx) => (
+                <div key={b.id} className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">From</Label>
+                    <Input
+                      type="date"
+                      value={b.from}
+                      onChange={(e) =>
+                        setBlackouts((arr) =>
+                          arr.map((x, i) => (i === idx ? { ...x, from: e.target.value } : x)),
+                        )
+                      }
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">To</Label>
+                    <Input
+                      type="date"
+                      value={b.to}
+                      onChange={(e) =>
+                        setBlackouts((arr) =>
+                          arr.map((x, i) => (i === idx ? { ...x, to: e.target.value } : x)),
+                        )
+                      }
+                      className="h-9"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive ml-auto"
+                    onClick={() => setBlackouts((arr) => arr.filter((_, i) => i !== idx))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setBlackouts((arr) => [...arr, { id: rid(), from: "", to: "" }])}
+            >
+              <Plus className="h-4 w-4" /> Add Blackout Range
+            </Button>
           </div>
 
           <DialogFooter>

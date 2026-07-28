@@ -8,6 +8,22 @@ import { db, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType }
 
 export type CwbMode = "amount" | "rule";
 
+// Preset season names + fixed month/day ranges. `year` is used to build a full
+// ISO date for the currently-being-edited season; both fields remain editable.
+export const SEASON_PRESETS = ["Summer", "Winter", "Wildlife", "Wildlife Buffer"] as const;
+export type SeasonPreset = typeof SEASON_PRESETS[number];
+
+export function seasonPresetRange(preset: SeasonPreset, year = new Date().getFullYear()): { from: string; to: string } {
+  const iso = (y: number, m: number, d: number) =>
+    `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  switch (preset) {
+    case "Summer":         return { from: iso(year, 4, 1),  to: iso(year, 9, 30) };
+    case "Winter":         return { from: iso(year, 10, 1), to: iso(year + 1, 3, 31) };
+    case "Wildlife":       return { from: iso(year, 10, 1), to: iso(year + 1, 6, 30) };
+    case "Wildlife Buffer": return { from: iso(year, 7, 1),  to: iso(year, 9, 30) };
+  }
+}
+
 export interface SeasonBlock {
   season_label: string;
   validity_start: string;
@@ -21,7 +37,9 @@ export interface SeasonBlock {
   cwb_rule: string;
   lunch: string; dinner: string; extra_breakfast: string;
   xmas: string; xmas_type: SupplementType;
+  xmas_date_from: string; xmas_date_to: string;
   newyear: string; newyear_type: SupplementType;
+  newyear_date_from: string; newyear_date_to: string;
   remarks: string;
 }
 
@@ -39,8 +57,8 @@ export const emptySeason = (): SeasonBlock => ({
   extra_bed: "",
   cwb_mode: "amount", cwb_amount: "", cwb_rule: "",
   lunch: "", dinner: "", extra_breakfast: "",
-  xmas: "", xmas_type: "per_person",
-  newyear: "", newyear_type: "per_person",
+  xmas: "", xmas_type: "per_person", xmas_date_from: "", xmas_date_to: "",
+  newyear: "", newyear_type: "per_person", newyear_date_from: "", newyear_date_to: "",
   remarks: "",
 });
 
@@ -83,8 +101,12 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
         extra_breakfast: s(base.extra_breakfast_rate ?? ""),
         xmas: s(base.xmas_supplement ?? ""),
         xmas_type: base.xmas_supplement_type ?? "per_person",
+        xmas_date_from: base.xmas_date_from ?? "",
+        xmas_date_to: base.xmas_date_to ?? "",
         newyear: s(base.newyear_supplement ?? ""),
         newyear_type: base.newyear_supplement_type ?? "per_person",
+        newyear_date_from: base.newyear_date_from ?? "",
+        newyear_date_to: base.newyear_date_to ?? "",
         remarks: base.remarks ?? "",
       });
     }
@@ -129,8 +151,12 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
         extra_breakfast_rate: numOrNull(sn.extra_breakfast),
         xmas_supplement: numOrNull(sn.xmas),
         xmas_supplement_type: sn.xmas_type,
+        xmas_date_from: sn.xmas_date_from || null,
+        xmas_date_to: sn.xmas_date_to || null,
         newyear_supplement: numOrNull(sn.newyear),
         newyear_supplement_type: sn.newyear_type,
+        newyear_date_from: sn.newyear_date_from || null,
+        newyear_date_to: sn.newyear_date_to || null,
         remarks: sn.remarks.trim() || null,
       }));
     });
@@ -215,7 +241,25 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <Label className="text-xs">Season Label</Label>
-                  <Input value={sn.season_label} onChange={(e) => setSeason(ri, si, { season_label: e.target.value })} placeholder="Peak Season" />
+                  <Select
+                    value={SEASON_PRESETS.includes(sn.season_label as SeasonPreset) ? sn.season_label : ""}
+                    onValueChange={(v) => {
+                      const preset = v as SeasonPreset;
+                      const range = seasonPresetRange(preset);
+                      setSeason(ri, si, {
+                        season_label: preset,
+                        validity_start: range.from,
+                        validity_end: range.to,
+                      });
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select season" /></SelectTrigger>
+                    <SelectContent>
+                      {SEASON_PRESETS.map((p) => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label className="text-xs">Validity From *</Label>
@@ -289,11 +333,11 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                 </div>
               </div>
 
-              <div>
-                <div className="text-xs font-medium mb-1">Festive Supplements (optional)</div>
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Festive Supplements (optional)</div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">X'mas</Label>
+                  <div className="rounded-md bg-background border p-2 space-y-2">
+                    <div className="text-xs font-medium">X'mas</div>
                     <div className="flex gap-2">
                       <Input value={sn.xmas} onChange={(e) => setSeason(ri, si, { xmas: e.target.value })} placeholder="₹" />
                       <Select value={sn.xmas_type} onValueChange={(v) => setSeason(ri, si, { xmas_type: v as SupplementType })}>
@@ -304,9 +348,19 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies From</Label>
+                        <Input type="date" value={sn.xmas_date_from} onChange={(e) => setSeason(ri, si, { xmas_date_from: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies To</Label>
+                        <Input type="date" value={sn.xmas_date_to} onChange={(e) => setSeason(ri, si, { xmas_date_to: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">New Year</Label>
+                  <div className="rounded-md bg-background border p-2 space-y-2">
+                    <div className="text-xs font-medium">New Year</div>
                     <div className="flex gap-2">
                       <Input value={sn.newyear} onChange={(e) => setSeason(ri, si, { newyear: e.target.value })} placeholder="₹" />
                       <Select value={sn.newyear_type} onValueChange={(v) => setSeason(ri, si, { newyear_type: v as SupplementType })}>
@@ -317,13 +371,23 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies From</Label>
+                        <Input type="date" value={sn.newyear_date_from} onChange={(e) => setSeason(ri, si, { newyear_date_from: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Applies To</Label>
+                        <Input type="date" value={sn.newyear_date_to} onChange={(e) => setSeason(ri, si, { newyear_date_to: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <Label className="text-xs">Remarks / Blackout Dates</Label>
-                <Textarea rows={2} value={sn.remarks} onChange={(e) => setSeason(ri, si, { remarks: e.target.value })} placeholder="Blackout dates, notes…" />
+              <div className="rounded-md border border-border bg-background p-3 space-y-2">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Remarks</div>
+                <Textarea rows={2} value={sn.remarks} onChange={(e) => setSeason(ri, si, { remarks: e.target.value })} placeholder="Notes about this season…" />
               </div>
             </div>
           ))}
