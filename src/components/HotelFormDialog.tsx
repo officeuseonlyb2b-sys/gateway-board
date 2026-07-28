@@ -231,9 +231,6 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
             <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
           </div>
 
-          <div className="border-t pt-4">
-            <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
-          </div>
 
           <div className="border-t pt-4 space-y-3">
             <div>
