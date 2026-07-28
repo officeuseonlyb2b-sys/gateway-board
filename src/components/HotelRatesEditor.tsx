@@ -101,8 +101,12 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
         extra_breakfast: s(base.extra_breakfast_rate ?? ""),
         xmas: s(base.xmas_supplement ?? ""),
         xmas_type: base.xmas_supplement_type ?? "per_person",
+        xmas_date_from: base.xmas_date_from ?? "",
+        xmas_date_to: base.xmas_date_to ?? "",
         newyear: s(base.newyear_supplement ?? ""),
         newyear_type: base.newyear_supplement_type ?? "per_person",
+        newyear_date_from: base.newyear_date_from ?? "",
+        newyear_date_to: base.newyear_date_to ?? "",
         remarks: base.remarks ?? "",
       });
     }
