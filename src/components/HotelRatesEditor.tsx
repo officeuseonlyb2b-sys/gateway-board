@@ -151,8 +151,12 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
         extra_breakfast_rate: numOrNull(sn.extra_breakfast),
         xmas_supplement: numOrNull(sn.xmas),
         xmas_supplement_type: sn.xmas_type,
+        xmas_date_from: sn.xmas_date_from || null,
+        xmas_date_to: sn.xmas_date_to || null,
         newyear_supplement: numOrNull(sn.newyear),
         newyear_supplement_type: sn.newyear_type,
+        newyear_date_from: sn.newyear_date_from || null,
+        newyear_date_to: sn.newyear_date_to || null,
         remarks: sn.remarks.trim() || null,
       }));
     });
