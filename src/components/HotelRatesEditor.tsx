@@ -241,7 +241,25 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <Label className="text-xs">Season Label</Label>
-                  <Input value={sn.season_label} onChange={(e) => setSeason(ri, si, { season_label: e.target.value })} placeholder="Peak Season" />
+                  <Select
+                    value={SEASON_PRESETS.includes(sn.season_label as SeasonPreset) ? sn.season_label : ""}
+                    onValueChange={(v) => {
+                      const preset = v as SeasonPreset;
+                      const range = seasonPresetRange(preset);
+                      setSeason(ri, si, {
+                        season_label: preset,
+                        validity_start: range.from,
+                        validity_end: range.to,
+                      });
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select season" /></SelectTrigger>
+                    <SelectContent>
+                      {SEASON_PRESETS.map((p) => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label className="text-xs">Validity From *</Label>
