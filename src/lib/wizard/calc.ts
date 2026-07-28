@@ -33,6 +33,10 @@ export function gstRateFor(net: number): number {
 }
 
 export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
+  // Per-vehicle "Total" mode overrides per-route day-wise entry with one lump-sum rate.
+  if (l.rate_mode === "total") {
+    return (l.total_rate ?? 0) * (l.vehicles || 1) + (l.reporting_cost ?? 0);
+  }
   if (l.rate_format === "total") return l.total_override ?? 0;
   if (l.rate_format === "per_route") {
     const sum = (l.per_route_rates ?? []).reduce((s, r) => s + (Number(r) || 0), 0);
