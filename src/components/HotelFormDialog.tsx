@@ -180,6 +180,18 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
             </div>
 
             <div className="space-y-2">
+              <Label>Hotel Type <span className="text-destructive">*</span></Label>
+              <Select value={form.hotel_type} onValueChange={(v) => update("hotel_type", v as HotelType)}>
+                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                <SelectContent>
+                  {HOTEL_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label>Contact Person</Label>
               <Input value={form.contact_name} onChange={(e) => update("contact_name", e.target.value)} placeholder="Full name" />
             </div>
