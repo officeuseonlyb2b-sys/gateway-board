@@ -1,5 +1,5 @@
 // Step 12 — Guide charges (language-based rates table with City+Tour column
-// and per-language reporting cost inputs).
+// and per-language reporting cost input row).
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,16 +10,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { inr } from "@/lib/format";
 import { useDB, GUIDE_LANGUAGES, guideConfiguredLanguages, guideRateForPax, guidePrimaryLanguage, type GuideLanguage } from "@/lib/mock-store";
 import { totalPax } from "@/lib/wizard/calc";
-import { uid, dayAllCities, type CityRef, type StepProps } from "../shared";
+import { uid, dayAllCities, type StepProps } from "../shared";
 
-// Languages to display as columns (fixed as per user request)
 const DISPLAY_LANGUAGES: GuideLanguage[] = ["Hindi", "English", "Language"];
 
 const REPORTING_KEY: Record<GuideLanguage, "guide_reporting_cost_hindi" | "guide_reporting_cost_english" | "guide_reporting_cost_language"> = {
   Hindi: "guide_reporting_cost_hindi",
   English: "guide_reporting_cost_english",
   Language: "guide_reporting_cost_language",
-} as unknown as Record<GuideLanguage, "guide_reporting_cost_hindi" | "guide_reporting_cost_english" | "guide_reporting_cost_language">;
+} as const;
 
 function makeTourKey(city: string, tour: string) {
   return `${city}||${tour}`;
@@ -29,7 +28,9 @@ export function Step13({ draft, set }: StepProps) {
   const d = useDB();
   const pax = totalPax(draft);
   const paxTier = pax <= 5 ? "1-5" : pax <= 14 ? "6-14" : "15+";
-  const [langFilter, setLangFilter] = useState<GuideLanguage | "all">((draft.guide_language as GuideLanguage | "all") || "all");
+  const [langFilter, setLangFilter] = useState<GuideLanguage | "all">(
+    (draft.guide_language as GuideLanguage | "all") || "all"
+  );
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function Step13({ draft, set }: StepProps) {
   }, [langFilter]);
 
   const allGuides = d.guides.filter((g) => g.is_active);
+
   const availableLanguages = useMemo(() => {
     const s = new Set<GuideLanguage>();
     allGuides.forEach((g) => guideConfiguredLanguages(g).forEach((l) => s.add(l)));
@@ -50,7 +52,9 @@ export function Step13({ draft, set }: StepProps) {
     return guideRateForPax(g, p, lang);
   };
 
-  const getDisabledMap = (): Record<number, string[]> => ((draft as any).guide_tour_disabled_by_day as Record<number, string[]> | undefined) || {};
+  const getDisabledMap = (): Record<number, string[]> =>
+    ((draft as any).guide_tour_disabled_by_day as Record<number, string[]> | undefined) || {};
+
   const getDisabledKeys = (day: number) => new Set(getDisabledMap()[day] || []);
 
   const setDisabledKey = (day: number, key: string, disabled: boolean) => {
@@ -71,10 +75,11 @@ export function Step13({ draft, set }: StepProps) {
     allGuides.find((g) => (g.city ?? g.destination ?? "") === city && (g.tour_program ?? g.name ?? "") === tour);
 
   // Auto-sync selected guides for each day based on selected tours.
-  // IMPORTANT: if a city+tour is manually unchecked, it is stored in guide_tour_disabled_by_day
-  // so it will not be auto-added again until reselected.
+  // If a city+tour is manually unchecked, it stays disabled in guide_tour_disabled_by_day
+  // until the user checks it again.
   useEffect(() => {
     if (!draft.routing.length) return;
+
     let changed = false;
     const newGuides = [...draft.guides];
     const disabledMap = getDisabledMap();
@@ -99,6 +104,7 @@ export function Step13({ draft, set }: StepProps) {
 
       const primaryLang = guidePrimaryLanguage(g) || "English";
       const rate = rateForGuideLangPax(g, primaryLang, pax);
+
       newGuides.push({
         id: uid(),
         guide_id: g.id,
@@ -108,16 +114,20 @@ export function Step13({ draft, set }: StepProps) {
         language: primaryLang,
         from_routing_days: [day],
       });
+
       changed = true;
     };
 
     draft.routing.forEach((r) => {
       const day = r.day;
-      const fromDefault = draft.routing.indexOf(r) === 0 ? draft.departure_city : cityName(draft.routing[draft.routing.indexOf(r) - 1]?.city_id || "");
+      const fromDefault = draft.routing.indexOf(r) === 0
+        ? draft.departure_city
+        : cityName(draft.routing[draft.routing.indexOf(r) - 1]?.city_id || "");
       const dayCities = dayAllCities(r, d.cities, fromDefault);
 
       dayCities.forEach((c) => {
-        const selectedTitles = (r.tours_selected_by_city?.[c.id])
+        const selectedTitles =
+          r.tours_selected_by_city?.[c.id]
           ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
         selectedTitles.forEach((tourTitle) => ensureGuideLine(day, c.name, tourTitle));
       });
@@ -131,9 +141,11 @@ export function Step13({ draft, set }: StepProps) {
     const current = draft.guide_day_escort || {};
     set({ guide_day_escort: { ...current, [day]: value } });
   };
+
   const getDayEscort = (day: number) => (draft.guide_day_escort?.[day] ?? 0);
 
-  // Guide lines assigned to a day (excluding escort)
+  const escortTotal = draft.routing.reduce((sum, r) => sum + getDayEscort(r.day), 0);
+
   const dayLines = (day: number) =>
     draft.guides.filter((x) => !x.is_escort && (x.from_routing_days ?? []).includes(day));
 
@@ -148,43 +160,20 @@ export function Step13({ draft, set }: StepProps) {
     return total;
   };
 
-  // Per-pax-category reporting cost helpers ---------------------------------
-  const PAX_CATS = ["indian", "foreigner", "student"] as const;
-  type PaxCat = typeof PAX_CATS[number];
-  const paxCatLabel: Record<PaxCat, string> = {
-    indian: "Indian",
-    foreigner: "Foreigner",
-    student: "Student",
-  };
-  const getReportingByPax = (lang: GuideLanguage, cat: PaxCat): number =>
-    (draft.guide_reporting_by_pax?.[lang]?.[cat] as number | undefined) ?? 0;
-  const setReportingByPax = (lang: GuideLanguage, cat: PaxCat, value: number) => {
-    const current = draft.guide_reporting_by_pax ?? {};
-    const forLang = current[lang] ?? {};
-    set({
-      guide_reporting_by_pax: {
-        ...current,
-        [lang]: { ...forLang, [cat]: value },
-      },
-    } as Partial<typeof draft>);
-  };
-  const reportingTotalForLang = (lang: GuideLanguage): number => {
-    // Sum of legacy single value + all three pax-category values.
-    const legacy = (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
-    return legacy + PAX_CATS.reduce((s, c) => s + getReportingByPax(lang, c), 0);
-  };
-
-  const totalForLang = (lang: GuideLanguage) => {
-    let sum = 0;
-    draft.routing.forEach((r) => { sum += dayTotalForLang(r.day, lang); });
-    return sum + reportingTotalForLang(lang);
-  };
+  const getReporting = (lang: GuideLanguage): number =>
+    (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
 
   const setReporting = (lang: GuideLanguage, value: number) => {
     set({ [REPORTING_KEY[lang]]: value } as Partial<typeof draft>);
   };
-  const getReporting = (lang: GuideLanguage): number =>
-    (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
+
+  const totalForLang = (lang: GuideLanguage) => {
+    let sum = 0;
+    draft.routing.forEach((r) => {
+      sum += dayTotalForLang(r.day, lang);
+    });
+    return sum + getReporting(lang);
+  };
 
   const isTourSelected = (day: number, city: string, tour: string) => {
     const key = makeTourKey(city, tour);
@@ -217,7 +206,6 @@ export function Step13({ draft, set }: StepProps) {
     }
 
     setDisabledKey(day, key, false);
-
     if (!guide) return;
 
     const primaryLang = guidePrimaryLanguage(guide) || "English";
@@ -248,14 +236,18 @@ export function Step13({ draft, set }: StepProps) {
     });
   };
 
-  // Resolve City + Tour options for a day (shows the same kind of select/unselect behavior as Entrances)
+  // Resolve City + Tour options for a day.
   const cityTourFor = (day: number, r: typeof draft.routing[number]) => {
-    const fromDefault = draft.routing.indexOf(r) === 0 ? draft.departure_city : cityName(draft.routing[draft.routing.indexOf(r) - 1]?.city_id || "");
+    const fromDefault = draft.routing.indexOf(r) === 0
+      ? draft.departure_city
+      : cityName(draft.routing[draft.routing.indexOf(r) - 1]?.city_id || "");
     const dayCities = dayAllCities(r, d.cities, fromDefault);
+
     const options: Array<{ id: string; city: string; tour: string; guideExists: boolean; selected: boolean }> = [];
 
     dayCities.forEach((c) => {
-      const selectedTitles = (r.tours_selected_by_city?.[c.id])
+      const selectedTitles =
+        r.tours_selected_by_city?.[c.id]
         ?? (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
       selectedTitles.forEach((tourTitle) => {
         const guide = findGuideByCityTour(c.name, tourTitle);
@@ -272,7 +264,6 @@ export function Step13({ draft, set }: StepProps) {
     return options;
   };
 
-  // Language filter: when a specific language is chosen, only render that column.
   const visibleLanguages: GuideLanguage[] =
     langFilter === "all" ? DISPLAY_LANGUAGES : [langFilter as GuideLanguage];
 
@@ -283,10 +274,14 @@ export function Step13({ draft, set }: StepProps) {
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Filter language:</span>
           <Select value={langFilter} onValueChange={(v) => setLangFilter(v as GuideLanguage | "all")}>
-            <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-36">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All languages</SelectItem>
-              {DISPLAY_LANGUAGES.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+              {availableLanguages.length > 0
+                ? availableLanguages.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)
+                : DISPLAY_LANGUAGES.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
             </SelectContent>
           </Select>
           <Badge variant="secondary" className="text-[10px]">Current pax: {pax} ({paxTier})</Badge>
@@ -303,9 +298,10 @@ export function Step13({ draft, set }: StepProps) {
               {visibleLanguages.map((lang) => (
                 <th key={lang} className="text-right p-2 w-[110px]">{lang}</th>
               ))}
-              <th className="text-right p-2 w-[120px]">Tour Escorted (₹)</th>
+              <th className="text-right p-2 w-[120px] whitespace-nowrap">Tour Escorted (₹)</th>
             </tr>
           </thead>
+
           <tbody>
             {draft.routing.map((r, ri) => {
               const fromDefault = ri === 0 ? draft.departure_city : cityName(draft.routing[ri - 1]?.city_id || "");
@@ -317,7 +313,7 @@ export function Step13({ draft, set }: StepProps) {
                   <td className="p-2 font-semibold align-middle">Day {r.day}</td>
                   <td className="p-2 text-muted-foreground text-[11px] align-middle">{routeLabel}</td>
                   <td className="p-2">
-                    {cityTours && cityTours.length > 0 ? (
+                    {cityTours.length > 0 ? (
                       <div className="space-y-2">
                         {cityTours.map((ct) => (
                           <label key={ct.id} className="flex items-start gap-2 rounded-md px-1 py-0.5 cursor-pointer">
@@ -341,6 +337,7 @@ export function Step13({ draft, set }: StepProps) {
                       <span className="text-[11px] text-muted-foreground italic">No guide/tour selected.</span>
                     )}
                   </td>
+
                   {visibleLanguages.map((lang) => {
                     const total = dayTotalForLang(r.day, lang);
                     return (
@@ -349,11 +346,12 @@ export function Step13({ draft, set }: StepProps) {
                       </td>
                     );
                   })}
+
                   <td className="p-2 text-right">
                     <Input
                       type="number"
                       min={0}
-                      value={getDayEscort(r.day)}
+                      value={getDayEscort(r.day) || ""}
                       onChange={(e) => setDayEscort(r.day, parseFloat(e.target.value) || 0)}
                       className="h-7 w-24 text-right text-[11px] ml-auto"
                     />
@@ -362,14 +360,15 @@ export function Step13({ draft, set }: StepProps) {
               );
             })}
 
-            {/* Per-language subtotal (guide charges only) */}
             <tr className="bg-muted/10">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
                 Guide charges subtotal
               </td>
               {visibleLanguages.map((lang) => {
                 let sum = 0;
-                draft.routing.forEach((r) => { sum += dayTotalForLang(r.day, lang); });
+                draft.routing.forEach((r) => {
+                  sum += dayTotalForLang(r.day, lang);
+                });
                 return (
                   <td key={lang} className="p-2 text-right tabular-nums">{inr(sum)}</td>
                 );
@@ -377,36 +376,19 @@ export function Step13({ draft, set }: StepProps) {
               <td className="p-2 text-right tabular-nums">—</td>
             </tr>
 
-            {/* Reporting cost — split by pax category (Indian / Foreigner / Student). */}
-            {PAX_CATS.map((cat, ci) => (
-              <tr
-                key={`rep-${cat}`}
-                className={ci === 0 ? "bg-muted/10 border-t border-[#E5E7EB]" : "bg-muted/10"}
-              >
-                <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
-                  Reporting cost — {paxCatLabel[cat]} (₹)
-                </td>
-                {visibleLanguages.map((lang) => (
-                  <td key={lang} className="p-2 text-right">
-                    <Input
-                      type="number"
-                      min={0}
-                      value={getReportingByPax(lang, cat) || ""}
-                      onChange={(e) =>
-                        setReportingByPax(lang, cat, parseFloat(e.target.value) || 0)
-                      }
-                      className="h-7 w-24 text-right text-[11px] ml-auto"
-                    />
-                  </td>
-                ))}
-                <td className="p-2 text-right tabular-nums">—</td>
-              </tr>
-            ))}
-
-            {/* Optional flat reporting cost (legacy single field, kept editable). */}
-            <tr className="bg-muted/5 border-t border-[#E5E7EB]">
+            <tr className="bg-muted/10 border-t border-[#E5E7EB]">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
-                Reporting cost — flat (₹)
+                Tour escorted total (₹)
+              </td>
+              {visibleLanguages.map((lang) => (
+                <td key={lang} className="p-2 text-right tabular-nums">—</td>
+              ))}
+              <td className="p-2 text-right tabular-nums font-semibold">{inr(escortTotal)}</td>
+            </tr>
+
+            <tr className="bg-muted/10 border-t border-[#E5E7EB]">
+              <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
+                Reporting cost
               </td>
               {visibleLanguages.map((lang) => (
                 <td key={lang} className="p-2 text-right">
@@ -422,7 +404,6 @@ export function Step13({ draft, set }: StepProps) {
               <td className="p-2 text-right tabular-nums">—</td>
             </tr>
 
-            {/* Totals per language (charges + all reporting rows) */}
             <tr className="bg-muted/20 font-semibold">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
                 Totals per language (all days + reporting)
@@ -430,13 +411,12 @@ export function Step13({ draft, set }: StepProps) {
               {visibleLanguages.map((lang) => (
                 <td key={lang} className="p-2 text-right tabular-nums">{inr(totalForLang(lang))}</td>
               ))}
-              <td className="p-2 text-right tabular-nums">—</td>
+              <td className="p-2 text-right tabular-nums">{inr(escortTotal)}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* Remarks */}
       <Card className="p-3">
         <Label className="text-xs">Remarks (optional)</Label>
         <Input
