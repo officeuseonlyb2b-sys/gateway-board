@@ -6,12 +6,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { totalPax } from "@/lib/wizard/calc";
+import { effectivePaxForPricing } from "@/lib/wizard/calc";
 import { uid, dayDestInfo, CustomAdd, type StepProps } from "../shared";
 
 export function Step11({ draft, set }: StepProps) {
   const d = useDB();
-  const pax = totalPax(draft);
+  const pax = effectivePaxForPricing(draft);
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   const findLine = (activityId: string, day: number) =>

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { totalPax, transportLineTotal } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, transportLineTotal } from "@/lib/wizard/calc";
 import { uid, type StepProps } from "../shared";
 
 // ============================================================
@@ -15,7 +15,7 @@ import { uid, type StepProps } from "../shared";
 // ============================================================
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
-  const pax = totalPax(draft);
+  const pax = effectivePaxForPricing(draft);
   const opts = d.travel_options.filter((t) => {
     if (!t.is_active) return false;
     const min = t.min_pax ?? 1;

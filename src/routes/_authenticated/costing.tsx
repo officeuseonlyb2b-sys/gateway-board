@@ -34,7 +34,7 @@ import type {
 import { emptyDraft } from "@/lib/wizard/types";
 import { useAgents, usePrograms, type Agent } from "@/lib/wizard/agents-store";
 import {
-  computeOption, computeAddonsTotal, totalPax, gstRateFor, transportLineTotal,
+  computeOption, computeAddonsTotal, totalPax, effectivePaxForPricing, gstRateFor, transportLineTotal,
   computePersonTotals, optionUsesCustomAllocation, normalizeAllocations,
   defaultAllocations, presetAllSingle, presetAllDouble, presetOneSingleRestDouble,
   personRoomTypeLabel, lookupOptionNightlyRates,
@@ -177,7 +177,10 @@ function WizardPage() {
   }
 
   const step = draft.step;
-  const set = (patch: Partial<QuoteDraft>) => writeDraft({ ...draft, ...patch });
+  const set = (patch: Partial<QuoteDraft>) => {
+    const current = loadDraft() ?? draft;
+    writeDraft({ ...current, ...patch });
+  };
 
   const canProceed = validate(draft, step);
 
@@ -198,7 +201,8 @@ function WizardPage() {
   const go = (n: number) => {
     if (n < 1 || n > 18) return;
     if (n > step && !canProceed) return;
-    const next = { ...draft, step: n };
+    const current = loadDraft() ?? draft;
+    const next = { ...current, step: n };
     writeDraft(next);
     // Auto-save when moving forward past identification.
     if (n > step && n >= 3) {
@@ -1732,7 +1736,8 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
 function StepPaxType({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
   const totPax = draft.adults + draft.ss + draft.children.length;
-  const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure ? "Brochure" : totPax <= 5 ? "FIT" : "GIT";
+  const pricingPax = effectivePaxForPricing(draft);
+  const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure ? "Brochure" : pricingPax <= 5 ? "FIT" : "GIT";
   // Persist auto-detected tour type into the draft (once when it changes)
   useEffect(() => {
     if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });
@@ -1769,7 +1774,7 @@ function StepPaxType({ draft, set }: StepProps) {
           {autoTourType}
         </Badge>
         <span className="text-sm text-muted-foreground">
-          Auto-detected — 1-5 pax = FIT, 6+ = GIT.
+          Auto-detected from pricing pax — 1-5 pax = FIT, 6+ = GIT.
         </span>
       </div>
       <Card className="p-4 space-y-3 max-w-lg">
@@ -1794,6 +1799,27 @@ function StepPaxType({ draft, set }: StepProps) {
           </div>
         ))}
         <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
+        <div className="pt-2 border-t space-y-1">
+          <Label className="text-xs">Pax Range (pricing slab override)</Label>
+          <Select
+            value={draft.pax_range ?? "auto"}
+            onValueChange={(v) => set({ pax_range: v as QuoteDraft["pax_range"] })}
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto — actual pax ({totPax || 1})</SelectItem>
+              <SelectItem value="1-9">1–9 pax</SelectItem>
+              <SelectItem value="5-14">5–14 pax</SelectItem>
+              <SelectItem value="15-24">15–24 pax</SelectItem>
+              <SelectItem value="25+">25+ pax</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-[10px] text-muted-foreground">
+            Current pricing pax: {pricingPax}. Guide, activities, misc, transport filters and group hotel room mixes use this slab.
+          </div>
+        </div>
       </Card>
     </div>
   );

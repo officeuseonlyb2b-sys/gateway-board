@@ -7,13 +7,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB, miscRateForPax } from "@/lib/mock-store";
-import { totalPax } from "@/lib/wizard/calc";
+import { effectivePaxForPricing } from "@/lib/wizard/calc";
 import { uid, CustomAdd, type StepProps } from "../shared";
 
 export function Step14({ draft, set }: StepProps) {
   const d = useDB();
   const items = d.miscellaneous_items.filter((x) => x.is_active);
-  const pax = totalPax(draft);
+  const pax = effectivePaxForPricing(draft);
   const nights = draft.nights || 1;
 
   const effType = (m: typeof items[number]): "per_person" | "slab" => {

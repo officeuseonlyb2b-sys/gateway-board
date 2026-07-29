@@ -9,16 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { inr } from "@/lib/format";
 import { useDB, GUIDE_LANGUAGES, guideConfiguredLanguages, guideRateForPax, guidePrimaryLanguage, type GuideLanguage } from "@/lib/mock-store";
-import { totalPax } from "@/lib/wizard/calc";
+import { effectivePaxForPricing } from "@/lib/wizard/calc";
 import { uid, dayAllCities, type StepProps } from "../shared";
 
 const DISPLAY_LANGUAGES: GuideLanguage[] = ["Hindi", "English", "Language"];
 
-const REPORTING_KEY: Record<GuideLanguage, "guide_reporting_cost_hindi" | "guide_reporting_cost_english" | "guide_reporting_cost_language"> = {
-  Hindi: "guide_reporting_cost_hindi",
-  English: "guide_reporting_cost_english",
-  Language: "guide_reporting_cost_language",
-} as const;
+function reportingKey(lang: GuideLanguage) {
+  if (lang === "Hindi") return "guide_reporting_cost_hindi";
+  if (lang === "English") return "guide_reporting_cost_english";
+  return "guide_reporting_cost_language";
+}
 
 function makeTourKey(city: string, tour: string) {
   return `${city}||${tour}`;
@@ -26,7 +26,7 @@ function makeTourKey(city: string, tour: string) {
 
 export function Step13({ draft, set }: StepProps) {
   const d = useDB();
-  const pax = totalPax(draft);
+  const pax = effectivePaxForPricing(draft);
   const paxTier = pax <= 5 ? "1-5" : pax <= 14 ? "6-14" : "15+";
   const [langFilter, setLangFilter] = useState<GuideLanguage | "all">(
     (draft.guide_language as GuideLanguage | "all") || "all"
@@ -161,10 +161,10 @@ export function Step13({ draft, set }: StepProps) {
   };
 
   const getReporting = (lang: GuideLanguage): number =>
-    (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
+    (draft[reportingKey(lang)] as number | undefined) ?? 0;
 
   const setReporting = (lang: GuideLanguage, value: number) => {
-    set({ [REPORTING_KEY[lang]]: value } as Partial<typeof draft>);
+    set({ [reportingKey(lang)]: value } as Partial<typeof draft>);
   };
 
   const totalForLang = (lang: GuideLanguage) => {
@@ -187,25 +187,37 @@ export function Step13({ draft, set }: StepProps) {
     return exists && !disabled;
   };
 
-  const toggleTourSelection = (day: number, city: string, tour: string) => {
+  const toggleTourSelection = (day: number, city: string, tour: string, desiredChecked?: boolean) => {
     const key = makeTourKey(city, tour);
     const selected = isTourSelected(day, city, tour);
+    const shouldSelect = desiredChecked ?? !selected;
     const guide = findGuideByCityTour(city, tour);
 
-    if (selected) {
-      setDisabledKey(day, key, true);
+    if (!shouldSelect) {
+      const currentDisabled = getDisabledMap();
+      const disabledForDay = new Set(currentDisabled[day] || []);
+      disabledForDay.add(key);
+      const nextDisabled = { ...currentDisabled, [day]: Array.from(disabledForDay) };
       set({
+        guide_tour_disabled_by_day: nextDisabled,
         guides: draft.guides.filter((line) => {
           if (line.is_escort) return true;
           if (!(line.from_routing_days ?? []).includes(day)) return true;
           const g = allGuides.find((x) => x.id === line.guide_id);
           return !((g?.city ?? g?.destination ?? "") === city && (g?.tour_program ?? g?.name ?? "") === tour);
         }),
-      });
+      } as Partial<typeof draft>);
       return;
     }
 
-    setDisabledKey(day, key, false);
+    const currentDisabled = getDisabledMap();
+    const disabledForDay = new Set(currentDisabled[day] || []);
+    disabledForDay.delete(key);
+    const nextDisabled = { ...currentDisabled };
+    const values = Array.from(disabledForDay);
+    if (values.length > 0) nextDisabled[day] = values;
+    else delete nextDisabled[day];
+
     if (!guide) return;
 
     const primaryLang = guidePrimaryLanguage(guide) || "English";
@@ -218,9 +230,13 @@ export function Step13({ draft, set }: StepProps) {
       return (g?.city ?? g?.destination ?? "") === city && (g?.tour_program ?? g?.name ?? "") === tour;
     });
 
-    if (existingIndex !== -1) return;
+    if (existingIndex !== -1) {
+      set({ guide_tour_disabled_by_day: nextDisabled } as Partial<typeof draft>);
+      return;
+    }
 
     set({
+      guide_tour_disabled_by_day: nextDisabled,
       guides: [
         ...draft.guides,
         {
@@ -319,7 +335,7 @@ export function Step13({ draft, set }: StepProps) {
                           <label key={ct.id} className="flex items-start gap-2 rounded-md px-1 py-0.5 cursor-pointer">
                             <Checkbox
                               checked={ct.selected}
-                              onCheckedChange={() => toggleTourSelection(r.day, ct.city, ct.tour)}
+                              onCheckedChange={(checked) => toggleTourSelection(r.day, ct.city, ct.tour, checked === true)}
                               disabled={!ct.guideExists && !ct.selected}
                               className="mt-1"
                             />
