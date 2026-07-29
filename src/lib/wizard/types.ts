@@ -245,6 +245,7 @@ export interface QuoteDraft {
   // Per-language reporting cost split by pax category (Indian / Foreigner / Student).
   // Shape: { Hindi: { indian, foreigner, student }, English: {...}, Language: {...} }
   guide_reporting_by_pax?: Record<string, { indian?: number; foreigner?: number; student?: number }>;
+  guide_tour_disabled_by_day?: Record<number, string[]>;
   guide_day_escort?: Record<number, number>;
   guide_remarks?: string;
   // Optional pax range/slab override — when set, downstream rate lookups

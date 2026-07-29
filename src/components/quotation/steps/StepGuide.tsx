@@ -14,11 +14,11 @@ import { uid, dayAllCities, type StepProps } from "../shared";
 
 const DISPLAY_LANGUAGES: GuideLanguage[] = ["Hindi", "English", "Language"];
 
-const REPORTING_KEY: Record<GuideLanguage, "guide_reporting_cost_hindi" | "guide_reporting_cost_english" | "guide_reporting_cost_language"> = {
-  Hindi: "guide_reporting_cost_hindi",
-  English: "guide_reporting_cost_english",
-  Language: "guide_reporting_cost_language",
-} as const;
+function reportingKey(lang: GuideLanguage) {
+  if (lang === "Hindi") return "guide_reporting_cost_hindi";
+  if (lang === "English") return "guide_reporting_cost_english";
+  return "guide_reporting_cost_language";
+}
 
 function makeTourKey(city: string, tour: string) {
   return `${city}||${tour}`;
@@ -161,10 +161,10 @@ export function Step13({ draft, set }: StepProps) {
   };
 
   const getReporting = (lang: GuideLanguage): number =>
-    (draft[REPORTING_KEY[lang]] as number | undefined) ?? 0;
+    (draft[reportingKey(lang)] as number | undefined) ?? 0;
 
   const setReporting = (lang: GuideLanguage, value: number) => {
-    set({ [REPORTING_KEY[lang]]: value } as Partial<typeof draft>);
+    set({ [reportingKey(lang)]: value } as Partial<typeof draft>);
   };
 
   const totalForLang = (lang: GuideLanguage) => {
