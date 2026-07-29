@@ -23,6 +23,20 @@ import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { WIZARD_HOTEL_CATEGORIES } from "../shared";
 import type { StepProps } from "../shared";
 
+const CATEGORY_RANK: Record<string, number> = {
+  "Excellent Budget": 1,
+  "Home Stay": 1,
+  "3 Star": 2,
+  "3 Star Deluxe": 3,
+  "4 Star": 4,
+  "Heritage": 4,
+  "Experiential": 4,
+  "4 Star Superior": 5,
+  "5 Star": 6,
+  "5 Star Deluxe": 7,
+  "5 Star Luxury": 7,
+};
+
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
@@ -123,8 +137,26 @@ export function Step15({ draft, set }: StepProps) {
             const cityHotels = allCityHotels.filter(
               (h) => h.hotel_category.trim().toLowerCase() === catKey,
             );
+            const categoryRank = CATEGORY_RANK[activeCategory] ?? 0;
+            const bestRateForHotel = (hotelId: string) => {
+              const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+              return d.rate_plans
+                .filter((plan) => roomIds.includes(plan.room_category_id) && day.date >= plan.validity_start && day.date <= plan.validity_end)
+                .reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
+            };
             const noCategoryMatch = cityHotels.length === 0;
-            const hotelPool = noCategoryMatch ? allCityHotels : cityHotels;
+            const lowerCategoryHotels = allCityHotels.filter((h) => {
+              const rank = CATEGORY_RANK[h.hotel_category] ?? 0;
+              return categoryRank > 0 && rank > 0 && rank < categoryRank;
+            });
+            const fallbackHotels = (lowerCategoryHotels.length > 0 ? lowerCategoryHotels : allCityHotels)
+              .slice()
+              .sort((a, b) => {
+                const rankDiff = (CATEGORY_RANK[b.hotel_category] ?? 0) - (CATEGORY_RANK[a.hotel_category] ?? 0);
+                if (rankDiff !== 0) return rankDiff;
+                return bestRateForHotel(b.id) - bestRateForHotel(a.id);
+              });
+            const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
             const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
             const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
             const rate = sel && sel.room_id ? findRate(sel.room_id, sel.meal_plan, day.date) : null;
@@ -165,7 +197,7 @@ export function Step15({ draft, set }: StepProps) {
                     {noCategoryMatch && (
                       <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800 flex flex-wrap items-center gap-2">
                         <AlertCircle className="h-4 w-4 shrink-0" />
-                        <span>No <b>{activeCategory}</b> hotels found in {cityName}. Select from available hotels below (showing all categories).</span>
+                        <span>No <b>{activeCategory}</b> hotels found in {cityName}. Showing closest lower categories first, sorted by available rate high to low.</span>
                         <Button size="sm" variant="outline" className="ml-auto h-7" onClick={() => setQuickAdd({ cityId: day.city_id, cityName: cityName || "" })}>
                           <Plus className="h-3 w-3" /> Add New
                         </Button>

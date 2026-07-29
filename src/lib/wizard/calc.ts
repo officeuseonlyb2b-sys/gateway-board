@@ -64,6 +64,20 @@ export function totalPax(draft: QuoteDraft): number {
   return draft.adults + draft.ss + draft.children.length;
 }
 
+export function effectivePaxForPricing(draft: QuoteDraft): number {
+  const actual = Math.max(1, totalPax(draft));
+  switch (draft.pax_range) {
+    case "1-5": return 5;
+    case "1-9": return 9;
+    case "5-14":
+    case "6-14": return 14;
+    case "15-24": return 24;
+    case "25+": return Math.max(actual, 25);
+    case "auto":
+    default: return actual;
+  }
+}
+
 export function computeOption(
   draft: QuoteDraft,
   opt: HotelOption,
@@ -349,7 +363,7 @@ export function lookupOptionNightlyRates(
 import type { GroupRoomMix } from "./types";
 
 export function isGroupTour(draft: import("./types").QuoteDraft): boolean {
-  return draft.tour_type === "GIT" || totalPax(draft) >= 6;
+  return draft.tour_type === "GIT" || effectivePaxForPricing(draft) >= 6;
 }
 
 export function autoDoubleMix(pax: number): GroupRoomMix {

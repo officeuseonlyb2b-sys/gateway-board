@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import {
-  computeOption, computePersonTotals, totalPax,
+  computeOption, computePersonTotals, totalPax, effectivePaxForPricing,
   optionUsesCustomAllocation, personRoomTypeLabel,
   isGroupTour, autoDoubleMix, mixCoversPax, mixLabel, computeGroupOption,
 } from "@/lib/wizard/calc";
@@ -202,7 +202,7 @@ export function PerPersonSummaryBlock({
 
 function GroupFinalSummary({ draft, focusOption }: { draft: QuoteDraft; focusOption: HotelOption | undefined }) {
   const d = useDB();
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   const mix = draft.group_room_mix || autoDoubleMix(pax);
   if (!focusOption) return null;
   const tot = computeGroupOption(draft, focusOption, d, mix);

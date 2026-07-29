@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import {
-  computeOption, totalPax, transportLineTotal,
+  computeOption, totalPax, effectivePaxForPricing, transportLineTotal,
   optionUsesCustomAllocation, isGroupTour, autoDoubleMix, autoTripleMix,
   mixCoversPax, mixLabel, computeGroupOption,
   type OptionTotals, type GroupOptionTotals,
@@ -187,7 +187,7 @@ export function Step16({ draft, set }: StepProps) {
 // ============================================================
 function GroupCostingBlock({ draft, set, options }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void; options: HotelOption[] }) {
   const d = useDB();
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   const autoDbl = useMemo(() => autoDoubleMix(pax), [pax]);
   const autoTrp = useMemo(() => autoTripleMix(pax), [pax]);
   const customMix = draft.group_room_mix || autoDbl;
