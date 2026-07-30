@@ -166,7 +166,14 @@ export interface HotelSelection {
   is_fallback?: boolean;
 }
 export type OptionKey = "A" | "B" | "C" | "D";
-export type PersonRoomType = "single" | "double" | "triple" | "extra_bed" | "cwb";
+export type PersonRoomType = "single" | "double" | "triple" | "quad" | "extra_bed" | "cwb";
+export type AllocationMode = "standard" | "dynamic";
+export interface DayRoomMix {
+  single: number;
+  double: number;
+  triple: number;
+  quad: number;
+}
 export interface PersonAllocation {
   person_id: number;         // stable 1-based id
   label: string;             // editable, defaults to "Person N"
@@ -236,6 +243,10 @@ export interface QuoteDraft {
   optionals: ActivityLine[];
   included_option_keys?: OptionKey[];
   group_room_mix?: GroupRoomMix;
+  // Room allocation step (before hotel selection)
+  allocation_mode?: AllocationMode;
+  // Dynamic mode: per itinerary day number → room mix chosen manually
+  day_room_mix?: Record<number, DayRoomMix>;
   // Guide step UI state (Step 12) — non-calc
   guide_language?: string;
   guide_reporting_cost?: number;
