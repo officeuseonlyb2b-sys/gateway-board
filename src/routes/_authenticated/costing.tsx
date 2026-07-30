@@ -1819,8 +1819,10 @@ function StepPaxType({ draft, set }: StepProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">Auto — actual pax ({totPax || 1})</SelectItem>
+              <SelectItem value="1-5">1–5 pax</SelectItem>
               <SelectItem value="1-9">1–9 pax</SelectItem>
               <SelectItem value="5-14">5–14 pax</SelectItem>
+              <SelectItem value="6-14">6–14 pax (9 to 14)</SelectItem>
               <SelectItem value="15-24">15–24 pax</SelectItem>
               <SelectItem value="25+">25+ pax</SelectItem>
             </SelectContent>

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useDB } from "@/lib/mock-store";
 import {
-  totalPax, normalizeAllocations, defaultAllocations,
+  effectivePaxForPricing, normalizeAllocations, defaultAllocations,
   presetAllSingle, presetAllDouble, presetOneSingleRestDouble, presetStandardPattern,
   defaultDayMix, dayMixCoversPax,
 } from "@/lib/wizard/calc";
@@ -29,7 +29,7 @@ export const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: 
 
 export function StepAllocation({ draft, set }: StepProps) {
   const d = useDB();
-  const paxCount = Math.max(1, totalPax(draft));
+  const paxCount = Math.max(1, effectivePaxForPricing(draft));
   const mode: AllocationMode = draft.allocation_mode ?? "standard";
   const overnight = draft.routing.filter((r) => r.overnight);
 
