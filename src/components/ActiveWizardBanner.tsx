@@ -34,7 +34,7 @@ export function ActiveWizardBanner() {
         <span className="font-semibold">Quotation in progress:</span>{" "}
         <span className="truncate">"{name}"</span>
         <span className="mx-2 opacity-60">·</span>
-        <span className="opacity-90">Step {active.step} of 18</span>
+        <span className="opacity-90">Step {active.step} of 16</span>
         <span className="mx-2 opacity-60">·</span>
         <span className="opacity-75">Last saved {timeAgo(active.savedAt)}</span>
       </div>

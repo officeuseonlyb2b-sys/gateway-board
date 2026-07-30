@@ -61,6 +61,7 @@ import { Step14 } from "@/components/quotation/steps/StepMisc";
 import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { Step17 } from "@/components/quotation/steps/StepFinal";
+import { StepAllocation } from "@/components/quotation/steps/StepAllocation";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
@@ -71,13 +72,14 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // ============================================================
 // Step definitions
 // ============================================================
+const TOTAL_STEPS = 16;
 const STEPS: { n: number; label: string }[] = [
-  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Pax+Type" },
-  { n: 4, label: "From" }, { n: 5, label: "Travel" }, { n: 6, label: "Duration" },
-  { n: 7, label: "Program" }, { n: 8, label: "Create Route" }, { n: 9, label: "Routing" },
-  { n: 10, label: "Activities" }, { n: 11, label: "Entrances" }, { n: 12, label: "Guide" },
-  { n: 13, label: "Misc" }, { n: 14, label: "Transport" }, { n: 15, label: "Hotels" },
-  { n: 16, label: "Costing" }, { n: 17, label: "Final" }, { n: 18, label: "Optionals" },
+  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Trip Basics" },
+  { n: 4, label: "Program" }, { n: 5, label: "Create Route" }, { n: 6, label: "Routing" },
+  { n: 7, label: "Activities" }, { n: 8, label: "Entrances" }, { n: 9, label: "Guide" },
+  { n: 10, label: "Misc" }, { n: 11, label: "Transport" }, { n: 12, label: "Room Allocation" },
+  { n: 13, label: "Hotels" }, { n: 14, label: "Costing" }, { n: 15, label: "Final" },
+  { n: 16, label: "Optionals" },
 ];
 
 
@@ -176,7 +178,7 @@ function WizardPage() {
     );
   }
 
-  const step = draft.step;
+  const step = Math.min(draft.step, TOTAL_STEPS);
   const set = (patch: Partial<QuoteDraft>) => {
     const current = loadDraft() ?? draft;
     writeDraft({ ...current, ...patch });
@@ -199,7 +201,7 @@ function WizardPage() {
   };
 
   const go = (n: number) => {
-    if (n < 1 || n > 18) return;
+    if (n < 1 || n > TOTAL_STEPS) return;
     if (n > step && !canProceed) return;
     const current = loadDraft() ?? draft;
     const next = { ...current, step: n };
@@ -236,7 +238,7 @@ function WizardPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">New Quotation</h1>
               <p className="text-sm text-muted-foreground">
-                Step {step} of 18 — {STEPS[step - 1].label}
+                Step {step} of {TOTAL_STEPS} — {STEPS[step - 1].label}
               </p>
             </div>
           </div>
@@ -275,7 +277,7 @@ function WizardPage() {
           <Button variant="ghost" onClick={() => go(step - 1)} disabled={step === 1}>
             <ChevronLeft className="h-4 w-4 mr-1" /> Back
           </Button>
-          {step < 18 ? (
+          {step < TOTAL_STEPS ? (
             <Button onClick={() => go(step + 1)} disabled={!canProceed}>
               Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
@@ -361,27 +363,26 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
     case 3: {
-      // Pax + Type
-      if (d.query_type === "Brochure") return (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0);
-      return (d.adults + d.ss + d.children.length) >= 1;
-    }
-    case 4: return !!d.departure_city;
-    case 5: return d.query_type === "Brochure" ? true : d.travel_modes.length >= 1;
-    case 6: {
+      // Combined Trip Basics — Pax + Type, Departure, Travel, Duration
+      const paxOk = d.query_type === "Brochure"
+        ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
+        : (d.adults + d.ss + d.children.length) >= 1;
+      if (!paxOk) return false;
+      if (!d.departure_city) return false;
+      if (d.query_type !== "Brochure" && d.travel_modes.length < 1) return false;
       if (d.nights < 1) return false;
       if (d.query_type === "Brochure") return !!d.brochure_validity_from && !!d.brochure_validity_till;
-      // B2B/B2C: with dates → need start_date; without dates → ok
       if (d.has_dates === false) return true;
       return !!d.start_date;
     }
-    case 7: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
-    case 8: return true; // Create-route gate — always allow (button generates rows)
-    case 9: {
+    case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
+    case 5: return true; // Create-route gate — always allow (button generates rows)
+    case 6: {
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    case 15: {
+    case 13: {
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
       const A = d.hotel_options.find((o) => o.key === "A");
@@ -396,26 +397,23 @@ function validate(d: QuoteDraft, step: number): boolean {
 // Step router — maps slot → component
 // ============================================================
 function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
-  switch (draft.step) {
+  switch (Math.min(draft.step, TOTAL_STEPS)) {
     case 1: return <Step1 draft={draft} set={set} />;
     case 2: return <Step2 draft={draft} set={set} />;
-    case 3: return <StepPaxType draft={draft} set={set} />;
-    case 4: return <StepDeparture draft={draft} set={set} />;
-    case 5: return <StepTravel draft={draft} set={set} />;
-    case 6: return <StepDuration draft={draft} set={set} />;
-    case 7: return <Step4 draft={draft} set={set} />;
-    case 8: return <StepCreateRoute draft={draft} set={set} />;
-    case 9: return <Step9 draft={draft} set={set} />;
-    case 10: return <Step11 draft={draft} set={set} />;
-    case 11: return <Step12 draft={draft} set={set} />;
-    case 12: return <Step13 draft={draft} set={set} />;
-    case 13: return <Step14 draft={draft} set={set} />;
-    case 14: return <Step10 draft={draft} set={set} />;
-
-    case 15: return <Step15 draft={draft} set={set} />;
-    case 16: return <Step16 draft={draft} set={set} />;
-    case 17: return <Step17 draft={draft} set={set} />;
-    case 18: return <Step18 draft={draft} set={set} />;
+    case 3: return <StepTripBasics draft={draft} set={set} />;
+    case 4: return <Step4 draft={draft} set={set} />;
+    case 5: return <StepCreateRoute draft={draft} set={set} />;
+    case 6: return <Step9 draft={draft} set={set} />;
+    case 7: return <Step11 draft={draft} set={set} />;
+    case 8: return <Step12 draft={draft} set={set} />;
+    case 9: return <Step13 draft={draft} set={set} />;
+    case 10: return <Step14 draft={draft} set={set} />;
+    case 11: return <Step10 draft={draft} set={set} />;
+    case 12: return <StepAllocation draft={draft} set={set} />;
+    case 13: return <Step15 draft={draft} set={set} />;
+    case 14: return <Step16 draft={draft} set={set} />;
+    case 15: return <Step17 draft={draft} set={set} />;
+    case 16: return <Step18 draft={draft} set={set} />;
     default: return null;
   }
 }
@@ -1733,6 +1731,17 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
 // ============================================================
 // NEW STEP 3 — Pax + Tour Type (FIT/GIT auto for B2B/B2C, pax-range for Brochure)
 // ============================================================
+function StepTripBasics({ draft, set }: StepProps) {
+  return (
+    <div className="space-y-8">
+      <StepPaxType draft={draft} set={set} />
+      <div className="border-t pt-6"><StepDeparture draft={draft} set={set} /></div>
+      <div className="border-t pt-6"><StepTravel draft={draft} set={set} /></div>
+      <div className="border-t pt-6"><StepDuration draft={draft} set={set} /></div>
+    </div>
+  );
+}
+
 function StepPaxType({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
   const totPax = draft.adults + draft.ss + draft.children.length;
@@ -1810,8 +1819,10 @@ function StepPaxType({ draft, set }: StepProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">Auto — actual pax ({totPax || 1})</SelectItem>
+              <SelectItem value="1-5">1–5 pax</SelectItem>
               <SelectItem value="1-9">1–9 pax</SelectItem>
               <SelectItem value="5-14">5–14 pax</SelectItem>
+              <SelectItem value="6-14">6–14 pax (9 to 14)</SelectItem>
               <SelectItem value="15-24">15–24 pax</SelectItem>
               <SelectItem value="25+">25+ pax</SelectItem>
             </SelectContent>

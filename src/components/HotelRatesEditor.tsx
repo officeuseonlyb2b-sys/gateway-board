@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { db, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
 
@@ -31,6 +32,8 @@ export interface SeasonBlock {
   cp_single: string; cp_double: string;
   map_single: string; map_double: string;
   ap_single: string; ap_double: string;
+  has_quad: boolean;
+  cp_quad: string; map_quad: string; ap_quad: string;
   extra_bed: string;
   cwb_mode: CwbMode;
   cwb_amount: string;
@@ -54,6 +57,7 @@ export const emptySeason = (): SeasonBlock => ({
   cp_single: "", cp_double: "",
   map_single: "", map_double: "",
   ap_single: "", ap_double: "",
+  has_quad: false, cp_quad: "", map_quad: "", ap_quad: "",
   extra_bed: "",
   cwb_mode: "amount", cwb_amount: "", cwb_rule: "",
   lunch: "", dinner: "", extra_breakfast: "",
@@ -92,6 +96,8 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
         cp_single: s(cp?.single_rate), cp_double: s(cp?.double_rate),
         map_single: s(map?.single_rate), map_double: s(map?.double_rate),
         ap_single: s(ap?.single_rate), ap_double: s(ap?.double_rate),
+        has_quad: !!(cp?.quad_rate || map?.quad_rate || ap?.quad_rate),
+        cp_quad: s(cp?.quad_rate ?? ""), map_quad: s(map?.quad_rate ?? ""), ap_quad: s(ap?.quad_rate ?? ""),
         extra_bed: s(base.extra_bed_rate),
         cwb_mode: base.cwb_rule_text ? "rule" : "amount",
         cwb_amount: s(base.cwb_rate ?? ""),
@@ -135,6 +141,7 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
     const plans = r.seasons.flatMap((sn) => {
       const single = { CP: num(sn.cp_single), MAP: num(sn.map_single), AP: num(sn.ap_single) };
       const dbl = { CP: num(sn.cp_double), MAP: num(sn.map_double), AP: num(sn.ap_double) };
+      const quad = { CP: numOrNull(sn.cp_quad), MAP: numOrNull(sn.map_quad), AP: numOrNull(sn.ap_quad) };
       return MEAL_PLANS.map((mp) => ({
         room_category_id: room.id,
         validity_start: sn.validity_start,
@@ -143,6 +150,7 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
         meal_plan: mp,
         double_rate: dbl[mp],
         single_rate: single[mp],
+        quad_rate: sn.has_quad ? quad[mp] : null,
         extra_bed_rate: num(sn.extra_bed),
         cwb_rate: sn.cwb_mode === "amount" ? numOrNull(sn.cwb_amount) : null,
         cwb_rule_text: sn.cwb_mode === "rule" ? (sn.cwb_rule.trim() || null) : null,
@@ -290,7 +298,32 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                   <Input value={sn.cp_double} onChange={(e) => setSeason(ri, si, { cp_double: e.target.value })} placeholder="₹" />
                   <Input value={sn.map_double} onChange={(e) => setSeason(ri, si, { map_double: e.target.value })} placeholder="₹" />
                   <Input value={sn.ap_double} onChange={(e) => setSeason(ri, si, { ap_double: e.target.value })} placeholder="₹" />
+
+                  <div className="flex items-center text-muted-foreground">Triple (TRP)</div>
+                  <div className="col-span-3 flex items-center text-[11px] text-muted-foreground">
+                    Auto-calculated as Double + Extra Bed rate.
+                  </div>
                 </div>
+
+                <div className="flex items-center justify-between rounded-md border border-border p-2">
+                  <div>
+                    <div className="text-xs font-medium">Quad (QUAD)</div>
+                    <div className="text-[11px] text-muted-foreground">Enable to enter a 4-sharing room rate</div>
+                  </div>
+                  <Switch
+                    checked={sn.has_quad}
+                    onCheckedChange={(v) => setSeason(ri, si, { has_quad: v })}
+                  />
+                </div>
+
+                {sn.has_quad && (
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="flex items-center">Quad (QUAD)</div>
+                    <Input value={sn.cp_quad} onChange={(e) => setSeason(ri, si, { cp_quad: e.target.value })} placeholder="₹ CP" />
+                    <Input value={sn.map_quad} onChange={(e) => setSeason(ri, si, { map_quad: e.target.value })} placeholder="₹ MAP" />
+                    <Input value={sn.ap_quad} onChange={(e) => setSeason(ri, si, { ap_quad: e.target.value })} placeholder="₹ AP" />
+                  </div>
+                )}
                 {errors[`s_${ri}_${si}_cp_double`] && (
                   <p className="text-xs text-destructive">{errors[`s_${ri}_${si}_cp_double`]}</p>
                 )}

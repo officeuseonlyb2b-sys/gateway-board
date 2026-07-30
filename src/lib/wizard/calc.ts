@@ -156,7 +156,7 @@ export interface PersonDayCost {
 // Compute a single person's share for a single day given the resolved plan.
 export function computePersonDayCost(
   room_type: PersonRoomType,
-  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number | null },
+  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number | null; quad_rate?: number | null },
 ): PersonDayCost {
 
   const sgl = plan.single_rate || 0;
@@ -164,10 +164,12 @@ export function computePersonDayCost(
   const eb = plan.extra_bed_rate || 0;
   const cwb = (plan as { cwb_rate?: number }).cwb_rate || 0;
   const trpTariff = dbl + eb;
+  const quadTariff = (plan as { quad_rate?: number | null }).quad_rate || dbl + eb * 2;
   switch (room_type) {
     case "single":    return { net: sgl,        gst: sgl        * gstRateFor(sgl) };
     case "double":    return { net: dbl / 2,    gst: (dbl / 2)  * gstRateFor(dbl) };
     case "triple":    return { net: trpTariff / 3, gst: (trpTariff / 3) * gstRateFor(trpTariff) };
+    case "quad":      return { net: quadTariff / 4, gst: (quadTariff / 4) * gstRateFor(quadTariff) };
     case "extra_bed": return { net: eb,         gst: eb         * gstRateFor(eb) };
     case "cwb":       return { net: cwb,        gst: cwb        * gstRateFor(cwb) };
     default:          return { net: 0, gst: 0 };
@@ -247,6 +249,7 @@ export function personRoomTypeLabel(t: PersonRoomType, sharing_with: number[] = 
     case "single":    return "Single Room";
     case "double":    return sharing_with.length ? `Double (shared)` : "Double";
     case "triple":    return "Triple Sharing";
+    case "quad":      return "Quad Sharing";
     case "extra_bed": return "Extra Bed";
     case "cwb":       return "Child With Bed";
   }
@@ -457,4 +460,95 @@ export function mixLabel(mix: GroupRoomMix): string {
   if (mix.triple) parts.push(`${mix.triple} Triple`);
   if (mix.single) parts.push(`${mix.single} Single`);
   return parts.join(" + ") || "No rooms";
+}
+
+
+// ============================================================
+// Standard allocation pattern — repeating 1 Single, 2 Double, 3 Triple
+// ============================================================
+export function presetStandardPattern(count: number): PersonAllocation[] {
+  const list: PersonAllocation[] = Array.from({ length: count }, (_, i) => ({
+    person_id: i + 1,
+    label: `Person ${i + 1}`,
+    room_type: "single" as PersonRoomType,
+    sharing_with: [] as number[],
+  }));
+  const cycle: { type: PersonRoomType; size: number }[] = [
+    { type: "single", size: 1 },
+    { type: "double", size: 2 },
+    { type: "triple", size: 3 },
+  ];
+  let idx = 0;
+  let c = 0;
+  while (idx < count) {
+    let { type, size } = cycle[c % cycle.length];
+    c++;
+    const remaining = count - idx;
+    if (size > remaining) {
+      size = remaining;
+      type = size === 1 ? "single" : size === 2 ? "double" : "triple";
+    }
+    const group = list.slice(idx, idx + size);
+    group.forEach((p) => {
+      p.room_type = type;
+      p.sharing_with = group.filter((o) => o.person_id !== p.person_id).map((o) => o.person_id);
+    });
+    idx += size;
+  }
+  return list;
+}
+
+// ============================================================
+// Dynamic (day-by-day) room mix costing
+// ============================================================
+import type { DayRoomMix } from "./types";
+
+export function dayMixCoversPax(mix: DayRoomMix): number {
+  return mix.single + mix.double * 2 + mix.triple * 3 + mix.quad * 4;
+}
+
+export function defaultDayMix(pax: number): DayRoomMix {
+  const double = Math.floor(pax / 2);
+  return { single: pax % 2, double, triple: 0, quad: 0 };
+}
+
+export interface DynamicDayCost {
+  day: number;
+  city_id: string;
+  mix: DayRoomMix;
+  net: number;
+  gst: number;
+  missing: boolean;
+}
+
+export function computeDynamicOption(
+  draft: import("./types").QuoteDraft,
+  opt: HotelOption,
+  d: import("@/lib/mock-store").DB,
+): { days: DynamicDayCost[]; room_net: number; room_gst: number } {
+  const days: DynamicDayCost[] = [];
+  let net = 0, gst = 0;
+  draft.routing.forEach((day, i) => {
+    if (!day.overnight) return;
+    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, totalPax(draft)));
+    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const date = addDaysISO(draft.start_date, i);
+    const plan = sel ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date) : null;
+    if (!plan) {
+      days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });
+      return;
+    }
+    const sgl = plan.single_rate;
+    const dbl = plan.double_rate;
+    const trp = dbl + plan.extra_bed_rate;
+    const quad = (plan as { quad_rate?: number | null }).quad_rate || dbl + plan.extra_bed_rate * 2;
+    const dNet = mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad;
+    const dGst = mix.single * sgl * gstRateFor(sgl)
+      + mix.double * dbl * gstRateFor(dbl)
+      + mix.triple * trp * gstRateFor(trp)
+      + mix.quad * quad * gstRateFor(quad);
+    net += dNet; gst += dGst;
+    days.push({ day: day.day, city_id: day.city_id, mix, net: dNet, gst: dGst, missing: false });
+  });
+  return { days, room_net: net, room_gst: gst };
 }
