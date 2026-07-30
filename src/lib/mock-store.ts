@@ -96,6 +96,7 @@ export interface RatePlan {
   meal_plan: MealPlan;
   double_rate: number;
   single_rate: number;
+  quad_rate?: number | null;
   extra_bed_rate: number;
   cwb_rate?: number | null;
   cwb_rule_text?: string | null;
