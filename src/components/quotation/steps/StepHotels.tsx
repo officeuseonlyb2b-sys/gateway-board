@@ -15,11 +15,12 @@ import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
 import {
   gstRateFor,
   computePersonTotals,
-  optionUsesCustomAllocation,
   computeDynamicOption,
   personRoomTypeLabel,
+  defaultDayMix,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
+import type { QuoteDraft, HotelOption, OptionKey, DayRoomMix } from "@/lib/wizard/types";
+
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -149,16 +150,9 @@ export function Step15({ draft, set }: StepProps) {
 
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
-            <>
-              {draft.allocation_mode === "dynamic" ? (
-                <OptionDynamicPreview draft={draft} option={activeOption} />
-              ) : (
-                optionUsesCustomAllocation(activeOption) && (
-                  <OptionPerPersonPreview draft={draft} option={activeOption} />
-                )
-              )}
-            </>
+            <OptionDynamicPreview draft={draft} option={activeOption} />
           )}
+
 
           {activeCategory && (
             <OptionInclusionsEditor
@@ -218,14 +212,11 @@ function AccommodationSelectionTable({
 }) {
   const d = useDB();
 
-  // --- Quad allocation gating (driven by Step 12 Room Allocation) ---
-  const standardQuadAllocated =
-    (draft.allocation_mode ?? "standard") === "standard" &&
-    !!draft.hotel_options[0]?.pax_allocations?.some((a) => a.room_type === "quad");
-  const quadAllocatedForDay = (dayNo: number) =>
-    (draft.allocation_mode === "dynamic")
-      ? (draft.day_room_mix?.[dayNo]?.quad ?? 0) > 0
-      : standardQuadAllocated;
+  // --- Room mix per day (driven by Step 12 Room Allocation, dynamic only) ---
+  const paxForMix = Math.max(1, draft.adults + draft.ss + draft.children.length);
+  const mixForDay = (dayNo: number): DayRoomMix =>
+    draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
+  const quadAllocatedForDay = (dayNo: number) => mixForDay(dayNo).quad > 0;
   const anyQuadAllocated = overnightRouting.some((r) => quadAllocatedForDay(r.day));
 
   // Toggle states for extra columns
@@ -233,6 +224,7 @@ function AccommodationSelectionTable({
   const showQuad = showQuadManual || anyQuadAllocated;
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
+
 
 
   // Total number of passengers (used for meal costing)
@@ -280,19 +272,43 @@ function AccommodationSelectionTable({
         if (rankDiff !== 0) return rankDiff;
         return bestRateForHotel(b.id) - bestRateForHotel(a.id);
       });
-    const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
+    const categoryPool = noCategoryMatch ? fallbackHotels : cityHotels;
 
-    // Does ANY hotel available for this city/date expose a Quad rate?
-    const cityHasQuadHotel = hotelPool.some((h) => {
-      const roomIds = d.room_categories.filter((room) => room.hotel_id === h.id).map((room) => room.id);
-      return d.rate_plans.some(
+    // --- Filter the pool to hotels that can satisfy THIS day's allocated room mix ---
+    const needs = mixForDay(day.day);
+    const plansForHotel = (hotelId: string) => {
+      const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+      return d.rate_plans.filter(
         (plan) =>
           roomIds.includes(plan.room_category_id) &&
           day.date >= plan.validity_start &&
-          day.date <= plan.validity_end &&
-          ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0,
+          day.date <= plan.validity_end,
       );
-    });
+    };
+    const hotelSatisfiesMix = (hotelId: string) =>
+      plansForHotel(hotelId).some((plan) => {
+        if (needs.single > 0 && !(plan.single_rate > 0)) return false;
+        if (needs.double > 0 && !(plan.double_rate > 0)) return false;
+        if (needs.triple > 0 && !(plan.double_rate > 0 && (plan.extra_bed_rate || 0) > 0)) return false;
+        if (needs.quad > 0 && !(((plan as { quad_rate?: number | null }).quad_rate || 0) > 0)) return false;
+        return true;
+      });
+    const mixPool = categoryPool.filter((h) => hotelSatisfiesMix(h.id));
+    const hotelPool = mixPool;
+    // True when the category pool had hotels but none can fulfil the day's mix.
+    const mixUnfulfillable = categoryPool.length > 0 && mixPool.length === 0;
+    const missingTypes = [
+      needs.single > 0 ? "Single" : "",
+      needs.double > 0 ? "Double" : "",
+      needs.triple > 0 ? "Triple" : "",
+      needs.quad > 0 ? "Quad" : "",
+    ].filter(Boolean);
+
+    // Does ANY hotel available for this city/date expose a Quad rate?
+    const cityHasQuadHotel = categoryPool.some((h) =>
+      plansForHotel(h.id).some((plan) => ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0),
+    );
+
 
     // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
@@ -397,13 +413,14 @@ function AccommodationSelectionTable({
         offSeasonText = rate.season_label || "—";
       }
 
-      // Accumulate totals for summary (only if columns are active and meal is not included)
-      totalSgl += sglTotal;
-      totalDbl += dblTotal;
-      totalTrp += trpTotal;
-      if (quadAllocated && quadAvailable) totalQuad += quadTotal;
+      // Accumulate totals for summary, weighted by the rooms actually allocated that day
+      totalSgl += needs.single * sglTotal;
+      totalDbl += needs.double * dblTotal;
+      totalTrp += needs.triple * trpTotal;
+      if (quadAllocated && quadAvailable) totalQuad += needs.quad * quadTotal;
       if (showLunch && !isLunchIncluded) totalLunch += lunchTotal;
       if (showDinner && !isDinnerIncluded) totalDinner += dinnerTotal;
+
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
@@ -448,6 +465,10 @@ function AccommodationSelectionTable({
       quadAllocated,
       quadAvailable,
       cityHasQuadHotel,
+      needs,
+      mixUnfulfillable,
+      missingTypes,
+
       // Meal totals (only if not included)
       lunchTotal,
       lunchNet,
@@ -465,9 +486,10 @@ function AccommodationSelectionTable({
     };
   });
 
-  const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
-  // Days where Step 12 allocated a Quad room but the city has no Quad-capable hotel.
-  const quadUnavailableRows = rows.filter((r) => r.quadAllocated && !r.cityHasQuadHotel);
+  const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0 && !r.mixUnfulfillable);
+  // Days where the allocated room mix cannot be fulfilled by any hotel in that city.
+  const unfulfillableRows = rows.filter((r) => r.mixUnfulfillable);
+
 
   return (
     <div className="space-y-2">
@@ -515,16 +537,19 @@ function AccommodationSelectionTable({
         </div>
       )}
 
-      {quadUnavailableRows.length > 0 && (
+      {unfulfillableRows.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-start justify-between gap-3">
           <span className="flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>
-              No Quad hotel available in{" "}
-              {quadUnavailableRows.map((r) => `${r.city} (Day ${r.day})`).join(", ")}. Please go back to
-              Room Allocation and adjust{" "}
-              {quadUnavailableRows.map((r) => `Day ${r.day}`).join(", ")} to use Single/Double/Triple
-              instead.
+              {unfulfillableRows
+                .map(
+                  (r) =>
+                    `No hotel in ${r.city} can fulfil Day ${r.day}'s room mix (needs ${r.missingTypes.join(" + ")})`,
+                )
+                .join(". ")}
+              . Please go back to Room Allocation and adjust{" "}
+              {unfulfillableRows.map((r) => `Day ${r.day}`).join(", ")} — e.g. use Triple/Double instead.
             </span>
           </span>
           <Button size="sm" variant="outline" className="shrink-0" onClick={onBackToAllocation}>
@@ -532,6 +557,7 @@ function AccommodationSelectionTable({
           </Button>
         </div>
       )}
+
 
       <Card className="p-0 overflow-hidden border border-[#E2E8F0] shadow-sm">
         <div className="overflow-x-auto">
@@ -560,14 +586,28 @@ function AccommodationSelectionTable({
             </thead>
             <tbody>
               {rows.map((r, idx) => {
-                const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+                const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0 && !r.mixUnfulfillable;
                 return (
                   <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
                     <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
                     <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
                     <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
                     <td className="py-2.5 px-3 min-w-[140px]">
-                      {isMissingHotel ? (
+                      {r.mixUnfulfillable ? (
+                        <div className="text-xs text-amber-700 space-y-1 max-w-[240px]">
+                          <div className="flex items-start gap-1">
+                            <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                            <span>
+                              No hotel in {r.city} can fulfil Day {r.day}'s room mix (needs{" "}
+                              {r.missingTypes.join(" + ")}). Adjust this day in Room Allocation — e.g. use
+                              Triple/Double instead.
+                            </span>
+                          </div>
+                          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={onBackToAllocation}>
+                            Go to Room Allocation
+                          </Button>
+                        </div>
+                      ) : isMissingHotel ? (
                         <div className="text-amber-600 text-xs flex items-center gap-1">
                           <AlertCircle className="h-3 w-3" />
                           No hotels
@@ -606,11 +646,13 @@ function AccommodationSelectionTable({
                             </div>
                           )}
                           <div className="text-[10px] text-muted-foreground mt-1">
-                            {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
+                            {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} match this day's mix
+                            {r.missingTypes.length > 0 ? ` (${r.missingTypes.join(" + ")})` : ""}
                           </div>
                         </>
                       )}
                     </td>
+
                     <td className="py-2.5 px-3 min-w-[120px]">
                       {r.sel?.hotel_id ? (
                         <Select
@@ -654,22 +696,40 @@ function AccommodationSelectionTable({
                     {r.hasRate ? (
                       <>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.sglTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%: {inr(r.sglGst)}
-                          </div>
+                          {r.needs.single ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.sglTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.single} room{r.needs.single > 1 ? "s" : ""} · Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%: {inr(r.sglGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.dblTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%: {inr(r.dblGst)}
-                          </div>
+                          {r.needs.double ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.dblTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.double} room{r.needs.double > 1 ? "s" : ""} · Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%: {inr(r.dblGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.trpTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%: {inr(r.trpGst)}
-                          </div>
+                          {r.needs.triple ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.trpTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.triple} room{r.needs.triple > 1 ? "s" : ""} · Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%: {inr(r.trpGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         {showQuad && (
                           <td className="py-2.5 px-3 text-right">
@@ -679,7 +739,7 @@ function AccommodationSelectionTable({
                               <>
                                 <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
                                 <div className="text-[11px] text-[#64748B]">
-                                  Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
+                                  × {r.needs.quad} room{r.needs.quad > 1 ? "s" : ""} · Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
                                 </div>
                               </>
                             ) : (
@@ -726,6 +786,7 @@ function AccommodationSelectionTable({
                         {showDinner && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
                       </>
                     )}
+
                   </tr>
                 );
               })}
