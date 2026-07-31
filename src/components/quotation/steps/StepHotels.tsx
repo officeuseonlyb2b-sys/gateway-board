@@ -143,8 +143,10 @@ export function Step15({ draft, set }: StepProps) {
               overnightRouting={overnightRouting}
               onUpdate={(patch) => updateOption(activeOption.key, patch)}
               onQuickAdd={(cityId, cityName) => setQuickAdd({ cityId, cityName })}
+              onBackToAllocation={() => set({ step: 12 })}
             />
           )}
+
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <>
@@ -204,6 +206,7 @@ function AccommodationSelectionTable({
   overnightRouting,
   onUpdate,
   onQuickAdd,
+  onBackToAllocation,
 }: {
   draft: QuoteDraft;
   option: HotelOption;
@@ -211,13 +214,26 @@ function AccommodationSelectionTable({
   overnightRouting: typeof draft.routing;
   onUpdate: (patch: Partial<HotelOption>) => void;
   onQuickAdd: (cityId: string, cityName: string) => void;
+  onBackToAllocation: () => void;
 }) {
   const d = useDB();
 
+  // --- Quad allocation gating (driven by Step 12 Room Allocation) ---
+  const standardQuadAllocated =
+    (draft.allocation_mode ?? "standard") === "standard" &&
+    !!draft.hotel_options[0]?.pax_allocations?.some((a) => a.room_type === "quad");
+  const quadAllocatedForDay = (dayNo: number) =>
+    (draft.allocation_mode === "dynamic")
+      ? (draft.day_room_mix?.[dayNo]?.quad ?? 0) > 0
+      : standardQuadAllocated;
+  const anyQuadAllocated = overnightRouting.some((r) => quadAllocatedForDay(r.day));
+
   // Toggle states for extra columns
-  const [showQuad, setShowQuad] = useState(false);
+  const [showQuadManual, setShowQuadManual] = useState(false);
+  const showQuad = showQuadManual || anyQuadAllocated;
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
+
 
   // Total number of passengers (used for meal costing)
   const totalPax = draft.adults + draft.ss + draft.children.length;
@@ -266,6 +282,18 @@ function AccommodationSelectionTable({
       });
     const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
 
+    // Does ANY hotel available for this city/date expose a Quad rate?
+    const cityHasQuadHotel = hotelPool.some((h) => {
+      const roomIds = d.room_categories.filter((room) => room.hotel_id === h.id).map((room) => room.id);
+      return d.rate_plans.some(
+        (plan) =>
+          roomIds.includes(plan.room_category_id) &&
+          day.date >= plan.validity_start &&
+          day.date <= plan.validity_end &&
+          ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0,
+      );
+    });
+
     // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
     const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
@@ -302,12 +330,15 @@ function AccommodationSelectionTable({
 
     let offSeasonText = "";
     let hasRate = false;
+    const quadAllocated = quadAllocatedForDay(day.day);
+    // A hotel offers Quad only when an explicit quad rate is configured.
+    const quadAvailable = !!(rate && (rate as { quad_rate?: number | null }).quad_rate);
 
     if (rate) {
       const dbl = rate.double_rate;
       const sgl = rate.single_rate;
       const extra = rate.extra_bed_rate || 0;
-      const quad = dbl + 2 * extra;
+      const quad = (rate as { quad_rate?: number | null }).quad_rate || 0;
       const lunchRate = rate.lunch_rate || 0;
       const dinnerRate = rate.dinner_rate || 0;
       const gst = gstRateFor;
@@ -324,6 +355,7 @@ function AccommodationSelectionTable({
       sglTotal = sglNet + sglGst;
       dblTotal = dblNet + dblGst;
       trpTotal = trpNet + trpGst;
+
       quadTotal = quadNet + quadGst;
 
       // Determine if lunch/dinner are included in the meal plan
@@ -369,7 +401,7 @@ function AccommodationSelectionTable({
       totalSgl += sglTotal;
       totalDbl += dblTotal;
       totalTrp += trpTotal;
-      totalQuad += quadTotal;
+      if (quadAllocated && quadAvailable) totalQuad += quadTotal;
       if (showLunch && !isLunchIncluded) totalLunch += lunchTotal;
       if (showDinner && !isDinnerIncluded) totalDinner += dinnerTotal;
     }
@@ -413,6 +445,9 @@ function AccommodationSelectionTable({
       trpGst,
       quadNet,
       quadGst,
+      quadAllocated,
+      quadAvailable,
+      cityHasQuadHotel,
       // Meal totals (only if not included)
       lunchTotal,
       lunchNet,
@@ -431,6 +466,8 @@ function AccommodationSelectionTable({
   });
 
   const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
+  // Days where Step 12 allocated a Quad room but the city has no Quad-capable hotel.
+  const quadUnavailableRows = rows.filter((r) => r.quadAllocated && !r.cityHasQuadHotel);
 
   return (
     <div className="space-y-2">
@@ -441,7 +478,7 @@ function AccommodationSelectionTable({
           <Checkbox
             id="showQuad"
             checked={showQuad}
-            onCheckedChange={(checked) => setShowQuad(checked === true)}
+            onCheckedChange={(checked) => setShowQuadManual(checked === true)}
           />
           <Label htmlFor="showQuad" className="text-xs cursor-pointer">Quad</Label>
         </div>
@@ -474,6 +511,24 @@ function AccommodationSelectionTable({
             if (firstMissing) onQuickAdd(firstMissing.cityId, firstMissing.city);
           }}>
             <Plus className="h-3 w-3" /> Add Hotel
+          </Button>
+        </div>
+      )}
+
+      {quadUnavailableRows.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-start justify-between gap-3">
+          <span className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>
+              No Quad hotel available in{" "}
+              {quadUnavailableRows.map((r) => `${r.city} (Day ${r.day})`).join(", ")}. Please go back to
+              Room Allocation and adjust{" "}
+              {quadUnavailableRows.map((r) => `Day ${r.day}`).join(", ")} to use Single/Double/Triple
+              instead.
+            </span>
+          </span>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={onBackToAllocation}>
+            Go to Room Allocation
           </Button>
         </div>
       )}
@@ -618,10 +673,18 @@ function AccommodationSelectionTable({
                         </td>
                         {showQuad && (
                           <td className="py-2.5 px-3 text-right">
-                            <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
-                            <div className="text-[11px] text-[#64748B]">
-                              Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
-                            </div>
+                            {!r.quadAllocated ? (
+                              <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                            ) : r.quadAvailable ? (
+                              <>
+                                <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
+                                <div className="text-[11px] text-[#64748B]">
+                                  Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-amber-700">No Quad rate</span>
+                            )}
                           </td>
                         )}
                         {showLunch && (
