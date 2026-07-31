@@ -471,6 +471,10 @@ function AccommodationSelectionTable({
       quadAllocated,
       quadAvailable,
       cityHasQuadHotel,
+      needs,
+      mixUnfulfillable,
+      missingTypes,
+
       // Meal totals (only if not included)
       lunchTotal,
       lunchNet,
