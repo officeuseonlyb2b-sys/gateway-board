@@ -218,14 +218,11 @@ function AccommodationSelectionTable({
 }) {
   const d = useDB();
 
-  // --- Quad allocation gating (driven by Step 12 Room Allocation) ---
-  const standardQuadAllocated =
-    (draft.allocation_mode ?? "standard") === "standard" &&
-    !!draft.hotel_options[0]?.pax_allocations?.some((a) => a.room_type === "quad");
-  const quadAllocatedForDay = (dayNo: number) =>
-    (draft.allocation_mode === "dynamic")
-      ? (draft.day_room_mix?.[dayNo]?.quad ?? 0) > 0
-      : standardQuadAllocated;
+  // --- Room mix per day (driven by Step 12 Room Allocation, dynamic only) ---
+  const paxForMix = Math.max(1, draft.adults + draft.ss + draft.children.length);
+  const mixForDay = (dayNo: number): DayRoomMix =>
+    draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
+  const quadAllocatedForDay = (dayNo: number) => mixForDay(dayNo).quad > 0;
   const anyQuadAllocated = overnightRouting.some((r) => quadAllocatedForDay(r.day));
 
   // Toggle states for extra columns
@@ -233,6 +230,7 @@ function AccommodationSelectionTable({
   const showQuad = showQuadManual || anyQuadAllocated;
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
+
 
 
   // Total number of passengers (used for meal costing)
