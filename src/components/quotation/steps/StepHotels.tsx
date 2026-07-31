@@ -282,6 +282,18 @@ function AccommodationSelectionTable({
       });
     const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
 
+    // Does ANY hotel available for this city/date expose a Quad rate?
+    const cityHasQuadHotel = hotelPool.some((h) => {
+      const roomIds = d.room_categories.filter((room) => room.hotel_id === h.id).map((room) => room.id);
+      return d.rate_plans.some(
+        (plan) =>
+          roomIds.includes(plan.room_category_id) &&
+          day.date >= plan.validity_start &&
+          day.date <= plan.validity_end &&
+          ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0,
+      );
+    });
+
     // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
     const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
@@ -435,6 +447,7 @@ function AccommodationSelectionTable({
       quadGst,
       quadAllocated,
       quadAvailable,
+      cityHasQuadHotel,
       // Meal totals (only if not included)
       lunchTotal,
       lunchNet,
@@ -453,6 +466,8 @@ function AccommodationSelectionTable({
   });
 
   const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
+  // Days where Step 12 allocated a Quad room but the city has no Quad-capable hotel.
+  const quadUnavailableRows = rows.filter((r) => r.quadAllocated && !r.cityHasQuadHotel);
 
   return (
     <div className="space-y-2">
@@ -496,6 +511,24 @@ function AccommodationSelectionTable({
             if (firstMissing) onQuickAdd(firstMissing.cityId, firstMissing.city);
           }}>
             <Plus className="h-3 w-3" /> Add Hotel
+          </Button>
+        </div>
+      )}
+
+      {quadUnavailableRows.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-start justify-between gap-3">
+          <span className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>
+              No Quad hotel available in{" "}
+              {quadUnavailableRows.map((r) => `${r.city} (Day ${r.day})`).join(", ")}. Please go back to
+              Room Allocation and adjust{" "}
+              {quadUnavailableRows.map((r) => `Day ${r.day}`).join(", ")} to use Single/Double/Triple
+              instead.
+            </span>
+          </span>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={onBackToAllocation}>
+            Go to Room Allocation
           </Button>
         </div>
       )}
@@ -640,10 +673,18 @@ function AccommodationSelectionTable({
                         </td>
                         {showQuad && (
                           <td className="py-2.5 px-3 text-right">
-                            <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
-                            <div className="text-[11px] text-[#64748B]">
-                              Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
-                            </div>
+                            {!r.quadAllocated ? (
+                              <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                            ) : r.quadAvailable ? (
+                              <>
+                                <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
+                                <div className="text-[11px] text-[#64748B]">
+                                  Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-amber-700">No Quad rate</span>
+                            )}
                           </td>
                         )}
                         {showLunch && (
