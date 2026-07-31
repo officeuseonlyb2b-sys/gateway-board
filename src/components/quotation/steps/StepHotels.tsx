@@ -143,8 +143,10 @@ export function Step15({ draft, set }: StepProps) {
               overnightRouting={overnightRouting}
               onUpdate={(patch) => updateOption(activeOption.key, patch)}
               onQuickAdd={(cityId, cityName) => setQuickAdd({ cityId, cityName })}
+              onBackToAllocation={() => set({ step: 12 })}
             />
           )}
+
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <>
