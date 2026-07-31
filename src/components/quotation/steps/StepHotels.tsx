@@ -486,9 +486,10 @@ function AccommodationSelectionTable({
     };
   });
 
-  const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
-  // Days where Step 12 allocated a Quad room but the city has no Quad-capable hotel.
-  const quadUnavailableRows = rows.filter((r) => r.quadAllocated && !r.cityHasQuadHotel);
+  const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0 && !r.mixUnfulfillable);
+  // Days where the allocated room mix cannot be fulfilled by any hotel in that city.
+  const unfulfillableRows = rows.filter((r) => r.mixUnfulfillable);
+
 
   return (
     <div className="space-y-2">
