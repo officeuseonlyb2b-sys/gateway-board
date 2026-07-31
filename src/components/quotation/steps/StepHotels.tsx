@@ -389,7 +389,7 @@ function AccommodationSelectionTable({
       totalSgl += sglTotal;
       totalDbl += dblTotal;
       totalTrp += trpTotal;
-      totalQuad += quadTotal;
+      if (quadAllocated && quadAvailable) totalQuad += quadTotal;
       if (showLunch && !isLunchIncluded) totalLunch += lunchTotal;
       if (showDinner && !isDinnerIncluded) totalDinner += dinnerTotal;
     }
@@ -433,6 +433,8 @@ function AccommodationSelectionTable({
       trpGst,
       quadNet,
       quadGst,
+      quadAllocated,
+      quadAvailable,
       // Meal totals (only if not included)
       lunchTotal,
       lunchNet,
