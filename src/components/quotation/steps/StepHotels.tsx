@@ -654,22 +654,40 @@ function AccommodationSelectionTable({
                     {r.hasRate ? (
                       <>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.sglTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%: {inr(r.sglGst)}
-                          </div>
+                          {r.needs.single ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.sglTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.single} room{r.needs.single > 1 ? "s" : ""} · Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%: {inr(r.sglGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.dblTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%: {inr(r.dblGst)}
-                          </div>
+                          {r.needs.double ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.dblTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.double} room{r.needs.double > 1 ? "s" : ""} · Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%: {inr(r.dblGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.trpTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%: {inr(r.trpGst)}
-                          </div>
+                          {r.needs.triple ? (
+                            <>
+                              <div className="font-semibold text-[#0F172A]">{inr(r.trpTotal)}</div>
+                              <div className="text-[11px] text-[#64748B]">
+                                × {r.needs.triple} room{r.needs.triple > 1 ? "s" : ""} · Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%: {inr(r.trpGst)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-[#94A3B8]">Not allocated</span>
+                          )}
                         </td>
                         {showQuad && (
                           <td className="py-2.5 px-3 text-right">
@@ -679,7 +697,7 @@ function AccommodationSelectionTable({
                               <>
                                 <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
                                 <div className="text-[11px] text-[#64748B]">
-                                  Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
+                                  × {r.needs.quad} room{r.needs.quad > 1 ? "s" : ""} · Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
                                 </div>
                               </>
                             ) : (
@@ -726,6 +744,7 @@ function AccommodationSelectionTable({
                         {showDinner && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
                       </>
                     )}
+
                   </tr>
                 );
               })}
