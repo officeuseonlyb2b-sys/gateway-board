@@ -1,7 +1,7 @@
 // Room Allocation step — runs BEFORE hotel selection.
 // Two modes:
-//   Standard — repeating 1 Single / 2 Double / 3 Triple pattern (per-person table)
-//   Dynamic  — per-day room mix (Single / Double / Triple / Quad), flexible per day
+//   Standard — room-first allocation: create rooms, assign travellers to them.
+//   Dynamic  — per-day room mix (Single / Double / Triple / Quad), flexible per day.
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/wizard/calc";
 import type { PersonAllocation, PersonRoomType, DayRoomMix, AllocationMode } from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
+import { useState, useMemo } from "react";
 
 export const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: number }[] = [
   { value: "single", label: "Single Room", shares: 0 },
@@ -26,6 +27,80 @@ export const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: 
   { value: "extra_bed", label: "Extra Bed", shares: 0 },
   { value: "cwb", label: "Child With Bed", shares: 0 },
 ];
+
+// ---------- Helper functions for room-based allocation ----------
+type Room = {
+  id: string;               // stable identifier (sorted person ids joined by '-')
+  roomType: PersonRoomType;
+  personIds: number[];
+};
+
+function roomsFromAllocs(allocs: PersonAllocation[]): Room[] {
+  const personMap = new Map(allocs.map(p => [p.person_id, p]));
+  const visited = new Set<number>();
+  const rooms: Room[] = [];
+
+  for (const p of allocs) {
+    if (visited.has(p.person_id)) continue;
+    // BFS to find all persons connected via sharing_with
+    const queue = [p.person_id];
+    const groupIds = new Set<number>();
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      groupIds.add(id);
+      const person = personMap.get(id);
+      if (person) {
+        for (const shareId of person.sharing_with) {
+          if (!visited.has(shareId) && !groupIds.has(shareId)) {
+            queue.push(shareId);
+          }
+        }
+      }
+    }
+    const sortedIds = Array.from(groupIds).sort((a, b) => a - b);
+    const firstPerson = allocs.find(p => p.person_id === sortedIds[0])!;
+    rooms.push({
+      id: sortedIds.join('-'),
+      roomType: firstPerson.room_type,
+      personIds: sortedIds,
+    });
+  }
+  return rooms;
+}
+
+function allocsFromRooms(rooms: Room[], paxCount: number, currentAllocs: PersonAllocation[]): PersonAllocation[] {
+  const labelMap = new Map(currentAllocs.map(p => [p.person_id, p.label]));
+  const allocs: PersonAllocation[] = [];
+  for (let i = 1; i <= paxCount; i++) {
+    allocs.push({
+      person_id: i,
+      room_type: 'single', // will be overwritten if assigned to a room
+      sharing_with: [],
+      label: labelMap.get(i) || `Person ${i}`,
+    });
+  }
+  for (const room of rooms) {
+    const ids = room.personIds;
+    for (const id of ids) {
+      const alloc = allocs.find(a => a.person_id === id);
+      if (alloc) {
+        alloc.room_type = room.roomType;
+        alloc.sharing_with = ids.filter(other => other !== id);
+      }
+    }
+  }
+  return allocs;
+}
+
+// Get max occupancy for a room type
+function maxOccupancy(roomType: PersonRoomType): number {
+  const found = PERSON_ROOM_TYPES.find(r => r.value === roomType);
+  return found ? found.shares + 1 : 1;
+}
+
+// ----------------------------------------------------------------
 
 export function StepAllocation({ draft, set }: StepProps) {
   const d = useDB();
@@ -44,43 +119,92 @@ export function StepAllocation({ draft, set }: StepProps) {
   };
   const setAllocs = (next: PersonAllocation[]) => writeAll({ pax_allocations: next });
 
-  const setRoomType = (person_id: number, type: PersonRoomType) => {
-    setAllocs(allocs.map((p) => {
-      if (p.person_id === person_id) return { ...p, room_type: type, sharing_with: [] };
-      return { ...p, sharing_with: p.sharing_with.filter((id) => id !== person_id) };
-    }));
+  // ---------- Room-based UI state ----------
+  const [selectedUnassigned, setSelectedUnassigned] = useState<Set<number>>(new Set());
+  const [newRoomType, setNewRoomType] = useState<PersonRoomType>('double');
+
+  // Derived rooms and unassigned persons
+  const rooms = useMemo(() => roomsFromAllocs(allocs), [allocs]);
+  const assignedIds = useMemo(() => new Set(rooms.flatMap(r => r.personIds)), [rooms]);
+  const unassigned = useMemo(() => allocs.filter(p => !assignedIds.has(p.person_id)), [allocs, assignedIds]);
+
+  // Helper to update allocs from a modified rooms array
+  const updateRooms = (newRooms: Room[]) => {
+    const newAllocs = allocsFromRooms(newRooms, paxCount, allocs);
+    setAllocs(newAllocs);
   };
 
-  const togglePartner = (person_id: number, partner_id: number) => {
-    const person = allocs.find((p) => p.person_id === person_id);
-    if (!person) return;
-    const maxShares = PERSON_ROOM_TYPES.find((r) => r.value === person.room_type)?.shares ?? 0;
-    const has = person.sharing_with.includes(partner_id);
-    let newList = has
-      ? person.sharing_with.filter((id) => id !== partner_id)
-      : [...person.sharing_with, partner_id];
-    if (newList.length > maxShares) newList = newList.slice(-maxShares);
-    setAllocs(allocs.map((p) => {
-      if (p.person_id === person_id) return { ...p, sharing_with: newList };
-      if (newList.includes(p.person_id)) {
-        const withList = [person_id, ...newList.filter((id) => id !== p.person_id)];
-        return { ...p, room_type: person.room_type, sharing_with: withList };
+  // ---------- Room actions ----------
+  const changeRoomType = (roomId: string, newType: PersonRoomType) => {
+    const newRooms = rooms.map(r => {
+      if (r.id !== roomId) return r;
+      const cap = maxOccupancy(newType);
+      // If current occupancy exceeds new capacity, truncate (move extra to unassigned)
+      let personIds = r.personIds;
+      if (personIds.length > cap) {
+        personIds = personIds.slice(0, cap);
       }
-      if (has && p.person_id === partner_id) {
-        return { ...p, sharing_with: p.sharing_with.filter((id) => id !== person_id) };
-      }
-      return p;
-    }));
+      return { ...r, roomType: newType, personIds };
+    });
+    updateRooms(newRooms);
   };
 
-  const setLabel = (person_id: number, label: string) =>
-    setAllocs(allocs.map((p) => (p.person_id === person_id ? { ...p, label } : p)));
+  const removePersonFromRoom = (personId: number) => {
+    const newRooms = rooms
+      .map(r => ({
+        ...r,
+        personIds: r.personIds.filter(id => id !== personId),
+      }))
+      .filter(r => r.personIds.length > 0); // remove empty rooms
+    updateRooms(newRooms);
+  };
 
+  const deleteRoom = (roomId: string) => {
+    const newRooms = rooms.filter(r => r.id !== roomId);
+    updateRooms(newRooms);
+  };
+
+  const addPersonToRoom = (roomId: string, personId: number) => {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+    const cap = maxOccupancy(room.roomType);
+    if (room.personIds.length >= cap) return; // capacity full
+
+    const newRooms = rooms.map(r =>
+      r.id === roomId ? { ...r, personIds: [...r.personIds, personId] } : r
+    );
+    updateRooms(newRooms);
+  };
+
+  const createRoom = () => {
+    if (selectedUnassigned.size === 0) return;
+    const ids = Array.from(selectedUnassigned).sort((a, b) => a - b);
+    const newRoom: Room = {
+      id: ids.join('-'), // stable id
+      roomType: newRoomType,
+      personIds: ids,
+    };
+    const newRooms = [...rooms, newRoom];
+    updateRooms(newRooms);
+    setSelectedUnassigned(new Set());
+  };
+
+  const toggleUnassignedSelection = (personId: number) => {
+    const newSet = new Set(selectedUnassigned);
+    if (newSet.has(personId)) newSet.delete(personId);
+    else newSet.add(personId);
+    setSelectedUnassigned(newSet);
+  };
+
+  // Presets (still set allocs directly; rooms will be recomputed)
   const applyPreset = (which: "single" | "double" | "one_rest" | "standard") => {
-    if (which === "single") setAllocs(presetAllSingle(paxCount));
-    else if (which === "double") setAllocs(presetAllDouble(paxCount));
-    else if (which === "standard") setAllocs(presetStandardPattern(paxCount));
-    else setAllocs(presetOneSingleRestDouble(paxCount));
+    let newAllocs: PersonAllocation[];
+    if (which === "single") newAllocs = presetAllSingle(paxCount);
+    else if (which === "double") newAllocs = presetAllDouble(paxCount);
+    else if (which === "standard") newAllocs = presetStandardPattern(paxCount);
+    else newAllocs = presetOneSingleRestDouble(paxCount);
+    setAllocs(newAllocs);
+    setSelectedUnassigned(new Set()); // clear selection
   };
 
   // ---- dynamic mode helpers ----
@@ -138,7 +262,7 @@ export function StepAllocation({ draft, set }: StepProps) {
       </div>
       <p className="text-xs text-muted-foreground">
         {mode === "standard"
-          ? "Standard — rooms follow a repeating 1 Single, 2 Double, 3 Triple pattern; adjust any person below."
+          ? "Standard — create rooms and assign travellers. Rooms are shown first."
           : "Dynamic — set a different Single / Double / Triple / Quad mix for every night of the trip."}
       </p>
 
@@ -146,8 +270,8 @@ export function StepAllocation({ draft, set }: StepProps) {
         <Card className="p-4 border-primary/20">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-sm font-semibold text-primary">Per-Person Room Allocation</div>
-              <div className="text-xs text-muted-foreground">Applies to all accommodation options.</div>
+              <div className="text-sm font-semibold text-primary">Room‑First Allocation</div>
+              <div className="text-xs text-muted-foreground">Create rooms, assign travellers to them.</div>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Use custom allocation</span>
@@ -172,73 +296,165 @@ export function StepAllocation({ draft, set }: StepProps) {
                 <Button size="sm" variant="outline" onClick={() => applyPreset("double")}>All Double Sharing</Button>
                 <Button size="sm" variant="outline" onClick={() => applyPreset("one_rest")}>1 Single + Rest Double</Button>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-xs uppercase text-muted-foreground">
-                    <tr>
-                      <th className="text-left py-1.5 font-medium">Person</th>
-                      <th className="text-left py-1.5 font-medium">Room Type</th>
-                      <th className="text-left py-1.5 font-medium">Sharing With</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allocs.map((p) => {
-                      const rt = PERSON_ROOM_TYPES.find((r) => r.value === p.room_type)!;
-                      const others = allocs.filter((o) => o.person_id !== p.person_id);
-                      return (
-                        <tr key={p.person_id} className="border-t">
-                          <td className="py-1.5 pr-2 align-top">
-                            <Input
-                              className="h-8 text-sm"
-                              value={p.label}
-                              onChange={(e) => setLabel(p.person_id, e.target.value)}
-                              placeholder={`Person ${p.person_id}`}
-                            />
-                          </td>
-                          <td className="py-1.5 pr-2 align-top">
-                            <Select value={p.room_type} onValueChange={(v) => setRoomType(p.person_id, v as PersonRoomType)}>
-                              <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {PERSON_ROOM_TYPES.map((r) => (
-                                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
-                          <td className="py-1.5 align-top">
-                            {rt.shares > 0 ? (
-                              <div className="flex flex-wrap gap-1.5">
-                                {others.map((o) => {
-                                  const active = p.sharing_with.includes(o.person_id);
-                                  return (
-                                    <button
-                                      key={o.person_id}
-                                      type="button"
-                                      onClick={() => togglePartner(p.person_id, o.person_id)}
-                                      className={cn(
-                                        "text-xs px-2 py-1 rounded border",
-                                        active ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border",
-                                      )}
-                                    >
-                                      {o.label}
-                                    </button>
-                                  );
-                                })}
-                                {p.sharing_with.length < rt.shares && (
-                                  <span className="text-[11px] text-amber-700 self-center">
-                                    Choose {rt.shares - p.sharing_with.length} more
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+
+              <div className="space-y-4">
+                {/* Rooms list */}
+                {rooms.map((room) => {
+                  const cap = maxOccupancy(room.roomType);
+                  const occupancy = room.personIds.length;
+                  const canAdd = occupancy < cap;
+                  const availableUnassigned = unassigned.filter(p => !room.personIds.includes(p.person_id));
+
+                  return (
+                    <div key={room.id} className="rounded-lg border p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <Select
+                            value={room.roomType}
+                            onValueChange={(v) => changeRoomType(room.id, v as PersonRoomType)}
+                          >
+                            <SelectTrigger className="h-8 w-[180px] text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PERSON_ROOM_TYPES.map((r) => (
+                                <SelectItem key={r.value} value={r.value}>
+                                  {r.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className="text-xs text-muted-foreground">
+                            {occupancy} / {cap} occupants
+                          </span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-destructive"
+                          onClick={() => deleteRoom(room.id)}
+                          disabled={rooms.length === 1} // keep at least one room
+                        >
+                          Delete Room
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {room.personIds.map((id) => {
+                          const person = allocs.find(p => p.person_id === id);
+                          return (
+                            <div
+                              key={id}
+                              className="flex items-center gap-1 bg-muted/50 rounded-full px-3 py-1 text-sm"
+                            >
+                              <span>{person?.label || `Person ${id}`}</span>
+                              <button
+                                type="button"
+                                onClick={() => removePersonFromRoom(id)}
+                                className="text-muted-foreground hover:text-destructive"
+                                title="Remove from this room (becomes unassigned)"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Add person to this room */}
+                      {availableUnassigned.length > 0 && canAdd && (
+                        <div className="flex items-center gap-2">
+                          <Select
+                            onValueChange={(val) => {
+                              const pid = parseInt(val, 10);
+                              if (!isNaN(pid)) addPersonToRoom(room.id, pid);
+                            }}
+                            value=""
+                          >
+                            <SelectTrigger className="h-8 text-sm w-[200px]">
+                              <SelectValue placeholder="Add person to room" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableUnassigned.map(p => (
+                                <SelectItem key={p.person_id} value={String(p.person_id)}>
+                                  {p.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className="text-xs text-muted-foreground">
+                            {canAdd ? `(room can take ${cap - occupancy} more)` : 'full'}
+                          </span>
+                        </div>
+                      )}
+                      {!canAdd && occupancy >= cap && (
+                        <div className="text-xs text-amber-700">Room is full – remove someone first to add another</div>
+                      )}
+                      {/* If there are no unassigned but room has space, it means all persons are assigned elsewhere.
+                          To move someone here, remove them from their current room first. */}
+                      {availableUnassigned.length === 0 && canAdd && unassigned.length === 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          All travellers are assigned – remove someone from another room to add here.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Unassigned persons and room creation */}
+                {unassigned.length > 0 && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="text-sm font-medium">Unassigned Travellers</div>
+                    <div className="flex flex-wrap gap-2">
+                      {unassigned.map((p) => (
+                        <button
+                          key={p.person_id}
+                          type="button"
+                          onClick={() => toggleUnassignedSelection(p.person_id)}
+                          className={cn(
+                            "px-3 py-1 rounded-full text-sm border",
+                            selectedUnassigned.has(p.person_id)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-background border-border"
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 mt-2">
+                      <Select value={newRoomType} onValueChange={(v) => setNewRoomType(v as PersonRoomType)}>
+                        <SelectTrigger className="h-8 w-[180px] text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PERSON_ROOM_TYPES.map((r) => (
+                            <SelectItem key={r.value} value={r.value}>
+                              {r.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        onClick={createRoom}
+                        disabled={selectedUnassigned.size === 0}
+                      >
+                        Create Room ({selectedUnassigned.size} selected)
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary */}
+                <div className="text-sm text-muted-foreground">
+                  {assignedIds.size} / {paxCount} travellers assigned to rooms.
+                  {unassigned.length > 0 && (
+                    <span className="text-amber-700 ml-2">
+                      {unassigned.length} unassigned – create a room or assign them to existing rooms.
+                    </span>
+                  )}
+                </div>
               </div>
             </>
           )}
