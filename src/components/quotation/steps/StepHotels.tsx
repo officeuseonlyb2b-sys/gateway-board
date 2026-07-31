@@ -537,16 +537,19 @@ function AccommodationSelectionTable({
         </div>
       )}
 
-      {quadUnavailableRows.length > 0 && (
+      {unfulfillableRows.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-start justify-between gap-3">
           <span className="flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>
-              No Quad hotel available in{" "}
-              {quadUnavailableRows.map((r) => `${r.city} (Day ${r.day})`).join(", ")}. Please go back to
-              Room Allocation and adjust{" "}
-              {quadUnavailableRows.map((r) => `Day ${r.day}`).join(", ")} to use Single/Double/Triple
-              instead.
+              {unfulfillableRows
+                .map(
+                  (r) =>
+                    `No hotel in ${r.city} can fulfil Day ${r.day}'s room mix (needs ${r.missingTypes.join(" + ")})`,
+                )
+                .join(". ")}
+              . Please go back to Room Allocation and adjust{" "}
+              {unfulfillableRows.map((r) => `Day ${r.day}`).join(", ")} — e.g. use Triple/Double instead.
             </span>
           </span>
           <Button size="sm" variant="outline" className="shrink-0" onClick={onBackToAllocation}>
@@ -554,6 +557,7 @@ function AccommodationSelectionTable({
           </Button>
         </div>
       )}
+
 
       <Card className="p-0 overflow-hidden border border-[#E2E8F0] shadow-sm">
         <div className="overflow-x-auto">
