@@ -150,16 +150,9 @@ export function Step15({ draft, set }: StepProps) {
 
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
-            <>
-              {draft.allocation_mode === "dynamic" ? (
-                <OptionDynamicPreview draft={draft} option={activeOption} />
-              ) : (
-                optionUsesCustomAllocation(activeOption) && (
-                  <OptionPerPersonPreview draft={draft} option={activeOption} />
-                )
-              )}
-            </>
+            <OptionDynamicPreview draft={draft} option={activeOption} />
           )}
+
 
           {activeCategory && (
             <OptionInclusionsEditor
