@@ -318,12 +318,15 @@ function AccommodationSelectionTable({
 
     let offSeasonText = "";
     let hasRate = false;
+    const quadAllocated = quadAllocatedForDay(day.day);
+    // A hotel offers Quad only when an explicit quad rate is configured.
+    const quadAvailable = !!(rate && (rate as { quad_rate?: number | null }).quad_rate);
 
     if (rate) {
       const dbl = rate.double_rate;
       const sgl = rate.single_rate;
       const extra = rate.extra_bed_rate || 0;
-      const quad = dbl + 2 * extra;
+      const quad = (rate as { quad_rate?: number | null }).quad_rate || 0;
       const lunchRate = rate.lunch_rate || 0;
       const dinnerRate = rate.dinner_rate || 0;
       const gst = gstRateFor;
@@ -340,6 +343,7 @@ function AccommodationSelectionTable({
       sglTotal = sglNet + sglGst;
       dblTotal = dblNet + dblGst;
       trpTotal = trpNet + trpGst;
+
       quadTotal = quadNet + quadGst;
 
       // Determine if lunch/dinner are included in the meal plan
