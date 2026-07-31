@@ -15,11 +15,12 @@ import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
 import {
   gstRateFor,
   computePersonTotals,
-  optionUsesCustomAllocation,
   computeDynamicOption,
   personRoomTypeLabel,
+  defaultDayMix,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
+import type { QuoteDraft, HotelOption, OptionKey, DayRoomMix } from "@/lib/wizard/types";
+
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
