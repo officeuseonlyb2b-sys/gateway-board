@@ -419,13 +419,14 @@ function AccommodationSelectionTable({
         offSeasonText = rate.season_label || "—";
       }
 
-      // Accumulate totals for summary (only if columns are active and meal is not included)
-      totalSgl += sglTotal;
-      totalDbl += dblTotal;
-      totalTrp += trpTotal;
-      if (quadAllocated && quadAvailable) totalQuad += quadTotal;
+      // Accumulate totals for summary, weighted by the rooms actually allocated that day
+      totalSgl += needs.single * sglTotal;
+      totalDbl += needs.double * dblTotal;
+      totalTrp += needs.triple * trpTotal;
+      if (quadAllocated && quadAvailable) totalQuad += needs.quad * quadTotal;
       if (showLunch && !isLunchIncluded) totalLunch += lunchTotal;
       if (showDinner && !isDinnerIncluded) totalDinner += dinnerTotal;
+
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
