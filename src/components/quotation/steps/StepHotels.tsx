@@ -278,19 +278,43 @@ function AccommodationSelectionTable({
         if (rankDiff !== 0) return rankDiff;
         return bestRateForHotel(b.id) - bestRateForHotel(a.id);
       });
-    const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
+    const categoryPool = noCategoryMatch ? fallbackHotels : cityHotels;
 
-    // Does ANY hotel available for this city/date expose a Quad rate?
-    const cityHasQuadHotel = hotelPool.some((h) => {
-      const roomIds = d.room_categories.filter((room) => room.hotel_id === h.id).map((room) => room.id);
-      return d.rate_plans.some(
+    // --- Filter the pool to hotels that can satisfy THIS day's allocated room mix ---
+    const needs = mixForDay(day.day);
+    const plansForHotel = (hotelId: string) => {
+      const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+      return d.rate_plans.filter(
         (plan) =>
           roomIds.includes(plan.room_category_id) &&
           day.date >= plan.validity_start &&
-          day.date <= plan.validity_end &&
-          ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0,
+          day.date <= plan.validity_end,
       );
-    });
+    };
+    const hotelSatisfiesMix = (hotelId: string) =>
+      plansForHotel(hotelId).some((plan) => {
+        if (needs.single > 0 && !(plan.single_rate > 0)) return false;
+        if (needs.double > 0 && !(plan.double_rate > 0)) return false;
+        if (needs.triple > 0 && !(plan.double_rate > 0 && (plan.extra_bed_rate || 0) > 0)) return false;
+        if (needs.quad > 0 && !(((plan as { quad_rate?: number | null }).quad_rate || 0) > 0)) return false;
+        return true;
+      });
+    const mixPool = categoryPool.filter((h) => hotelSatisfiesMix(h.id));
+    const hotelPool = mixPool;
+    // True when the category pool had hotels but none can fulfil the day's mix.
+    const mixUnfulfillable = categoryPool.length > 0 && mixPool.length === 0;
+    const missingTypes = [
+      needs.single > 0 ? "Single" : "",
+      needs.double > 0 ? "Double" : "",
+      needs.triple > 0 ? "Triple" : "",
+      needs.quad > 0 ? "Quad" : "",
+    ].filter(Boolean);
+
+    // Does ANY hotel available for this city/date expose a Quad rate?
+    const cityHasQuadHotel = categoryPool.some((h) =>
+      plansForHotel(h.id).some((plan) => ((plan as { quad_rate?: number | null }).quad_rate || 0) > 0),
+    );
+
 
     // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
