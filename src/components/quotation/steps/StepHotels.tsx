@@ -586,14 +586,28 @@ function AccommodationSelectionTable({
             </thead>
             <tbody>
               {rows.map((r, idx) => {
-                const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+                const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0 && !r.mixUnfulfillable;
                 return (
                   <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
                     <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
                     <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
                     <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
                     <td className="py-2.5 px-3 min-w-[140px]">
-                      {isMissingHotel ? (
+                      {r.mixUnfulfillable ? (
+                        <div className="text-xs text-amber-700 space-y-1 max-w-[240px]">
+                          <div className="flex items-start gap-1">
+                            <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                            <span>
+                              No hotel in {r.city} can fulfil Day {r.day}'s room mix (needs{" "}
+                              {r.missingTypes.join(" + ")}). Adjust this day in Room Allocation — e.g. use
+                              Triple/Double instead.
+                            </span>
+                          </div>
+                          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={onBackToAllocation}>
+                            Go to Room Allocation
+                          </Button>
+                        </div>
+                      ) : isMissingHotel ? (
                         <div className="text-amber-600 text-xs flex items-center gap-1">
                           <AlertCircle className="h-3 w-3" />
                           No hotels
@@ -632,11 +646,13 @@ function AccommodationSelectionTable({
                             </div>
                           )}
                           <div className="text-[10px] text-muted-foreground mt-1">
-                            {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
+                            {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} match this day's mix
+                            {r.missingTypes.length > 0 ? ` (${r.missingTypes.join(" + ")})` : ""}
                           </div>
                         </>
                       )}
                     </td>
+
                     <td className="py-2.5 px-3 min-w-[120px]">
                       {r.sel?.hotel_id ? (
                         <Select
