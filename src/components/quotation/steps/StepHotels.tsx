@@ -461,7 +461,7 @@ function AccommodationSelectionTable({
           <Checkbox
             id="showQuad"
             checked={showQuad}
-            onCheckedChange={(checked) => setShowQuad(checked === true)}
+            onCheckedChange={(checked) => setShowQuadManual(checked === true)}
           />
           <Label htmlFor="showQuad" className="text-xs cursor-pointer">Quad</Label>
         </div>
