@@ -206,6 +206,7 @@ function AccommodationSelectionTable({
   overnightRouting,
   onUpdate,
   onQuickAdd,
+  onBackToAllocation,
 }: {
   draft: QuoteDraft;
   option: HotelOption;
@@ -213,13 +214,26 @@ function AccommodationSelectionTable({
   overnightRouting: typeof draft.routing;
   onUpdate: (patch: Partial<HotelOption>) => void;
   onQuickAdd: (cityId: string, cityName: string) => void;
+  onBackToAllocation: () => void;
 }) {
   const d = useDB();
 
+  // --- Quad allocation gating (driven by Step 12 Room Allocation) ---
+  const standardQuadAllocated =
+    (draft.allocation_mode ?? "standard") === "standard" &&
+    !!draft.hotel_options[0]?.pax_allocations?.some((a) => a.room_type === "quad");
+  const quadAllocatedForDay = (dayNo: number) =>
+    (draft.allocation_mode === "dynamic")
+      ? (draft.day_room_mix?.[dayNo]?.quad ?? 0) > 0
+      : standardQuadAllocated;
+  const anyQuadAllocated = overnightRouting.some((r) => quadAllocatedForDay(r.day));
+
   // Toggle states for extra columns
-  const [showQuad, setShowQuad] = useState(false);
+  const [showQuadManual, setShowQuadManual] = useState(false);
+  const showQuad = showQuadManual || anyQuadAllocated;
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
+
 
   // Total number of passengers (used for meal costing)
   const totalPax = draft.adults + draft.ss + draft.children.length;
