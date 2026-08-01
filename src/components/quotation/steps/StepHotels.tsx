@@ -27,8 +27,16 @@ import {
   optionUsesCustomAllocation,
   computeDynamicOption,
   personRoomTypeLabel,
+  defaultDayMix,
+  effectivePaxForPricing,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey, DayRateOverride } from "@/lib/wizard/types";
+import type {
+  QuoteDraft,
+  HotelOption,
+  OptionKey,
+  DayRateOverride,
+  DayRoomMix,
+} from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
