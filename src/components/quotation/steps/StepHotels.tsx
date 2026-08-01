@@ -2,7 +2,7 @@
 // Simplified Lunch/Dinner columns: one total per day (meal rate × total passengers + GST).
 
 import { useMemo, useState } from "react";
-import { AlertCircle, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +13,14 @@ import { cn } from "@/lib/utils";
 import { inr, fmtDateShort } from "@/lib/format";
 import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
 import {
+  applyRateOverride,
   gstRateFor,
   computePersonTotals,
   optionUsesCustomAllocation,
   computeDynamicOption,
   personRoomTypeLabel,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
+import type { QuoteDraft, HotelOption, OptionKey, DayRateOverride } from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -208,6 +209,34 @@ function AccommodationSelectionTable({
 
   // Toggle states for extra columns
   const [showQuad, setShowQuad] = useState(false);
+  // Which rate cell is currently being edited: "<day>:<field>"
+  const [editingCell, setEditingCell] = useState<string | null>(null);
+
+  const overrides = option.rate_overrides ?? {};
+  const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
+    const cur = { ...(overrides[dayNumber] ?? {}) };
+    if (value === undefined || !(value > 0)) delete cur[field];
+    else cur[field] = value;
+    const next = { ...overrides };
+    if (Object.keys(cur).length === 0) delete next[dayNumber];
+    else next[dayNumber] = cur;
+    onUpdate({ rate_overrides: next });
+  };
+
+  // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
+  const dayNeedsQuad = (dayNumber: number) =>
+    showQuad || (draft.allocation_mode === "dynamic" && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
+
+  // Hotel offers Quad when any of its rooms has a quad rate for that date.
+  const hotelHasQuad = (hotelId: string, dateISO: string) => {
+    const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+    return d.rate_plans.some(
+      (plan) =>
+        roomIds.includes(plan.room_category_id) &&
+        (plan.quad_rate ?? 0) > 0 &&
+        findRatePlan(d.rate_plans, plan.room_category_id, plan.meal_plan, dateISO)?.id !== undefined,
+    );
+  };
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
 
@@ -256,12 +285,19 @@ function AccommodationSelectionTable({
         if (rankDiff !== 0) return rankDiff;
         return bestRateForHotel(b.id) - bestRateForHotel(a.id);
       });
-    const hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
+    let hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
+    // When Quad is active for this day, only show hotels that actually offer Quad.
+    const needsQuad = dayNeedsQuad(day.day);
+    const quadPool = hotelPool.filter((h) => hotelHasQuad(h.id, day.date));
+    const noQuadHotel = needsQuad && quadPool.length === 0;
+    if (needsQuad && quadPool.length > 0) hotelPool = quadPool;
 
     // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
     const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
-    const rate = sel && sel.room_id ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
+    const baseRate = sel && sel.room_id ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
+    const dayOverride = overrides[day.day];
+    const rate = applyRateOverride(baseRate, dayOverride);
     const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const isFallback = sel?.is_fallback || false;
 
@@ -294,7 +330,7 @@ function AccommodationSelectionTable({
       const dbl = rate.double_rate;
       const sgl = rate.single_rate;
       const extra = rate.extra_bed_rate || 0;
-      const quad = dbl + 2 * extra;
+      const quad = (rate.quad_rate ?? 0) > 0 ? (rate.quad_rate as number) : dbl + 2 * extra;
       const lunchRate = rate.lunch_rate || 0;
       const dinnerRate = rate.dinner_rate || 0;
       const gst = gstRateFor;
@@ -368,6 +404,9 @@ function AccommodationSelectionTable({
       selHotel,
       isFallback,
       noCategoryMatch,
+      needsQuad,
+      noQuadHotel,
+      dayOverride,
       offSeasonText,
       hasRate,
       // Room totals per occupancy
