@@ -567,11 +567,37 @@ function AccommodationSelectionTable({
                 {showDinner && (
                   <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Dinner</th>
                 )}
+                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Edit</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, idx) => {
                 const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+                const extraCols = (showQuad ? 1 : 0) + (showLunch ? 1 : 0) + (showDinner ? 1 : 0);
+                if (r.noQuadHotel) {
+                  // Quad required but unavailable in this city: keep the row blank
+                  // and let the popup drive the admin into Dynamic Costing.
+                  return (
+                    <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
+                      <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
+                      <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
+                      <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
+                      {Array.from({ length: 6 + extraCols }).map((_, i) => (
+                        <td key={i} className="py-2.5 px-3" />
+                      ))}
+                      <td className="py-2.5 px-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => setQuadAlertDay(r.day)}
+                        >
+                          Dynamic Costing
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
                     <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
