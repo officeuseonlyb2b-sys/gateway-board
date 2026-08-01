@@ -434,6 +434,69 @@ function AccommodationSelectionTable({
     };
   });
 
+  const renderRateCell = (
+    dayNumber: number,
+    field: keyof DayRateOverride,
+    total: number,
+    net: number,
+    gst: number,
+  ) => {
+    const cellKey = `${dayNumber}:${field}`;
+    const edited = (overrides[dayNumber]?.[field] ?? 0) > 0;
+    if (editingCell === cellKey) {
+      return (
+        <td key={field} className="py-2.5 px-3 text-right">
+          <Input
+            autoFocus
+            type="number"
+            defaultValue={overrides[dayNumber]?.[field] ?? Math.round(net)}
+            className="h-8 w-24 text-xs text-right ml-auto"
+            onBlur={(e) => {
+              setOverride(dayNumber, field, parseFloat(e.target.value) || undefined);
+              setEditingCell(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setEditingCell(null);
+            }}
+          />
+          <div className="text-[10px] text-muted-foreground mt-1">Net rate (excl. GST)</div>
+        </td>
+      );
+    }
+    return (
+      <td key={field} className={cn("py-2.5 px-3 text-right", edited && "bg-amber-50")}>
+        <div className="flex items-center justify-end gap-1">
+          <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
+          <button
+            type="button"
+            aria-label="Edit rate"
+            className="text-muted-foreground hover:text-primary"
+            onClick={() => setEditingCell(cellKey)}
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          {edited && (
+            <button
+              type="button"
+              aria-label="Reset to contract rate"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setOverride(dayNumber, field, undefined)}
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <div className="text-[11px] text-[#64748B]">
+          Net: {inr(net)} + GST {(gstRateFor(net) * 100).toFixed(0)}%: {inr(gst)}
+        </div>
+        {edited && (
+          <div className="text-[10px] text-amber-700 font-medium uppercase tracking-wide">Edited</div>
+        )}
+      </td>
+    );
+  };
+
   const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
 
   return (
@@ -554,6 +617,14 @@ function AccommodationSelectionTable({
                               No {activeCategory} hotels; showing closest lower categories.
                             </div>
                           )}
+                          {r.needsQuad && !r.noQuadHotel && (
+                            <div className="text-[10px] text-primary mt-1">Showing Quad-capable hotels only</div>
+                          )}
+                          {r.noQuadHotel && (
+                            <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-1 mt-1">
+                              No Quad hotel available in {r.city}. Please go back to Room Allocation and adjust Day {r.day} to use Single/Double/Triple instead.
+                            </div>
+                          )}
                           <div className="text-[10px] text-muted-foreground mt-1">
                             {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
                           </div>
@@ -602,32 +673,10 @@ function AccommodationSelectionTable({
                     </td>
                     {r.hasRate ? (
                       <>
-                        <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.sglTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%: {inr(r.sglGst)}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.dblTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%: {inr(r.dblGst)}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <div className="font-semibold text-[#0F172A]">{inr(r.trpTotal)}</div>
-                          <div className="text-[11px] text-[#64748B]">
-                            Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%: {inr(r.trpGst)}
-                          </div>
-                        </td>
-                        {showQuad && (
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="font-semibold text-[#0F172A]">{inr(r.quadTotal)}</div>
-                            <div className="text-[11px] text-[#64748B]">
-                              Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%: {inr(r.quadGst)}
-                            </div>
-                          </td>
-                        )}
+                        {renderRateCell(r.day, "sgl", r.sglTotal, r.sglNet, r.sglGst)}
+                        {renderRateCell(r.day, "dbl", r.dblTotal, r.dblNet, r.dblGst)}
+                        {renderRateCell(r.day, "trp", r.trpTotal, r.trpNet, r.trpGst)}
+                        {showQuad && renderRateCell(r.day, "quad", r.quadTotal, r.quadNet, r.quadGst)}
                         {showLunch && (
                           <td className="py-2.5 px-3 text-right">
                             <div className="font-semibold text-[#0F172A]">{inr(r.lunchTotal)}</div>
