@@ -642,13 +642,8 @@ function AccommodationSelectionTable({
                               No {activeCategory} hotels; showing closest lower categories.
                             </div>
                           )}
-                          {r.needsQuad && !r.noQuadHotel && (
+                          {r.needsQuad && (
                             <div className="text-[10px] text-primary mt-1">Showing Quad-capable hotels only</div>
-                          )}
-                          {r.noQuadHotel && (
-                            <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-1 mt-1">
-                              No Quad hotel available in {r.city}. Please go back to Room Allocation and adjust Day {r.day} to use Single/Double/Triple instead.
-                            </div>
                           )}
                           <div className="text-[10px] text-muted-foreground mt-1">
                             {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
