@@ -760,6 +760,7 @@ function AccommodationSelectionTable({
                   {showDinner && (
                     <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalDinner)}</td>
                   )}
+                  <td />
                 </tr>
               </tfoot>
             )}
