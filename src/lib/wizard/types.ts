@@ -180,6 +180,13 @@ export interface PersonAllocation {
   room_type: PersonRoomType;
   sharing_with: number[];    // other person_ids in the same shared room
 }
+// Per-day, per-quotation rate override (never mutates the hotel's saved contract rate).
+export interface DayRateOverride {
+  sgl?: number;
+  dbl?: number;
+  trp?: number;
+  quad?: number;
+}
 export interface HotelOption {
   key: OptionKey;
   label: string;
@@ -189,7 +196,10 @@ export interface HotelOption {
   exclusions?: string[];
   use_custom_allocation?: boolean;
   pax_allocations?: PersonAllocation[];
+  // keyed by routing day number
+  rate_overrides?: Record<number, DayRateOverride>;
 }
+
 
 export interface QuoteDraft {
   step: number;
