@@ -147,6 +147,7 @@ export function Step15({ draft, set }: StepProps) {
           {activeCategory && overnightRouting.length > 0 && (
             <AccommodationSelectionTable
               draft={draft}
+              set={set}
               option={activeOption}
               activeCategory={activeCategory}
               overnightRouting={overnightRouting}
