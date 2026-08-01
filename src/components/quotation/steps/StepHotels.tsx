@@ -1,9 +1,17 @@
 // src/components/quotation/steps/StepHotels.tsx (Step15)
 // Simplified Lunch/Dinner columns: one total per day (meal rate × total passengers + GST).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,8 +27,16 @@ import {
   optionUsesCustomAllocation,
   computeDynamicOption,
   personRoomTypeLabel,
+  defaultDayMix,
+  effectivePaxForPricing,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey, DayRateOverride } from "@/lib/wizard/types";
+import type {
+  QuoteDraft,
+  HotelOption,
+  OptionKey,
+  DayRateOverride,
+  DayRoomMix,
+} from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -131,6 +147,7 @@ export function Step15({ draft, set }: StepProps) {
           {activeCategory && overnightRouting.length > 0 && (
             <AccommodationSelectionTable
               draft={draft}
+              set={set}
               option={activeOption}
               activeCategory={activeCategory}
               overnightRouting={overnightRouting}
@@ -192,6 +209,7 @@ export function Step15({ draft, set }: StepProps) {
 // ============================================================
 function AccommodationSelectionTable({
   draft,
+  set,
   option,
   activeCategory,
   overnightRouting,
@@ -199,6 +217,7 @@ function AccommodationSelectionTable({
   onQuickAdd,
 }: {
   draft: QuoteDraft;
+  set: (p: Partial<QuoteDraft>) => void;
   option: HotelOption;
   activeCategory: string;
   overnightRouting: typeof draft.routing;
@@ -211,8 +230,12 @@ function AccommodationSelectionTable({
   const [showQuad, setShowQuad] = useState(false);
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
-  // Which rate cell is currently being edited: "<day>:<field>"
-  const [editingCell, setEditingCell] = useState<string | null>(null);
+  // Day number whose rates are being edited in the combined per-day dialog.
+  const [editingDay, setEditingDay] = useState<number | null>(null);
+  // Quad-unavailable popup + dynamic costing flow state.
+  const [quadAlertDay, setQuadAlertDay] = useState<number | null>(null);
+  const [dynamicDay, setDynamicDay] = useState<number | null>(null);
+  const [dismissedQuadDays, setDismissedQuadDays] = useState<number[]>([]);
 
   const overrides = option.rate_overrides ?? {};
   const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
@@ -224,6 +247,22 @@ function AccommodationSelectionTable({
     else next[dayNumber] = cur;
     onUpdate({ rate_overrides: next });
   };
+  const setDayOverride = (dayNumber: number, value: DayRateOverride | undefined) => {
+    const next = { ...overrides };
+    if (!value || Object.keys(value).length === 0) delete next[dayNumber];
+    else next[dayNumber] = value;
+    onUpdate({ rate_overrides: next });
+  };
+
+  // Per-day room mix (shared with the Room Allocation step).
+  const paxForMix = Math.max(1, effectivePaxForPricing(draft));
+  const dayMixFor = (dayNo: number): DayRoomMix =>
+    draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
+  const setDayMix = (dayNo: number, patch: Partial<DayRoomMix>) => {
+    set({ day_room_mix: { ...(draft.day_room_mix ?? {}), [dayNo]: { ...dayMixFor(dayNo), ...patch } } });
+  };
+
+
 
   // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
   const dayNeedsQuad = (dayNumber: number) =>
@@ -436,6 +475,7 @@ function AccommodationSelectionTable({
     };
   });
 
+  // Read-only rate cell. Editing happens through the single per-day "Edit" control.
   const renderRateCell = (
     dayNumber: number,
     field: keyof DayRateOverride,
@@ -443,52 +483,10 @@ function AccommodationSelectionTable({
     net: number,
     gst: number,
   ) => {
-    const cellKey = `${dayNumber}:${field}`;
     const edited = (overrides[dayNumber]?.[field] ?? 0) > 0;
-    if (editingCell === cellKey) {
-      return (
-        <td key={field} className="py-2.5 px-3 text-right">
-          <Input
-            autoFocus
-            type="number"
-            defaultValue={overrides[dayNumber]?.[field] ?? Math.round(net)}
-            className="h-8 w-24 text-xs text-right ml-auto"
-            onBlur={(e) => {
-              setOverride(dayNumber, field, parseFloat(e.target.value) || undefined);
-              setEditingCell(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              if (e.key === "Escape") setEditingCell(null);
-            }}
-          />
-          <div className="text-[10px] text-muted-foreground mt-1">Net rate (excl. GST)</div>
-        </td>
-      );
-    }
     return (
       <td key={field} className={cn("py-2.5 px-3 text-right", edited && "bg-amber-50")}>
-        <div className="flex items-center justify-end gap-1">
-          <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
-          <button
-            type="button"
-            aria-label="Edit rate"
-            className="text-muted-foreground hover:text-primary"
-            onClick={() => setEditingCell(cellKey)}
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
-          {edited && (
-            <button
-              type="button"
-              aria-label="Reset to contract rate"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => setOverride(dayNumber, field, undefined)}
-            >
-              <RotateCcw className="h-3 w-3" />
-            </button>
-          )}
-        </div>
+        <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
         <div className="text-[11px] text-[#64748B]">
           Net: {inr(net)} + GST {(gstRateFor(net) * 100).toFixed(0)}%: {inr(gst)}
         </div>
@@ -500,6 +498,21 @@ function AccommodationSelectionTable({
   };
 
   const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
+
+  // First day that needs Quad but has no Quad-capable hotel in its city.
+  const pendingQuadRow = rows.find((r) => r.noQuadHotel && !dismissedQuadDays.includes(r.day));
+  const pendingQuadDay = pendingQuadRow?.day ?? null;
+
+  useEffect(() => {
+    if (pendingQuadDay != null && quadAlertDay == null && dynamicDay == null) {
+      setQuadAlertDay(pendingQuadDay);
+    }
+  }, [pendingQuadDay, quadAlertDay, dynamicDay]);
+
+  const editRow = rows.find((r) => r.day === editingDay) ?? null;
+  const dynamicRow = rows.find((r) => r.day === dynamicDay) ?? null;
+  const quadAlertRow = rows.find((r) => r.day === quadAlertDay) ?? null;
+
 
   return (
     <div className="space-y-2">
@@ -570,11 +583,37 @@ function AccommodationSelectionTable({
                 {showDinner && (
                   <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Dinner</th>
                 )}
+                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Edit</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, idx) => {
                 const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+                const extraCols = (showQuad ? 1 : 0) + (showLunch ? 1 : 0) + (showDinner ? 1 : 0);
+                if (r.noQuadHotel) {
+                  // Quad required but unavailable in this city: keep the row blank
+                  // and let the popup drive the admin into Dynamic Costing.
+                  return (
+                    <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
+                      <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
+                      <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
+                      <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
+                      {Array.from({ length: 6 + extraCols }).map((_, i) => (
+                        <td key={i} className="py-2.5 px-3" />
+                      ))}
+                      <td className="py-2.5 px-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => setQuadAlertDay(r.day)}
+                        >
+                          Dynamic Costing
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
                     <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
@@ -619,13 +658,8 @@ function AccommodationSelectionTable({
                               No {activeCategory} hotels; showing closest lower categories.
                             </div>
                           )}
-                          {r.needsQuad && !r.noQuadHotel && (
+                          {r.needsQuad && (
                             <div className="text-[10px] text-primary mt-1">Showing Quad-capable hotels only</div>
-                          )}
-                          {r.noQuadHotel && (
-                            <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-1 mt-1">
-                              No Quad hotel available in {r.city}. Please go back to Room Allocation and adjust Day {r.day} to use Single/Double/Triple instead.
-                            </div>
                           )}
                           <div className="text-[10px] text-muted-foreground mt-1">
                             {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
@@ -706,6 +740,20 @@ function AccommodationSelectionTable({
                         {showDinner && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
                       </>
                     )}
+                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={!r.hasRate}
+                        onClick={() => setEditingDay(r.day)}
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </Button>
+                      {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
+                        <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -728,6 +776,7 @@ function AccommodationSelectionTable({
                   {showDinner && (
                     <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalDinner)}</td>
                   )}
+                  <td />
                 </tr>
               </tfoot>
             )}
@@ -740,9 +789,246 @@ function AccommodationSelectionTable({
           </div>
         )}
       </Card>
+
+      {/* Combined per-day rate edit (per-quotation override only) */}
+      <Dialog open={!!editRow} onOpenChange={(v) => { if (!v) setEditingDay(null); }}>
+        <DialogContent className="sm:max-w-md">
+          {editRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit rates — Day {editRow.day} · {editRow.city}</DialogTitle>
+                <DialogDescription>
+                  Applies to this quotation only. The hotel's saved contract rate stays unchanged.
+                </DialogDescription>
+              </DialogHeader>
+              <DayRateFields
+                showQuad={showQuad || editRow.needsQuad}
+                base={{ sgl: editRow.sglNet, dbl: editRow.dblNet, trp: editRow.trpNet, quad: editRow.quadNet }}
+                override={overrides[editRow.day] ?? {}}
+                onChange={(field, value) => setOverride(editRow.day, field, value)}
+              />
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setDayOverride(editRow.day, undefined)}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset to contract rates
+                </Button>
+                <Button onClick={() => setEditingDay(null)}>Done</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quad unavailable → prompt to use Dynamic Costing */}
+      <Dialog open={!!quadAlertRow && !dynamicRow} onOpenChange={(v) => {
+        if (!v && quadAlertRow) {
+          setDismissedQuadDays((prev) => prev.includes(quadAlertRow.day) ? prev : [...prev, quadAlertRow.day]);
+          setQuadAlertDay(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          {quadAlertRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>No Quad hotel available in {quadAlertRow.city}</DialogTitle>
+                <DialogDescription>
+                  Day {quadAlertRow.day} needs a Quad room, but no hotel in {quadAlertRow.city} offers one.
+                  Please complete this day's accommodation using Dynamic Costing.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setDismissedQuadDays((prev) => [...prev, quadAlertRow.day]);
+                    setQuadAlertDay(null);
+                  }}
+                >
+                  Later
+                </Button>
+                <Button onClick={() => { setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
+                  Open Dynamic Costing
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dynamic Costing for a single day */}
+      <Dialog open={!!dynamicRow} onOpenChange={(v) => { if (!v) setDynamicDay(null); }}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          {dynamicRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Dynamic Costing — Day {dynamicRow.day} · {dynamicRow.city}</DialogTitle>
+                <DialogDescription>
+                  Pick a hotel, allocate the room mix and confirm rates for this night.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label className="text-xs">Hotel</Label>
+                    <Select
+                      value={dynamicRow.selectedHotelId}
+                      onValueChange={(v) => dynamicRow.setSel({ hotel_id: v, room_id: "" })}
+                    >
+                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
+                      <SelectContent>
+                        {dynamicRow.hotelPool.map((h) => (
+                          <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Room</Label>
+                      <Select
+                        value={dynamicRow.selectedRoomId}
+                        onValueChange={(v) => dynamicRow.setSel({ room_id: v })}
+                        disabled={!dynamicRow.selectedHotelId}
+                      >
+                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select room…" /></SelectTrigger>
+                        <SelectContent>
+                          {dynamicRow.rooms.map((room) => (
+                            <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Meal Plan</Label>
+                      <Select
+                        value={dynamicRow.selectedMeal}
+                        onValueChange={(v) => dynamicRow.setSel({ meal_plan: v as MealPlan })}
+                        disabled={!dynamicRow.selectedRoomId}
+                      >
+                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>
+                          {(dynamicRow.meals.length ? dynamicRow.meals : MEAL_PLANS).map((m) => (
+                            <SelectItem key={m} value={m}>{m}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 space-y-2">
+                  <div className="text-sm font-semibold">Day {dynamicRow.day} Room Mix</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[]).map((k) => (
+                      <div key={k}>
+                        <Label className="text-xs capitalize">{k}</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8"
+                          value={dayMixFor(dynamicRow.day)[k]}
+                          onChange={(e) => setDayMix(dynamicRow.day, { [k]: Math.max(0, parseInt(e.target.value) || 0) } as Partial<DayRoomMix>)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Quad isn't available in {dynamicRow.city} — allocate Single / Double / Triple instead.
+                  </p>
+                </div>
+
+                {dynamicRow.hasRate && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="text-sm font-semibold">Rates for this day</div>
+                    <DayRateFields
+                      showQuad={false}
+                      base={{ sgl: dynamicRow.sglNet, dbl: dynamicRow.dblNet, trp: dynamicRow.trpNet, quad: dynamicRow.quadNet }}
+                      override={overrides[dynamicRow.day] ?? {}}
+                      onChange={(field, value) => setOverride(dynamicRow.day, field, value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setDynamicDay(null)}>Cancel</Button>
+                <Button
+                  disabled={!dynamicRow.selectedRoomId}
+                  onClick={() => {
+                    setDismissedQuadDays((prev) => prev.includes(dynamicRow.day) ? prev : [...prev, dynamicRow.day]);
+                    setDynamicDay(null);
+                    set({ step: 14 });
+                  }}
+                >
+                  Confirm & Continue to Costing
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+// ------------------------------------------------------------
+// Combined per-day rate editor fields (SGL / DBL / TRP / Quad).
+// Per-quotation override only — never writes to the hotel master.
+// ------------------------------------------------------------
+const RATE_FIELDS: { key: keyof DayRateOverride; label: string }[] = [
+  { key: "sgl", label: "Single (SGL)" },
+  { key: "dbl", label: "Double (DBL)" },
+  { key: "trp", label: "Triple (TRP)" },
+  { key: "quad", label: "Quad" },
+];
+
+function DayRateFields({
+  showQuad,
+  base,
+  override,
+  onChange,
+}: {
+  showQuad: boolean;
+  base: Record<"sgl" | "dbl" | "trp" | "quad", number>;
+  override: DayRateOverride;
+  onChange: (field: keyof DayRateOverride, value: number | undefined) => void;
+}) {
+  const fields = showQuad ? RATE_FIELDS : RATE_FIELDS.filter((f) => f.key !== "quad");
+  return (
+    <div className="space-y-3">
+      {fields.map((f) => {
+        const contract = Math.round(base[f.key as "sgl" | "dbl" | "trp" | "quad"] || 0);
+        const value = override[f.key];
+        const edited = (value ?? 0) > 0;
+        return (
+          <div key={f.key} className="flex items-end gap-2">
+            <div className="flex-1">
+              <Label className="text-xs">{f.label} — net rate (excl. GST)</Label>
+              <Input
+                type="number"
+                className="h-9"
+                value={value ?? ""}
+                placeholder={String(contract)}
+                onChange={(e) => onChange(f.key, parseFloat(e.target.value) || undefined)}
+              />
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                Contract rate: {inr(contract)}
+                {edited && <span className="text-amber-700 font-medium ml-2">Edited</span>}
+              </div>
+            </div>
+            {edited && (
+              <Button size="sm" variant="ghost" className="h-9" onClick={() => onChange(f.key, undefined)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 
 // ------------------------------------------------------------
 // Per-option Inclusions & Exclusions editor (Step 15).
