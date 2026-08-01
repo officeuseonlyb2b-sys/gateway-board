@@ -773,6 +773,184 @@ function AccommodationSelectionTable({
           </div>
         )}
       </Card>
+
+      {/* Combined per-day rate edit (per-quotation override only) */}
+      <Dialog open={!!editRow} onOpenChange={(v) => { if (!v) setEditingDay(null); }}>
+        <DialogContent className="sm:max-w-md">
+          {editRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit rates — Day {editRow.day} · {editRow.city}</DialogTitle>
+                <DialogDescription>
+                  Applies to this quotation only. The hotel's saved contract rate stays unchanged.
+                </DialogDescription>
+              </DialogHeader>
+              <DayRateFields
+                showQuad={showQuad || editRow.needsQuad}
+                base={{ sgl: editRow.sglNet, dbl: editRow.dblNet, trp: editRow.trpNet, quad: editRow.quadNet }}
+                override={overrides[editRow.day] ?? {}}
+                onChange={(field, value) => setOverride(editRow.day, field, value)}
+              />
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setDayOverride(editRow.day, undefined)}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset to contract rates
+                </Button>
+                <Button onClick={() => setEditingDay(null)}>Done</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quad unavailable → prompt to use Dynamic Costing */}
+      <Dialog open={!!quadAlertRow && !dynamicRow} onOpenChange={(v) => {
+        if (!v && quadAlertRow) {
+          setDismissedQuadDays((prev) => prev.includes(quadAlertRow.day) ? prev : [...prev, quadAlertRow.day]);
+          setQuadAlertDay(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          {quadAlertRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>No Quad hotel available in {quadAlertRow.city}</DialogTitle>
+                <DialogDescription>
+                  Day {quadAlertRow.day} needs a Quad room, but no hotel in {quadAlertRow.city} offers one.
+                  Please complete this day's accommodation using Dynamic Costing.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setDismissedQuadDays((prev) => [...prev, quadAlertRow.day]);
+                    setQuadAlertDay(null);
+                  }}
+                >
+                  Later
+                </Button>
+                <Button onClick={() => { setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
+                  Open Dynamic Costing
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dynamic Costing for a single day */}
+      <Dialog open={!!dynamicRow} onOpenChange={(v) => { if (!v) setDynamicDay(null); }}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          {dynamicRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Dynamic Costing — Day {dynamicRow.day} · {dynamicRow.city}</DialogTitle>
+                <DialogDescription>
+                  Pick a hotel, allocate the room mix and confirm rates for this night.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label className="text-xs">Hotel</Label>
+                    <Select
+                      value={dynamicRow.selectedHotelId}
+                      onValueChange={(v) => dynamicRow.setSel({ hotel_id: v, room_id: "" })}
+                    >
+                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
+                      <SelectContent>
+                        {dynamicRow.hotelPool.map((h) => (
+                          <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Room</Label>
+                      <Select
+                        value={dynamicRow.selectedRoomId}
+                        onValueChange={(v) => dynamicRow.setSel({ room_id: v })}
+                        disabled={!dynamicRow.selectedHotelId}
+                      >
+                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select room…" /></SelectTrigger>
+                        <SelectContent>
+                          {dynamicRow.rooms.map((room) => (
+                            <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Meal Plan</Label>
+                      <Select
+                        value={dynamicRow.selectedMeal}
+                        onValueChange={(v) => dynamicRow.setSel({ meal_plan: v as MealPlan })}
+                        disabled={!dynamicRow.selectedRoomId}
+                      >
+                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>
+                          {(dynamicRow.meals.length ? dynamicRow.meals : MEAL_PLANS).map((m) => (
+                            <SelectItem key={m} value={m}>{m}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 space-y-2">
+                  <div className="text-sm font-semibold">Day {dynamicRow.day} Room Mix</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[]).map((k) => (
+                      <div key={k}>
+                        <Label className="text-xs capitalize">{k}</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8"
+                          value={dayMixFor(dynamicRow.day)[k]}
+                          onChange={(e) => setDayMix(dynamicRow.day, { [k]: Math.max(0, parseInt(e.target.value) || 0) } as Partial<DayRoomMix>)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Quad isn't available in {dynamicRow.city} — allocate Single / Double / Triple instead.
+                  </p>
+                </div>
+
+                {dynamicRow.hasRate && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="text-sm font-semibold">Rates for this day</div>
+                    <DayRateFields
+                      showQuad={false}
+                      base={{ sgl: dynamicRow.sglNet, dbl: dynamicRow.dblNet, trp: dynamicRow.trpNet, quad: dynamicRow.quadNet }}
+                      override={overrides[dynamicRow.day] ?? {}}
+                      onChange={(field, value) => setOverride(dynamicRow.day, field, value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setDynamicDay(null)}>Cancel</Button>
+                <Button
+                  disabled={!dynamicRow.selectedRoomId}
+                  onClick={() => {
+                    setDismissedQuadDays((prev) => prev.includes(dynamicRow.day) ? prev : [...prev, dynamicRow.day]);
+                    setDynamicDay(null);
+                    set({ step: 14 });
+                  }}
+                >
+                  Confirm & Continue to Costing
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
