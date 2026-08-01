@@ -724,6 +724,20 @@ function AccommodationSelectionTable({
                         {showDinner && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
                       </>
                     )}
+                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={!r.hasRate}
+                        onClick={() => setEditingDay(r.day)}
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </Button>
+                      {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
+                        <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
