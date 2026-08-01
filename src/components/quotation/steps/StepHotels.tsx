@@ -209,6 +209,8 @@ function AccommodationSelectionTable({
 
   // Toggle states for extra columns
   const [showQuad, setShowQuad] = useState(false);
+  const [showLunch, setShowLunch] = useState(false);
+  const [showDinner, setShowDinner] = useState(false);
   // Which rate cell is currently being edited: "<day>:<field>"
   const [editingCell, setEditingCell] = useState<string | null>(null);
 
