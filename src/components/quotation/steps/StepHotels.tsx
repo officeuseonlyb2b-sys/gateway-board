@@ -459,6 +459,7 @@ function AccommodationSelectionTable({
     };
   });
 
+  // Read-only rate cell. Editing happens through the single per-day "Edit" control.
   const renderRateCell = (
     dayNumber: number,
     field: keyof DayRateOverride,
@@ -466,52 +467,10 @@ function AccommodationSelectionTable({
     net: number,
     gst: number,
   ) => {
-    const cellKey = `${dayNumber}:${field}`;
     const edited = (overrides[dayNumber]?.[field] ?? 0) > 0;
-    if (editingCell === cellKey) {
-      return (
-        <td key={field} className="py-2.5 px-3 text-right">
-          <Input
-            autoFocus
-            type="number"
-            defaultValue={overrides[dayNumber]?.[field] ?? Math.round(net)}
-            className="h-8 w-24 text-xs text-right ml-auto"
-            onBlur={(e) => {
-              setOverride(dayNumber, field, parseFloat(e.target.value) || undefined);
-              setEditingCell(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              if (e.key === "Escape") setEditingCell(null);
-            }}
-          />
-          <div className="text-[10px] text-muted-foreground mt-1">Net rate (excl. GST)</div>
-        </td>
-      );
-    }
     return (
       <td key={field} className={cn("py-2.5 px-3 text-right", edited && "bg-amber-50")}>
-        <div className="flex items-center justify-end gap-1">
-          <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
-          <button
-            type="button"
-            aria-label="Edit rate"
-            className="text-muted-foreground hover:text-primary"
-            onClick={() => setEditingCell(cellKey)}
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
-          {edited && (
-            <button
-              type="button"
-              aria-label="Reset to contract rate"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => setOverride(dayNumber, field, undefined)}
-            >
-              <RotateCcw className="h-3 w-3" />
-            </button>
-          )}
-        </div>
+        <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
         <div className="text-[11px] text-[#64748B]">
           Net: {inr(net)} + GST {(gstRateFor(net) * 100).toFixed(0)}%: {inr(gst)}
         </div>
