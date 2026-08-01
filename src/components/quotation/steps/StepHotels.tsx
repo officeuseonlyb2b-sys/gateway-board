@@ -1,9 +1,17 @@
 // src/components/quotation/steps/StepHotels.tsx (Step15)
 // Simplified Lunch/Dinner columns: one total per day (meal rate × total passengers + GST).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
