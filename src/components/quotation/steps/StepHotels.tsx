@@ -209,6 +209,7 @@ export function Step15({ draft, set }: StepProps) {
 // ============================================================
 function AccommodationSelectionTable({
   draft,
+  set,
   option,
   activeCategory,
   overnightRouting,
@@ -216,6 +217,7 @@ function AccommodationSelectionTable({
   onQuickAdd,
 }: {
   draft: QuoteDraft;
+  set: (p: Partial<QuoteDraft>) => void;
   option: HotelOption;
   activeCategory: string;
   overnightRouting: typeof draft.routing;
@@ -228,8 +230,12 @@ function AccommodationSelectionTable({
   const [showQuad, setShowQuad] = useState(false);
   const [showLunch, setShowLunch] = useState(false);
   const [showDinner, setShowDinner] = useState(false);
-  // Which rate cell is currently being edited: "<day>:<field>"
-  const [editingCell, setEditingCell] = useState<string | null>(null);
+  // Day number whose rates are being edited in the combined per-day dialog.
+  const [editingDay, setEditingDay] = useState<number | null>(null);
+  // Quad-unavailable popup + dynamic costing flow state.
+  const [quadAlertDay, setQuadAlertDay] = useState<number | null>(null);
+  const [dynamicDay, setDynamicDay] = useState<number | null>(null);
+  const [dismissedQuadDays, setDismissedQuadDays] = useState<number[]>([]);
 
   const overrides = option.rate_overrides ?? {};
   const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
