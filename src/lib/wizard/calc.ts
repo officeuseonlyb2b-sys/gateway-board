@@ -120,7 +120,7 @@ export function computeOption(
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     if (!sel) { missing++; return; }
     const date = addDaysISO(draft.start_date, i);
-    const plan = pickPlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    const plan = planForDay(opt, day.day, pickPlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
     if (!plan) { missing++; return; }
     matches++;
     const dbl = plan.double_rate;
@@ -241,7 +241,7 @@ export function computePersonTotals(
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     if (!sel) return null;
     const date = addDaysISO(draft.start_date, i);
-    return findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    return planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
   });
 
   return allocs.map((p) => {
@@ -377,7 +377,7 @@ export function lookupOptionNightlyRates(
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     if (!sel) { missing++; return; }
     const date = addDaysISO(draft.start_date, i);
-    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    const plan = planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
     if (!plan) { missing++; return; }
     perNight.push({
       sgl: plan.single_rate, dbl: plan.double_rate,
@@ -443,7 +443,7 @@ export function computeGroupOption(
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     if (!sel) { missing++; return; }
     const date = addDaysISO(draft.start_date, i);
-    const plan = findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date);
+    const plan = planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
     if (!plan) { missing++; return; }
     const sgl = plan.single_rate;
     const dbl = plan.double_rate;
@@ -561,7 +561,7 @@ export function computeDynamicOption(
     const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, totalPax(draft)));
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     const date = addDaysISO(draft.start_date, i);
-    const plan = sel ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date) : null;
+    const plan = sel ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date)) : null;
     if (!plan) {
       days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });
       return;
