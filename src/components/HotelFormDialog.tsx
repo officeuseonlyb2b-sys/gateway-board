@@ -40,7 +40,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     city_id: hotel?.city_id ?? data.cities[0]?.id ?? "",
     name: hotel?.name ?? "",
     hotel_category: (hotel?.hotel_category ?? "3 Star") as HotelCategory,
-    hotel_type: (hotel?.hotel_type ?? "") as HotelType | "",
+    hotel_type: (hotel?.hotel_type ?? "") as HotelType | "",   // optional, may be empty
     contact_name: hotel?.contact_name ?? "",
     contact_phone: hotel?.contact_phone ?? "",
     email: hotel?.email ?? "",
@@ -73,7 +73,8 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     e.preventDefault();
     if (!form.name.trim()) return toast.error("Hotel name is required.");
     if (!form.city_id) return toast.error("Please choose a city.");
-    if (!form.hotel_type) return toast.error("Please choose a hotel type.");
+    // ⚠️ Hotel type validation removed – now optional
+    // if (!form.hotel_type) return toast.error("Please choose a hotel type.");
 
     const roomErrors = validateRooms(rooms);
     if (Object.keys(roomErrors).length) {
@@ -89,7 +90,7 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     const cleanBlackouts = blackouts.filter((b) => b.from && b.to);
     const payload = {
       ...form,
-      hotel_type: form.hotel_type as HotelType,
+      hotel_type: form.hotel_type as HotelType,   // still cast to HotelType – if empty string it will be sent as ''
       blackout_ranges: cleanBlackouts,
     };
     let hotelId: string;
@@ -179,10 +180,14 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
               </Select>
             </div>
 
+            {/* Hotel Type – now optional, no red star */}
             <div className="space-y-2">
-              <Label>Hotel Type <span className="text-destructive">*</span></Label>
-              <Select value={form.hotel_type} onValueChange={(v) => update("hotel_type", v as HotelType)}>
-                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+              <Label>Hotel Type</Label>
+              <Select
+                value={form.hotel_type}
+                onValueChange={(v) => update("hotel_type", v as HotelType | "")}
+              >
+                <SelectTrigger><SelectValue placeholder="Select type (optional)" /></SelectTrigger>
                 <SelectContent>
                   {HOTEL_TYPES.map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
@@ -230,7 +235,6 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
           <div className="border-t pt-4">
             <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
           </div>
-
 
           <div className="border-t pt-4 space-y-3">
             <div>
