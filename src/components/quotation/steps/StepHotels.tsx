@@ -483,6 +483,21 @@ function AccommodationSelectionTable({
 
   const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
 
+  // First day that needs Quad but has no Quad-capable hotel in its city.
+  const pendingQuadRow = rows.find((r) => r.noQuadHotel && !dismissedQuadDays.includes(r.day));
+  const pendingQuadDay = pendingQuadRow?.day ?? null;
+
+  useEffect(() => {
+    if (pendingQuadDay != null && quadAlertDay == null && dynamicDay == null) {
+      setQuadAlertDay(pendingQuadDay);
+    }
+  }, [pendingQuadDay, quadAlertDay, dynamicDay]);
+
+  const editRow = rows.find((r) => r.day === editingDay) ?? null;
+  const dynamicRow = rows.find((r) => r.day === dynamicDay) ?? null;
+  const quadAlertRow = rows.find((r) => r.day === quadAlertDay) ?? null;
+
+
   return (
     <div className="space-y-2">
       {/* Toggle controls for extra columns */}
