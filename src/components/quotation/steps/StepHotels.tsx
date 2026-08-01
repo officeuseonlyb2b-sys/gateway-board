@@ -227,18 +227,16 @@ function AccommodationSelectionTable({
   const dayNeedsQuad = (dayNumber: number) =>
     showQuad || (draft.allocation_mode === "dynamic" && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
 
-  // Hotel offers Quad when any of its rooms has a quad rate for that date.
+  // Hotel offers Quad when any of its rooms has a quad rate applicable on that date.
   const hotelHasQuad = (hotelId: string, dateISO: string) => {
     const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
-    return d.rate_plans.some(
-      (plan) =>
-        roomIds.includes(plan.room_category_id) &&
-        (plan.quad_rate ?? 0) > 0 &&
-        findRatePlan(d.rate_plans, plan.room_category_id, plan.meal_plan, dateISO)?.id !== undefined,
+    return roomIds.some((roomId) =>
+      MEAL_PLANS.some((m) => {
+        const plan = findRatePlan(d.rate_plans, roomId, m, dateISO);
+        return !!plan && (plan.quad_rate ?? 0) > 0;
+      }),
     );
   };
-  const [showLunch, setShowLunch] = useState(false);
-  const [showDinner, setShowDinner] = useState(false);
 
   // Total number of passengers (used for meal costing)
   const totalPax = draft.adults + draft.ss + draft.children.length;
