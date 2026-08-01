@@ -247,6 +247,22 @@ function AccommodationSelectionTable({
     else next[dayNumber] = cur;
     onUpdate({ rate_overrides: next });
   };
+  const setDayOverride = (dayNumber: number, value: DayRateOverride | undefined) => {
+    const next = { ...overrides };
+    if (!value || Object.keys(value).length === 0) delete next[dayNumber];
+    else next[dayNumber] = value;
+    onUpdate({ rate_overrides: next });
+  };
+
+  // Per-day room mix (shared with the Room Allocation step).
+  const paxForMix = Math.max(1, effectivePaxForPricing(draft));
+  const dayMixFor = (dayNo: number): DayRoomMix =>
+    draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
+  const setDayMix = (dayNo: number, patch: Partial<DayRoomMix>) => {
+    set({ day_room_mix: { ...(draft.day_room_mix ?? {}), [dayNo]: { ...dayMixFor(dayNo), ...patch } } });
+  };
+
+
 
   // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
   const dayNeedsQuad = (dayNumber: number) =>
