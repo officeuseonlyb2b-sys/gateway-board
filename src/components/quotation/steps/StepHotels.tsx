@@ -972,6 +972,65 @@ function AccommodationSelectionTable({
 }
 
 // ------------------------------------------------------------
+// Combined per-day rate editor fields (SGL / DBL / TRP / Quad).
+// Per-quotation override only — never writes to the hotel master.
+// ------------------------------------------------------------
+const RATE_FIELDS: { key: keyof DayRateOverride; label: string }[] = [
+  { key: "sgl", label: "Single (SGL)" },
+  { key: "dbl", label: "Double (DBL)" },
+  { key: "trp", label: "Triple (TRP)" },
+  { key: "quad", label: "Quad" },
+];
+
+function DayRateFields({
+  showQuad,
+  base,
+  override,
+  onChange,
+}: {
+  showQuad: boolean;
+  base: Record<"sgl" | "dbl" | "trp" | "quad", number>;
+  override: DayRateOverride;
+  onChange: (field: keyof DayRateOverride, value: number | undefined) => void;
+}) {
+  const fields = showQuad ? RATE_FIELDS : RATE_FIELDS.filter((f) => f.key !== "quad");
+  return (
+    <div className="space-y-3">
+      {fields.map((f) => {
+        const contract = Math.round(base[f.key as "sgl" | "dbl" | "trp" | "quad"] || 0);
+        const value = override[f.key];
+        const edited = (value ?? 0) > 0;
+        return (
+          <div key={f.key} className="flex items-end gap-2">
+            <div className="flex-1">
+              <Label className="text-xs">{f.label} — net rate (excl. GST)</Label>
+              <Input
+                type="number"
+                className="h-9"
+                value={value ?? ""}
+                placeholder={String(contract)}
+                onChange={(e) => onChange(f.key, parseFloat(e.target.value) || undefined)}
+              />
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                Contract rate: {inr(contract)}
+                {edited && <span className="text-amber-700 font-medium ml-2">Edited</span>}
+              </div>
+            </div>
+            {edited && (
+              <Button size="sm" variant="ghost" className="h-9" onClick={() => onChange(f.key, undefined)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
+
+// ------------------------------------------------------------
 // Per-option Inclusions & Exclusions editor (Step 15).
 // (unchanged)
 // ------------------------------------------------------------
