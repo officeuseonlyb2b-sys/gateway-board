@@ -23,6 +23,34 @@ function pickPlan(plans: RatePlan[], room_id: string, meal: string, dateISO: str
   return findRatePlan(plans, room_id, meal, dateISO);
 }
 
+// Apply a per-day, per-quotation rate override on top of the hotel's saved
+// contract rate. Returns a clone — the stored rate plan is never mutated.
+// Triple is modelled as (double_rate + extra_bed_rate) everywhere, so a TRP
+// override is folded back into extra_bed_rate.
+export function applyRateOverride(
+  plan: RatePlan | null,
+  ovr: import("./types").DayRateOverride | undefined,
+): RatePlan | null {
+  if (!plan || !ovr) return plan;
+  const hasAny = [ovr.sgl, ovr.dbl, ovr.trp, ovr.quad].some((v) => typeof v === "number" && v > 0);
+  if (!hasAny) return plan;
+  const out: RatePlan = { ...plan };
+  if (typeof ovr.sgl === "number" && ovr.sgl > 0) out.single_rate = ovr.sgl;
+  if (typeof ovr.dbl === "number" && ovr.dbl > 0) out.double_rate = ovr.dbl;
+  if (typeof ovr.trp === "number" && ovr.trp > 0) out.extra_bed_rate = Math.max(0, ovr.trp - out.double_rate);
+  if (typeof ovr.quad === "number" && ovr.quad > 0) out.quad_rate = ovr.quad;
+  return out;
+}
+
+export function planForDay(
+  opt: HotelOption,
+  dayNumber: number,
+  plan: RatePlan | null,
+): RatePlan | null {
+  return applyRateOverride(plan, opt.rate_overrides?.[dayNumber]);
+}
+
+
 // GST slab per business rule: effective per-room tariff (meal-inclusive,
 // including extra-bed / mandatory hotel supplements) > ₹7,500 → 18%,
 // otherwise 5%. Applied uniformly for SGL / DBL / TRP and every meal plan,
