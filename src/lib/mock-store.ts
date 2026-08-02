@@ -217,11 +217,24 @@ export interface EntranceSite {
   tour_id?: string;
 }
 
+export interface Restaurant {
+  id: string;
+  city_id: string;      // references destination_cities.id
+  city_name: string;    // denormalised for routing-city matching
+  name: string;
+  price_per_person: number;
+  meal_type?: string;   // optional: Lunch / Dinner / Breakfast
+  notes?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface DestinationCity {
   id: string;
   name: string;
   created_at: string;
 }
+
 export interface DestinationTour {
   id: string;
   city_id: string;
