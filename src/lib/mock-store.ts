@@ -697,7 +697,8 @@ function seed(): DB {
     guide_cities: guide_cities_list,
     destination_cities, destination_tours,
     travel_options,
-  };
+    restaurants: [],
+
 }
 
 
