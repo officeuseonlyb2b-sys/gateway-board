@@ -191,9 +191,17 @@ interface Props {
   rooms: RoomBlock[];
   setRooms: (updater: (r: RoomBlock[]) => RoomBlock[]) => void;
   errors: Record<string, string>;
+  /** Hotel's city name — restricts the linkable restaurants (Meals module). */
+  cityName?: string;
 }
 
-export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
+export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
+  const data = useDB();
+  const linkableRestaurants = (data.restaurants ?? []).filter(
+    (r) => r.is_active !== false &&
+      (!cityName || (r.city_name || "").trim().toLowerCase() === cityName.trim().toLowerCase()),
+  );
+
   const setRoom = (idx: number, patch: Partial<RoomBlock>) =>
     setRooms((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   const setSeason = (rIdx: number, sIdx: number, patch: Partial<SeasonBlock>) =>
