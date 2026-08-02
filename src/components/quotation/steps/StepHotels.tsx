@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { inr, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, restaurantsForCityNames, type MealPlan } from "@/lib/mock-store";
 import {
   applyRateOverride,
   gstRateFor,
@@ -174,6 +174,9 @@ export function Step15({ draft, set }: StepProps) {
               onChange={(patch) => updateOption(activeOption.key, patch)}
             />
           )}
+
+          <ExternalMealsEditor draft={draft} set={set} />
+
         </div>
       )}
 
@@ -1215,6 +1218,115 @@ export function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; o
           Add-ons (transport, guide, activities) will be split equally across all {rows.length} traveller{rows.length === 1 ? "" : "s"} in Steps 16 & 17.
         </div>
       </div>
+    </Card>
+  );
+}
+// ============================================================
+// Add Meal (outside hotel) — pulls restaurants from the Meals module,
+// filtered to the cities present in this quotation's routing.
+// Adds a simple per-person cost line into the quotation's misc costs.
+// ============================================================
+function ExternalMealsEditor({
+  draft,
+  set,
+}: {
+  draft: QuoteDraft;
+  set: (p: Partial<QuoteDraft>) => void;
+}) {
+  const d = useDB();
+  const [pick, setPick] = useState("");
+
+  const routeCityNames = useMemo(() => {
+    const names = new Set<string>();
+    draft.routing.forEach((r) => {
+      const ids = [r.city_id, r.to_city_id, ...(r.to_city_ids ?? [])].filter(Boolean) as string[];
+      ids.forEach((id) => {
+        const n = d.cities.find((c) => c.id === id)?.name;
+        if (n) names.add(n);
+      });
+      if (r.to_city) names.add(r.to_city);
+      if (r.from_city) names.add(r.from_city);
+    });
+    return Array.from(names);
+  }, [draft.routing, d.cities]);
+
+  const options = useMemo(
+    () => restaurantsForCityNames(d.restaurants ?? [], routeCityNames),
+    [d.restaurants, routeCityNames],
+  );
+
+  const pax = Math.max(1, draft.adults + draft.ss + draft.children.length);
+  const mealLines = draft.misc.filter((m) => m.custom_name?.startsWith("Meal (outside hotel)"));
+
+  const addMeal = (restaurantId: string) => {
+    const r = (d.restaurants ?? []).find((x) => x.id === restaurantId);
+    if (!r) return;
+    const line = {
+      id: Math.random().toString(36).slice(2, 10),
+      custom_name: `Meal (outside hotel) — ${r.name}, ${r.city_name}`,
+      qty: pax,
+      rate: r.price_per_person,
+      unit: "per_person",
+    };
+    set({ misc: [...draft.misc, line] });
+    setPick("");
+  };
+
+  const removeMeal = (id: string) => set({ misc: draft.misc.filter((m) => m.id !== id) });
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div>
+        <div className="text-sm font-semibold">Add Meal (outside hotel)</div>
+        <div className="text-xs text-muted-foreground">
+          Pick a restaurant from the Meals module — only restaurants in this quotation's route cities are shown. Cost is added per person.
+        </div>
+      </div>
+
+      {routeCityNames.length === 0 && (
+        <p className="text-xs text-muted-foreground">Complete routing first to see restaurants.</p>
+      )}
+      {routeCityNames.length > 0 && options.length === 0 && (
+        <p className="text-xs text-amber-600">No restaurants added yet for these cities. Add them in the Meals module.</p>
+      )}
+
+      {options.length > 0 && (
+        <div className="flex items-end gap-2">
+          <div className="flex-1 max-w-md">
+            <Label className="text-xs">Restaurant</Label>
+            <Select value={pick} onValueChange={setPick}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
+              <SelectContent>
+                {options.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name} · {r.city_name} · {inr(r.price_per_person)}/pp
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button size="sm" disabled={!pick} onClick={() => addMeal(pick)}>
+            <Plus className="h-3.5 w-3.5" /> Add Meal
+          </Button>
+        </div>
+      )}
+
+      {mealLines.length > 0 && (
+        <div className="space-y-1">
+          {mealLines.map((m) => (
+            <div key={m.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-1.5">
+              <span>{m.custom_name}</span>
+              <span className="flex items-center gap-3">
+                <span className="text-muted-foreground text-xs">{inr(m.rate)} × {m.qty} pax</span>
+                <span className="font-medium">{inr(m.rate * m.qty)}</span>
+                <Button size="sm" variant="ghost" onClick={() => removeMeal(m.id)}>
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

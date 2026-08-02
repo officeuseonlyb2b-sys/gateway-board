@@ -1,16 +1,21 @@
 // Room Allocation step — runs BEFORE hotel selection.
 // Day-by-day room mix only (Single / Double / Triple / Quad per night).
 // "Standard mode" was removed; every quotation uses the dynamic day mix.
-import { useEffect } from "react";
+// Additionally lets the admin pick Hotel / Room / Meal Plan per day early —
+// this writes into the same hotel_options[].selections used by Accommodation.
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useDB } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { effectivePaxForPricing, defaultDayMix, dayMixCoversPax } from "@/lib/wizard/calc";
-import type { DayRoomMix, PersonRoomType } from "@/lib/wizard/types";
+import type { DayRoomMix, PersonRoomType, HotelOption, OptionKey } from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
+
 
 export const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: number }[] = [
   { value: "single", label: "Single Room", shares: 0 },
@@ -60,6 +65,52 @@ export function StepAllocation({ draft, set }: StepProps) {
     set({ day_room_mix: next });
   };
 
+  // ---- Early Hotel / Room / Meal selection (same data as Accommodation step) ----
+  const options = draft.hotel_options ?? [];
+  const [optKey, setOptKey] = useState<OptionKey>(options[0]?.key ?? "A");
+  const activeOption = options.find((o) => o.key === optKey) ?? options[0];
+  const updateOption = (patch: Partial<HotelOption>) => {
+    if (!activeOption) return;
+    set({ hotel_options: options.map((o) => (o.key === activeOption.key ? { ...o, ...patch } : o)) });
+  };
+  const selFor = (cityId: string) => activeOption?.selections.find((s) => s.city_id === cityId);
+  const setSel = (cityId: string, patch: Partial<{ hotel_id: string; room_id: string; meal_plan: MealPlan }>) => {
+    if (!activeOption) return;
+    const others = activeOption.selections.filter((s) => s.city_id !== cityId);
+    const cur = selFor(cityId) ?? { city_id: cityId, hotel_id: "", room_id: "", meal_plan: "CP" as MealPlan };
+    const merged = { ...cur, ...patch };
+    if ("hotel_id" in patch) {
+      const h = d.hotels.find((x) => x.id === merged.hotel_id);
+      merged.is_fallback = !!h && !!activeOption.category && h.hotel_category !== activeOption.category;
+    }
+    updateOption({ selections: [...others, merged] });
+  };
+  const hotelHasQuad = (hotelId: string, dateISO: string) => {
+    const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+    return roomIds.some((roomId) =>
+      MEAL_PLANS.some((m) => {
+        const plan = findRatePlan(d.rate_plans, roomId, m, dateISO);
+        return !!plan && (plan.quad_rate ?? 0) > 0;
+      }),
+    );
+  };
+  const hotelsForDay = (cityId: string, dateISO: string, mix: DayRoomMix) => {
+    const cityKey = (d.cities.find((c) => c.id === cityId)?.name || "").trim().toLowerCase();
+    const inCity = d.hotels.filter(
+      (h) => (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase() === cityKey,
+    );
+    const cat = (activeOption?.category || "").trim().toLowerCase();
+    let pool = cat ? inCity.filter((h) => h.hotel_category.trim().toLowerCase() === cat) : inCity;
+    if (pool.length === 0) pool = inCity;
+    if ((mix.quad ?? 0) > 0) {
+      const quadPool = pool.filter((h) => hotelHasQuad(h.id, dateISO));
+      if (quadPool.length > 0) return { pool: quadPool, noQuad: false };
+      return { pool: [], noQuad: true };
+    }
+    return { pool, noQuad: false };
+  };
+
+
   return (
     <div className="space-y-4">
       <div>
@@ -68,6 +119,24 @@ export function StepAllocation({ draft, set }: StepProps) {
           Set the room mix for every night before picking hotels. {paxCount} traveller{paxCount === 1 ? "" : "s"}.
         </p>
       </div>
+
+      {options.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Hotel selection applies to:</span>
+          {options.map((o) => (
+            <Button
+              key={o.key}
+              size="sm"
+              variant={o.key === activeOption?.key ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setOptKey(o.key)}
+            >
+              Option {o.key}{o.category ? ` · ${o.category}` : ""}
+            </Button>
+          ))}
+        </div>
+      )}
+
 
       <Card className="p-4 border-primary/20 space-y-3">
         <div className="flex items-center justify-between">
@@ -121,7 +190,66 @@ export function StepAllocation({ draft, set }: StepProps) {
                   </div>
                 ))}
               </div>
+
+              {/* Optional early hotel / room / meal plan for this night */}
+              {(() => {
+                const sel = selFor(r.city_id);
+                const { pool, noQuad } = hotelsForDay(r.city_id, r.date, mix);
+                const rooms = sel?.hotel_id ? d.room_categories.filter((rc) => rc.hotel_id === sel.hotel_id) : [];
+                const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, r.date) : [];
+                return (
+                  <div className="pt-2 border-t space-y-2">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Hotel / Room / Meal Plan (optional — syncs with Accommodation Options {activeOption?.key ? `· Option ${activeOption.key}` : ""})
+                    </div>
+                    {noQuad ? (
+                      <p className="text-xs text-amber-700">
+                        No hotel in {cityName} offers a Quad room for this date. You can complete this night with Dynamic Costing in Accommodation Options.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs">Hotel</Label>
+                          <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel(r.city_id, { hotel_id: v, room_id: "" })}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
+                            <SelectContent>
+                              {pool.map((h) => (
+                                <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Room</Label>
+                          <Select value={sel?.room_id || ""} onValueChange={(v) => setSel(r.city_id, { room_id: v })} disabled={!sel?.hotel_id}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select room…" /></SelectTrigger>
+                            <SelectContent>
+                              {rooms.map((rc) => <SelectItem key={rc.id} value={rc.id}>{rc.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Meal Plan</Label>
+                          <Select
+                            value={sel?.meal_plan || "CP"}
+                            onValueChange={(v) => setSel(r.city_id, { meal_plan: v as MealPlan })}
+                            disabled={!sel?.room_id}
+                          >
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {(meals.length > 0 ? meals : MEAL_PLANS).map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
+
           );
         })}
       </Card>

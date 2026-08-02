@@ -217,11 +217,24 @@ export interface EntranceSite {
   tour_id?: string;
 }
 
+export interface Restaurant {
+  id: string;
+  city_id: string;      // references destination_cities.id
+  city_name: string;    // denormalised for routing-city matching
+  name: string;
+  price_per_person: number;
+  meal_type?: string;   // optional: Lunch / Dinner / Breakfast
+  notes?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface DestinationCity {
   id: string;
   name: string;
   created_at: string;
 }
+
 export interface DestinationTour {
   id: string;
   city_id: string;
@@ -404,6 +417,8 @@ export interface DB {
   destination_cities: DestinationCity[];
   destination_tours: DestinationTour[];
   travel_options: TravelOption[];
+  restaurants: Restaurant[];
+
 }
 
 
@@ -682,8 +697,10 @@ function seed(): DB {
     guide_cities: guide_cities_list,
     destination_cities, destination_tours,
     travel_options,
+    restaurants: [],
   };
 }
+
 
 
 let _db: DB | null = null;
@@ -704,6 +721,8 @@ function load(): DB {
       if (!parsed.entrance_cities) parsed.entrance_cities = [];
       if (!parsed.entrance_sites) parsed.entrance_sites = [];
       if (!parsed.activity_destinations) parsed.activity_destinations = [];
+      if (!parsed.restaurants) parsed.restaurants = [];
+
       if (!parsed.activities) parsed.activities = [];
       if (!parsed.guides || parsed.guides.length === 0) {
         const s = seed();
@@ -785,6 +804,8 @@ function persist() {
 }
 
 function emit() {
+  // Re-identify the root object so useSyncExternalStore snapshots change.
+  if (_db) _db = { ..._db };
   listeners.forEach((l) => l());
 }
 
@@ -1208,7 +1229,45 @@ export const db = {
     row.tour_id = tour_id;
     persist(); emit();
   },
+
+  // Restaurants (Meals module) — cities come from destination_cities.
+  addRestaurant(input: Omit<Restaurant, "id" | "created_at" | "city_name"> & { city_name?: string }): Restaurant {
+    const d = load();
+    const city = d.destination_cities.find((c) => c.id === input.city_id);
+    const r: Restaurant = {
+      ...input,
+      city_name: input.city_name ?? city?.name ?? "",
+      id: uid(),
+      created_at: now(),
+    };
+    d.restaurants = [...(d.restaurants ?? []), r];
+    persist(); emit();
+    return r;
+  },
+  updateRestaurant(id: string, patch: Partial<Restaurant>) {
+    const d = load();
+    const idx = (d.restaurants ?? []).findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    const next: Restaurant = { ...d.restaurants[idx], ...patch };
+    if (patch.city_id) {
+      next.city_name = d.destination_cities.find((c) => c.id === patch.city_id)?.name ?? next.city_name;
+    }
+    d.restaurants = d.restaurants.map((x, i) => (i === idx ? next : x));
+    persist(); emit();
+  },
+  deleteRestaurant(id: string) {
+    const d = load();
+    d.restaurants = d.restaurants.filter((x) => x.id !== id);
+    persist(); emit();
+  },
 };
+
+/** Restaurants available for a set of city names (routing cities / hotel city). */
+export function restaurantsForCityNames(all: Restaurant[], cityNames: string[]): Restaurant[] {
+  const keys = new Set(cityNames.map((n) => (n || "").trim().toLowerCase()).filter(Boolean));
+  return all.filter((r) => r.is_active !== false && keys.has((r.city_name || "").trim().toLowerCase()));
+}
+
 
 
 

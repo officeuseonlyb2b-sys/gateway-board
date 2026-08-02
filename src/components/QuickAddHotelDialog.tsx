@@ -144,7 +144,7 @@ export function QuickAddHotelDialog({ open, onOpenChange, cityId, cityName, cate
 
           <div className="border-t" />
 
-          <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
+          <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} cityName={cityName} />
         </div>
 
         <DialogFooter className="p-4 border-t sticky bottom-0 bg-background">

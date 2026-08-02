@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { db, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
+import { db, useDB, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
 
 export type CwbMode = "amount" | "rule";
 
@@ -191,9 +191,17 @@ interface Props {
   rooms: RoomBlock[];
   setRooms: (updater: (r: RoomBlock[]) => RoomBlock[]) => void;
   errors: Record<string, string>;
+  /** Hotel's city name — restricts the linkable restaurants (Meals module). */
+  cityName?: string;
 }
 
-export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
+export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
+  const data = useDB();
+  const linkableRestaurants = (data.restaurants ?? []).filter(
+    (r) => r.is_active !== false &&
+      (!cityName || (r.city_name || "").trim().toLowerCase() === cityName.trim().toLowerCase()),
+  );
+
   const setRoom = (idx: number, patch: Partial<RoomBlock>) =>
     setRooms((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   const setSeason = (rIdx: number, sIdx: number, patch: Partial<SeasonBlock>) =>
@@ -364,7 +372,46 @@ export function HotelRatesEditor({ rooms, setRooms, errors }: Props) {
                   <div><Label className="text-xs">Dinner / person</Label><Input value={sn.dinner} onChange={(e) => setSeason(ri, si, { dinner: e.target.value })} /></div>
                   <div><Label className="text-xs">Extra Breakfast / person</Label><Input value={sn.extra_breakfast} onChange={(e) => setSeason(ri, si, { extra_breakfast: e.target.value })} /></div>
                 </div>
+                {linkableRestaurants.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Link Lunch to a restaurant (Meals module)</Label>
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          const r = linkableRestaurants.find((x) => x.id === v);
+                          if (r) setSeason(ri, si, { lunch: String(r.price_per_person) });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
+                        <SelectContent>
+                          {linkableRestaurants.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name} · ₹{r.price_per_person}/pp</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Link Dinner to a restaurant (Meals module)</Label>
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          const r = linkableRestaurants.find((x) => x.id === v);
+                          if (r) setSeason(ri, si, { dinner: String(r.price_per_person) });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
+                        <SelectContent>
+                          {linkableRestaurants.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name} · ₹{r.price_per_person}/pp</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
               </div>
+
 
               <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
                 <div className="text-xs font-semibold uppercase text-muted-foreground">Festive Supplements (optional)</div>
