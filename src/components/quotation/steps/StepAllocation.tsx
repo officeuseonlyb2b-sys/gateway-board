@@ -120,6 +120,24 @@ export function StepAllocation({ draft, set }: StepProps) {
         </p>
       </div>
 
+      {options.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Hotel selection applies to:</span>
+          {options.map((o) => (
+            <Button
+              key={o.key}
+              size="sm"
+              variant={o.key === activeOption?.key ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setOptKey(o.key)}
+            >
+              Option {o.key}{o.category ? ` · ${o.category}` : ""}
+            </Button>
+          ))}
+        </div>
+      )}
+
+
       <Card className="p-4 border-primary/20 space-y-3">
         <div className="flex items-center justify-between">
           <div>
