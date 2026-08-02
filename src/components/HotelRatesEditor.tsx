@@ -372,7 +372,46 @@ export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
                   <div><Label className="text-xs">Dinner / person</Label><Input value={sn.dinner} onChange={(e) => setSeason(ri, si, { dinner: e.target.value })} /></div>
                   <div><Label className="text-xs">Extra Breakfast / person</Label><Input value={sn.extra_breakfast} onChange={(e) => setSeason(ri, si, { extra_breakfast: e.target.value })} /></div>
                 </div>
+                {linkableRestaurants.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Link Lunch to a restaurant (Meals module)</Label>
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          const r = linkableRestaurants.find((x) => x.id === v);
+                          if (r) setSeason(ri, si, { lunch: String(r.price_per_person) });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
+                        <SelectContent>
+                          {linkableRestaurants.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name} · ₹{r.price_per_person}/pp</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Link Dinner to a restaurant (Meals module)</Label>
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          const r = linkableRestaurants.find((x) => x.id === v);
+                          if (r) setSeason(ri, si, { dinner: String(r.price_per_person) });
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
+                        <SelectContent>
+                          {linkableRestaurants.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name} · ₹{r.price_per_person}/pp</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
               </div>
+
 
               <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
                 <div className="text-xs font-semibold uppercase text-muted-foreground">Festive Supplements (optional)</div>
