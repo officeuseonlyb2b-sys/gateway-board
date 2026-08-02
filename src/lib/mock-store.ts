@@ -698,8 +698,9 @@ function seed(): DB {
     destination_cities, destination_tours,
     travel_options,
     restaurants: [],
-
+  };
 }
+
 
 
 let _db: DB | null = null;
