@@ -233,7 +233,13 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
           </div>
 
           <div className="border-t pt-4">
-            <HotelRatesEditor rooms={rooms} setRooms={setRooms} errors={errors} />
+            <HotelRatesEditor
+              rooms={rooms}
+              setRooms={setRooms}
+              errors={errors}
+              cityName={data.cities.find((c) => c.id === form.city_id)?.name}
+            />
+
           </div>
 
           <div className="border-t pt-4 space-y-3">
