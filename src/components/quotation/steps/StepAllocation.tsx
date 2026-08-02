@@ -1,16 +1,21 @@
 // Room Allocation step — runs BEFORE hotel selection.
 // Day-by-day room mix only (Single / Double / Triple / Quad per night).
 // "Standard mode" was removed; every quotation uses the dynamic day mix.
-import { useEffect } from "react";
+// Additionally lets the admin pick Hotel / Room / Meal Plan per day early —
+// this writes into the same hotel_options[].selections used by Accommodation.
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useDB } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { effectivePaxForPricing, defaultDayMix, dayMixCoversPax } from "@/lib/wizard/calc";
-import type { DayRoomMix, PersonRoomType } from "@/lib/wizard/types";
+import type { DayRoomMix, PersonRoomType, HotelOption, OptionKey } from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
+
 
 export const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: number }[] = [
   { value: "single", label: "Single Room", shares: 0 },
