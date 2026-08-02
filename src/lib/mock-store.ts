@@ -721,6 +721,8 @@ function load(): DB {
       if (!parsed.entrance_cities) parsed.entrance_cities = [];
       if (!parsed.entrance_sites) parsed.entrance_sites = [];
       if (!parsed.activity_destinations) parsed.activity_destinations = [];
+      if (!parsed.restaurants) parsed.restaurants = [];
+
       if (!parsed.activities) parsed.activities = [];
       if (!parsed.guides || parsed.guides.length === 0) {
         const s = seed();
