@@ -804,6 +804,8 @@ function persist() {
 }
 
 function emit() {
+  // Re-identify the root object so useSyncExternalStore snapshots change.
+  if (_db) _db = { ..._db };
   listeners.forEach((l) => l());
 }
 
@@ -1238,18 +1240,19 @@ export const db = {
       id: uid(),
       created_at: now(),
     };
-    d.restaurants.push(r);
+    d.restaurants = [...(d.restaurants ?? []), r];
     persist(); emit();
     return r;
   },
   updateRestaurant(id: string, patch: Partial<Restaurant>) {
     const d = load();
-    const r = d.restaurants.find((x) => x.id === id);
-    if (!r) return;
-    Object.assign(r, patch);
+    const idx = (d.restaurants ?? []).findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    const next: Restaurant = { ...d.restaurants[idx], ...patch };
     if (patch.city_id) {
-      r.city_name = d.destination_cities.find((c) => c.id === patch.city_id)?.name ?? r.city_name;
+      next.city_name = d.destination_cities.find((c) => c.id === patch.city_id)?.name ?? next.city_name;
     }
+    d.restaurants = d.restaurants.map((x, i) => (i === idx ? next : x));
     persist(); emit();
   },
   deleteRestaurant(id: string) {
