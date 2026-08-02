@@ -174,6 +174,9 @@ export function Step15({ draft, set }: StepProps) {
               onChange={(patch) => updateOption(activeOption.key, patch)}
             />
           )}
+
+          <ExternalMealsEditor draft={draft} set={set} />
+
         </div>
       )}
 
