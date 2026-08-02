@@ -28,6 +28,8 @@ const SECTIONS: Item[][] = [
     { label: "Miscellaneous", to: "/miscellaneous", icon: ShoppingBag },
     { label: "Entrances", to: "/entrances", icon: Landmark },
     { label: "Guide", to: "/guide", icon: UserCheck },
+    { label: "Meals", to: "/meals", icon: UtensilsCrossed },
+
     { label: "Agents", to: "/agents", icon: Users },
     { label: "Activity & Experience", to: "/activities", icon: Compass },
   ],

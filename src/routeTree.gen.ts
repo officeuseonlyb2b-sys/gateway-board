@@ -19,6 +19,7 @@ import { Route as AuthenticatedRateSearchRouteImport } from './routes/_authentic
 import { Route as AuthenticatedQuotesRouteImport } from './routes/_authenticated/quotes'
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as AuthenticatedMiscellaneousRouteImport } from './routes/_authenticated/miscellaneous'
+import { Route as AuthenticatedMealsRouteImport } from './routes/_authenticated/meals'
 import { Route as AuthenticatedGuideRouteImport } from './routes/_authenticated/guide'
 import { Route as AuthenticatedEntrancesRouteImport } from './routes/_authenticated/entrances'
 import { Route as AuthenticatedDraftsRouteImport } from './routes/_authenticated/drafts'
@@ -81,6 +82,11 @@ const AuthenticatedMiscellaneousRoute =
     path: '/miscellaneous',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedMealsRoute = AuthenticatedMealsRouteImport.update({
+  id: '/meals',
+  path: '/meals',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedGuideRoute = AuthenticatedGuideRouteImport.update({
   id: '/guide',
   path: '/guide',
@@ -145,6 +151,7 @@ export interface FileRoutesByFullPath {
   '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
+  '/meals': typeof AuthenticatedMealsRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/quotes': typeof AuthenticatedQuotesRoute
@@ -166,6 +173,7 @@ export interface FileRoutesByTo {
   '/drafts': typeof AuthenticatedDraftsRoute
   '/entrances': typeof AuthenticatedEntrancesRoute
   '/guide': typeof AuthenticatedGuideRoute
+  '/meals': typeof AuthenticatedMealsRoute
   '/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
   '/quotes': typeof AuthenticatedQuotesRoute
@@ -189,6 +197,7 @@ export interface FileRoutesById {
   '/_authenticated/drafts': typeof AuthenticatedDraftsRoute
   '/_authenticated/entrances': typeof AuthenticatedEntrancesRoute
   '/_authenticated/guide': typeof AuthenticatedGuideRoute
+  '/_authenticated/meals': typeof AuthenticatedMealsRoute
   '/_authenticated/miscellaneous': typeof AuthenticatedMiscellaneousRoute
   '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
   '/_authenticated/quotes': typeof AuthenticatedQuotesRoute
@@ -212,6 +221,7 @@ export interface FileRouteTypes {
     | '/drafts'
     | '/entrances'
     | '/guide'
+    | '/meals'
     | '/miscellaneous'
     | '/notifications'
     | '/quotes'
@@ -233,6 +243,7 @@ export interface FileRouteTypes {
     | '/drafts'
     | '/entrances'
     | '/guide'
+    | '/meals'
     | '/miscellaneous'
     | '/notifications'
     | '/quotes'
@@ -255,6 +266,7 @@ export interface FileRouteTypes {
     | '/_authenticated/drafts'
     | '/_authenticated/entrances'
     | '/_authenticated/guide'
+    | '/_authenticated/meals'
     | '/_authenticated/miscellaneous'
     | '/_authenticated/notifications'
     | '/_authenticated/quotes'
@@ -344,6 +356,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMiscellaneousRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/meals': {
+      id: '/_authenticated/meals'
+      path: '/meals'
+      fullPath: '/meals'
+      preLoaderRoute: typeof AuthenticatedMealsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/guide': {
       id: '/_authenticated/guide'
       path: '/guide'
@@ -426,6 +445,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDraftsRoute: typeof AuthenticatedDraftsRoute
   AuthenticatedEntrancesRoute: typeof AuthenticatedEntrancesRoute
   AuthenticatedGuideRoute: typeof AuthenticatedGuideRoute
+  AuthenticatedMealsRoute: typeof AuthenticatedMealsRoute
   AuthenticatedMiscellaneousRoute: typeof AuthenticatedMiscellaneousRoute
   AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
   AuthenticatedQuotesRoute: typeof AuthenticatedQuotesRoute
@@ -446,6 +466,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDraftsRoute: AuthenticatedDraftsRoute,
   AuthenticatedEntrancesRoute: AuthenticatedEntrancesRoute,
   AuthenticatedGuideRoute: AuthenticatedGuideRoute,
+  AuthenticatedMealsRoute: AuthenticatedMealsRoute,
   AuthenticatedMiscellaneousRoute: AuthenticatedMiscellaneousRoute,
   AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
   AuthenticatedQuotesRoute: AuthenticatedQuotesRoute,
