@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { db, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
+import { db, useDB, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
 
 export type CwbMode = "amount" | "rule";
 
