@@ -172,7 +172,66 @@ export function StepAllocation({ draft, set }: StepProps) {
                   </div>
                 ))}
               </div>
+
+              {/* Optional early hotel / room / meal plan for this night */}
+              {(() => {
+                const sel = selFor(r.city_id);
+                const { pool, noQuad } = hotelsForDay(r.city_id, r.date, mix);
+                const rooms = sel?.hotel_id ? d.room_categories.filter((rc) => rc.hotel_id === sel.hotel_id) : [];
+                const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, r.date) : [];
+                return (
+                  <div className="pt-2 border-t space-y-2">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Hotel / Room / Meal Plan (optional — syncs with Accommodation Options {activeOption?.key ? `· Option ${activeOption.key}` : ""})
+                    </div>
+                    {noQuad ? (
+                      <p className="text-xs text-amber-700">
+                        No hotel in {cityName} offers a Quad room for this date. You can complete this night with Dynamic Costing in Accommodation Options.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs">Hotel</Label>
+                          <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel(r.city_id, { hotel_id: v, room_id: "" })}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
+                            <SelectContent>
+                              {pool.map((h) => (
+                                <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Room</Label>
+                          <Select value={sel?.room_id || ""} onValueChange={(v) => setSel(r.city_id, { room_id: v })} disabled={!sel?.hotel_id}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select room…" /></SelectTrigger>
+                            <SelectContent>
+                              {rooms.map((rc) => <SelectItem key={rc.id} value={rc.id}>{rc.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Meal Plan</Label>
+                          <Select
+                            value={sel?.meal_plan || "CP"}
+                            onValueChange={(v) => setSel(r.city_id, { meal_plan: v as MealPlan })}
+                            disabled={!sel?.room_id}
+                          >
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {(meals.length > 0 ? meals : MEAL_PLANS).map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
+
           );
         })}
       </Card>
