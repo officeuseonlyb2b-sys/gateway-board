@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Plane, ShoppingBag, Landmark, Compass, UserCheck,
   Calculator, FileText, BarChart2, Settings as SettingsIcon, LogOut, ChevronLeft, ChevronRight,
-  FolderClock, Bell, Users, MapPin,
+  FolderClock, Bell, Users, MapPin, UtensilsCrossed,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
