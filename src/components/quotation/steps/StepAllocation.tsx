@@ -65,6 +65,52 @@ export function StepAllocation({ draft, set }: StepProps) {
     set({ day_room_mix: next });
   };
 
+  // ---- Early Hotel / Room / Meal selection (same data as Accommodation step) ----
+  const options = draft.hotel_options ?? [];
+  const [optKey, setOptKey] = useState<OptionKey>(options[0]?.key ?? "A");
+  const activeOption = options.find((o) => o.key === optKey) ?? options[0];
+  const updateOption = (patch: Partial<HotelOption>) => {
+    if (!activeOption) return;
+    set({ hotel_options: options.map((o) => (o.key === activeOption.key ? { ...o, ...patch } : o)) });
+  };
+  const selFor = (cityId: string) => activeOption?.selections.find((s) => s.city_id === cityId);
+  const setSel = (cityId: string, patch: Partial<{ hotel_id: string; room_id: string; meal_plan: MealPlan }>) => {
+    if (!activeOption) return;
+    const others = activeOption.selections.filter((s) => s.city_id !== cityId);
+    const cur = selFor(cityId) ?? { city_id: cityId, hotel_id: "", room_id: "", meal_plan: "CP" as MealPlan };
+    const merged = { ...cur, ...patch };
+    if ("hotel_id" in patch) {
+      const h = d.hotels.find((x) => x.id === merged.hotel_id);
+      merged.is_fallback = !!h && !!activeOption.category && h.hotel_category !== activeOption.category;
+    }
+    updateOption({ selections: [...others, merged] });
+  };
+  const hotelHasQuad = (hotelId: string, dateISO: string) => {
+    const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
+    return roomIds.some((roomId) =>
+      MEAL_PLANS.some((m) => {
+        const plan = findRatePlan(d.rate_plans, roomId, m, dateISO);
+        return !!plan && (plan.quad_rate ?? 0) > 0;
+      }),
+    );
+  };
+  const hotelsForDay = (cityId: string, dateISO: string, mix: DayRoomMix) => {
+    const cityKey = (d.cities.find((c) => c.id === cityId)?.name || "").trim().toLowerCase();
+    const inCity = d.hotels.filter(
+      (h) => (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase() === cityKey,
+    );
+    const cat = (activeOption?.category || "").trim().toLowerCase();
+    let pool = cat ? inCity.filter((h) => h.hotel_category.trim().toLowerCase() === cat) : inCity;
+    if (pool.length === 0) pool = inCity;
+    if ((mix.quad ?? 0) > 0) {
+      const quadPool = pool.filter((h) => hotelHasQuad(h.id, dateISO));
+      if (quadPool.length > 0) return { pool: quadPool, noQuad: false };
+      return { pool: [], noQuad: true };
+    }
+    return { pool, noQuad: false };
+  };
+
+
   return (
     <div className="space-y-4">
       <div>
