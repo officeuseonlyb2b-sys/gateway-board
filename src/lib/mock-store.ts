@@ -1227,7 +1227,44 @@ export const db = {
     row.tour_id = tour_id;
     persist(); emit();
   },
+
+  // Restaurants (Meals module) — cities come from destination_cities.
+  addRestaurant(input: Omit<Restaurant, "id" | "created_at" | "city_name"> & { city_name?: string }): Restaurant {
+    const d = load();
+    const city = d.destination_cities.find((c) => c.id === input.city_id);
+    const r: Restaurant = {
+      ...input,
+      city_name: input.city_name ?? city?.name ?? "",
+      id: uid(),
+      created_at: now(),
+    };
+    d.restaurants.push(r);
+    persist(); emit();
+    return r;
+  },
+  updateRestaurant(id: string, patch: Partial<Restaurant>) {
+    const d = load();
+    const r = d.restaurants.find((x) => x.id === id);
+    if (!r) return;
+    Object.assign(r, patch);
+    if (patch.city_id) {
+      r.city_name = d.destination_cities.find((c) => c.id === patch.city_id)?.name ?? r.city_name;
+    }
+    persist(); emit();
+  },
+  deleteRestaurant(id: string) {
+    const d = load();
+    d.restaurants = d.restaurants.filter((x) => x.id !== id);
+    persist(); emit();
+  },
 };
+
+/** Restaurants available for a set of city names (routing cities / hotel city). */
+export function restaurantsForCityNames(all: Restaurant[], cityNames: string[]): Restaurant[] {
+  const keys = new Set(cityNames.map((n) => (n || "").trim().toLowerCase()).filter(Boolean));
+  return all.filter((r) => r.is_active !== false && keys.has((r.city_name || "").trim().toLowerCase()));
+}
+
 
 
 
