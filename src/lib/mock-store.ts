@@ -417,6 +417,8 @@ export interface DB {
   destination_cities: DestinationCity[];
   destination_tours: DestinationTour[];
   travel_options: TravelOption[];
+  restaurants: Restaurant[];
+
 }
 
 
