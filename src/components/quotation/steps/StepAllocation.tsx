@@ -3,7 +3,7 @@
 // "Standard mode" was removed; every quotation uses the dynamic day mix.
 // Additionally lets the admin pick Hotel / Room / Meal Plan per day early —
 // this writes into the same hotel_options[].selections used by Accommodation.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
-import { effectivePaxForPricing, defaultDayMix, dayMixCoversPax } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, defaultDayMix, dayMixCoversPax, computeDynamicOption } from "@/lib/wizard/calc";
+import { inr } from "@/lib/format";
 import type { DayRoomMix, PersonRoomType, HotelOption, OptionKey } from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
 
@@ -110,6 +111,13 @@ export function StepAllocation({ draft, set }: StepProps) {
     return { pool, noQuad: false };
   };
 
+
+  // Live room pricing for the current option (same maths as Accommodation Options).
+  const pricing = useMemo(
+    () => (activeOption ? computeDynamicOption(draft, activeOption, d) : { days: [], room_net: 0, room_gst: 0 }),
+    [draft, activeOption, d],
+  );
+  const priceByDay = new Map(pricing.days.map((row) => [row.day, row]));
 
   return (
     <div className="space-y-4">
@@ -245,6 +253,20 @@ export function StepAllocation({ draft, set }: StepProps) {
                         </div>
                       </div>
                     )}
+                    {(() => {
+                      const price = priceByDay.get(r.day);
+                      if (!price) return null;
+                      return (
+                        <div className="flex items-center justify-between text-xs pt-1">
+                          <span className="text-muted-foreground">Room cost for this night</span>
+                          <span className="font-semibold text-primary">
+                            {price.missing
+                              ? "No rate found"
+                              : `${inr(price.net + price.gst)} (net ${inr(price.net)} + GST ${inr(price.gst)})`}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -252,6 +274,17 @@ export function StepAllocation({ draft, set }: StepProps) {
 
           );
         })}
+        {overnight.length > 0 && (
+          <div className="flex items-center justify-between rounded-lg border-t-2 border-primary/30 bg-primary/5 px-3 py-2.5">
+            <span className="text-sm font-semibold">Total room cost (all nights)</span>
+            <span className="text-sm font-bold text-primary">
+              {inr(pricing.room_net + pricing.room_gst)}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                net {inr(pricing.room_net)} + GST {inr(pricing.room_gst)}
+              </span>
+            </span>
+          </div>
+        )}
       </Card>
     </div>
   );
