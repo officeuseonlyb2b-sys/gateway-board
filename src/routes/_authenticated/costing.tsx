@@ -62,6 +62,8 @@ import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { Step17 } from "@/components/quotation/steps/StepFinal";
 import { StepAllocation } from "@/components/quotation/steps/StepAllocation";
+import { StepMeals } from "@/components/quotation/steps/StepMeals";
+
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
@@ -72,15 +74,16 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // ============================================================
 // Step definitions
 // ============================================================
-const TOTAL_STEPS = 16;
+const TOTAL_STEPS = 17;
 const STEPS: { n: number; label: string }[] = [
   { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Trip Basics" },
   { n: 4, label: "Program" }, { n: 5, label: "Create Route" }, { n: 6, label: "Routing" },
   { n: 7, label: "Activities" }, { n: 8, label: "Entrances" }, { n: 9, label: "Guide" },
   { n: 10, label: "Misc" }, { n: 11, label: "Transport" }, { n: 12, label: "Room Allocation" },
-  { n: 13, label: "Hotels" }, { n: 14, label: "Costing" }, { n: 15, label: "Final" },
-  { n: 16, label: "Optionals" },
+  { n: 13, label: "Hotels" }, { n: 14, label: "Meals" }, { n: 15, label: "Costing" },
+  { n: 16, label: "Final" }, { n: 17, label: "Optionals" },
 ];
+
 
 
 /** Brochure departure ex-points (Ex-City list) */
@@ -411,9 +414,11 @@ function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<Quote
     case 11: return <Step10 draft={draft} set={set} />;
     case 12: return <StepAllocation draft={draft} set={set} />;
     case 13: return <Step15 draft={draft} set={set} />;
-    case 14: return <Step16 draft={draft} set={set} />;
-    case 15: return <Step17 draft={draft} set={set} />;
-    case 16: return <Step18 draft={draft} set={set} />;
+    case 14: return <StepMeals draft={draft} set={set} />;
+    case 15: return <Step16 draft={draft} set={set} />;
+    case 16: return <Step17 draft={draft} set={set} />;
+    case 17: return <Step18 draft={draft} set={set} />;
+
     default: return null;
   }
 }

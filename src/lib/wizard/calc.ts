@@ -74,7 +74,73 @@ export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
   return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
 }
 
-export function computeAddonsTotal(draft: QuoteDraft): number {
+// ------------------------------------------------------------
+// Meals step (Lunch / Dinner) — day-by-day, from hotel or restaurant.
+// ------------------------------------------------------------
+export interface MealDayRow {
+  day: number;
+  date: string;
+  city: string;
+  source: import("./types").MealSource;
+  label: string;
+  per_person: number;
+  pax: number;
+  total: number;
+}
+
+export function computeMealDays(
+  draft: QuoteDraft,
+  d: import("@/lib/mock-store").DB,
+): { rows: MealDayRow[]; total: number } {
+  const pax = Math.max(1, totalPax(draft));
+  const opt = draft.hotel_options?.[0];
+  const rows: MealDayRow[] = [];
+  let total = 0;
+
+  draft.routing.forEach((day, i) => {
+    const sel = draft.meal_selections?.[day.day];
+    if (!sel || sel.source === "none" || !sel.source) return;
+    const date = day.date || addDaysISO(draft.start_date, i);
+    const city = d.cities.find((c) => c.id === (day.city_id || day.to_city_id))?.name || "—";
+    let perPerson = 0;
+    let label = "";
+
+    if (sel.source === "hotel") {
+      const hs = opt?.selections.find((s) => s.city_id === (day.city_id || day.to_city_id));
+      const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date) : null;
+      const hotelName = hs ? d.hotels.find((h) => h.id === hs.hotel_id)?.name || "Hotel" : "Hotel";
+      const parts: string[] = [];
+      if (sel.lunch) { perPerson += plan?.lunch_rate || 0; parts.push("Lunch"); }
+      if (sel.dinner) { perPerson += plan?.dinner_rate || 0; parts.push("Dinner"); }
+      label = `${hotelName}${parts.length ? ` · ${parts.join(" + ")}` : ""}`;
+    } else {
+      const r = (d.restaurants ?? []).find((x) => x.id === sel.restaurant_id);
+      if (r) {
+        perPerson = r.price_per_person || 0;
+        label = `${r.name}${sel.meal_type ? ` · ${sel.meal_type}` : ""}`;
+      }
+    }
+
+    const rowTotal = perPerson * pax;
+    total += rowTotal;
+    rows.push({ day: day.day, date, city, source: sel.source, label, per_person: perPerson, pax, total: rowTotal });
+  });
+
+  return { rows, total };
+}
+
+export function computeMealsTotal(
+  draft: QuoteDraft,
+  d?: import("@/lib/mock-store").DB,
+): number {
+  if (!d) return 0;
+  return computeMealDays(draft, d).total;
+}
+
+export function computeAddonsTotal(
+  draft: QuoteDraft,
+  d?: import("@/lib/mock-store").DB,
+): number {
   const t = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
   const a = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
   const e = draft.entrances.reduce(
@@ -85,8 +151,10 @@ export function computeAddonsTotal(draft: QuoteDraft): number {
   const g = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);
   const m = draft.misc.reduce((s, l) => s + l.rate * l.qty, 0);
   const opt = draft.optionals.reduce((s, l) => s + l.rate * l.qty, 0);
-  return t + a + e + g + m + opt;
+  const meals = computeMealsTotal(draft, d);
+  return t + a + e + g + m + opt + meals;
 }
+
 
 export function totalPax(draft: QuoteDraft): number {
   return draft.adults + draft.ss + draft.children.length;
@@ -132,7 +200,7 @@ export function computeOption(
     trpGst += trp * gstRateFor(trp);
   });
 
-  const addons = computeAddonsTotal(draft);
+  const addons = computeAddonsTotal(draft, d);
   const mk = draft.markup_percent / 100;
 
   const subSgl = sglNet + sglGst + addons;
@@ -231,7 +299,7 @@ export function computePersonTotals(
   const allocs = opt.pax_allocations ?? [];
   if (!allocs.length) return [];
   const totPax = Math.max(1, totalPax(draft));
-  const addons = computeAddonsTotal(draft);
+  const addons = computeAddonsTotal(draft, d);
   const sharedPer = addons / totPax;
   const mk = (draft.markup_percent || 0) / 100;
 
@@ -457,7 +525,7 @@ export function computeGroupOption(
     roomGst += nightGst;
   });
 
-  const addons = computeAddonsTotal(draft);
+  const addons = computeAddonsTotal(draft, d);
   const mk = (draft.markup_percent || 0) / 100;
   const sub = roomNet + roomGst + addons;
   const markup = sub * mk;
