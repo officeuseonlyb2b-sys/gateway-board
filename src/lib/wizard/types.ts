@@ -187,6 +187,20 @@ export interface DayRateOverride {
   trp?: number;
   quad?: number;
 }
+
+// Meals step — per routing day, Lunch/Dinner sourced either from the hotel
+// selected in the Hotels step, or from a restaurant in the Meals module.
+export type MealSource = "none" | "hotel" | "restaurant";
+export interface MealDaySelection {
+  source: MealSource;
+  /** hotel source — which meals to include from the hotel's extra meal charges */
+  lunch?: boolean;
+  dinner?: boolean;
+  /** restaurant source */
+  restaurant_id?: string;
+  meal_type?: "Lunch" | "Dinner";
+}
+
 export interface HotelOption {
   key: OptionKey;
   label: string;
@@ -257,6 +271,9 @@ export interface QuoteDraft {
   allocation_mode?: AllocationMode;
   // Dynamic mode: per itinerary day number → room mix chosen manually
   day_room_mix?: Record<number, DayRoomMix>;
+  // Meals step — per routing day number → lunch/dinner source & selection
+  meal_selections?: Record<number, MealDaySelection>;
+
   // Guide step UI state (Step 12) — non-calc
   guide_language?: string;
   guide_reporting_cost?: number;

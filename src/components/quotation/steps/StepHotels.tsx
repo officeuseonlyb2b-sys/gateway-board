@@ -1,5 +1,4 @@
 // src/components/quotation/steps/StepHotels.tsx (Step15)
-// Simplified Lunch/Dinner columns: one total per day (meal rate × total passengers + GST).
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -175,8 +174,6 @@ export function Step15({ draft, set }: StepProps) {
             />
           )}
 
-          <ExternalMealsEditor draft={draft} set={set} />
-
         </div>
       )}
 
@@ -208,7 +205,7 @@ export function Step15({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// Accommodation Selection Table – simplified Lunch/Dinner columns
+// Accommodation Selection Table
 // ============================================================
 function AccommodationSelectionTable({
   draft,
@@ -231,8 +228,6 @@ function AccommodationSelectionTable({
 
   // Toggle states for extra columns
   const [showQuad, setShowQuad] = useState(false);
-  const [showLunch, setShowLunch] = useState(false);
-  const [showDinner, setShowDinner] = useState(false);
   // Day number whose rates are being edited in the combined per-day dialog.
   const [editingDay, setEditingDay] = useState<number | null>(null);
   // Quad-unavailable popup + dynamic costing flow state.
@@ -290,8 +285,6 @@ function AccommodationSelectionTable({
     totalDbl = 0,
     totalTrp = 0,
     totalQuad = 0;
-  let totalLunch = 0,
-    totalDinner = 0;
 
   const rows = overnightRouting.map((day) => {
     const cityName = d.cities.find((c) => c.id === day.city_id)?.name || day.to_city || "";
@@ -357,14 +350,6 @@ function AccommodationSelectionTable({
       trpTotal = 0,
       quadTotal = 0;
 
-    // Meal totals (single total for all passengers)
-    let lunchNet = 0,
-      lunchGst = 0,
-      lunchTotal = 0;
-    let dinnerNet = 0,
-      dinnerGst = 0,
-      dinnerTotal = 0;
-
     let offSeasonText = "";
     let hasRate = false;
 
@@ -373,8 +358,6 @@ function AccommodationSelectionTable({
       const sgl = rate.single_rate;
       const extra = rate.extra_bed_rate || 0;
       const quad = (rate.quad_rate ?? 0) > 0 ? (rate.quad_rate as number) : dbl + 2 * extra;
-      const lunchRate = rate.lunch_rate || 0;
-      const dinnerRate = rate.dinner_rate || 0;
       const gst = gstRateFor;
 
       // Room totals
@@ -390,16 +373,6 @@ function AccommodationSelectionTable({
       dblTotal = dblNet + dblGst;
       trpTotal = trpNet + trpGst;
       quadTotal = quadNet + quadGst;
-
-      // Meal totals: net = perPersonRate * totalPax, then gst = net * gstRate, total = net + gst
-      const lunchNetValue = lunchRate * totalPax;
-      const dinnerNetValue = dinnerRate * totalPax;
-      lunchNet = lunchNetValue;
-      lunchGst = lunchNetValue * gst(lunchNetValue);
-      lunchTotal = lunchNet + lunchGst;
-      dinnerNet = dinnerNetValue;
-      dinnerGst = dinnerNetValue * gst(dinnerNetValue);
-      dinnerTotal = dinnerNet + dinnerGst;
 
       hasRate = true;
 
@@ -418,8 +391,6 @@ function AccommodationSelectionTable({
       totalDbl += dblTotal;
       totalTrp += trpTotal;
       totalQuad += quadTotal;
-      if (showLunch) totalLunch += lunchTotal;
-      if (showDinner) totalDinner += dinnerTotal;
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
@@ -464,13 +435,6 @@ function AccommodationSelectionTable({
       trpGst,
       quadNet,
       quadGst,
-      // Meal totals (single total for all pax)
-      lunchTotal,
-      lunchNet,
-      lunchGst,
-      dinnerTotal,
-      dinnerNet,
-      dinnerGst,
       setSel,
       selectedHotelId: sel?.hotel_id || "",
       selectedRoomId: sel?.room_id || "",
@@ -530,22 +494,6 @@ function AccommodationSelectionTable({
           />
           <Label htmlFor="showQuad" className="text-xs cursor-pointer">Quad</Label>
         </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="showLunch"
-            checked={showLunch}
-            onCheckedChange={(checked) => setShowLunch(checked === true)}
-          />
-          <Label htmlFor="showLunch" className="text-xs cursor-pointer">Lunch</Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="showDinner"
-            checked={showDinner}
-            onCheckedChange={(checked) => setShowDinner(checked === true)}
-          />
-          <Label htmlFor="showDinner" className="text-xs cursor-pointer">Dinner</Label>
-        </div>
       </div>
 
       {anyNoHotels && (
@@ -580,19 +528,13 @@ function AccommodationSelectionTable({
                 {showQuad && (
                   <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Quad</th>
                 )}
-                {showLunch && (
-                  <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Lunch</th>
-                )}
-                {showDinner && (
-                  <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Dinner</th>
-                )}
                 <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Edit</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, idx) => {
                 const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
-                const extraCols = (showQuad ? 1 : 0) + (showLunch ? 1 : 0) + (showDinner ? 1 : 0);
+                const extraCols = showQuad ? 1 : 0;
                 if (r.noQuadHotel) {
                   // Quad required but unavailable in this city: keep the row blank
                   // and let the popup drive the admin into Dynamic Costing.
@@ -716,22 +658,6 @@ function AccommodationSelectionTable({
                         {renderRateCell(r.day, "dbl", r.dblTotal, r.dblNet, r.dblGst)}
                         {renderRateCell(r.day, "trp", r.trpTotal, r.trpNet, r.trpGst)}
                         {showQuad && renderRateCell(r.day, "quad", r.quadTotal, r.quadNet, r.quadGst)}
-                        {showLunch && (
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="font-semibold text-[#0F172A]">{inr(r.lunchTotal)}</div>
-                            <div className="text-[11px] text-[#64748B]">
-                              Net: {inr(r.lunchNet)} + GST {(gstRateFor(r.lunchNet) * 100).toFixed(0)}%: {inr(r.lunchGst)}
-                            </div>
-                          </td>
-                        )}
-                        {showDinner && (
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="font-semibold text-[#0F172A]">{inr(r.dinnerTotal)}</div>
-                            <div className="text-[11px] text-[#64748B]">
-                              Net: {inr(r.dinnerNet)} + GST {(gstRateFor(r.dinnerNet) * 100).toFixed(0)}%: {inr(r.dinnerGst)}
-                            </div>
-                          </td>
-                        )}
                       </>
                     ) : (
                       <>
@@ -739,8 +665,6 @@ function AccommodationSelectionTable({
                         <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>
                         <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>
                         {showQuad && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
-                        {showLunch && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
-                        {showDinner && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
                       </>
                     )}
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
@@ -772,12 +696,6 @@ function AccommodationSelectionTable({
                   <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalTrp)}</td>
                   {showQuad && (
                     <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalQuad)}</td>
-                  )}
-                  {showLunch && (
-                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalLunch)}</td>
-                  )}
-                  {showDinner && (
-                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalDinner)}</td>
                   )}
                   <td />
                 </tr>
@@ -1218,115 +1136,6 @@ export function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; o
           Add-ons (transport, guide, activities) will be split equally across all {rows.length} traveller{rows.length === 1 ? "" : "s"} in Steps 16 & 17.
         </div>
       </div>
-    </Card>
-  );
-}
-// ============================================================
-// Add Meal (outside hotel) — pulls restaurants from the Meals module,
-// filtered to the cities present in this quotation's routing.
-// Adds a simple per-person cost line into the quotation's misc costs.
-// ============================================================
-function ExternalMealsEditor({
-  draft,
-  set,
-}: {
-  draft: QuoteDraft;
-  set: (p: Partial<QuoteDraft>) => void;
-}) {
-  const d = useDB();
-  const [pick, setPick] = useState("");
-
-  const routeCityNames = useMemo(() => {
-    const names = new Set<string>();
-    draft.routing.forEach((r) => {
-      const ids = [r.city_id, r.to_city_id, ...(r.to_city_ids ?? [])].filter(Boolean) as string[];
-      ids.forEach((id) => {
-        const n = d.cities.find((c) => c.id === id)?.name;
-        if (n) names.add(n);
-      });
-      if (r.to_city) names.add(r.to_city);
-      if (r.from_city) names.add(r.from_city);
-    });
-    return Array.from(names);
-  }, [draft.routing, d.cities]);
-
-  const options = useMemo(
-    () => restaurantsForCityNames(d.restaurants ?? [], routeCityNames),
-    [d.restaurants, routeCityNames],
-  );
-
-  const pax = Math.max(1, draft.adults + draft.ss + draft.children.length);
-  const mealLines = draft.misc.filter((m) => m.custom_name?.startsWith("Meal (outside hotel)"));
-
-  const addMeal = (restaurantId: string) => {
-    const r = (d.restaurants ?? []).find((x) => x.id === restaurantId);
-    if (!r) return;
-    const line = {
-      id: Math.random().toString(36).slice(2, 10),
-      custom_name: `Meal (outside hotel) — ${r.name}, ${r.city_name}`,
-      qty: pax,
-      rate: r.price_per_person,
-      unit: "per_person",
-    };
-    set({ misc: [...draft.misc, line] });
-    setPick("");
-  };
-
-  const removeMeal = (id: string) => set({ misc: draft.misc.filter((m) => m.id !== id) });
-
-  return (
-    <Card className="p-4 space-y-3">
-      <div>
-        <div className="text-sm font-semibold">Add Meal (outside hotel)</div>
-        <div className="text-xs text-muted-foreground">
-          Pick a restaurant from the Meals module — only restaurants in this quotation's route cities are shown. Cost is added per person.
-        </div>
-      </div>
-
-      {routeCityNames.length === 0 && (
-        <p className="text-xs text-muted-foreground">Complete routing first to see restaurants.</p>
-      )}
-      {routeCityNames.length > 0 && options.length === 0 && (
-        <p className="text-xs text-amber-600">No restaurants added yet for these cities. Add them in the Meals module.</p>
-      )}
-
-      {options.length > 0 && (
-        <div className="flex items-end gap-2">
-          <div className="flex-1 max-w-md">
-            <Label className="text-xs">Restaurant</Label>
-            <Select value={pick} onValueChange={setPick}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select restaurant…" /></SelectTrigger>
-              <SelectContent>
-                {options.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.name} · {r.city_name} · {inr(r.price_per_person)}/pp
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button size="sm" disabled={!pick} onClick={() => addMeal(pick)}>
-            <Plus className="h-3.5 w-3.5" /> Add Meal
-          </Button>
-        </div>
-      )}
-
-      {mealLines.length > 0 && (
-        <div className="space-y-1">
-          {mealLines.map((m) => (
-            <div key={m.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-1.5">
-              <span>{m.custom_name}</span>
-              <span className="flex items-center gap-3">
-                <span className="text-muted-foreground text-xs">{inr(m.rate)} × {m.qty} pax</span>
-                <span className="font-medium">{inr(m.rate * m.qty)}</span>
-                <Button size="sm" variant="ghost" onClick={() => removeMeal(m.id)}>
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
     </Card>
   );
 }
