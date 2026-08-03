@@ -18,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { inr, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, restaurantsForCityNames, type MealPlan } from "@/lib/mock-store";
+import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
 import {
   applyRateOverride,
   gstRateFor,
