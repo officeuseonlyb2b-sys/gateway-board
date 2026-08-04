@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Calculator, Check, ChevronLeft, ChevronRight, ChevronDown, Save, Plus, Trash2,
   Building2, User, Users, FileText, Printer, FileDown, FileSpreadsheet,
-  Star, AlertCircle, X,
+  Star, AlertCircle, X, Clock, MapPin, CheckCircle2, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -72,18 +72,27 @@ export const Route = createFileRoute("/_authenticated/costing")({
 });
 
 // ============================================================
-// Step definitions
+// Step definitions — Step 5 (Create Route) removed → now 16 steps
 // ============================================================
-const TOTAL_STEPS = 17;
+const TOTAL_STEPS = 16;
 const STEPS: { n: number; label: string }[] = [
-  { n: 1, label: "Type" }, { n: 2, label: "Who" }, { n: 3, label: "Trip Basics" },
-  { n: 4, label: "Program" }, { n: 5, label: "Create Route" }, { n: 6, label: "Routing" },
-  { n: 7, label: "Activities" }, { n: 8, label: "Entrances" }, { n: 9, label: "Guide" },
-  { n: 10, label: "Misc" }, { n: 11, label: "Transport" }, { n: 12, label: "Room Allocation" },
-  { n: 13, label: "Hotels" }, { n: 14, label: "Meals" }, { n: 15, label: "Costing" },
-  { n: 16, label: "Final" }, { n: 17, label: "Optionals" },
+  { n: 1, label: "Type" },
+  { n: 2, label: "Who" },
+  { n: 3, label: "Trip Basics" },
+  { n: 4, label: "Program" },
+  { n: 5, label: "Routing" },
+  { n: 6, label: "Activities" },
+  { n: 7, label: "Entrances" },
+  { n: 8, label: "Guide" },
+  { n: 9, label: "Misc" },
+  { n: 10, label: "Transport" },
+  { n: 11, label: "Room Allocation" },
+  { n: 12, label: "Hotels" },
+  { n: 13, label: "Meals" },
+  { n: 14, label: "Costing" },
+  { n: 15, label: "Final" },
+  { n: 16, label: "Optionals" },
 ];
-
 
 
 /** Brochure departure ex-points (Ex-City list) */
@@ -139,10 +148,7 @@ function WizardPage() {
 
   useEffect(() => {
     if (initialized) return;
-    // Migrate any legacy single-slot draft into the new drafts array.
     migrateLegacyDraft();
-
-    // Resume a specific draft when navigated with ?id=...
     if (search.id) {
       const rec = getDraft(search.id);
       if (rec) {
@@ -152,16 +158,12 @@ function WizardPage() {
         return;
       }
     }
-
-    // Prefer the draft already read by useSyncExternalStore; fall back to a direct read.
     const existing = draft || loadDraft();
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
   }, [initialized, search.id, draft]);
 
-  // Publish active-wizard metadata whenever the draft moves — so other
-  // pages can show the "Continue Quotation" banner. Cleared on discard/save.
   useEffect(() => {
     if (!draft) return;
     if (draft.step <= 1) { setActiveWizard(null); return; }
@@ -209,7 +211,6 @@ function WizardPage() {
     const current = loadDraft() ?? draft;
     const next = { ...current, step: n };
     writeDraft(next);
-    // Auto-save when moving forward past identification.
     if (n > step && n >= 3) {
       persistToDrafts(next, { silent: true });
     }
@@ -355,7 +356,7 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
 }
 
 // ============================================================
-// Validation — matches the reordered 18-step flow
+// Validation — updated step numbers (step 5 = Routing, step 12 = Hotels)
 // ============================================================
 function validate(d: QuoteDraft, step: number): boolean {
   switch (step) {
@@ -366,7 +367,6 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
     case 3: {
-      // Combined Trip Basics — Pax + Type, Departure, Travel, Duration
       const paxOk = d.query_type === "Brochure"
         ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
         : (d.adults + d.ss + d.children.length) >= 1;
@@ -379,13 +379,12 @@ function validate(d: QuoteDraft, step: number): boolean {
       return !!d.start_date;
     }
     case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
-    case 5: return true; // Create-route gate — always allow (button generates rows)
-    case 6: {
+    case 5: { // Routing
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    case 13: {
+    case 12: { // Hotels (was case 13)
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
       const A = d.hotel_options.find((o) => o.key === "A");
@@ -397,7 +396,7 @@ function validate(d: QuoteDraft, step: number): boolean {
 }
 
 // ============================================================
-// Step router — maps slot → component
+// Step router — maps slot → component (renumbered)
 // ============================================================
 function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
   switch (Math.min(draft.step, TOTAL_STEPS)) {
@@ -405,20 +404,18 @@ function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<Quote
     case 2: return <Step2 draft={draft} set={set} />;
     case 3: return <StepTripBasics draft={draft} set={set} />;
     case 4: return <Step4 draft={draft} set={set} />;
-    case 5: return <StepCreateRoute draft={draft} set={set} />;
-    case 6: return <Step9 draft={draft} set={set} />;
-    case 7: return <Step11 draft={draft} set={set} />;
-    case 8: return <Step12 draft={draft} set={set} />;
-    case 9: return <Step13 draft={draft} set={set} />;
-    case 10: return <Step14 draft={draft} set={set} />;
-    case 11: return <Step10 draft={draft} set={set} />;
-    case 12: return <StepAllocation draft={draft} set={set} />;
-    case 13: return <Step15 draft={draft} set={set} />;
-    case 14: return <StepMeals draft={draft} set={set} />;
-    case 15: return <Step16 draft={draft} set={set} />;
-    case 16: return <Step17 draft={draft} set={set} />;
-    case 17: return <Step18 draft={draft} set={set} />;
-
+    case 5: return <Step9 draft={draft} set={set} />;          // Routing (was Step9)
+    case 6: return <Step11 draft={draft} set={set} />;         // Activities
+    case 7: return <Step12 draft={draft} set={set} />;         // Entrances
+    case 8: return <Step13 draft={draft} set={set} />;         // Guide
+    case 9: return <Step14 draft={draft} set={set} />;         // Misc
+    case 10: return <Step10 draft={draft} set={set} />;        // Transport
+    case 11: return <StepAllocation draft={draft} set={set} />;
+    case 12: return <Step15 draft={draft} set={set} />;        // Hotels
+    case 13: return <StepMeals draft={draft} set={set} />;
+    case 14: return <Step16 draft={draft} set={set} />;        // Costing
+    case 15: return <Step17 draft={draft} set={set} />;        // Final
+    case 16: return <Step18 draft={draft} set={set} />;        // Optionals
     default: return null;
   }
 }
@@ -470,7 +467,6 @@ function Step2({ draft, set }: StepProps) {
   const [editMode, setEditMode] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
-  // Keep draft in sync when the selected agent's master record changes.
   useEffect(() => {
     const id = draft.agent.agent_id;
     if (!id) return;
@@ -484,7 +480,6 @@ function Step2({ draft, set }: StepProps) {
     ) {
       set({ agent: { agent_id: a.id, name: a.name, agency: a.agency, phone: a.phone, email: a.email } });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents]);
 
   const applyAgent = (a: Agent) => {
@@ -510,7 +505,6 @@ function Step2({ draft, set }: StepProps) {
               <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
                 <Command
                   filter={(value, search) => {
-                    // value is the id; look up the agent and match against its searchable fields
                     const a = agents.find((x) => x.id === value);
                     if (!a) return 0;
                     const hay = [a.name, a.agency, a.phone, a.email, a.city].filter(Boolean).join(" ").toLowerCase();
@@ -534,14 +528,6 @@ function Step2({ draft, set }: StepProps) {
                 </Command>
               </PopoverContent>
             </Popover>
-            <Button variant="outline" onClick={() => { setEditingAgent(null); setFormOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" /> Add New
-            </Button>
-            {selected && (
-              <Button variant="outline" onClick={() => { setEditingAgent(selected); setFormOpen(true); }}>
-                Edit
-              </Button>
-            )}
           </div>
         </div>
 
@@ -613,39 +599,20 @@ function Step2({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// STEP 3 — Duration
+// STEP 4 — Program (updated with Program Name & Category)
 // ============================================================
-function Step3({ draft, set }: StepProps) {
-  return (
-    <div className="space-y-4 max-w-md">
-      <h2 className="text-lg font-semibold">Tour Duration</h2>
-      <div>
-        <Label>Number of Nights</Label>
-        <Input type="number" min={1} value={draft.nights}
-          onChange={(e) => set({ nights: Math.max(1, parseInt(e.target.value) || 1) })} />
-      </div>
-      <div>
-        <Label>Number of Days</Label>
-        <Input value={draft.nights + 1} readOnly className="bg-muted" />
-      </div>
-      <div className="p-4 bg-primary/5 rounded-lg text-center">
-        <div className="text-3xl font-bold text-primary">{draft.nights} Nights / {draft.nights + 1} Days</div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// STEP 4 — Program
+// STEP 4 — Program (updated with Program Name & Category and Beautiful Preview)
 // ============================================================
 function Step4({ draft, set }: StepProps) {
   const programs = usePrograms();
   const db = useDB();
 
+  // Find the currently selected program for the preview
+  const selectedProgram = programs.find((p) => p.id === draft.program_id);
+
   const applyProgram = (id: string) => {
     const p = programs.find((x) => x.id === id);
     if (!p) return;
-    // Resolve city names → city_ids via DB.
     const nameToId = (name: string | null) => {
       if (!name) return "";
       return db.cities.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id || "";
@@ -674,40 +641,169 @@ function Step4({ draft, set }: StepProps) {
     toast.success(`Auto-filled from "${p.name}" — all fields remain editable.`);
   };
 
+  const toggleCategory = (tag: string) => {
+    const has = draft.categories.includes(tag);
+    set({
+      categories: has ? draft.categories.filter((x) => x !== tag) : [...draft.categories, tag],
+    });
+  };
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Program Selection</h2>
       <RadioGroup value={draft.program_mode} onValueChange={(v) => set({ program_mode: v as "existing" | "new" })}>
-        <div className="flex items-start gap-3 p-4 border rounded-lg">
+        {/* ---- Existing Program ---- */}
+        <div className="flex items-start gap-3 p-4 border rounded-lg relative">
           <RadioGroupItem value="existing" id="pm-e" className="mt-1" />
           <div className="flex-1">
             <label htmlFor="pm-e" className="font-medium cursor-pointer">Pre-Select Existing Program</label>
             {draft.program_mode === "existing" && (
-              <>
+              <div className="mt-2 space-y-4">
                 <Select value={draft.program_id || ""} onValueChange={applyProgram}>
-                  <SelectTrigger className="mt-2"><SelectValue placeholder="Choose program…" /></SelectTrigger>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Choose program…" /></SelectTrigger>
                   <SelectContent>
                     {programs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.nights}N)</SelectItem>)}
                   </SelectContent>
                 </Select>
-                {draft.program_id && (
-                  <div className="mt-2 p-2 rounded bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
-                    ✓ Auto-filled from <b>{draft.program_name}</b> — routing, category, departure, travel mode & inclusions loaded. You can modify anything in later steps.
-                  </div>
+
+                {/* 🔥 ATTRACTIVE & BEAUTIFUL PROGRAM PREVIEW */}
+                {selectedProgram && (
+                  <Card className="border-accent/20 shadow-md overflow-hidden mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="p-4 border-b bg-muted/5 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold text-lg text-accent-foreground">{selectedProgram.name}</div>
+                        <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {selectedProgram.nights} Nights</span>
+                          {selectedProgram.departure_city && (
+                            <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> Ex-{selectedProgram.departure_city}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedProgram.categories?.map((cat) => (
+                          <Badge key={cat} variant="secondary" className="text-[10px] bg-accent/10 text-accent border-accent/20">
+                            {cat}
+                          </Badge>
+                        ))}
+                        {selectedProgram.travel_modes?.map((mode) => (
+                          <Badge key={mode} variant="outline" className="text-[10px] capitalize bg-background">
+                            {mode === "flight" ? "✈ Flight" : mode === "train" ? "🚂 Train" : mode === "car" ? "🚗 Car" : mode}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
+                      {/* Itinerary */}
+                      <div className="space-y-2">
+                        <div className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1 flex items-center gap-2">
+                          <FileText className="h-3.5 w-3.5" /> Day-by-Day Itinerary
+                        </div>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                          {selectedProgram.routing?.map((r, idx) => (
+                            <div key={idx} className="flex items-start gap-3 text-xs pb-1.5 border-b border-muted/30 last:border-0">
+                              <div className="font-mono font-bold text-muted-foreground w-12 shrink-0 pt-0.5">
+                                Day {r.day}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-foreground truncate">
+                                  {r.overnight_city || "Travel / Transfer"}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground line-clamp-1">
+                                  {r.program_text || "—"}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Inclusions & Exclusions */}
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1 flex items-center gap-2">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Inclusions
+                          </div>
+                          <ul className="text-xs text-muted-foreground space-y-0.5 list-none pl-0">
+                            {(selectedProgram.inclusions?.length ?? 0) > 0 ? (
+                              selectedProgram.inclusions?.map((inc, i) => (
+                                <li key={i} className="flex items-start gap-2">
+                                  <CheckCircle2 className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
+                                  <span>{inc}</span>
+                                </li>
+                              ))
+                            ) : (
+                              <li className="italic">No specific inclusions listed.</li>
+                            )}
+                          </ul>
+                        </div>
+                        <div>
+                          <div className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1 flex items-center gap-2">
+                            <XCircle className="h-3.5 w-3.5 text-destructive" /> Exclusions
+                          </div>
+                          <ul className="text-xs text-muted-foreground space-y-0.5 list-none pl-0">
+                            {(selectedProgram.exclusions?.length ?? 0) > 0 ? (
+                              selectedProgram.exclusions?.map((exc, i) => (
+                                <li key={i} className="flex items-start gap-2">
+                                  <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
+                                  <span>{exc}</span>
+                                </li>
+                              ))
+                            ) : (
+                              <li className="italic">No specific exclusions listed.</li>
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
                 )}
-              </>
+              </div>
             )}
           </div>
         </div>
+
+        {/* ---- New Custom Program ---- */}
         <div className="flex items-start gap-3 p-4 border rounded-lg">
           <RadioGroupItem value="new" id="pm-n" className="mt-1" />
           <div className="flex-1">
             <label htmlFor="pm-n" className="font-medium cursor-pointer">New Routing / Customized</label>
             {draft.program_mode === "new" && (
-              <Input placeholder="Program Name (e.g. Bhopal-Sanchi-Bhimbetka Heritage Tour)"
-                value={draft.program_name}
-                onChange={(e) => set({ program_name: e.target.value })}
-                className="mt-2" />
+              <div className="mt-2 space-y-4">
+                <div>
+                  <Label>Program Name</Label>
+                  <Input
+                    placeholder="e.g. Bhopal-Sanchi-Bhimbetka Heritage Tour"
+                    value={draft.program_name}
+                    onChange={(e) => set({ program_name: e.target.value })}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label>Program Category</Label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {CATEGORY_TAGS.map((tag) => {
+                      const on = draft.categories.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => toggleCategory(tag)}
+                          className={cn(
+                            "px-4 py-2 rounded-full border-2 text-sm font-medium transition-colors",
+                            on ? "bg-accent text-accent-foreground border-accent" : "bg-background border-border hover:border-primary/40"
+                          )}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Select one or more categories that best describe the tour.
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -717,203 +813,10 @@ function Step4({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// STEP 5 — Dates & Pax
-// ============================================================
-function Step5({ draft, set }: StepProps) {
-  const endDate = addDaysISO(draft.start_date, draft.nights);
-  const totPax = draft.adults + draft.ss + draft.children.length;
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold">Dates & Pax</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Tour Starting Date</Label><Input type="date" value={draft.start_date}
-          onChange={(e) => set({ start_date: e.target.value })} /></div>
-        <div><Label>Tour Ending Date</Label><Input value={fmtDateShort(endDate)} readOnly className="bg-muted" /></div>
-      </div>
-      <div className="p-3 bg-primary/5 rounded-lg text-sm text-primary font-medium">
-        {fmtDateShort(draft.start_date)} → {fmtDateShort(endDate)} ({draft.nights} Nights / {draft.nights + 1} Days)
-      </div>
-
-      <Card className="p-4 space-y-3">
-        <div className="text-sm font-semibold">Pax</div>
-        <PaxRow label="Adults" value={draft.adults} onChange={(v) => set({ adults: v })} />
-        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={(v) => set({ ss: v })} />
-        <PaxRow label="Children" value={draft.children.length} onChange={(v) => {
-          const cur = draft.children.length;
-          if (v > cur) set({ children: [...draft.children, ...Array(v - cur).fill({ age: 5 })] });
-          else set({ children: draft.children.slice(0, Math.max(0, v)) });
-        }} />
-        {draft.children.map((c, i) => (
-          <div key={i} className="pl-8 flex items-center gap-3">
-            <span className="text-sm">Child {i + 1}: Age</span>
-            <Input type="number" min={0} max={17} value={c.age} className="w-20"
-              onChange={(e) => {
-                const next = [...draft.children];
-                next[i] = { age: parseInt(e.target.value) || 0 };
-                set({ children: next });
-              }} />
-            <span className="text-xs text-muted-foreground">years</span>
-          </div>
-        ))}
-        <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
-        <div className="pt-2 border-t space-y-1">
-          <Label className="text-xs">Pax Range (used for tiered pricing)</Label>
-          <div className="flex flex-wrap gap-1">
-            {(["auto", "1-5", "6-14", "15-24", "25+"] as const).map((r) => {
-              const active = (draft.pax_range ?? "auto") === r;
-              return (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => set({ pax_range: r })}
-                  className={`px-2 py-1 text-[11px] rounded ${active ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-                >
-                  {r === "auto" ? "Auto (by headcount)" : r}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[10px] text-muted-foreground">
-            Auto uses the actual head count. Selecting a range forces guide, activity and misc slabs to that band.
-          </p>
-        </div>
-      </Card>
-    </div>
-  );
-}
-function PaxRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm">{label}</span>
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(Math.max(0, value - 1))}>−</Button>
-        <Input value={value} readOnly className="w-14 text-center" />
-        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(value + 1)}>+</Button>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// STEP 6 — Category
-// ============================================================
-function Step6({ draft, set }: StepProps) {
-  const toggle = (t: string) => {
-    const has = draft.categories.includes(t);
-    set({ categories: has ? draft.categories.filter((x) => x !== t) : [...draft.categories, t] });
-  };
-  return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Program Category</h2>
-      <p className="text-sm text-muted-foreground">Select one or more categories.</p>
-      <div className="flex flex-wrap gap-2">
-        {CATEGORY_TAGS.map((t) => {
-          const on = draft.categories.includes(t);
-          return (
-            <button key={t} onClick={() => toggle(t)}
-              className={cn(
-                "px-4 py-2 rounded-full border-2 text-sm font-medium transition-colors",
-                on ? "bg-accent text-accent-foreground border-accent" : "bg-background border-border hover:border-primary/40",
-              )}>
-              {t}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// STEP 7 — Departure
-// ============================================================
-function Step7({ draft, set }: StepProps) {
-  const d = useDB();
-  if (draft.query_type === "Brochure") {
-    return (
-      <div className="space-y-4 max-w-md">
-        <h2 className="text-lg font-semibold">Ex (Departure Point)</h2>
-        <Input placeholder="e.g. Ex-Bhopal, Ex-Delhi" value={draft.departure_city}
-          onChange={(e) => set({ departure_city: e.target.value })} />
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-4 max-w-md">
-      <h2 className="text-lg font-semibold">Guest Travelling From</h2>
-      <Select value={draft.departure_city} onValueChange={(v) => set({ departure_city: v })}>
-        <SelectTrigger><SelectValue placeholder="Select city…" /></SelectTrigger>
-        <SelectContent>
-          {d.cities.map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-// ============================================================
-// STEP 8 — Mode of Travel
-// ============================================================
-function Step8({ draft, set }: StepProps) {
-  const toggle = (id: string) => {
-    const has = draft.travel_modes.includes(id);
-    set({ travel_modes: has ? draft.travel_modes.filter((x) => x !== id) : [...draft.travel_modes, id] });
-  };
-  return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Mode of Travel</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {TRAVEL_MODES.map((m) => {
-          const on = draft.travel_modes.includes(m.id);
-          return (
-            <button key={m.id} onClick={() => toggle(m.id)}
-              className={cn(
-                "border-2 rounded-lg p-4 text-center transition",
-                on ? "border-accent bg-accent/10" : "border-border hover:border-primary/40",
-              )}>
-              <div className="text-2xl">{m.icon}</div>
-              <div className="text-sm font-medium mt-1">{m.label}</div>
-            </button>
-          );
-        })}
-      </div>
-      {draft.travel_modes.includes("flight") && (
-        <div>
-          <Label>Flight Class</Label>
-          <Select value={draft.travel_flight_class || ""} onValueChange={(v) => set({ travel_flight_class: v })}>
-            <SelectTrigger><SelectValue placeholder="Economy / Business" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Economy">Economy</SelectItem>
-              <SelectItem value="Premium Economy">Premium Economy</SelectItem>
-              <SelectItem value="Business">Business</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      {draft.travel_modes.includes("train") && (
-        <div>
-          <Label>Train Class</Label>
-          <Select value={draft.travel_train_class || ""} onValueChange={(v) => set({ travel_train_class: v })}>
-            <SelectTrigger><SelectValue placeholder="AC 1 / 2 / 3 / Sleeper" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="AC 1">AC 1</SelectItem>
-              <SelectItem value="AC 2">AC 2</SelectItem>
-              <SelectItem value="AC 3">AC 3</SelectItem>
-              <SelectItem value="Sleeper">Sleeper</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
-// STEP 9 — Routing
+// STEP 5 — Routing (was Step9) – unchanged, but included here
 // ============================================================
 function Step9({ draft, set }: StepProps) {
   const d = useDB();
-  // ensure routing length matches nights + 1
   useEffect(() => {
     const need = draft.nights + 1;
     if (draft.routing.length !== need) {
@@ -934,7 +837,6 @@ function Step9({ draft, set }: StepProps) {
       }
       writeDraft({ ...draft, routing: rows });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.nights, draft.start_date]);
 
   const updateRow = (i: number, patch: Partial<RoutingDay>) => {
@@ -944,7 +846,6 @@ function Step9({ draft, set }: StepProps) {
   };
 
   const OVERNIGHT_NONE = "__none__";
-
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   return (
@@ -974,257 +875,257 @@ function Step9({ draft, set }: StepProps) {
                 ? new Date(r.date).toLocaleDateString("en-US", { weekday: "long" })
                 : `Day ${r.day}`;
               return (
-                <>
-                <tr key={i} className="bg-white border-b border-[#E5E7EB] align-middle" style={{ minHeight: 56 }}>
-                  <td className="p-2 font-semibold align-middle">Day {r.day}</td>
-                  <td className="p-2 align-middle">
-                    <Input className="h-8 text-xs" value={r.day_name || weekday}
-                      onChange={(e) => updateRow(i, { day_name: e.target.value })} />
-                  </td>
-                  <td className="p-2 text-xs align-middle">
-                    {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
-                  </td>
-                  <td className="p-2 text-xs align-middle">
-                    {(() => {
-                      const currentName = r.from_city ?? fromDefault;
-                      const currentId = d.cities.find((c) => c.name === currentName)?.id || "";
-                      return (
+                <React.Fragment key={i}>
+                  <tr className="bg-white border-b border-[#E5E7EB] align-middle" style={{ minHeight: 56 }}>
+                    <td className="p-2 font-semibold align-middle">Day {r.day}</td>
+                    <td className="p-2 align-middle">
+                      <Input className="h-8 text-xs" value={r.day_name || weekday}
+                        onChange={(e) => updateRow(i, { day_name: e.target.value })} />
+                    </td>
+                    <td className="p-2 text-xs align-middle">
+                      {draft.has_dates === false ? <span className="text-muted-foreground">—</span> : fmtDateShort(r.date)}
+                    </td>
+                    <td className="p-2 text-xs align-middle">
+                      {(() => {
+                        const currentName = r.from_city ?? fromDefault;
+                        const currentId = d.cities.find((c) => c.name === currentName)?.id || "";
+                        return (
+                          <Select
+                            value={currentId || "__custom__"}
+                            onValueChange={(v) => {
+                              if (v === "__custom__") return;
+                              const nm = d.cities.find((c) => c.id === v)?.name || "";
+                              updateRow(i, { from_city: nm });
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={currentName || "From city…"}>{currentName || "Select"}</SelectValue></SelectTrigger>
+                            <SelectContent>
+                              {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        );
+                      })()}
+                    </td>
+
+                    <td className="p-2 align-middle w-[200px]">
+                      {(() => {
+                        const selected = (r.to_city_ids && r.to_city_ids.length > 0)
+                          ? r.to_city_ids
+                          : (r.to_city_id ? [r.to_city_id] : []);
+                        const available = d.cities.filter((c) => !selected.includes(c.id));
+                        const addCity = (v: string) => {
+                          const next = Array.from(new Set([...selected, v]));
+                          const primary = next[0];
+                          const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
+                          updateRow(i, {
+                            to_city_ids: next,
+                            to_city_id: primary,
+                            to_city: cityName(primary),
+                            ...(isLast
+                              ? { city_id: primary }
+                              : shouldMirror
+                                ? { city_id: primary }
+                                : {}),
+                          });
+                        };
+                        const removeCity = (id: string) => {
+                          const next = selected.filter((x) => x !== id);
+                          const primary = next[0] || "";
+                          updateRow(i, {
+                            to_city_ids: next,
+                            to_city_id: primary,
+                            to_city: cityName(primary),
+                            ...(isLast ? { city_id: primary } : {}),
+                          });
+                        };
+                        return (
+                          <>
+                            {selected.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-1">
+                                {selected.map((id) => (
+                                  <span key={id}
+                                    className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30">
+                                    {cityName(id) || id}
+                                    <button type="button" onClick={() => removeCity(id)}
+                                      className="hover:text-destructive" title="Remove">
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <Select
+                              value=""
+                              onValueChange={addCity}
+                            >
+                              <SelectTrigger className="h-8">
+                                <SelectValue placeholder={
+                                  selected.length === 0
+                                    ? (isLast ? "Departure city…" : "Add destination…")
+                                    : "+ Add another destination"
+                                } />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {available.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            {isLast && selected.length === 0 && (
+                              <Input className="h-7 text-[11px] mt-1"
+                                placeholder="or type departure city"
+                                value={r.to_city && !r.to_city_id ? r.to_city : ""}
+                                onChange={(e) => updateRow(i, { to_city: e.target.value })} />
+                            )}
+                          </>
+                        );
+                      })()}
+                    </td>
+
+                    <td className="p-2 align-middle w-[120px]">
+                      {isLast ? (
+                        <span className="text-[11px] text-muted-foreground italic">Departure</span>
+                      ) : (
                         <Select
-                          value={currentId || "__custom__"}
-                          onValueChange={(v) => {
-                            if (v === "__custom__") return;
-                            const nm = d.cities.find((c) => c.id === v)?.name || "";
-                            updateRow(i, { from_city: nm });
-                          }}
+                          value={r.city_id || OVERNIGHT_NONE}
+                          onValueChange={(v) => updateRow(i, { city_id: v === OVERNIGHT_NONE ? "" : v })}
                         >
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={currentName || "From city…"}>{currentName || "Select"}</SelectValue></SelectTrigger>
+                          <SelectTrigger className="h-8"><SelectValue placeholder="Stay city…" /></SelectTrigger>
                           <SelectContent>
+                            <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
                             {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                      );
-                    })()}
-                  </td>
-
-                  <td className="p-2 align-middle w-[200px]">
-                    {(() => {
-                      const selected = (r.to_city_ids && r.to_city_ids.length > 0)
-                        ? r.to_city_ids
-                        : (r.to_city_id ? [r.to_city_id] : []);
-                      const available = d.cities.filter((c) => !selected.includes(c.id));
-                      const addCity = (v: string) => {
-                        const next = Array.from(new Set([...selected, v]));
-                        const primary = next[0];
-                        const shouldMirror = !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
-                        updateRow(i, {
-                          to_city_ids: next,
-                          to_city_id: primary,
-                          to_city: cityName(primary),
-                          ...(isLast
-                            ? { city_id: primary }
-                            : shouldMirror
-                              ? { city_id: primary }
-                              : {}),
-                        });
-                      };
-                      const removeCity = (id: string) => {
-                        const next = selected.filter((x) => x !== id);
-                        const primary = next[0] || "";
-                        updateRow(i, {
-                          to_city_ids: next,
-                          to_city_id: primary,
-                          to_city: cityName(primary),
-                          ...(isLast ? { city_id: primary } : {}),
-                        });
-                      };
-                      return (
-                        <>
-                          {selected.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-1">
-                              {selected.map((id) => (
-                                <span key={id}
-                                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30">
-                                  {cityName(id) || id}
-                                  <button type="button" onClick={() => removeCity(id)}
-                                    className="hover:text-destructive" title="Remove">
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          <Select
-                            value=""
-                            onValueChange={addCity}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue placeholder={
-                                selected.length === 0
-                                  ? (isLast ? "Departure city…" : "Add destination…")
-                                  : "+ Add another destination"
-                              } />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {available.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          {isLast && selected.length === 0 && (
-                            <Input className="h-7 text-[11px] mt-1"
-                              placeholder="or type departure city"
-                              value={r.to_city && !r.to_city_id ? r.to_city : ""}
-                              onChange={(e) => updateRow(i, { to_city: e.target.value })} />
-                          )}
-                        </>
-                      );
-                    })()}
-                  </td>
-
-                  <td className="p-2 align-middle w-[120px]">
-                    {isLast ? (
-                      <span className="text-[11px] text-muted-foreground italic">Departure</span>
-                    ) : (
-                      <Select
-                        value={r.city_id || OVERNIGHT_NONE}
-                        onValueChange={(v) => updateRow(i, { city_id: v === OVERNIGHT_NONE ? "" : v })}
-                      >
-                        <SelectTrigger className="h-8"><SelectValue placeholder="Stay city…" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
-                          {d.cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </td>
-                  <td className="p-2 align-middle w-[110px]">
-                    <div className="flex gap-1">
-                      <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"], transport_expanded: true })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Road">Road</SelectItem>
-                          <SelectItem value="Train">Train</SelectItem>
-                          <SelectItem value="Flight">Flight</SelectItem>
-                          <SelectItem value="Self Drive">Self Drive</SelectItem>
-                          <SelectItem value="Helicopter">Helicopter</SelectItem>
-                          <SelectItem value="Boat">Boat</SelectItem>
-                          <SelectItem value="Walk">Walk</SelectItem>
-                          <SelectItem value="Custom">Custom</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {r.travel_by && (
-                        <button
-                          type="button"
-                          title={r.transport_expanded ? "Hide details" : "Show details"}
-                          onClick={() => updateRow(i, { transport_expanded: !r.transport_expanded })}
-                          className="h-8 w-8 shrink-0 flex items-center justify-center rounded-md border hover:bg-muted"
-                        >
-                          {r.transport_expanded
-                            ? <ChevronDown className="h-3.5 w-3.5" />
-                            : <ChevronRight className="h-3.5 w-3.5" />}
-                        </button>
                       )}
-                    </div>
-                  </td>
-                  <td className="p-2 align-middle w-[240px]">
-                    {(() => {
-                      const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
-                        ? r.to_city_ids
-                        : (r.to_city_id ? [r.to_city_id] : []);
-                      const fromName = r.from_city ?? fromDefault;
-                      const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
-                      const allIds: string[] = [];
-                      if (fromId) allIds.push(fromId);
-                      toIds.forEach((id) => { if (id && !allIds.includes(id)) allIds.push(id); });
-                      if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
-                      const getTourOptionsForCity = (routingCityId: string) => {
-                        if (!routingCityId) return [] as Array<{ id: string; title: string }>;
-                        const cityNameRaw = d.cities.find((c) => c.id === routingCityId)?.name ?? "";
-                        const normalized = cityNameRaw.trim().toLowerCase();
-                        if (!normalized) return [] as Array<{ id: string; title: string }>;
-                        const destCity = d.destination_cities.find(
-                          (c) => c.name.trim().toLowerCase() === normalized
-                        );
-                        if (!destCity) return [] as Array<{ id: string; title: string }>;
-                        return [...d.destination_tours]
-                          .filter((tour) => tour.city_id === destCity.id)
-                          .sort((a, b) => a.title.localeCompare(b.title));
-                      };
-                      const selectedMap = r.tours_selected_by_city || {};
-                      const toggle = (cid: string, title: string) => {
-                        const list = selectedMap[cid] || [];
-                        const next = list.includes(title)
-                          ? list.filter((t) => t !== title)
-                          : [...list, title];
-                        updateRow(i, {
-                          tours_selected_by_city: { ...selectedMap, [cid]: next },
-                        });
-                      };
-                      if (allIds.length === 0) {
-                        return <span className="text-[11px] text-muted-foreground italic">Set FROM/TO first</span>;
-                      }
-                      return (
-                        <div className="flex flex-col gap-1">
-                          {allIds.map((cid) => {
-                            const cityTours = getTourOptionsForCity(cid);
-                            const selected = selectedMap[cid] || [];
-                            const nm = cityName(cid) || cid;
-                            return (
-                              <Popover key={cid}>
-                                <PopoverTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="h-7 w-full flex items-center gap-1.5 text-[11px] px-2 border rounded hover:bg-muted text-left"
-                                  >
-                                    <span className="text-muted-foreground truncate w-[64px]" title={nm}>{nm}</span>
-                                    <span className="flex-1 truncate">
-                                      {selected.length === 0
-                                        ? (cityTours.length ? "Select tours…" : "No tours")
-                                        : `${selected.length} tour${selected.length === 1 ? "" : "s"}`}
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 shrink-0" />
-                                  </button>
-                                </PopoverTrigger>
-                                <PopoverContent align="start" className="w-72 p-2 max-h-72 overflow-auto">
-                                  {cityTours.length === 0 ? (
-                                    <div className="text-xs text-muted-foreground p-2">
-                                      No tours defined for {nm}.
-                                    </div>
-                                  ) : cityTours.map((tour) => (
-                                    <label key={tour.id} className="flex items-start gap-2 py-1 px-1 rounded hover:bg-muted cursor-pointer text-xs">
-                                      <Checkbox
-                                        checked={selected.includes(tour.title)}
-                                        onCheckedChange={() => toggle(cid, tour.title)}
-                                        className="mt-0.5"
-                                      />
-                                      <span className="flex-1">{tour.title}</span>
-                                    </label>
-                                  ))}
-                                </PopoverContent>
-                              </Popover>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-                  </td>
-                </tr>
-
-                {r.travel_by && r.transport_expanded && (
-                  <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
-                    <td colSpan={8} className="p-3">
-                      <DayTransportPanel
-                        mode={r.travel_by}
-                        details={r.transport_details || {}}
-                        onChange={(patch) =>
-                          updateRow(i, { transport_details: { ...(r.transport_details || {}), ...patch } })
+                    </td>
+                    <td className="p-2 align-middle w-[110px]">
+                      <div className="flex gap-1">
+                        <Select value={r.travel_by || ""} onValueChange={(v) => updateRow(i, { travel_by: v as RoutingDay["travel_by"], transport_expanded: true })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mode" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Road">Road</SelectItem>
+                            <SelectItem value="Train">Train</SelectItem>
+                            <SelectItem value="Flight">Flight</SelectItem>
+                            <SelectItem value="Self Drive">Self Drive</SelectItem>
+                            <SelectItem value="Helicopter">Helicopter</SelectItem>
+                            <SelectItem value="Boat">Boat</SelectItem>
+                            <SelectItem value="Walk">Walk</SelectItem>
+                            <SelectItem value="Custom">Custom</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {r.travel_by && (
+                          <button
+                            type="button"
+                            title={r.transport_expanded ? "Hide details" : "Show details"}
+                            onClick={() => updateRow(i, { transport_expanded: !r.transport_expanded })}
+                            className="h-8 w-8 shrink-0 flex items-center justify-center rounded-md border hover:bg-muted"
+                          >
+                            {r.transport_expanded
+                              ? <ChevronDown className="h-3.5 w-3.5" />
+                              : <ChevronRight className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-2 align-middle w-[240px]">
+                      {(() => {
+                        const toIds = (r.to_city_ids && r.to_city_ids.length > 0)
+                          ? r.to_city_ids
+                          : (r.to_city_id ? [r.to_city_id] : []);
+                        const fromName = r.from_city ?? fromDefault;
+                        const fromId = d.cities.find((c) => c.name === fromName)?.id || "";
+                        const allIds: string[] = [];
+                        if (fromId) allIds.push(fromId);
+                        toIds.forEach((id) => { if (id && !allIds.includes(id)) allIds.push(id); });
+                        if (r.city_id && !allIds.includes(r.city_id)) allIds.push(r.city_id);
+                        const getTourOptionsForCity = (routingCityId: string) => {
+                          if (!routingCityId) return [] as Array<{ id: string; title: string }>;
+                          const cityNameRaw = d.cities.find((c) => c.id === routingCityId)?.name ?? "";
+                          const normalized = cityNameRaw.trim().toLowerCase();
+                          if (!normalized) return [] as Array<{ id: string; title: string }>;
+                          const destCity = d.destination_cities.find(
+                            (c) => c.name.trim().toLowerCase() === normalized
+                          );
+                          if (!destCity) return [] as Array<{ id: string; title: string }>;
+                          return [...d.destination_tours]
+                            .filter((tour) => tour.city_id === destCity.id)
+                            .sort((a, b) => a.title.localeCompare(b.title));
+                        };
+                        const selectedMap = r.tours_selected_by_city || {};
+                        const toggle = (cid: string, title: string) => {
+                          const list = selectedMap[cid] || [];
+                          const next = list.includes(title)
+                            ? list.filter((t) => t !== title)
+                            : [...list, title];
+                          updateRow(i, {
+                            tours_selected_by_city: { ...selectedMap, [cid]: next },
+                          });
+                        };
+                        if (allIds.length === 0) {
+                          return <span className="text-[11px] text-muted-foreground italic">Set FROM/TO first</span>;
                         }
-                        defaultFrom={r.from_city ?? fromDefault}
-                        defaultTo={cityName(r.to_city_id || r.city_id) || r.to_city || ""}
-                        defaultDate={r.date}
-                      />
+                        return (
+                          <div className="flex flex-col gap-1">
+                            {allIds.map((cid) => {
+                              const cityTours = getTourOptionsForCity(cid);
+                              const selected = selectedMap[cid] || [];
+                              const nm = cityName(cid) || cid;
+                              return (
+                                <Popover key={cid}>
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="h-7 w-full flex items-center gap-1.5 text-[11px] px-2 border rounded hover:bg-muted text-left"
+                                    >
+                                      <span className="text-muted-foreground truncate w-[64px]" title={nm}>{nm}</span>
+                                      <span className="flex-1 truncate">
+                                        {selected.length === 0
+                                          ? (cityTours.length ? "Select tours…" : "No tours")
+                                          : `${selected.length} tour${selected.length === 1 ? "" : "s"}`}
+                                      </span>
+                                      <ChevronDown className="h-3 w-3 shrink-0" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent align="start" className="w-72 p-2 max-h-72 overflow-auto">
+                                    {cityTours.length === 0 ? (
+                                      <div className="text-xs text-muted-foreground p-2">
+                                        No tours defined for {nm}.
+                                      </div>
+                                    ) : cityTours.map((tour) => (
+                                      <label key={tour.id} className="flex items-start gap-2 py-1 px-1 rounded hover:bg-muted cursor-pointer text-xs">
+                                        <Checkbox
+                                          checked={selected.includes(tour.title)}
+                                          onCheckedChange={() => toggle(cid, tour.title)}
+                                          className="mt-0.5"
+                                        />
+                                        <span className="flex-1">{tour.title}</span>
+                                      </label>
+                                    ))}
+                                  </PopoverContent>
+                                </Popover>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
-                )}
-                </>
+
+                  {r.travel_by && r.transport_expanded && (
+                    <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
+                      <td colSpan={8} className="p-3">
+                        <DayTransportPanel
+                          mode={r.travel_by}
+                          details={r.transport_details || {}}
+                          onChange={(patch) =>
+                            updateRow(i, { transport_details: { ...(r.transport_details || {}), ...patch } })
+                          }
+                          defaultFrom={r.from_city ?? fromDefault}
+                          defaultTo={cityName(r.to_city_id || r.city_id) || r.to_city || ""}
+                          defaultDate={r.date}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -1234,8 +1135,7 @@ function Step9({ draft, set }: StepProps) {
   );
 }
 
-// Per-day transport details panel — mirrors the fields available in Step 10 (Transport)
-// per travel mode. Purely UI/data capture; does not affect costing.
+// Per-day transport details panel – unchanged
 function DayTransportPanel({
   mode, details, onChange, defaultFrom, defaultTo, defaultDate,
 }: {
@@ -1314,7 +1214,7 @@ function DayTransportPanel({
     );
   }
 
-  // Helicopter / Boat / Walk / Custom — lightweight capture
+  // Helicopter / Boat / Walk / Custom
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <F label="From"><Input className={cls} value={details.from_city ?? defaultFrom ?? ""} onChange={(e) => onChange({ from_city: e.target.value })} /></F>
@@ -1328,117 +1228,13 @@ function DayTransportPanel({
   );
 }
 
-
 // ============================================================
-// STEP 10 — Transport
-// ============================================================
-
-
-// ============================================================
-// Shared helpers for day-wise sync (Steps 11/12/13)
-// ============================================================
-
-
-
-// ============================================================
-// STEP 10 (Activities) — day-wise, city-grouped, with per-pax breakdown
-// ============================================================
-
-
-
-
-// ============================================================
-// STEP 11 — Entrances (day-wise table) & STEP 12 — Guide (day-wise table)
-// ============================================================
-
-type CityRef = { id: string; name: string };
-
-
-
-
-// ============================================================
-// STEP 12 — Guide (day-wise table)
-// ============================================================
-
-
-
-// ============================================================
-// STEP 14 — Miscellaneous
-// ============================================================
-
-
-
-// ============================================================
-// STEP 15 — Accommodation
-// ============================================================
-const WIZARD_HOTEL_CATEGORIES = [
-  "Home Stay",
-  "Excellent Budget",
-  "3 Star",
-  "3 Star Deluxe",
-  "4 Star",
-  "4 Star Superior",
-  "5 Star",
-  "5 Star Deluxe",
-  "Heritage",
-  "Experiential",
-] as const;
-
-
-// ------------------------------------------------------------
-// Per-option Inclusions & Exclusions editor (Step 15).
-// ------------------------------------------------------------
-
-
-// ------------------------------------------------------------
-// Live cost preview under each Option tab in Step 15.
-// Read-only rooms-only (Net, GST, Net+GST) with per-day warnings.
-// ------------------------------------------------------------
-
-// ============================================================
-// Step 15 — Per-Person Room Allocation
-// ============================================================
-const PERSON_ROOM_TYPES: { value: PersonRoomType; label: string; shares: number }[] = [
-  { value: "single", label: "Single Room", shares: 0 },
-  { value: "double", label: "Double Sharing", shares: 1 },
-  { value: "triple", label: "Triple Sharing", shares: 2 },
-  { value: "extra_bed", label: "Extra Bed", shares: 0 },
-  { value: "cwb", label: "Child With Bed", shares: 0 },
-];
-
-
-// ------------------------------------------------------------
-// Live per-person cost preview (Step 15).
-// ------------------------------------------------------------
-
-
-
-// ============================================================
-// STEP 16 — Costing Variations
+// STEP 6–15 are imported from separate files; we include them here
+// (already imported as Step10, Step11, etc.)
 // ============================================================
 
 // ============================================================
-// Group Costing block (Step 16, GIT tours)
-// ============================================================
-
-
-
-// ============================================================
-// STEP 17 — Final Costing
-// ============================================================
-
-// ------------------------------------------------------------
-// Shared per-person summary card used in Step 16 & 17.
-// Only renders options that use custom room allocation.
-// ------------------------------------------------------------
-
-
-
-
-
-
-// ============================================================
-// STEP 18 — Optionals + Actions
+// STEP 18 — Optionals + Actions (unchanged)
 // ============================================================
 function Step18({ draft, set }: StepProps) {
   const d = useDB();
@@ -1460,7 +1256,6 @@ function Step18({ draft, set }: StepProps) {
   function buildSavedQuote(): SavedQuote {
     const recIdx = Math.max(0, draft.hotel_options.findIndex((o) => o.key === draft.recommended_option));
     const rec = totals[recIdx] || totals[0];
-    // Build minimal legacy itinerary from recommended option
     const recOpt = draft.hotel_options[recIdx];
     const itinerary = draft.routing.map((day) => {
       const sel = recOpt?.selections.find((s) => s.city_id === day.city_id);
@@ -1734,7 +1529,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
 }
 
 // ============================================================
-// NEW STEP 3 — Pax + Tour Type (FIT/GIT auto for B2B/B2C, pax-range for Brochure)
+// NEW STEP 3 — Pax + Tour Type (StepTripBasics and sub-steps)
 // ============================================================
 function StepTripBasics({ draft, set }: StepProps) {
   return (
@@ -1747,15 +1542,15 @@ function StepTripBasics({ draft, set }: StepProps) {
   );
 }
 
+// Fixed StepPaxType with local state for min/max and mutual exclusivity
 function StepPaxType({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
   const totPax = draft.adults + draft.ss + draft.children.length;
   const pricingPax = effectivePaxForPricing(draft);
   const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure ? "Brochure" : pricingPax <= 5 ? "FIT" : "GIT";
-  // Persist auto-detected tour type into the draft (once when it changes)
+
   useEffect(() => {
     if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTourType]);
 
   if (isBrochure) {
@@ -1779,6 +1574,57 @@ function StepPaxType({ draft, set }: StepProps) {
     );
   }
 
+  // B2B / B2C – custom range override with local state
+  const currentOverride = draft.pax_range;
+  const isAuto = currentOverride === "auto" || !currentOverride;
+
+  const [localMin, setLocalMin] = useState<string>("");
+  const [localMax, setLocalMax] = useState<string>("");
+
+  useEffect(() => {
+    if (isAuto) {
+      setLocalMin("");
+      setLocalMax("");
+    } else {
+      const [min, max] = currentOverride.split("-").map(Number);
+      setLocalMin(min?.toString() ?? "");
+      setLocalMax(max?.toString() ?? "");
+    }
+  }, [currentOverride, isAuto]);
+
+  const applyRangeOverride = () => {
+    const min = parseInt(localMin);
+    const max = parseInt(localMax);
+    if (!isNaN(min) && !isNaN(max) && min <= max) {
+      set({ pax_range: `${min}-${max}` as any });
+    } else {
+      set({ pax_range: "auto" });
+    }
+  };
+
+  const resetToAuto = () => {
+    set({ pax_range: "auto" });
+  };
+
+  const isRangeActive = !isAuto;
+
+  const handleAdultsChange = (v: number) => {
+    set({ adults: v, pax_range: "auto" });
+  };
+  const handleSSChange = (v: number) => {
+    set({ ss: v, pax_range: "auto" });
+  };
+  const handleChildrenChange = (v: number) => {
+    const cur = draft.children.length;
+    let newChildren;
+    if (v > cur) {
+      newChildren = [...draft.children, ...Array(v - cur).fill({ age: 5 })];
+    } else {
+      newChildren = draft.children.slice(0, Math.max(0, v));
+    }
+    set({ children: newChildren, pax_range: "auto" });
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold">Pax & Tour Type</h2>
@@ -1793,47 +1639,72 @@ function StepPaxType({ draft, set }: StepProps) {
       </div>
       <Card className="p-4 space-y-3 max-w-lg">
         <div className="text-sm font-semibold">Pax</div>
-        <PaxRow label="Adults" value={draft.adults} onChange={(v) => set({ adults: v })} />
-        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={(v) => set({ ss: v })} />
-        <PaxRow label="Children" value={draft.children.length} onChange={(v) => {
-          const cur = draft.children.length;
-          if (v > cur) set({ children: [...draft.children, ...Array(v - cur).fill({ age: 5 })] });
-          else set({ children: draft.children.slice(0, Math.max(0, v)) });
-        }} />
+        <PaxRow label="Adults" value={draft.adults} onChange={handleAdultsChange} disabled={isRangeActive} />
+        <PaxRow label="SS (Senior/Special)" value={draft.ss} onChange={handleSSChange} disabled={isRangeActive} />
+        <PaxRow label="Children" value={draft.children.length} onChange={handleChildrenChange} disabled={isRangeActive} />
         {draft.children.map((c, i) => (
           <div key={i} className="pl-8 flex items-center gap-3">
             <span className="text-sm">Child {i + 1}: Age</span>
-            <Input type="number" min={0} max={17} value={c.age} className="w-20"
+            <Input
+              type="number"
+              min={0}
+              max={17}
+              value={c.age}
+              className="w-20"
+              disabled={isRangeActive}
               onChange={(e) => {
                 const next = [...draft.children];
                 next[i] = { age: parseInt(e.target.value) || 0 };
-                set({ children: next });
-              }} />
+                set({ children: next, pax_range: "auto" });
+              }}
+            />
             <span className="text-xs text-muted-foreground">years</span>
           </div>
         ))}
         <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
-        <div className="pt-2 border-t space-y-1">
+
+        <div className="pt-2 border-t space-y-3">
           <Label className="text-xs">Pax Range (pricing slab override)</Label>
-          <Select
-            value={draft.pax_range ?? "auto"}
-            onValueChange={(v) => set({ pax_range: v as QuoteDraft["pax_range"] })}
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto — actual pax ({totPax || 1})</SelectItem>
-              <SelectItem value="1-5">1–5 pax</SelectItem>
-              <SelectItem value="1-9">1–9 pax</SelectItem>
-              <SelectItem value="5-14">5–14 pax</SelectItem>
-              <SelectItem value="6-14">6–14 pax (9 to 14)</SelectItem>
-              <SelectItem value="15-24">15–24 pax</SelectItem>
-              <SelectItem value="25+">25+ pax</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <Label className="text-xs">Min</Label>
+              <Input
+                type="number"
+                min={1}
+                className="w-20"
+                value={localMin}
+                onChange={(e) => setLocalMin(e.target.value)}
+                placeholder="min"
+                onBlur={applyRangeOverride}
+              />
+            </div>
+            <span className="text-muted-foreground">–</span>
+            <div className="flex items-center gap-1">
+              <Label className="text-xs">Max</Label>
+              <Input
+                type="number"
+                min={1}
+                className="w-20"
+                value={localMax}
+                onChange={(e) => setLocalMax(e.target.value)}
+                placeholder="max"
+                onBlur={applyRangeOverride}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={resetToAuto}
+            >
+              Use actual pax
+            </Button>
+          </div>
           <div className="text-[10px] text-muted-foreground">
-            Current pricing pax: {pricingPax}. Guide, activities, misc, transport filters and group hotel room mixes use this slab.
+            Current pricing pax: {pricingPax}.
+            {!isAuto && <span> Using override range <strong>{currentOverride}</strong>.</span>}
+            {isAuto && <span> Using actual pax.</span>}
+            Guide, activities, misc, transport filters and group hotel room mixes use this slab.
           </div>
         </div>
       </Card>
@@ -1842,7 +1713,7 @@ function StepPaxType({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// NEW STEP 4 — Departure (Brochure restricted list)
+// StepDeparture (Brochure restricted list)
 // ============================================================
 function StepDeparture({ draft, set }: StepProps) {
   if (draft.query_type === "Brochure") {
@@ -1877,7 +1748,6 @@ function CityCombobox({ value, onChange }: { value: string; onChange: (v: string
   const d = useDB();
   const [open, setOpen] = useState(false);
 
-  // Merge db cities + curated Indian list, dedupe (case-insensitive), sort.
   const indian = useMemo(() => {
     const set = new Map<string, string>();
     [...INDIAN_CITIES, ...d.cities.map((c) => c.name)].forEach((n) => {
@@ -1924,8 +1794,7 @@ function CityCombobox({ value, onChange }: { value: string; onChange: (v: string
 }
 
 // ============================================================
-// NEW STEP 5 — Mode of Travel (with flight/train arrival + departure details)
-// Brochure: skipped
+// StepTravel – Mode of Travel
 // ============================================================
 function StepTravel({ draft, set }: StepProps) {
   const toggle = (id: string) => {
@@ -2064,7 +1933,7 @@ function StepTravel({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// NEW STEP 6 — Duration (with/without dates for B2B/B2C, validity for Brochure)
+// StepDuration – Duration
 // ============================================================
 function StepDuration({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
@@ -2129,65 +1998,31 @@ function StepDuration({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// NEW STEP 8 — Create Route (Gate) — summary + Generate Routing button
+// Helper: PaxRow with disabled prop
 // ============================================================
-function StepCreateRoute({ draft, set }: StepProps) {
-  const totPax = draft.adults + draft.ss + draft.children.length;
-  const generate = () => {
-    const need = draft.nights + 1;
-    const rows: RoutingDay[] = [];
-    for (let i = 0; i < need; i++) {
-      const existing = draft.routing[i];
-      rows.push(existing || {
-        day: i + 1,
-        date: draft.has_dates === false ? "" : addDaysISO(draft.start_date, i),
-        day_name: `Day ${i + 1}`,
-        city_id: "",
-        program: "",
-        program_mode: "text",
-        overnight: i < need - 1,
-      });
-      rows[i].day = i + 1;
-      rows[i].date = draft.has_dates === false ? "" : addDaysISO(draft.start_date, i);
-      rows[i].day_name = `Day ${i + 1}`;
-      rows[i].overnight = i < need - 1;
-    }
-    set({ routing: rows });
-    toast.success(`Generated ${need} day rows.`);
-  };
-
+function PaxRow({ label, value, onChange, disabled = false }: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
   return (
-    <div className="space-y-6 max-w-2xl">
-      <h2 className="text-lg font-semibold">Ready to Create Routing</h2>
-      <Card className="p-5 space-y-3">
-        <div className="text-sm font-semibold text-muted-foreground uppercase">Summary</div>
-        <div className="grid grid-cols-2 gap-y-2 text-sm">
-          <div className="text-muted-foreground">Query</div><div className="font-medium">{draft.query_type}</div>
-          <div className="text-muted-foreground">Tour Type</div><div className="font-medium">{draft.tour_type || "—"}</div>
-          <div className="text-muted-foreground">Pax</div>
-          <div className="font-medium">
-            {draft.query_type === "Brochure"
-              ? `${draft.pax_min}-${draft.pax_max}`
-              : `${totPax} (${draft.adults}A + ${draft.ss}SS + ${draft.children.length}C)`}
-          </div>
-          <div className="text-muted-foreground">Duration</div><div className="font-medium">{draft.nights}N / {draft.nights + 1}D</div>
-          <div className="text-muted-foreground">Departure</div><div className="font-medium">{draft.departure_city || "—"}</div>
-          <div className="text-muted-foreground">Travel</div>
-          <div className="font-medium">{draft.query_type === "Brochure" ? "N/A" : (draft.travel_modes.join(", ") || "—")}</div>
-          <div className="text-muted-foreground">Program</div><div className="font-medium">{draft.program_name || "—"}</div>
-        </div>
-      </Card>
-      <div className="flex items-center gap-3">
-        <Button onClick={generate} size="lg">
-          <Plus className="h-4 w-4 mr-1.5" /> Generate Routing ({draft.nights + 1} days)
+    <div className="flex items-center justify-between">
+      <span className="text-sm">{label}</span>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(Math.max(0, value - 1))} disabled={disabled}>
+          −
         </Button>
-        {draft.routing.length > 0 && (
-          <span className="text-sm text-emerald-700">✓ {draft.routing.length} day rows ready</span>
-        )}
+        <Input value={value} readOnly className="w-14 text-center" disabled={disabled} />
+        <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => onChange(value + 1)} disabled={disabled}>
+          +
+        </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Click Generate to build the day-by-day routing table, then continue to Step 9 to fill in cities and programs.
-      </p>
     </div>
   );
 }
+
+// ============================================================
+// Note: Step10, Step11, Step12, Step13, Step14, Step15, Step16, Step17
+// are imported from separate files and used in StepContent.
+// ============================================================

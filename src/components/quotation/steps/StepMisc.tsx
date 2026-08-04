@@ -181,20 +181,7 @@ export function Step14({ draft, set }: StepProps) {
       )}
 
       {/* Custom items — same Card pattern as Activities */}
-      <Card className="p-3 space-y-2">
-        <div className="text-xs font-semibold uppercase text-muted-foreground">Custom / Other Miscellaneous</div>
-        <CustomAdd label="Custom Misc Item" onAdd={(name, rate) => set({
-          misc: [...draft.misc, { id: uid(), custom_name: name, qty: 1, rate, unit: "fixed" }],
-        })} />
-        {draft.misc.filter((x) => x.custom_name).map((x) => (
-          <div key={x.id} className="text-xs flex justify-between p-2 bg-muted/30 rounded">
-            <span>{x.custom_name} × {x.qty}</span>
-            <span>{inr(x.qty * x.rate)}
-              <button className="ml-2 text-destructive" onClick={() => set({ misc: draft.misc.filter((y) => y.id !== x.id) })}>×</button>
-            </span>
-          </div>
-        ))}
-      </Card>
+      
     </div>
   );
 }

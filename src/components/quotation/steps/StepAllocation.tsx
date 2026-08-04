@@ -145,7 +145,6 @@ export function StepAllocation({ draft, set }: StepProps) {
         </div>
       )}
 
-
       <Card className="p-4 border-primary/20 space-y-3">
         <div className="flex items-center justify-between">
           <div>
@@ -167,115 +166,123 @@ export function StepAllocation({ draft, set }: StepProps) {
           const mix = mixFor(r.day);
           const covered = dayMixCoversPax(mix);
           const cityName = d.cities.find((c) => c.id === r.city_id)?.name || "—";
+          const sel = selFor(r.city_id);
+          const { pool, noQuad } = hotelsForDay(r.city_id, r.date, mix);
+          
+          // Calculate room types and meal options
+          const rooms = sel?.hotel_id ? d.room_categories.filter((rc) => rc.hotel_id === sel.hotel_id) : [];
+          const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, r.date) : [];
+          const plan = sel?.room_id && sel?.meal_plan ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, r.date) : null;
+          
           return (
-            <div key={r.day} className="rounded-lg border p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium">
+            <div key={r.day} className="rounded-lg border p-4 space-y-3">
+              {/* Day Header + Selects RIGHT NEXT TO the Title */}
+              <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                <div className="text-sm font-semibold whitespace-nowrap flex items-center gap-2">
                   Day {r.day} · {cityName}
-                  {r.date ? <span className="text-xs text-muted-foreground ml-2">{r.date}</span> : null}
+                  {r.date ? <span className="text-xs text-muted-foreground font-normal">{r.date}</span> : null}
                 </div>
-                <div className={cn("text-xs", covered === paxCount ? "text-emerald-700" : "text-amber-700")}>
+                
+                {/* Selects Group (Inline with Title) */}
+                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[200px]">
+                  <div className="flex-1 min-w-[120px]">
+                    <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel(r.city_id, { hotel_id: v, room_id: "" })}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Hotel" /></SelectTrigger>
+                      <SelectContent>
+                        {pool.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1 min-w-[120px]">
+                    <Select value={sel?.room_id || ""} onValueChange={(v) => setSel(r.city_id, { room_id: v })} disabled={!sel?.hotel_id}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Room" /></SelectTrigger>
+                      <SelectContent>
+                        {rooms.map((rc) => <SelectItem key={rc.id} value={rc.id}>{rc.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1 min-w-[100px]">
+                    <Select value={sel?.meal_plan || "CP"} onValueChange={(v) => setSel(r.city_id, { meal_plan: v as MealPlan })} disabled={!sel?.room_id}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(meals.length > 0 ? meals : MEAL_PLANS).map((m) => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className={cn("text-xs font-medium ml-auto whitespace-nowrap", covered === paxCount ? "text-emerald-700" : "text-amber-700")}>
                   {covered} / {paxCount} pax covered
                 </div>
               </div>
+              
+              {noQuad && (
+                <p className="text-xs text-amber-700 -mt-1">
+                  No hotel in {cityName} offers a Quad room for this date. You can complete this night with Dynamic Costing in Accommodation Options.
+                </p>
+              )}
+
+              {/* Quick Presets */}
               <div className="flex flex-wrap gap-1.5">
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyDayPreset(r.day, "single")}>All Single</Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyDayPreset(r.day, "double")}>All Double</Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyDayPreset(r.day, "triple")}>All Triple</Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyDayPreset(r.day, "quad")}>All Quad</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "single")}>All Single</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "double")}>All Double</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "triple")}>All Triple</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "quad")}>All Quad</Button>
               </div>
+
+              {/* Room Inputs WITH PRICE UNDERNEATH */}
               <div className="grid grid-cols-4 gap-2">
                 {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[]).map((k) => (
-                  <div key={k}>
-                    <Label className="text-xs capitalize">{k} rooms</Label>
+                  <div key={k} className="flex flex-col gap-1">
+                    <Label className="text-[10px] uppercase text-muted-foreground">{k} rooms</Label>
                     <Input
                       type="number"
                       min={0}
-                      className="h-8"
+                      className="h-8 text-xs"
                       value={mix[k]}
                       onChange={(e) => setMix(r.day, { [k]: Math.max(0, parseInt(e.target.value) || 0) } as Partial<DayRoomMix>)}
                     />
+                    {/* Price shown exactly underneath the room type input */}
+                    {plan && (
+                      <div className="text-[10px] text-right font-medium text-primary mt-0.5">
+                        {(() => {
+                          const roomRateKey = `${k}_rate` as keyof typeof plan;
+                          const rateVal = plan[roomRateKey];
+                          if (typeof rateVal === 'number' && rateVal > 0) {
+                            return `₹${rateVal}/night`;
+                          }
+                          return <span className="text-muted-foreground text-[9px]">—</span>;
+                        })()}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
 
-              {/* Optional early hotel / room / meal plan for this night */}
+              {/* Day Subtotals */}
               {(() => {
-                const sel = selFor(r.city_id);
-                const { pool, noQuad } = hotelsForDay(r.city_id, r.date, mix);
-                const rooms = sel?.hotel_id ? d.room_categories.filter((rc) => rc.hotel_id === sel.hotel_id) : [];
-                const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, r.date) : [];
+                const price = priceByDay.get(r.day);
+                if (!price) return null;
                 return (
-                  <div className="pt-2 border-t space-y-2">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Hotel / Room / Meal Plan (optional — syncs with Accommodation Options {activeOption?.key ? `· Option ${activeOption.key}` : ""})
-                    </div>
-                    {noQuad ? (
-                      <p className="text-xs text-amber-700">
-                        No hotel in {cityName} offers a Quad room for this date. You can complete this night with Dynamic Costing in Accommodation Options.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <Label className="text-xs">Hotel</Label>
-                          <Select value={sel?.hotel_id || ""} onValueChange={(v) => setSel(r.city_id, { hotel_id: v, room_id: "" })}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
-                            <SelectContent>
-                              {pool.map((h) => (
-                                <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs">Room</Label>
-                          <Select value={sel?.room_id || ""} onValueChange={(v) => setSel(r.city_id, { room_id: v })} disabled={!sel?.hotel_id}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select room…" /></SelectTrigger>
-                            <SelectContent>
-                              {rooms.map((rc) => <SelectItem key={rc.id} value={rc.id}>{rc.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs">Meal Plan</Label>
-                          <Select
-                            value={sel?.meal_plan || "CP"}
-                            onValueChange={(v) => setSel(r.city_id, { meal_plan: v as MealPlan })}
-                            disabled={!sel?.room_id}
-                          >
-                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {(meals.length > 0 ? meals : MEAL_PLANS).map((m) => (
-                                <SelectItem key={m} value={m}>{m}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-                    {(() => {
-                      const price = priceByDay.get(r.day);
-                      if (!price) return null;
-                      return (
-                        <div className="flex items-center justify-between text-xs pt-1">
-                          <span className="text-muted-foreground">Room cost for this night</span>
-                          <span className="font-semibold text-primary">
-                            {price.missing
-                              ? "No rate found"
-                              : `${inr(price.net + price.gst)} (net ${inr(price.net)} + GST ${inr(price.gst)})`}
-                          </span>
-                        </div>
-                      );
-                    })()}
+                  <div className="flex items-center justify-between text-xs pt-2 border-t border-dashed border-muted-foreground/20">
+                    <span className="text-muted-foreground">Subtotal for this night</span>
+                    <span className="font-semibold text-primary">
+                      {price.missing
+                        ? "Rate not found"
+                        : `${inr(price.net + price.gst)} (net ${inr(price.net)} + GST ${inr(price.gst)})`}
+                    </span>
                   </div>
                 );
               })()}
             </div>
-
           );
         })}
+        
+        {/* Grand Total Footer */}
         {overnight.length > 0 && (
-          <div className="flex items-center justify-between rounded-lg border-t-2 border-primary/30 bg-primary/5 px-3 py-2.5">
+          <div className="flex items-center justify-between rounded-lg border-t-2 border-primary/30 bg-primary/5 px-3 py-2.5 mt-2">
             <span className="text-sm font-semibold">Total room cost (all nights)</span>
             <span className="text-sm font-bold text-primary">
               {inr(pricing.room_net + pricing.room_gst)}

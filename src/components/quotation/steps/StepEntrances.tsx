@@ -1,6 +1,3 @@
-// Step 11 — Entrances. Day-per-row table with Indian/Foreigner/Student columns.
-// Shows column-wise grand totals, per-person rates, and pax calculation breakdown.
-
 import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,7 +41,7 @@ export function Step12({ draft, set }: StepProps) {
     }
   };
 
-  // Keep rates and pax in sync with master data
+  // Keep rates and pax in sync with master data (pax sync kept for data integrity, but we won't use pax in visuals)
   useEffect(() => {
     let dirty = false;
     const next = draft.entrances.map((l) => {
@@ -111,10 +108,10 @@ export function Step12({ draft, set }: StepProps) {
     return out;
   };
 
-  // Compute all day totals for grand column totals
-  let grandIndian = 0;
-  let grandForeign = 0;
-  let grandStudent = 0;
+  // ✅ TOTALS ARE NOW EXCLUSIVELY PER-PERSON (NO PAX MULTIPLICATION)
+  let totalIndianRate = 0; // sum of per‑person Indian rates across all selected sites
+  let totalForeignRate = 0;
+  let totalStudentRate = 0;
 
   const dayData = draft.routing.map((r, ri) => {
     const fromDefault =
@@ -126,24 +123,41 @@ export function Step12({ draft, set }: StepProps) {
     }`;
     const rows = dayRows(r, ri);
 
-    let indianTot = 0;
-    let foreignTot = 0;
-    let studentTot = 0;
-
-    rows.forEach((row) => {
+    const siteRows = rows.map((row) => {
       const line = findLine(row.site.id, r.day);
-      if (line) {
-        indianTot += line.indian_pax * line.indian_rate;
-        foreignTot += line.foreign_pax * line.foreign_rate;
-        studentTot += (line.student_pax ?? 0) * (line.student_rate ?? 0);
+      const on = !!line;
+      
+      // Per‑person rates only (NO PAX MULTIPLIER USED)
+      const indianRate = on ? line.indian_rate : 0;
+      const foreignRate = on ? line.foreign_rate : 0;
+      const studentRate = on ? (line.student_rate ?? 0) : 0;
+      
+      return {
+        ...row,
+        on,
+        indianRate,
+        foreignRate,
+        studentRate,
+        line,
+      };
+    });
+
+    // Update per-person totals globally
+    siteRows.forEach((s) => {
+      if (s.on) {
+        totalIndianRate += s.indianRate;
+        totalForeignRate += s.foreignRate;
+        totalStudentRate += s.studentRate;
       }
     });
 
-    grandIndian += indianTot;
-    grandForeign += foreignTot;
-    grandStudent += studentTot;
-
-    return { r, ri, routeLabel, rows, indianTot, foreignTot, studentTot };
+    return {
+      r,
+      ri,
+      routeLabel,
+      siteRows,
+      hasRows: siteRows.length > 0,
+    };
   });
 
   return (
@@ -163,248 +177,174 @@ export function Step12({ draft, set }: StepProps) {
             <tr className="border-b border-[#E5E7EB]">
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[170px]">Route</th>
-              <th className="text-left p-2">City + Tour</th>
+              <th className="text-left p-2 min-w-[200px]">City + Tour</th>
               <th className="text-right p-2 w-[180px]">Indian</th>
               <th className="text-right p-2 w-[180px]">Foreigner</th>
               <th className="text-right p-2 w-[180px]">Student</th>
             </tr>
           </thead>
           <tbody>
-            {dayData.map(
-              ({ r, ri, routeLabel, rows, indianTot, foreignTot, studentTot }) => {
-                if (rows.length === 0) {
-                  return (
-                    <tr key={ri} className="border-b border-[#E5E7EB]">
-                      <td className="p-2 font-semibold align-top">
-                        Day {r.day}
-                      </td>
-                      <td className="p-2 text-muted-foreground align-top text-[11px]">
-                        {routeLabel}
-                      </td>
-                      <td
-                        colSpan={4} // remaining: City+Tour, Indian, Foreigner, Student
-                        className="p-2 text-muted-foreground italic"
-                      >
-                        No entrance sites for this day's cities.
-                      </td>
-                    </tr>
-                  );
-                }
-
+            {dayData.map((day, dayIdx) => {
+              if (!day.hasRows) {
                 return (
-                  <tr
-                    key={ri}
-                    className="border-b border-[#E5E7EB] align-top bg-white"
-                  >
-                    {/* Day */}
-                    <td className="p-2 font-semibold">Day {r.day}</td>
-
-                    {/* Route */}
-                    <td className="p-2 text-muted-foreground text-[11px]">
-                      {routeLabel}
+                  <tr key={dayIdx} className="border-b border-[#E5E7EB]">
+                    <td className="p-2 font-semibold align-top">
+                      Day {day.r.day}
                     </td>
-
-                    {/* City + Tour with rate info */}
-                    <td className="p-2">
-                      <div className="space-y-3">
-                        {rows.map((row) => {
-                          const line = findLine(row.site.id, r.day);
-                          const on = !!line;
-                          const iRate = row.site.indian_rate;
-                          const fRate = row.site.foreigner_rate;
-                          const sRate = row.site.student_rate ?? 0;
-
-                          return (
-                            <label
-                              key={row.site.id}
-                              className="flex items-start gap-2 cursor-pointer group"
-                            >
-                              <Checkbox
-                                checked={on}
-                                onCheckedChange={() =>
-                                  toggle(row.site, r.day)
-                                }
-                                className="mt-0.5"
-                              />
-                              <span className="min-w-0">
-                                {/* City label */}
-                                <span className="text-[10px] text-muted-foreground">
-                                  {row.city.name}
-                                </span>
-                                {/* Tour name */}
-                                <span className="block text-sm font-medium truncate">
-                                  {row.site.site_name}
-                                </span>
-                                {/* Per-person rates */}
-                                <span className="block text-[10px] text-muted-foreground mt-0.5 space-x-2">
-                                  <span
-                                    className={cn(
-                                      iRate > 0
-                                        ? "text-green-700"
-                                        : "text-amber-500"
-                                    )}
-                                  >
-                                    Indian:{" "}
-                                    {iRate > 0
-                                      ? `${inr(iRate)}/pp`
-                                      : "not set"}
-                                  </span>
-                                  <span className="text-muted-foreground">
-                                    ·
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      fRate > 0
-                                        ? "text-blue-700"
-                                        : "text-amber-500"
-                                    )}
-                                  >
-                                    Foreigner:{" "}
-                                    {fRate > 0
-                                      ? `${inr(fRate)}/pp`
-                                      : "not set"}
-                                  </span>
-                                  <span className="text-muted-foreground">
-                                    ·
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      sRate > 0
-                                        ? "text-purple-700"
-                                        : "text-muted-foreground"
-                                    )}
-                                  >
-                                    Student:{" "}
-                                    {sRate > 0
-                                      ? `${inr(sRate)}/pp`
-                                      : "—"}
-                                  </span>
-                                </span>
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
+                    <td className="p-2 text-muted-foreground align-top text-[11px]">
+                      {day.routeLabel}
                     </td>
-
-                    {/* Indian total with pax breakdown */}
-                    <td className="p-2 text-right tabular-nums">
-                      <div className="font-semibold text-green-700">
-                        {inr(indianTot)}
-                      </div>
-                      <div className="text-[9px] text-muted-foreground mt-0.5">
-                        {totalPaxCount} pax × rates
-                      </div>
-                      {/* Per-tour breakdown */}
-                      {rows.map((row) => {
-                        const line = findLine(row.site.id, r.day);
-                        if (!line) return null;
-                        const amt = line.indian_pax * line.indian_rate;
-                        if (amt === 0) return null;
-                        return (
-                          <div
-                            key={row.site.id}
-                            className="text-[9px] text-muted-foreground"
-                          >
-                            {row.site.site_name.slice(0, 12)}:{" "}
-                            {line.indian_pax}×{inr(line.indian_rate)}=
-                            {inr(amt)}
-                          </div>
-                        );
-                      })}
-                    </td>
-
-                    {/* Foreigner total with pax breakdown */}
-                    <td className="p-2 text-right tabular-nums">
-                      <div className="font-semibold text-blue-700">
-                        {inr(foreignTot)}
-                      </div>
-                      <div className="text-[9px] text-muted-foreground mt-0.5">
-                        {totalPaxCount} pax × rates
-                      </div>
-                      {rows.map((row) => {
-                        const line = findLine(row.site.id, r.day);
-                        if (!line || line.foreign_pax === 0) return null;
-                        const amt = line.foreign_pax * line.foreign_rate;
-                        if (amt === 0) return null;
-                        return (
-                          <div
-                            key={row.site.id}
-                            className="text-[9px] text-muted-foreground"
-                          >
-                            {row.site.site_name.slice(0, 12)}:{" "}
-                            {line.foreign_pax}×{inr(line.foreign_rate)}=
-                            {inr(amt)}
-                          </div>
-                        );
-                      })}
-                    </td>
-
-                    {/* Student total with pax breakdown */}
-                    <td className="p-2 text-right tabular-nums">
-                      <div className="font-semibold text-purple-700">
-                        {inr(studentTot)}
-                      </div>
-                      <div className="text-[9px] text-muted-foreground mt-0.5">
-                        {totalPaxCount} pax × rates
-                      </div>
-                      {rows.map((row) => {
-                        const line = findLine(row.site.id, r.day);
-                        if (!line || (line.student_pax ?? 0) === 0)
-                          return null;
-                        const amt =
-                          (line.student_pax ?? 0) * (line.student_rate ?? 0);
-                        if (amt === 0) return null;
-                        return (
-                          <div
-                            key={row.site.id}
-                            className="text-[9px] text-muted-foreground"
-                          >
-                            {row.site.site_name.slice(0, 12)}:{" "}
-                            {line.student_pax}×{inr(line.student_rate ?? 0)}=
-                            {inr(amt)}
-                          </div>
-                        );
-                      })}
+                    <td colSpan={4} className="p-2 text-muted-foreground italic">
+                      No entrance sites for this day's cities.
                     </td>
                   </tr>
                 );
               }
-            )}
 
-            {/* Column Totals Row */}
-            <tr className="border-t-2 border-[#E5E7EB] bg-[#F9FAFB]">
+              const rowSpan = day.siteRows.length;
+              return day.siteRows.map((site, siteIdx) => {
+                const isFirst = siteIdx === 0;
+                return (
+                  <tr
+                    key={`${dayIdx}-${siteIdx}`}
+                    className="border-b border-[#E5E7EB] align-top bg-white"
+                  >
+                    {isFirst && (
+                      <>
+                        <td rowSpan={rowSpan} className="p-2 font-semibold align-top">
+                          Day {day.r.day}
+                        </td>
+                        <td rowSpan={rowSpan} className="p-2 text-muted-foreground text-[11px] align-top">
+                          {day.routeLabel}
+                        </td>
+                      </>
+                    )}
+                    {/* City + Tour */}
+                    <td className="p-2">
+                      <label className="flex items-start gap-2 cursor-pointer group">
+                        <Checkbox
+                          checked={site.on}
+                          onCheckedChange={() => toggle(site.site, day.r.day)}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0">
+                          <span className="text-[10px] text-muted-foreground">
+                            {site.city.name}
+                          </span>
+                          <span className="block text-sm font-medium truncate">
+                            {site.site.site_name}
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground mt-0.5 space-x-2">
+                            <span
+                              className={cn(
+                                site.indianRate > 0
+                                  ? "text-green-700"
+                                  : "text-amber-500"
+                              )}
+                            >
+                              Indian:{" "}
+                              {site.indianRate > 0
+                                ? `${inr(site.indianRate)}/pp`
+                                : "not set"}
+                            </span>
+                            <span className="text-muted-foreground">·</span>
+                            <span
+                              className={cn(
+                                site.foreignRate > 0
+                                  ? "text-blue-700"
+                                  : "text-amber-500"
+                              )}
+                            >
+                              Foreigner:{" "}
+                              {site.foreignRate > 0
+                                ? `${inr(site.foreignRate)}/pp`
+                                : "not set"}
+                            </span>
+                            <span className="text-muted-foreground">·</span>
+                            <span
+                              className={cn(
+                                site.studentRate > 0
+                                  ? "text-purple-700"
+                                  : "text-muted-foreground"
+                              )}
+                            >
+                              Student:{" "}
+                              {site.studentRate > 0
+                                ? `${inr(site.studentRate)}/pp`
+                                : "—"}
+                            </span>
+                          </span>
+                        </span>
+                      </label>
+                    </td>
+
+                    {/* Indian column: ONLY per-person rate displayed (NO PAX MULTIPLIER) */}
+                    <td className="p-2 text-right tabular-nums">
+                      {site.on ? (
+                        <div className="font-semibold text-green-700">
+                          {inr(site.indianRate)}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+
+                    {/* Foreigner column */}
+                    <td className="p-2 text-right tabular-nums">
+                      {site.on ? (
+                        <div className="font-semibold text-blue-700">
+                          {inr(site.foreignRate)}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+
+                    {/* Student column */}
+                    <td className="p-2 text-right tabular-nums">
+                      {site.on ? (
+                        <div className="font-semibold text-purple-700">
+                          {inr(site.studentRate)}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              });
+            })}
+
+            {/* 🔥 NEW PER-PERSON COLUMN TOTALS ROW (NO PAX MULTIPLICATION) */}
+            <tr className="border-t-2 border-[#E5E7EB] bg-[#F0FDF4]">
               <td
                 colSpan={3}
                 className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground font-semibold"
               >
-                Column Totals
+                Total (Per-Person)
               </td>
-              {/* Indian Grand Total */}
               <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-green-700 text-sm">
-                  {inr(grandIndian)}
+                <div className="font-bold text-green-800 text-sm">
+                  {inr(totalIndianRate)}
                 </div>
                 <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Indian total
+                  Indian
                 </div>
               </td>
-              {/* Foreigner Grand Total */}
               <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-blue-700 text-sm">
-                  {inr(grandForeign)}
+                <div className="font-bold text-blue-800 text-sm">
+                  {inr(totalForeignRate)}
                 </div>
                 <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Foreigner total
+                  Foreigner
                 </div>
               </td>
-              {/* Student Grand Total */}
               <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-purple-700 text-sm">
-                  {inr(grandStudent)}
+                <div className="font-bold text-purple-800 text-sm">
+                  {inr(totalStudentRate)}
                 </div>
                 <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Student total
+                  Student
                 </div>
               </td>
             </tr>
@@ -412,22 +352,33 @@ export function Step12({ draft, set }: StepProps) {
         </table>
       </div>
 
-      {/* Summary chips */}
-      {(grandIndian + grandForeign + grandStudent) > 0 && (
+      {/* Summary chips (Per-person totals) */}
+      {(totalIndianRate + totalForeignRate + totalStudentRate) > 0 && (
         <div className="flex flex-wrap gap-2 text-xs">
-          {grandIndian > 0 && (
+          {totalIndianRate > 0 && (
             <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1">
-              🇮🇳 Indian: {inr(grandIndian)}
+              🇮🇳 Indian total: {inr(totalIndianRate)}
             </span>
           )}
-          {grandForeign > 0 && (
+          {totalForeignRate > 0 && (
             <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1">
-              ✈ Foreigner: {inr(grandForeign)}
+              ✈ Foreigner total: {inr(totalForeignRate)}
             </span>
           )}
-          {grandStudent > 0 && (
+          {totalStudentRate > 0 && (
             <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-3 py-1">
-              🎓 Student: {inr(grandStudent)}
+              🎓 Student total: {inr(totalStudentRate)}
+            </span>
+          )}
+          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-3 py-1">
+            👤 Indian/pp: {inr(totalIndianRate)}
+          </span>
+          <span className="bg-sky-50 text-sky-700 border border-sky-200 rounded-full px-3 py-1">
+            👤 Foreigner/pp: {inr(totalForeignRate)}
+          </span>
+          {(totalStudentRate > 0) && (
+            <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-3 py-1">
+              👤 Student/pp: {inr(totalStudentRate)}
             </span>
           )}
         </div>

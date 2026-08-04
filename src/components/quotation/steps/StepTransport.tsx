@@ -70,6 +70,8 @@ export function Step10({ draft, set }: StepProps) {
             {draft.transport.map((t, i) => {
               const current = d.travel_options.find((x) => x.id === t.travel_id);
               const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
+              const isTotalMode = t.rate_mode === "total";
+
               return (
                 <Card key={t.id} className="p-2.5 space-y-2">
                   <div className="flex items-center justify-between">
@@ -115,11 +117,28 @@ export function Step10({ draft, set }: StepProps) {
                         className={`flex-1 px-2 py-1 rounded ${t.rate_mode === "total" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
                       >Total</button>
                     </div>
-                    {t.rate_mode === "total" && (
+                    {isTotalMode && (
                       <div>
                         <Label className="text-[10px]">Total Rate (₹)</Label>
-                        <Input type="number" min={0} className="h-8 text-xs text-right" value={t.total_rate || ""}
-                          onChange={(e) => patchLine(i, { total_rate: parseFloat(e.target.value) || 0 })} />
+                        <Input 
+                          type="number" 
+                          min={0} 
+                          className="h-8 text-xs text-right" 
+                          value={t.total_rate || ""}
+                          onChange={(e) => {
+                            const totalVal = parseFloat(e.target.value) || 0;
+                            const days = routing.length;
+                            // Auto-distribute the total across the days
+                            const distributedVal = days > 0 ? totalVal / days : 0;
+                            const newRates = Array(days).fill(distributedVal);
+                            
+                            // Update both total_rate and the daily rates array at once
+                            patchLine(i, { 
+                              total_rate: totalVal, 
+                              per_route_rates: newRates 
+                            });
+                          }} 
+                        />
                       </div>
                     )}
                   </div>
@@ -153,38 +172,70 @@ export function Step10({ draft, set }: StepProps) {
                       {draft.transport.map((t, ti) => {
                         const arr = t.per_route_rates ?? Array(routing.length).fill(0);
                         const val = arr[ri] ?? 0;
+                        const isTotalMode = t.rate_mode === "total";
+                        
                         return (
                           <td key={t.id} className="p-2">
-                            <Input type="number" min={0} className="h-7 text-xs text-right" value={val || ""}
-                              onChange={(e) => {
-                                const next = [...(t.per_route_rates ?? Array(routing.length).fill(0))];
-                                while (next.length < routing.length) next.push(0);
-                                next[ri] = parseFloat(e.target.value) || 0;
-                                patchLine(ti, { per_route_rates: next.slice(0, routing.length) });
-                              }} />
+                            {isTotalMode ? (
+                              /* 🔥 Kept blank, uneditable, and disabled */
+                              <div className="h-7 flex items-center justify-end text-xs tabular-nums text-muted-foreground bg-muted/30 rounded px-2">
+                                {/* Intentionally empty */}
+                              </div>
+                            ) : (
+                              <Input 
+                                type="number" 
+                                min={0} 
+                                className="h-7 text-xs text-right" 
+                                value={val || ""}
+                                onChange={(e) => {
+                                  const next = [...(t.per_route_rates ?? Array(routing.length).fill(0))];
+                                  while (next.length < routing.length) next.push(0);
+                                  next[ri] = parseFloat(e.target.value) || 0;
+                                  patchLine(ti, { per_route_rates: next.slice(0, routing.length) });
+                                }} 
+                              />
+                            )}
                           </td>
                         );
                       })}
                     </tr>
                   );
                 })}
-                <tr className="bg-muted/30 border-b border-[#E5E7EB]">
+                <tr className="bg-muted/30 border-b border-[#E5E7EB">
                   <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Reporting Cost</td>
-                  {draft.transport.map((t, ti) => (
-                    <td key={t.id} className="p-2">
-                      <Input type="number" min={0} className="h-7 text-xs text-right" value={t.reporting_cost || ""}
-                        onChange={(e) => patchLine(ti, { reporting_cost: parseFloat(e.target.value) || 0 })} />
-                    </td>
-                  ))}
+                  {draft.transport.map((t, ti) => {
+                    const isTotalMode = t.rate_mode === "total";
+                    return (
+                      <td key={t.id} className="p-2">
+                        {/* 🔥 Disabled, blank, and uneditable when Total mode is active */}
+                        <Input 
+                          type="number" 
+                          min={0} 
+                          className="h-7 text-xs text-right" 
+                          value={isTotalMode ? "" : t.reporting_cost || ""}
+                          disabled={isTotalMode}
+                          onChange={(e) => patchLine(ti, { reporting_cost: parseFloat(e.target.value) || 0 })} 
+                        />
+                      </td>
+                    );
+                  })}
                 </tr>
                 <tr className="bg-muted/10 border-b border-[#E5E7EB]">
                   <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Remarks</td>
-                  {draft.transport.map((t, ti) => (
-                    <td key={t.id} className="p-2">
-                      <Input className="h-7 text-xs" value={t.remarks || ""}
-                        onChange={(e) => patchLine(ti, { remarks: e.target.value })} />
-                    </td>
-                  ))}
+                  {draft.transport.map((t, ti) => {
+                    const isTotalMode = t.rate_mode === "total";
+                    return (
+                      <td key={t.id} className="p-2">
+                        {/* 🔥 Disabled, blank, and uneditable when Total mode is active */}
+                        <Input 
+                          className="h-7 text-xs" 
+                          value={isTotalMode ? "" : t.remarks || ""}
+                          disabled={isTotalMode}
+                          onChange={(e) => patchLine(ti, { remarks: e.target.value })} 
+                        />
+                      </td>
+                    );
+                  })}
                 </tr>
                 <tr className="bg-primary/5 font-semibold">
                   <td colSpan={2} className="p-2 text-right text-xs">Line Total</td>
