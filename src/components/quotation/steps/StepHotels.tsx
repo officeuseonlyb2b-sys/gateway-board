@@ -706,15 +706,42 @@ function AccommodationSelectionTable({
                       </>
                     )}
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        disabled={!r.hasRate}
-                        onClick={() => setEditingDay(r.day)}
-                      >
-                        <Pencil className="h-3 w-3" /> Edit
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          disabled={!r.hasRate}
+                          onClick={() => setEditingDay(r.day)}
+                        >
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={isDynamicDay(r.day) ? "default" : "ghost"}
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            if (isDynamicDay(r.day)) { setDayMode(r.day, false); return; }
+                            setDayMode(r.day, true);
+                            setDynamicDay(r.day);
+                          }}
+                        >
+                          {isDynamicDay(r.day) ? "Dynamic ✓" : "Dynamic"}
+                        </Button>
+                        {isDynamicDay(r.day) && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDynamicDay(r.day)}>
+                            Room mix
+                          </Button>
+                        )}
+                      </div>
+                      {isDynamicDay(r.day) && (
+                        <div className="text-[10px] text-primary mt-1">
+                          Mix: {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[])
+                            .filter((k) => dayMixFor(r.day)[k] > 0)
+                            .map((k) => `${dayMixFor(r.day)[k]} ${k}`)
+                            .join(" + ") || "—"}
+                        </div>
+                      )}
                       {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
                         <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>
                       )}
