@@ -287,10 +287,25 @@ export interface QuoteDraft {
   guide_day_escort?: Record<number, number>;
   guide_remarks?: string;
   // Optional pax range/slab override — when set, downstream rate lookups
-  // (guide, activity, misc) use this range instead of exact headcount.
-  pax_range?: "auto" | "1-5" | "1-9" | "5-14" | "6-14" | "15-24" | "25+";
+  // (guide, activity, misc, transport, hotel room mixes) use this range
+  // instead of the exact headcount. Format: "auto" or "<min>-<max>" / "25+".
+  pax_range?: string;
+  // Days (routing day numbers) explicitly switched to Dynamic room-mix mode
+  // inside Accommodation Options. Every other day stays Standard.
+  dynamic_days?: number[];
+  // Multi-scenario comparison on the Costing step.
+  scenarios?: CostScenario[];
   updated_at: string;
 
+}
+
+/** A full costing scenario = one vehicle + one accommodation option + all add-ons. */
+export interface CostScenario {
+  id: string;
+  label: string;
+  /** transport line id from draft.transport; empty = include all transport lines */
+  transport_line_id?: string;
+  option_key: OptionKey;
 }
 
 export interface GroupRoomMix {
