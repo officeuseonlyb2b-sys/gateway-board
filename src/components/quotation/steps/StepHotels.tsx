@@ -157,12 +157,11 @@ export function Step15({ draft, set }: StepProps) {
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <>
-              {draft.allocation_mode === "dynamic" ? (
+              {(draft.dynamic_days ?? []).length > 0 && (
                 <OptionDynamicPreview draft={draft} option={activeOption} />
-              ) : (
-                optionUsesCustomAllocation(activeOption) && (
-                  <OptionPerPersonPreview draft={draft} option={activeOption} />
-                )
+              )}
+              {optionUsesCustomAllocation(activeOption) && (
+                <OptionPerPersonPreview draft={draft} option={activeOption} />
               )}
             </>
           )}
@@ -831,7 +830,7 @@ function AccommodationSelectionTable({
                 >
                   Later
                 </Button>
-                <Button onClick={() => { setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
+                <Button onClick={() => { setDayMode(quadAlertRow.day, true); setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
                   Open Dynamic Costing
                 </Button>
               </DialogFooter>
@@ -942,8 +941,8 @@ function AccommodationSelectionTable({
                   disabled={!dynamicRow.selectedRoomId}
                   onClick={() => {
                     setDismissedQuadDays((prev) => prev.includes(dynamicRow.day) ? prev : [...prev, dynamicRow.day]);
+                    setDayMode(dynamicRow.day, true);
                     setDynamicDay(null);
-                    set({ step: 14 });
                   }}
                 >
                   Confirm & Continue to Costing
@@ -1098,7 +1097,16 @@ function OptionInclusionsEditor({
 // ------------------------------------------------------------
 function OptionDynamicPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
   const d = useDB();
-  const res = useMemo(() => computeDynamicOption(draft, option, d), [draft, option, d]);
+  const res = useMemo(() => {
+    const all = computeDynamicOption(draft, option, d);
+    const dyn = new Set(draft.dynamic_days ?? []);
+    const days = all.days.filter((x) => dyn.has(x.day));
+    return {
+      days,
+      room_net: days.reduce((s, x) => s + x.net, 0),
+      room_gst: days.reduce((s, x) => s + x.gst, 0),
+    };
+  }, [draft, option, d]);
   if (!res.days.length) return null;
   return (
     <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#FBF7EE" }}>
