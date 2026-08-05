@@ -70,24 +70,26 @@ function setSelection(
 const getSafeCityIds = (r: RoutingDay): string[] => {
   if (!r) return [];
 
-  if (Array.isArray(r.to_city_ids)) {
-    return r.to_city_ids.filter((id: any) => id != null && String(id).trim() !== '');
+  const raw: unknown = r.to_city_ids;
+
+  if (Array.isArray(raw)) {
+    return raw.filter((id) => id != null && String(id).trim() !== "").map(String);
   }
 
-  if (typeof r.to_city_ids === 'string') {
-    const raw = r.to_city_ids.trim();
-    if (!raw) return [];
-
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
     try {
-      if (raw.startsWith('[') && raw.endsWith(']')) {
-        const parsed = JSON.parse(raw);
+      if (text.startsWith("[") && text.endsWith("]")) {
+        const parsed = JSON.parse(text);
         if (Array.isArray(parsed)) {
-          return parsed.filter((id: any) => id != null && String(id).trim() !== '');
+          return parsed.filter((id) => id != null && String(id).trim() !== "").map(String);
         }
       }
-    } catch (e) {}
-
-    return raw.split(',').map((s: string) => s.trim()).filter((id: string) => id !== '');
+    } catch {
+      /* fall through to comma split */
+    }
+    return text.split(",").map((s) => s.trim()).filter(Boolean);
   }
 
   if (r.to_city_id) return [r.to_city_id];

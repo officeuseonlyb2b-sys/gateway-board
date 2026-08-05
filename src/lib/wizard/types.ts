@@ -286,6 +286,7 @@ export interface QuoteDraft {
   guide_tour_disabled_by_day?: Record<number, string[]>;
   guide_day_escort?: Record<number, number>;
   guide_remarks?: string;
+  guide_escort_reporting?: number;
   // Optional pax range/slab override — when set, downstream rate lookups
   // (guide, activity, misc, transport, hotel room mixes) use this range
   // instead of the exact headcount. Format: "auto" or "<min>-<max>" / "25+".
