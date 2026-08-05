@@ -92,7 +92,7 @@ export function computeMealDays(
   draft: QuoteDraft,
   d: import("@/lib/mock-store").DB,
 ): { rows: MealDayRow[]; total: number } {
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   const opt = draft.hotel_options?.[0];
   const rows: MealDayRow[] = [];
   let total = 0;
@@ -235,7 +235,7 @@ export function computeOption(
   const grandDbl = subDbl + mkDbl + gst5Dbl;
   const grandTrp = subTrp + mkTrp + gst5Trp;
 
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   // Per-pax: SGL assumes 1/room, DBL assumes 2/room, TRP assumes 3/room.
   return {
     key: opt.key,
@@ -314,7 +314,7 @@ export function computePersonTotals(
 ): PersonOptionTotal[] {
   const allocs = opt.pax_allocations ?? [];
   if (!allocs.length) return [];
-  const totPax = Math.max(1, totalPax(draft));
+  const totPax = Math.max(1, effectivePaxForPricing(draft));
   const addons = computeAddonsTotal(draft, d);
   const sharedPer = addons / totPax;
   const mk = (draft.markup_percent || 0) / 100;
@@ -642,7 +642,7 @@ export function computeDynamicOption(
   let net = 0, gst = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, totalPax(draft)));
+    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     const date = addDaysISO(draft.start_date, i);
     const plan = sel ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date)) : null;
