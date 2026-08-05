@@ -61,7 +61,7 @@ import { Step14 } from "@/components/quotation/steps/StepMisc";
 import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { Step17 } from "@/components/quotation/steps/StepFinal";
-import { StepAllocation } from "@/components/quotation/steps/StepAllocation";
+
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
 
 
