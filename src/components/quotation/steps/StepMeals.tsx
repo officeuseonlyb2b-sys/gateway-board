@@ -426,6 +426,14 @@ export function StepMeals({ draft, set }: StepProps) {
                     }
                   };
 
+                  const rowCovered = coveredByPlan(hs?.meal_plan);
+                  const planBadge = (
+                    <div className="flex flex-col items-start gap-0.5">
+                      <span className="text-xs font-medium text-emerald-700">Included in plan</span>
+                      <span className="text-[10px] text-muted-foreground">{hs?.meal_plan} · {hotel?.name || "Hotel"}</span>
+                    </div>
+                  );
+
                   return (
                     <tr key={`${day}-${cityName}`} className="border-t">
                       {isFirstOfDay && (
@@ -433,40 +441,49 @@ export function StepMeals({ draft, set }: StepProps) {
                           {day}
                         </td>
                       )}
-                      <td className="py-2 px-3 font-medium">{cityName}</td>
-                      <td className="py-2 px-3">
-                        <Select value={lunchVal} onValueChange={(v) => handleChange("Lunch", v)}>
-                          <SelectTrigger className="h-8 w-[150px] text-xs">
-                            <SelectValue placeholder="Source" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="py-2 px-3 text-right tabular-nums">
-                        {cityData.lunch.rate > 0 ? inr(cityData.lunch.rate) : "—"}
+                      <td className="py-2 px-3 font-medium">
+                        {cityName}
+                        {hs?.meal_plan && (
+                          <span className="ml-2 text-[10px] uppercase text-muted-foreground">{hs.meal_plan}</span>
+                        )}
                       </td>
                       <td className="py-2 px-3">
-                        <Select value={dinnerVal} onValueChange={(v) => handleChange("Dinner", v)}>
-                          <SelectTrigger className="h-8 w-[150px] text-xs">
-                            <SelectValue placeholder="Source" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {rowCovered.Lunch ? planBadge : (
+                          <Select value={lunchVal} onValueChange={(v) => handleChange("Lunch", v)}>
+                            <SelectTrigger className="h-8 w-[150px] text-xs">
+                              <SelectValue placeholder="Source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right tabular-nums">
-                        {cityData.dinner.rate > 0 ? inr(cityData.dinner.rate) : "—"}
+                        {rowCovered.Lunch ? "—" : cityData.lunch.rate > 0 ? inr(cityData.lunch.rate) : "—"}
+                      </td>
+                      <td className="py-2 px-3">
+                        {rowCovered.Dinner ? planBadge : (
+                          <Select value={dinnerVal} onValueChange={(v) => handleChange("Dinner", v)}>
+                            <SelectTrigger className="h-8 w-[150px] text-xs">
+                              <SelectValue placeholder="Source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-right tabular-nums">
+                        {rowCovered.Dinner ? "—" : cityData.dinner.rate > 0 ? inr(cityData.dinner.rate) : "—"}
                       </td>
                     </tr>
                   );
