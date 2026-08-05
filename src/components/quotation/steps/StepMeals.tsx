@@ -98,6 +98,14 @@ const getSafeCityIds = (r: RoutingDay): string[] => {
   return [];
 };
 
+/** Meals already covered by the hotel's meal plan for that day/city. */
+function coveredByPlan(mealPlan?: string): { Lunch: boolean; Dinner: boolean } {
+  const mp = (mealPlan || "").toUpperCase();
+  if (mp === "AP") return { Lunch: true, Dinner: true };
+  if (mp === "MAP") return { Lunch: false, Dinner: true };
+  return { Lunch: false, Dinner: false };
+}
+
 // ====== Main component ======
 export function StepMeals({ draft, set }: StepProps) {
   const d = useDB();
@@ -131,8 +139,12 @@ export function StepMeals({ draft, set }: StepProps) {
         const lunchData = { source: "none" as MealSource, rate: 0 };
         const dinnerData = { source: "none" as MealSource, rate: 0 };
 
+        const hsPlan = hotelSelections.find((s) => s.city_id === cityId)?.meal_plan;
+        const covered = coveredByPlan(hsPlan);
+
         ["Lunch", "Dinner"].forEach((mealType) => {
           const mt = mealType as MealType;
+          if (covered[mt]) return;
           const sel = getSelection(selections, day, cityName, mt);
           if (!sel || sel.source === "none") return;
 
@@ -209,7 +221,9 @@ export function StepMeals({ draft, set }: StepProps) {
         const date = routing.date || addDaysISO(draft.start_date, day - 1);
         const key = `${day}-${cityName}`;
 
+        const coveredHere = coveredByPlan(hotelSelections.find((s) => s.city_id === cityId)?.meal_plan);
         const getMealData = (mealType: MealType) => {
+          if (coveredHere[mealType]) return { source: "Included in plan", total: 0 };
           const sel = getSelection(selections, day, cityName, mealType);
           if (!sel || sel.source === "none") {
             return { source: "—", total: 0 };
