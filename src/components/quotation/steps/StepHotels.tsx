@@ -252,8 +252,27 @@ function AccommodationSelectionTable({
     onUpdate({ rate_overrides: next });
   };
 
-  // Per-day room mix (shared with the Room Allocation step).
+  // Per-day room mix (Dynamic mode — previously the separate Room Allocation step).
   const paxForMix = Math.max(1, effectivePaxForPricing(draft));
+  const dynamicDays = draft.dynamic_days ?? [];
+  const isDynamicDay = (dayNo: number) => dynamicDays.includes(dayNo);
+  const setDayMode = (dayNo: number, dynamic: boolean) => {
+    const next = dynamic
+      ? Array.from(new Set([...dynamicDays, dayNo]))
+      : dynamicDays.filter((x) => x !== dayNo);
+    const patch: Partial<QuoteDraft> = { dynamic_days: next };
+    if (dynamic && !draft.day_room_mix?.[dayNo]) {
+      patch.day_room_mix = { ...(draft.day_room_mix ?? {}), [dayNo]: defaultDayMix(paxForMix) };
+    }
+    set(patch);
+  };
+  const setAllDaysMode = (dynamic: boolean) => {
+    if (!dynamic) { set({ dynamic_days: [] }); return; }
+    const days = overnightRouting.map((r) => r.day);
+    const mixes = { ...(draft.day_room_mix ?? {}) };
+    days.forEach((dayNo) => { if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix); });
+    set({ dynamic_days: days, day_room_mix: mixes });
+  };
   const dayMixFor = (dayNo: number): DayRoomMix =>
     draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
   const setDayMix = (dayNo: number, patch: Partial<DayRoomMix>) => {
@@ -264,7 +283,7 @@ function AccommodationSelectionTable({
 
   // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
   const dayNeedsQuad = (dayNumber: number) =>
-    showQuad || (draft.allocation_mode === "dynamic" && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
+    showQuad || (isDynamicDay(dayNumber) && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
 
   // Hotel offers Quad when any of its rooms has a quad rate applicable on that date.
   const hotelHasQuad = (hotelId: string, dateISO: string) => {
