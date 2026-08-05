@@ -92,7 +92,7 @@ export function computeMealDays(
   draft: QuoteDraft,
   d: import("@/lib/mock-store").DB,
 ): { rows: MealDayRow[]; total: number } {
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   const opt = draft.hotel_options?.[0];
   const rows: MealDayRow[] = [];
   let total = 0;
@@ -160,18 +160,34 @@ export function totalPax(draft: QuoteDraft): number {
   return draft.adults + draft.ss + draft.children.length;
 }
 
-export function effectivePaxForPricing(draft: QuoteDraft): number {
-  const actual = Math.max(1, totalPax(draft));
-  switch (draft.pax_range) {
-    case "1-5": return 5;
-    case "1-9": return 9;
-    case "5-14":
-    case "6-14": return 14;
-    case "15-24": return 24;
-    case "25+": return Math.max(actual, 25);
-    case "auto":
-    default: return actual;
+/** True when the admin is costing for a pax RANGE instead of an exact headcount. */
+export function paxRangeActive(draft: QuoteDraft): boolean {
+  const r = draft.pax_range;
+  return !!r && r !== "auto";
+}
+
+/** Parsed { min, max } of an active pax range, else null. */
+export function parsePaxRange(draft: QuoteDraft): { min: number; max: number } | null {
+  const r = draft.pax_range;
+  if (!r || r === "auto") return null;
+  if (r.endsWith("+")) {
+    const min = parseInt(r) || 1;
+    return { min, max: Math.max(min, totalPax(draft), min) };
   }
+  const [a, b] = r.split("-").map((x) => parseInt(x));
+  if (isNaN(a)) return null;
+  const min = Math.max(1, a);
+  const max = isNaN(b) ? min : Math.max(min, b);
+  return { min, max };
+}
+
+// Pricing pax: when a range is active every downstream lookup (guide,
+// activities, entrances, misc, transport capacity, hotel room mixes) uses the
+// TOP of the range so the quote covers the whole slab.
+export function effectivePaxForPricing(draft: QuoteDraft): number {
+  const range = parsePaxRange(draft);
+  if (range) return Math.max(1, range.max);
+  return Math.max(1, totalPax(draft));
 }
 
 export function computeOption(
@@ -219,7 +235,7 @@ export function computeOption(
   const grandDbl = subDbl + mkDbl + gst5Dbl;
   const grandTrp = subTrp + mkTrp + gst5Trp;
 
-  const pax = Math.max(1, totalPax(draft));
+  const pax = Math.max(1, effectivePaxForPricing(draft));
   // Per-pax: SGL assumes 1/room, DBL assumes 2/room, TRP assumes 3/room.
   return {
     key: opt.key,
@@ -298,7 +314,7 @@ export function computePersonTotals(
 ): PersonOptionTotal[] {
   const allocs = opt.pax_allocations ?? [];
   if (!allocs.length) return [];
-  const totPax = Math.max(1, totalPax(draft));
+  const totPax = Math.max(1, effectivePaxForPricing(draft));
   const addons = computeAddonsTotal(draft, d);
   const sharedPer = addons / totPax;
   const mk = (draft.markup_percent || 0) / 100;
@@ -626,7 +642,7 @@ export function computeDynamicOption(
   let net = 0, gst = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, totalPax(draft)));
+    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     const date = addDaysISO(draft.start_date, i);
     const plan = sel ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date)) : null;

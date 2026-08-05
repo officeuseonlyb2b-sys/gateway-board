@@ -61,7 +61,7 @@ import { Step14 } from "@/components/quotation/steps/StepMisc";
 import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { Step17 } from "@/components/quotation/steps/StepFinal";
-import { StepAllocation } from "@/components/quotation/steps/StepAllocation";
+
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
 
 
@@ -72,9 +72,9 @@ export const Route = createFileRoute("/_authenticated/costing")({
 });
 
 // ============================================================
-// Step definitions — Step 5 (Create Route) removed → now 16 steps
+// Step definitions — Room Allocation now lives inside Hotels → 15 steps
 // ============================================================
-const TOTAL_STEPS = 16;
+const TOTAL_STEPS = 15;
 const STEPS: { n: number; label: string }[] = [
   { n: 1, label: "Type" },
   { n: 2, label: "Who" },
@@ -86,12 +86,11 @@ const STEPS: { n: number; label: string }[] = [
   { n: 8, label: "Guide" },
   { n: 9, label: "Misc" },
   { n: 10, label: "Transport" },
-  { n: 11, label: "Room Allocation" },
-  { n: 12, label: "Hotels" },
-  { n: 13, label: "Meals" },
-  { n: 14, label: "Costing" },
-  { n: 15, label: "Final" },
-  { n: 16, label: "Optionals" },
+  { n: 11, label: "Hotels" },
+  { n: 12, label: "Meals" },
+  { n: 13, label: "Costing" },
+  { n: 14, label: "Final" },
+  { n: 15, label: "Optionals" },
 ];
 
 
@@ -410,12 +409,11 @@ function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<Quote
     case 8: return <Step13 draft={draft} set={set} />;         // Guide
     case 9: return <Step14 draft={draft} set={set} />;         // Misc
     case 10: return <Step10 draft={draft} set={set} />;        // Transport
-    case 11: return <StepAllocation draft={draft} set={set} />;
-    case 12: return <Step15 draft={draft} set={set} />;        // Hotels
-    case 13: return <StepMeals draft={draft} set={set} />;
-    case 14: return <Step16 draft={draft} set={set} />;        // Costing
-    case 15: return <Step17 draft={draft} set={set} />;        // Final
-    case 16: return <Step18 draft={draft} set={set} />;        // Optionals
+    case 11: return <Step15 draft={draft} set={set} />;        // Hotels (Standard + Dynamic)
+    case 12: return <StepMeals draft={draft} set={set} />;
+    case 13: return <Step16 draft={draft} set={set} />;        // Costing
+    case 14: return <Step17 draft={draft} set={set} />;        // Final
+    case 15: return <Step18 draft={draft} set={set} />;        // Optionals
     default: return null;
   }
 }

@@ -70,24 +70,26 @@ function setSelection(
 const getSafeCityIds = (r: RoutingDay): string[] => {
   if (!r) return [];
 
-  if (Array.isArray(r.to_city_ids)) {
-    return r.to_city_ids.filter((id: any) => id != null && String(id).trim() !== '');
+  const raw: unknown = r.to_city_ids;
+
+  if (Array.isArray(raw)) {
+    return raw.filter((id) => id != null && String(id).trim() !== "").map(String);
   }
 
-  if (typeof r.to_city_ids === 'string') {
-    const raw = r.to_city_ids.trim();
-    if (!raw) return [];
-
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
     try {
-      if (raw.startsWith('[') && raw.endsWith(']')) {
-        const parsed = JSON.parse(raw);
+      if (text.startsWith("[") && text.endsWith("]")) {
+        const parsed = JSON.parse(text);
         if (Array.isArray(parsed)) {
-          return parsed.filter((id: any) => id != null && String(id).trim() !== '');
+          return parsed.filter((id) => id != null && String(id).trim() !== "").map(String);
         }
       }
-    } catch (e) {}
-
-    return raw.split(',').map((s: string) => s.trim()).filter((id: string) => id !== '');
+    } catch {
+      /* fall through to comma split */
+    }
+    return text.split(",").map((s) => s.trim()).filter(Boolean);
   }
 
   if (r.to_city_id) return [r.to_city_id];
@@ -95,6 +97,14 @@ const getSafeCityIds = (r: RoutingDay): string[] => {
 
   return [];
 };
+
+/** Meals already covered by the hotel's meal plan for that day/city. */
+function coveredByPlan(mealPlan?: string): { Lunch: boolean; Dinner: boolean } {
+  const mp = (mealPlan || "").toUpperCase();
+  if (mp === "AP") return { Lunch: true, Dinner: true };
+  if (mp === "MAP") return { Lunch: false, Dinner: true };
+  return { Lunch: false, Dinner: false };
+}
 
 // ====== Main component ======
 export function StepMeals({ draft, set }: StepProps) {
@@ -129,8 +139,12 @@ export function StepMeals({ draft, set }: StepProps) {
         const lunchData = { source: "none" as MealSource, rate: 0 };
         const dinnerData = { source: "none" as MealSource, rate: 0 };
 
+        const hsPlan = hotelSelections.find((s) => s.city_id === cityId)?.meal_plan;
+        const covered = coveredByPlan(hsPlan);
+
         ["Lunch", "Dinner"].forEach((mealType) => {
           const mt = mealType as MealType;
+          if (covered[mt]) return;
           const sel = getSelection(selections, day, cityName, mt);
           if (!sel || sel.source === "none") return;
 
@@ -207,7 +221,9 @@ export function StepMeals({ draft, set }: StepProps) {
         const date = routing.date || addDaysISO(draft.start_date, day - 1);
         const key = `${day}-${cityName}`;
 
+        const coveredHere = coveredByPlan(hotelSelections.find((s) => s.city_id === cityId)?.meal_plan);
         const getMealData = (mealType: MealType) => {
+          if (coveredHere[mealType]) return { source: "Included in plan", total: 0 };
           const sel = getSelection(selections, day, cityName, mealType);
           if (!sel || sel.source === "none") {
             return { source: "—", total: 0 };
@@ -410,6 +426,14 @@ export function StepMeals({ draft, set }: StepProps) {
                     }
                   };
 
+                  const rowCovered = coveredByPlan(hs?.meal_plan);
+                  const planBadge = (
+                    <div className="flex flex-col items-start gap-0.5">
+                      <span className="text-xs font-medium text-emerald-700">Included in plan</span>
+                      <span className="text-[10px] text-muted-foreground">{hs?.meal_plan} · {hotel?.name || "Hotel"}</span>
+                    </div>
+                  );
+
                   return (
                     <tr key={`${day}-${cityName}`} className="border-t">
                       {isFirstOfDay && (
@@ -417,40 +441,49 @@ export function StepMeals({ draft, set }: StepProps) {
                           {day}
                         </td>
                       )}
-                      <td className="py-2 px-3 font-medium">{cityName}</td>
-                      <td className="py-2 px-3">
-                        <Select value={lunchVal} onValueChange={(v) => handleChange("Lunch", v)}>
-                          <SelectTrigger className="h-8 w-[150px] text-xs">
-                            <SelectValue placeholder="Source" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="py-2 px-3 text-right tabular-nums">
-                        {cityData.lunch.rate > 0 ? inr(cityData.lunch.rate) : "—"}
+                      <td className="py-2 px-3 font-medium">
+                        {cityName}
+                        {hs?.meal_plan && (
+                          <span className="ml-2 text-[10px] uppercase text-muted-foreground">{hs.meal_plan}</span>
+                        )}
                       </td>
                       <td className="py-2 px-3">
-                        <Select value={dinnerVal} onValueChange={(v) => handleChange("Dinner", v)}>
-                          <SelectTrigger className="h-8 w-[150px] text-xs">
-                            <SelectValue placeholder="Source" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {rowCovered.Lunch ? planBadge : (
+                          <Select value={lunchVal} onValueChange={(v) => handleChange("Lunch", v)}>
+                            <SelectTrigger className="h-8 w-[150px] text-xs">
+                              <SelectValue placeholder="Source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right tabular-nums">
-                        {cityData.dinner.rate > 0 ? inr(cityData.dinner.rate) : "—"}
+                        {rowCovered.Lunch ? "—" : cityData.lunch.rate > 0 ? inr(cityData.lunch.rate) : "—"}
+                      </td>
+                      <td className="py-2 px-3">
+                        {rowCovered.Dinner ? planBadge : (
+                          <Select value={dinnerVal} onValueChange={(v) => handleChange("Dinner", v)}>
+                            <SelectTrigger className="h-8 w-[150px] text-xs">
+                              <SelectValue placeholder="Source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-right tabular-nums">
+                        {rowCovered.Dinner ? "—" : cityData.dinner.rate > 0 ? inr(cityData.dinner.rate) : "—"}
                       </td>
                     </tr>
                   );

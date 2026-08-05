@@ -157,12 +157,11 @@ export function Step15({ draft, set }: StepProps) {
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <>
-              {draft.allocation_mode === "dynamic" ? (
+              {(draft.dynamic_days ?? []).length > 0 && (
                 <OptionDynamicPreview draft={draft} option={activeOption} />
-              ) : (
-                optionUsesCustomAllocation(activeOption) && (
-                  <OptionPerPersonPreview draft={draft} option={activeOption} />
-                )
+              )}
+              {optionUsesCustomAllocation(activeOption) && (
+                <OptionPerPersonPreview draft={draft} option={activeOption} />
               )}
             </>
           )}
@@ -252,8 +251,27 @@ function AccommodationSelectionTable({
     onUpdate({ rate_overrides: next });
   };
 
-  // Per-day room mix (shared with the Room Allocation step).
+  // Per-day room mix (Dynamic mode — previously the separate Room Allocation step).
   const paxForMix = Math.max(1, effectivePaxForPricing(draft));
+  const dynamicDays = draft.dynamic_days ?? [];
+  const isDynamicDay = (dayNo: number) => dynamicDays.includes(dayNo);
+  const setDayMode = (dayNo: number, dynamic: boolean) => {
+    const next = dynamic
+      ? Array.from(new Set([...dynamicDays, dayNo]))
+      : dynamicDays.filter((x) => x !== dayNo);
+    const patch: Partial<QuoteDraft> = { dynamic_days: next };
+    if (dynamic && !draft.day_room_mix?.[dayNo]) {
+      patch.day_room_mix = { ...(draft.day_room_mix ?? {}), [dayNo]: defaultDayMix(paxForMix) };
+    }
+    set(patch);
+  };
+  const setAllDaysMode = (dynamic: boolean) => {
+    if (!dynamic) { set({ dynamic_days: [] }); return; }
+    const days = overnightRouting.map((r) => r.day);
+    const mixes = { ...(draft.day_room_mix ?? {}) };
+    days.forEach((dayNo) => { if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix); });
+    set({ dynamic_days: days, day_room_mix: mixes });
+  };
   const dayMixFor = (dayNo: number): DayRoomMix =>
     draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
   const setDayMix = (dayNo: number, patch: Partial<DayRoomMix>) => {
@@ -264,7 +282,7 @@ function AccommodationSelectionTable({
 
   // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
   const dayNeedsQuad = (dayNumber: number) =>
-    showQuad || (draft.allocation_mode === "dynamic" && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
+    showQuad || (isDynamicDay(dayNumber) && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
 
   // Hotel offers Quad when any of its rooms has a quad rate applicable on that date.
   const hotelHasQuad = (hotelId: string, dateISO: string) => {
@@ -483,16 +501,35 @@ function AccommodationSelectionTable({
 
   return (
     <div className="space-y-2">
-      {/* Toggle controls for extra columns */}
-      <div className="flex items-center gap-4 p-2 bg-muted/30 rounded-md">
-        <span className="text-xs font-medium text-muted-foreground">Show columns:</span>
+      {/* Mode toggle (Standard is default) + extra columns */}
+      <div className="flex flex-wrap items-center gap-4 p-2 bg-muted/30 rounded-md">
         <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Room mode:</span>
+          <div className="flex rounded-md border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setAllDaysMode(false)}
+              className={cn("px-3 py-1 text-xs font-medium",
+                dynamicDays.length === 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+            >Standard</button>
+            <button
+              type="button"
+              onClick={() => setAllDaysMode(true)}
+              className={cn("px-3 py-1 text-xs font-medium",
+                dynamicDays.length > 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+            >Dynamic</button>
+          </div>
+          <span className="text-[11px] text-muted-foreground">
+            Standard auto-fits {paxForMix} pax into rooms. Dynamic opens a day-by-day room mix builder.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
           <Checkbox
             id="showQuad"
             checked={showQuad}
             onCheckedChange={(checked) => setShowQuad(checked === true)}
           />
-          <Label htmlFor="showQuad" className="text-xs cursor-pointer">Quad</Label>
+          <Label htmlFor="showQuad" className="text-xs cursor-pointer">Show Quad column</Label>
         </div>
       </div>
 
@@ -668,15 +705,42 @@ function AccommodationSelectionTable({
                       </>
                     )}
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        disabled={!r.hasRate}
-                        onClick={() => setEditingDay(r.day)}
-                      >
-                        <Pencil className="h-3 w-3" /> Edit
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          disabled={!r.hasRate}
+                          onClick={() => setEditingDay(r.day)}
+                        >
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={isDynamicDay(r.day) ? "default" : "ghost"}
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            if (isDynamicDay(r.day)) { setDayMode(r.day, false); return; }
+                            setDayMode(r.day, true);
+                            setDynamicDay(r.day);
+                          }}
+                        >
+                          {isDynamicDay(r.day) ? "Dynamic ✓" : "Dynamic"}
+                        </Button>
+                        {isDynamicDay(r.day) && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDynamicDay(r.day)}>
+                            Room mix
+                          </Button>
+                        )}
+                      </div>
+                      {isDynamicDay(r.day) && (
+                        <div className="text-[10px] text-primary mt-1">
+                          Mix: {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[])
+                            .filter((k) => dayMixFor(r.day)[k] > 0)
+                            .map((k) => `${dayMixFor(r.day)[k]} ${k}`)
+                            .join(" + ") || "—"}
+                        </div>
+                      )}
                       {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
                         <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>
                       )}
@@ -766,7 +830,7 @@ function AccommodationSelectionTable({
                 >
                   Later
                 </Button>
-                <Button onClick={() => { setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
+                <Button onClick={() => { setDayMode(quadAlertRow.day, true); setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
                   Open Dynamic Costing
                 </Button>
               </DialogFooter>
@@ -877,8 +941,8 @@ function AccommodationSelectionTable({
                   disabled={!dynamicRow.selectedRoomId}
                   onClick={() => {
                     setDismissedQuadDays((prev) => prev.includes(dynamicRow.day) ? prev : [...prev, dynamicRow.day]);
+                    setDayMode(dynamicRow.day, true);
                     setDynamicDay(null);
-                    set({ step: 14 });
                   }}
                 >
                   Confirm & Continue to Costing
@@ -1033,7 +1097,16 @@ function OptionInclusionsEditor({
 // ------------------------------------------------------------
 function OptionDynamicPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
   const d = useDB();
-  const res = useMemo(() => computeDynamicOption(draft, option, d), [draft, option, d]);
+  const res = useMemo(() => {
+    const all = computeDynamicOption(draft, option, d);
+    const dyn = new Set(draft.dynamic_days ?? []);
+    const days = all.days.filter((x) => dyn.has(x.day));
+    return {
+      days,
+      room_net: days.reduce((s, x) => s + x.net, 0),
+      room_gst: days.reduce((s, x) => s + x.gst, 0),
+    };
+  }, [draft, option, d]);
   if (!res.days.length) return null;
   return (
     <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#FBF7EE" }}>

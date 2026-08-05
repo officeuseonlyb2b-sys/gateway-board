@@ -16,18 +16,21 @@ import { uid, type StepProps } from "../shared";
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
   const pax = effectivePaxForPricing(draft);
-  const opts = d.travel_options.filter((t) => {
-    if (!t.is_active) return false;
-    const min = t.min_pax ?? 1;
-    const max = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
-    return pax >= min && pax <= max;
-  });
+  // Every vehicle that can physically seat the active pax count / range is a
+  // valid option — e.g. 4 pax fits both an AC Sedan and an Innova Crysta.
+  const opts = d.travel_options
+    .filter((t) => {
+      if (!t.is_active) return false;
+      const cap = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
+      return cap >= pax;
+    })
+    .sort((a, b) => (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0));
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   const routing = draft.routing;
   const total = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
 
-  const addVehicle = () => {
-    const first = opts[0];
+  const addVehicle = (travelId?: string) => {
+    const first = (travelId && opts.find((o) => o.id === travelId)) || opts[0];
     set({
       transport: [...draft.transport, {
         id: uid(), travel_id: first?.id || "", vehicles: 1, days: routing.length || 1,
@@ -54,10 +57,36 @@ export function Step10({ draft, set }: StepProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Transport — Per Route</h2>
-        <Button size="sm" onClick={addVehicle} disabled={opts.length === 0}>
+        <Button size="sm" onClick={() => addVehicle()} disabled={opts.length === 0}>
           <Plus className="h-3.5 w-3.5 mr-1" /> Add Transport
         </Button>
       </div>
+
+      {opts.length > 0 && (
+        <Card className="p-3 space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            Vehicles that fit {pax} pax — add any of them to compare
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {opts.map((o) => {
+              const used = draft.transport.some((t) => t.travel_id === o.id);
+              return (
+                <Button
+                  key={o.id}
+                  size="sm"
+                  variant={used ? "secondary" : "outline"}
+                  className="h-7 text-xs"
+                  onClick={() => addVehicle(o.id)}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  {o.vehicle_type}
+                  <span className="ml-1 opacity-60">{o.capacity_persons} seats · {inr(o.rate_per_day)}/day</span>
+                </Button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {draft.transport.length === 0 && (
         <p className="text-sm text-muted-foreground">No transport added yet. Click "Add Transport" to add a vehicle column.</p>
