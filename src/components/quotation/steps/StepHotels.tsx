@@ -502,16 +502,35 @@ function AccommodationSelectionTable({
 
   return (
     <div className="space-y-2">
-      {/* Toggle controls for extra columns */}
-      <div className="flex items-center gap-4 p-2 bg-muted/30 rounded-md">
-        <span className="text-xs font-medium text-muted-foreground">Show columns:</span>
+      {/* Mode toggle (Standard is default) + extra columns */}
+      <div className="flex flex-wrap items-center gap-4 p-2 bg-muted/30 rounded-md">
         <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Room mode:</span>
+          <div className="flex rounded-md border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setAllDaysMode(false)}
+              className={cn("px-3 py-1 text-xs font-medium",
+                dynamicDays.length === 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+            >Standard</button>
+            <button
+              type="button"
+              onClick={() => setAllDaysMode(true)}
+              className={cn("px-3 py-1 text-xs font-medium",
+                dynamicDays.length > 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+            >Dynamic</button>
+          </div>
+          <span className="text-[11px] text-muted-foreground">
+            Standard auto-fits {paxForMix} pax into rooms. Dynamic opens a day-by-day room mix builder.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
           <Checkbox
             id="showQuad"
             checked={showQuad}
             onCheckedChange={(checked) => setShowQuad(checked === true)}
           />
-          <Label htmlFor="showQuad" className="text-xs cursor-pointer">Quad</Label>
+          <Label htmlFor="showQuad" className="text-xs cursor-pointer">Show Quad column</Label>
         </div>
       </div>
 
