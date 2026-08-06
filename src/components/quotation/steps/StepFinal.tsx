@@ -12,7 +12,72 @@ import {
   isGroupTour, autoDoubleMix, mixCoversPax, mixLabel, computeGroupOption,
 } from "@/lib/wizard/calc";
 import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
+import { computeScenario } from "@/lib/wizard/scenario";
 import type { StepProps } from "../shared";
+
+function ScenarioFinalBlock({ draft }: { draft: QuoteDraft }) {
+  const d = useDB();
+  const defs = draft.scenarios ?? [];
+  const results = defs.map((s) => computeScenario(draft, s, d)).filter(Boolean);
+  if (!results.length) return null;
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="section-label">Scenario Costing (per person)</div>
+      {results.map((r) => {
+        const res = r!;
+        return (
+          <div key={res.id} className="rounded-lg border overflow-hidden">
+            <div className="px-3 py-2 bg-muted/40 text-sm font-semibold text-primary">
+              {res.label} · {res.option_label} + {res.vehicle_label} · {res.pax} pax
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="uppercase text-[10px] text-muted-foreground bg-muted/20">
+                  <tr>
+                    <th className="text-left p-2">Traveller</th>
+                    <th className="text-left p-2">Room</th>
+                    <th className="text-right p-2">Hotel</th>
+                    <th className="text-right p-2">Transport</th>
+                    <th className="text-right p-2">Guide</th>
+                    <th className="text-right p-2">Activities</th>
+                    <th className="text-right p-2">Entrances</th>
+                    <th className="text-right p-2">Misc</th>
+                    <th className="text-right p-2">Meals</th>
+                    <th className="text-right p-2">Markup</th>
+                    <th className="text-right p-2">GST 5%</th>
+                    <th className="text-right p-2">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {res.persons.map((p) => (
+                    <tr key={p.person_id} className="border-t">
+                      <td className="p-2">{p.label}</td>
+                      <td className="p-2 text-muted-foreground">{p.room_label}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.hotel_total)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.transport)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.guide)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.activities)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.entrances)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.misc)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.meals)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.markup)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(p.gst5)}</td>
+                      <td className="p-2 text-right tabular-nums font-semibold text-primary">{inr(p.total)}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-primary/5 font-semibold">
+                    <td className="p-2" colSpan={11}>Package Total — avg {inr(res.per_person_avg)} per person</td>
+                    <td className="p-2 text-right tabular-nums text-primary">{inr(res.grand_total)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
 
 export function Step17({ draft, set }: StepProps) {
   const d = useDB();
