@@ -65,6 +65,30 @@ export interface SavedGroupRow {
   per_person: number;
   pax_covered: number;
 }
+/** One costing scenario = hotel category + vehicle + all add-ons, per person. */
+export interface SavedScenarioPerson {
+  label: string;
+  room_label: string;
+  hotel: number;
+  transport: number;
+  guide: number;
+  activities: number;
+  entrances: number;
+  misc: number;
+  meals: number;
+  markup: number;
+  gst5: number;
+  total: number;
+}
+export interface SavedScenario {
+  label: string;
+  hotel_category: string;
+  vehicle: string;
+  pax: number;
+  per_person_avg: number;
+  grand_total: number;
+  persons: SavedScenarioPerson[];
+}
 export interface SavedQuote {
   id: string;
   quote_number: string;
@@ -87,6 +111,7 @@ export interface SavedQuote {
   is_group?: boolean;
   group_total_pax?: number;
   group_rows?: SavedGroupRow[];
+  scenarios?: SavedScenario[];
 }
 
 

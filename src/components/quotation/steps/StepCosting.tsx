@@ -17,6 +17,7 @@ import {
 import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
 import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
+import { ScenarioComparison } from "../ScenarioComparison";
 import type { StepProps } from "../shared";
 
 export function Step16({ draft, set }: StepProps) {
@@ -172,6 +173,8 @@ export function Step16({ draft, set }: StepProps) {
       </div>
       )}
 
+
+      <ScenarioComparison draft={draft} set={set} />
 
       <PerPersonSummaryBlock draft={draft} options={includedOptions} title="Per-Person Breakdown (Custom Allocation)" />
 

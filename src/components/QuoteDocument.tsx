@@ -174,6 +174,52 @@ export function QuoteDocument({ quote: q }: Props) {
       </div>
       )}
 
+      {/* SCENARIO COSTING — per person, line by line */}
+      {q.scenarios && q.scenarios.length > 0 && q.scenarios.map((s, si) => (
+        <div key={si} style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, marginBottom: 4 }}>
+            {s.label.toUpperCase()} — {s.hotel_category} + {s.vehicle} ({s.pax} PAX)
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9.5 }}>
+            <thead><tr style={{ background: TEAL, color: "#fff" }}>
+              <Th>Traveller</Th><Th>Room</Th>
+              <Th align="right">Hotel</Th>
+              <Th align="right">Transport</Th>
+              <Th align="right">Guide</Th>
+              <Th align="right">Activities</Th>
+              <Th align="right">Entrances</Th>
+              <Th align="right">Misc</Th>
+              <Th align="right">Meals</Th>
+              <Th align="right">Markup</Th>
+              <Th align="right">GST 5%</Th>
+              <Th align="right">Total</Th>
+            </tr></thead>
+            <tbody>
+              {s.persons.map((p, i) => (
+                <tr key={i} style={{ background: i % 2 ? "#f7f9fa" : "#fff" }}>
+                  <Td>{p.label}</Td>
+                  <Td>{p.room_label}</Td>
+                  <Td align="right">{inr(p.hotel)}</Td>
+                  <Td align="right">{inr(p.transport)}</Td>
+                  <Td align="right">{inr(p.guide)}</Td>
+                  <Td align="right">{inr(p.activities)}</Td>
+                  <Td align="right">{inr(p.entrances)}</Td>
+                  <Td align="right">{inr(p.misc)}</Td>
+                  <Td align="right">{inr(p.meals)}</Td>
+                  <Td align="right">{inr(p.markup)}</Td>
+                  <Td align="right">{inr(p.gst5)}</Td>
+                  <Td align="right"><b style={{ color: TEAL }}>{inr(p.total)}</b></Td>
+                </tr>
+              ))}
+              <tr style={{ background: GOLD, color: "#000", fontWeight: 800 }}>
+                <Td colSpan={11}>PACKAGE TOTAL — {s.pax} pax (avg {inr(s.per_person_avg)} per person)</Td>
+                <Td align="right">{inr(s.grand_total)}</Td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ))}
+
 
       {/* ROOM ALLOCATION DETAIL (only if custom allocation was enabled) */}
       {q.allocations && q.allocations.length > 0 && (

@@ -45,7 +45,7 @@ export function ActiveWizardBanner() {
       >
         <Link
           to="/costing"
-          search={active.draftId ? { id: active.draftId } : {}}
+          search={{ id: active.draftId || undefined }}
         >
           Continue Quotation →
         </Link>

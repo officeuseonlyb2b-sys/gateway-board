@@ -59,7 +59,7 @@ function DraftsPage() {
             <p className="text-sm text-muted-foreground">In-progress quotations you can resume anytime.</p>
           </div>
         </div>
-        <Link to="/costing">
+        <Link to="/costing" search={{ id: undefined }}>
           <Button size="sm">Start new</Button>
         </Link>
       </div>
