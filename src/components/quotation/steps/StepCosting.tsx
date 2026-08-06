@@ -17,6 +17,7 @@ import {
 import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
 import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
+import { ScenarioComparison } from "../ScenarioComparison";
 import type { StepProps } from "../shared";
 
 export function Step16({ draft, set }: StepProps) {
