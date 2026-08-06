@@ -74,7 +74,14 @@ export function Step15({ draft, set }: StepProps) {
       days.forEach((dayNo) => { if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix); });
       set({ dynamic_days: days, day_room_mix: mixes });
     } else {
-      set({ dynamic_days: [] });
+      // Switch to Standard: set a double-occupancy mix for all overnight days
+      // so that the Per-Person Preview uses double rooms (no Quad).
+      const doubles = Math.floor(paxForMix / 2);
+      const single = paxForMix % 2;
+      const doubleMix: DayRoomMix = { single, double: doubles, triple: 0, quad: 0 };
+      const mixes: Record<number, DayRoomMix> = {};
+      overnightRouting.forEach((r) => { mixes[r.day] = { ...doubleMix }; });
+      set({ dynamic_days: [], day_room_mix: mixes });
     }
   };
 
