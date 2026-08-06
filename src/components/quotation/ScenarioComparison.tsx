@@ -12,7 +12,7 @@ import { useDB } from "@/lib/mock-store";
 import { computeScenario, type ScenarioResult } from "@/lib/wizard/scenario";
 import { transportLineTotal } from "@/lib/wizard/calc";
 import type { QuoteDraft, CostScenario, OptionKey } from "@/lib/wizard/types";
-import { uid } from "../shared";
+import { uid } from "./shared";
 
 export function ScenarioComparison({
   draft, set,
