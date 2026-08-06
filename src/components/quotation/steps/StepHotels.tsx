@@ -1,4 +1,5 @@
 // src/components/quotation/steps/StepHotels.tsx (Step15)
+// Standard & Dynamic Layouts Combined.
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -28,6 +29,7 @@ import {
   personRoomTypeLabel,
   defaultDayMix,
   effectivePaxForPricing,
+  dayMixCoversPax,
 } from "@/lib/wizard/calc";
 import type {
   QuoteDraft,
@@ -61,6 +63,20 @@ export function Step15({ draft, set }: StepProps) {
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
   const [quickAdd, setQuickAdd] = useState<{ cityId: string; cityName: string } | null>(null);
   const overnightRouting = draft.routing.filter((r) => r.overnight && (r.city_id || r.to_city));
+  const paxForMix = Math.max(1, effectivePaxForPricing(draft));
+
+  // Global Mode Toggle (Standard vs Dynamic)
+  const isDynamicGlobal = (draft.dynamic_days ?? []).length > 0;
+  const setGlobalMode = (isDynamic: boolean) => {
+    if (isDynamic) {
+      const days = overnightRouting.map((r) => r.day);
+      const mixes = { ...(draft.day_room_mix ?? {}) };
+      days.forEach((dayNo) => { if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix); });
+      set({ dynamic_days: days, day_room_mix: mixes });
+    } else {
+      set({ dynamic_days: [] });
+    }
+  };
 
   const addOption = () => {
     const existing = draft.hotel_options.map((o) => o.key);
@@ -76,10 +92,6 @@ export function Step15({ draft, set }: StepProps) {
 
   const activeOption = draft.hotel_options.find((o) => o.key === activeOpt) || draft.hotel_options[0];
   const activeCategory = activeOption?.category || "";
-
-  const findRate = (room_id: string, meal: MealPlan, dateISO: string) => {
-    return findRatePlan(d.rate_plans, room_id, meal, dateISO);
-  };
 
   const applyCategory = (v: string) => {
     if (!activeOption) return;
@@ -152,12 +164,15 @@ export function Step15({ draft, set }: StepProps) {
               overnightRouting={overnightRouting}
               onUpdate={(patch) => updateOption(activeOption.key, patch)}
               onQuickAdd={(cityId, cityName) => setQuickAdd({ cityId, cityName })}
+              isDynamicGlobal={isDynamicGlobal}
+              setGlobalMode={setGlobalMode}
+              paxForMix={paxForMix}
             />
           )}
 
           {activeCategory && overnightRouting.length > 0 && activeOption.selections.some((s) => s.room_id) && (
             <>
-              {(draft.dynamic_days ?? []).length > 0 && (
+              {!isDynamicGlobal && (draft.dynamic_days ?? []).length > 0 && (
                 <OptionDynamicPreview draft={draft} option={activeOption} />
               )}
               {optionUsesCustomAllocation(activeOption) && (
@@ -172,7 +187,6 @@ export function Step15({ draft, set }: StepProps) {
               onChange={(patch) => updateOption(activeOption.key, patch)}
             />
           )}
-
         </div>
       )}
 
@@ -204,7 +218,7 @@ export function Step15({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// Accommodation Selection Table
+// Accommodation Selection Table (Standard + Dynamic Combined)
 // ============================================================
 function AccommodationSelectionTable({
   draft,
@@ -214,6 +228,9 @@ function AccommodationSelectionTable({
   overnightRouting,
   onUpdate,
   onQuickAdd,
+  isDynamicGlobal,
+  setGlobalMode,
+  paxForMix,
 }: {
   draft: QuoteDraft;
   set: (p: Partial<QuoteDraft>) => void;
@@ -222,17 +239,13 @@ function AccommodationSelectionTable({
   overnightRouting: typeof draft.routing;
   onUpdate: (patch: Partial<HotelOption>) => void;
   onQuickAdd: (cityId: string, cityName: string) => void;
+  isDynamicGlobal: boolean;
+  setGlobalMode: (isDynamic: boolean) => void;
+  paxForMix: number;
 }) {
   const d = useDB();
-
-  // Toggle states for extra columns
-  const [showQuad, setShowQuad] = useState(false);
-  // Day number whose rates are being edited in the combined per-day dialog.
   const [editingDay, setEditingDay] = useState<number | null>(null);
-  // Quad-unavailable popup + dynamic costing flow state.
-  const [quadAlertDay, setQuadAlertDay] = useState<number | null>(null);
-  const [dynamicDay, setDynamicDay] = useState<number | null>(null);
-  const [dismissedQuadDays, setDismissedQuadDays] = useState<number[]>([]);
+  const [showQuad, setShowQuad] = useState(false);
 
   const overrides = option.rate_overrides ?? {};
   const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
@@ -251,40 +264,37 @@ function AccommodationSelectionTable({
     onUpdate({ rate_overrides: next });
   };
 
-  // Per-day room mix (Dynamic mode — previously the separate Room Allocation step).
-  const paxForMix = Math.max(1, effectivePaxForPricing(draft));
-  const dynamicDays = draft.dynamic_days ?? [];
-  const isDynamicDay = (dayNo: number) => dynamicDays.includes(dayNo);
-  const setDayMode = (dayNo: number, dynamic: boolean) => {
-    const next = dynamic
-      ? Array.from(new Set([...dynamicDays, dayNo]))
-      : dynamicDays.filter((x) => x !== dayNo);
-    const patch: Partial<QuoteDraft> = { dynamic_days: next };
-    if (dynamic && !draft.day_room_mix?.[dayNo]) {
-      patch.day_room_mix = { ...(draft.day_room_mix ?? {}), [dayNo]: defaultDayMix(paxForMix) };
-    }
-    set(patch);
-  };
-  const setAllDaysMode = (dynamic: boolean) => {
-    if (!dynamic) { set({ dynamic_days: [] }); return; }
-    const days = overnightRouting.map((r) => r.day);
-    const mixes = { ...(draft.day_room_mix ?? {}) };
-    days.forEach((dayNo) => { if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix); });
-    set({ dynamic_days: days, day_room_mix: mixes });
-  };
   const dayMixFor = (dayNo: number): DayRoomMix =>
     draft.day_room_mix?.[dayNo] ?? defaultDayMix(paxForMix);
   const setDayMix = (dayNo: number, patch: Partial<DayRoomMix>) => {
     set({ day_room_mix: { ...(draft.day_room_mix ?? {}), [dayNo]: { ...dayMixFor(dayNo), ...patch } } });
   };
 
+  // Toggles for "All Single/Double/Triple/Quad" in Dynamic mode
+  const applyDayPreset = (dayNo: number, kind: "single" | "double" | "triple" | "quad") => {
+    if (kind === "single") setDayMix(dayNo, { single: paxForMix, double: 0, triple: 0, quad: 0 });
+    if (kind === "double") setDayMix(dayNo, { single: paxForMix % 2, double: Math.floor(paxForMix / 2), triple: 0, quad: 0 });
+    if (kind === "triple") {
+      const triple = Math.floor(paxForMix / 3);
+      const rem = paxForMix % 3;
+      setDayMix(dayNo, { single: rem === 1 ? 1 : 0, double: rem === 2 ? 1 : 0, triple, quad: 0 });
+    }
+    if (kind === "quad") {
+      const quad = Math.floor(paxForMix / 4);
+      const rem = paxForMix % 4;
+      setDayMix(dayNo, { single: rem === 1 ? 1 : 0, double: rem === 2 ? 1 : 0, triple: rem === 3 ? 1 : 0, quad });
+    }
+  };
+  const copyDayOneToAll = () => {
+    const first = overnightRouting[0];
+    if (!first) return;
+    const base = dayMixFor(first.day);
+    const next: Record<number, DayRoomMix> = { ...(draft.day_room_mix ?? {}) };
+    overnightRouting.forEach((r) => { next[r.day] = { ...base }; });
+    set({ day_room_mix: next });
+  };
 
-
-  // A day needs Quad when the column is toggled on, or the day's dynamic room mix allocates one.
-  const dayNeedsQuad = (dayNumber: number) =>
-    showQuad || (isDynamicDay(dayNumber) && (draft.day_room_mix?.[dayNumber]?.quad ?? 0) > 0);
-
-  // Hotel offers Quad when any of its rooms has a quad rate applicable on that date.
+  // Hotel filter logic
   const hotelHasQuad = (hotelId: string, dateISO: string) => {
     const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
     return roomIds.some((roomId) =>
@@ -295,57 +305,40 @@ function AccommodationSelectionTable({
     );
   };
 
-  // Total number of passengers (used for meal costing)
-  const totalPax = draft.adults + draft.ss + draft.children.length;
-
-  // Summary totals
-  let totalSgl = 0,
-    totalDbl = 0,
-    totalTrp = 0,
-    totalQuad = 0;
-
+  // Build the rows
   const rows = overnightRouting.map((day) => {
     const cityName = d.cities.find((c) => c.id === day.city_id)?.name || day.to_city || "";
     const cityKey = cityName.trim().toLowerCase();
     const catKey = activeCategory.trim().toLowerCase();
     const sel = option.selections.find((s) => s.city_id === day.city_id);
 
-    // Hotels for this city
     const hotelCityName = (h: (typeof d.hotels)[number]) =>
       (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase();
-    const allCityHotels = cityKey
-      ? d.hotels.filter((h) => hotelCityName(h) === cityKey)
-      : [];
-    const cityHotels = allCityHotels.filter(
-      (h) => h.hotel_category.trim().toLowerCase() === catKey,
-    );
-    const categoryRank = CATEGORY_RANK[activeCategory] ?? 0;
-    const bestRateForHotel = (hotelId: string) => {
-      const roomIds = d.room_categories.filter((room) => room.hotel_id === hotelId).map((room) => room.id);
-      return d.rate_plans
-        .filter((plan) => roomIds.includes(plan.room_category_id) && day.date >= plan.validity_start && day.date <= plan.validity_end)
-        .reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
-    };
+    const allCityHotels = cityKey ? d.hotels.filter((h) => hotelCityName(h) === cityKey) : [];
+    const cityHotels = allCityHotels.filter((h) => h.hotel_category.trim().toLowerCase() === catKey);
     const noCategoryMatch = cityHotels.length === 0;
     const lowerCategoryHotels = allCityHotels.filter((h) => {
       const rank = CATEGORY_RANK[h.hotel_category] ?? 0;
-      return categoryRank > 0 && rank > 0 && rank < categoryRank;
+      return (CATEGORY_RANK[activeCategory] ?? 0) > 0 && rank > 0 && rank < (CATEGORY_RANK[activeCategory] ?? 0);
     });
     const fallbackHotels = (lowerCategoryHotels.length > 0 ? lowerCategoryHotels : allCityHotels)
       .slice()
       .sort((a, b) => {
         const rankDiff = (CATEGORY_RANK[b.hotel_category] ?? 0) - (CATEGORY_RANK[a.hotel_category] ?? 0);
         if (rankDiff !== 0) return rankDiff;
-        return bestRateForHotel(b.id) - bestRateForHotel(a.id);
+        const roomIdsA = d.room_categories.filter((room) => room.hotel_id === a.id).map((room) => room.id);
+        const bestRateA = d.rate_plans.filter((plan) => roomIdsA.includes(plan.room_category_id) && day.date >= plan.validity_start && day.date <= plan.validity_end).reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
+        const roomIdsB = d.room_categories.filter((room) => room.hotel_id === b.id).map((room) => room.id);
+        const bestRateB = d.rate_plans.filter((plan) => roomIdsB.includes(plan.room_category_id) && day.date >= plan.validity_start && day.date <= plan.validity_end).reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
+        return bestRateB - bestRateA;
       });
     let hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
-    // When Quad is active for this day, only show hotels that actually offer Quad.
-    const needsQuad = dayNeedsQuad(day.day);
+
+    const needsQuad = showQuad || (isDynamicGlobal && (dayMixFor(day.day).quad ?? 0) > 0);
     const quadPool = hotelPool.filter((h) => hotelHasQuad(h.id, day.date));
     const noQuadHotel = needsQuad && quadPool.length === 0;
     if (needsQuad && quadPool.length > 0) hotelPool = quadPool;
 
-    // Rooms and meal plans
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
     const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
     const baseRate = sel && sel.room_id ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
@@ -354,20 +347,9 @@ function AccommodationSelectionTable({
     const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const isFallback = sel?.is_fallback || false;
 
-    // Compute room rates (net, gst, total) for each occupancy
-    let sglNet = 0,
-      dblNet = 0,
-      trpNet = 0,
-      quadNet = 0;
-    let sglGst = 0,
-      dblGst = 0,
-      trpGst = 0,
-      quadGst = 0;
-    let sglTotal = 0,
-      dblTotal = 0,
-      trpTotal = 0,
-      quadTotal = 0;
-
+    let sglNet = 0, dblNet = 0, trpNet = 0, quadNet = 0;
+    let sglGst = 0, dblGst = 0, trpGst = 0, quadGst = 0;
+    let sglTotal = 0, dblTotal = 0, trpTotal = 0, quadTotal = 0;
     let offSeasonText = "";
     let hasRate = false;
 
@@ -378,37 +360,11 @@ function AccommodationSelectionTable({
       const quad = (rate.quad_rate ?? 0) > 0 ? (rate.quad_rate as number) : dbl + 2 * extra;
       const gst = gstRateFor;
 
-      // Room totals
-      sglNet = sgl;
-      dblNet = dbl;
-      trpNet = dbl + extra;
-      quadNet = quad;
-      sglGst = sgl * gst(sgl);
-      dblGst = dbl * gst(dbl);
-      trpGst = trpNet * gst(trpNet);
-      quadGst = quad * gst(quad);
-      sglTotal = sglNet + sglGst;
-      dblTotal = dblNet + dblGst;
-      trpTotal = trpNet + trpGst;
-      quadTotal = quadNet + quadGst;
-
+      sglNet = sgl; dblNet = dbl; trpNet = dbl + extra; quadNet = quad;
+      sglGst = sgl * gst(sgl); dblGst = dbl * gst(dbl); trpGst = trpNet * gst(trpNet); quadGst = quad * gst(quad);
+      sglTotal = sglNet + sglGst; dblTotal = dblNet + dblGst; trpTotal = trpNet + trpGst; quadTotal = quadNet + quadGst;
       hasRate = true;
-
-      if (rate.validity_start && rate.validity_end) {
-        const start = new Date(rate.validity_start);
-        const end = new Date(rate.validity_end);
-        const startStr = start.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-        const endStr = end.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-        offSeasonText = `Off Season (${startStr} – ${endStr})`;
-      } else {
-        offSeasonText = rate.season_label || "—";
-      }
-
-      // Accumulate totals for summary (only if columns are active)
-      totalSgl += sglTotal;
-      totalDbl += dblTotal;
-      totalTrp += trpTotal;
-      totalQuad += quadTotal;
+      offSeasonText = rate.season_label || (rate.validity_start && rate.validity_end ? `Off Season (${fmtDateShort(rate.validity_start)} – ${fmtDateShort(rate.validity_end)})` : "—");
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
@@ -423,530 +379,384 @@ function AccommodationSelectionTable({
     };
 
     return {
-      day: day.day,
-      date: day.date,
-      city: cityName,
-      cityId: day.city_id,
-      sel,
-      hotelPool,
-      rooms,
-      meals,
-      rate,
-      selHotel,
-      isFallback,
-      noCategoryMatch,
-      needsQuad,
-      noQuadHotel,
-      dayOverride,
-      offSeasonText,
-      hasRate,
-      // Room totals per occupancy
-      sglTotal,
-      dblTotal,
-      trpTotal,
-      quadTotal,
-      sglNet,
-      sglGst,
-      dblNet,
-      dblGst,
-      trpNet,
-      trpGst,
-      quadNet,
-      quadGst,
-      setSel,
-      selectedHotelId: sel?.hotel_id || "",
-      selectedRoomId: sel?.room_id || "",
-      selectedMeal: sel?.meal_plan || "CP",
+      day: day.day, date: day.date, city: cityName, cityId: day.city_id,
+      sel, hotelPool, rooms, meals, rate, selHotel, isFallback, noCategoryMatch, noQuadHotel,
+      offSeasonText, hasRate, sglTotal, dblTotal, trpTotal, quadTotal, sglNet, sglGst, dblNet, dblGst, trpNet, trpGst, quadNet, quadGst,
+      setSel, selectedHotelId: sel?.hotel_id || "", selectedRoomId: sel?.room_id || "", selectedMeal: sel?.meal_plan || "CP"
     };
   });
 
-  // Read-only rate cell. Editing happens through the single per-day "Edit" control.
-  const renderRateCell = (
-    dayNumber: number,
-    field: keyof DayRateOverride,
-    total: number,
-    net: number,
-    gst: number,
-  ) => {
-    const edited = (overrides[dayNumber]?.[field] ?? 0) > 0;
-    return (
-      <td key={field} className={cn("py-2.5 px-3 text-right", edited && "bg-amber-50")}>
-        <span className={cn("font-semibold text-[#0F172A]", edited && "text-amber-800")}>{inr(total)}</span>
-        <div className="text-[11px] text-[#64748B]">
-          Net: {inr(net)} + GST {(gstRateFor(net) * 100).toFixed(0)}%: {inr(gst)}
-        </div>
-        {edited && (
-          <div className="text-[10px] text-amber-700 font-medium uppercase tracking-wide">Edited</div>
-        )}
-      </td>
-    );
-  };
-
-  const anyNoHotels = rows.some((r) => r.noCategoryMatch && r.hotelPool.length === 0);
-
-  // First day that needs Quad but has no Quad-capable hotel in its city.
-  const pendingQuadRow = rows.find((r) => r.noQuadHotel && !dismissedQuadDays.includes(r.day));
-  const pendingQuadDay = pendingQuadRow?.day ?? null;
-
-  useEffect(() => {
-    if (pendingQuadDay != null && quadAlertDay == null && dynamicDay == null) {
-      setQuadAlertDay(pendingQuadDay);
+  // Dynamic Totals
+  let globalTotalPrice = 0;
+  let totalSgl = 0, totalDbl = 0, totalTrp = 0, totalQuad = 0;
+  rows.forEach((r) => {
+    if (r.hasRate) {
+      totalSgl += r.sglTotal; totalDbl += r.dblTotal; totalTrp += r.trpTotal; totalQuad += r.quadTotal;
     }
-  }, [pendingQuadDay, quadAlertDay, dynamicDay]);
+    if (isDynamicGlobal) {
+      const currentMix = dayMixFor(r.day);
+      const nightTotal = (currentMix.single * r.sglTotal) + (currentMix.double * r.dblTotal) + (currentMix.triple * r.trpTotal) + (currentMix.quad * r.quadTotal);
+      globalTotalPrice += nightTotal;
+    }
+  });
 
+  // Edit Dialog for Standard Mode
   const editRow = rows.find((r) => r.day === editingDay) ?? null;
-  const dynamicRow = rows.find((r) => r.day === dynamicDay) ?? null;
-  const quadAlertRow = rows.find((r) => r.day === quadAlertDay) ?? null;
-
 
   return (
-    <div className="space-y-2">
-      {/* Mode toggle (Standard is default) + extra columns */}
-      <div className="flex flex-wrap items-center gap-4 p-2 bg-muted/30 rounded-md">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3 p-2 bg-muted/30 rounded-md">
+        {/* Modes Toggle */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Room mode:</span>
-          <div className="flex rounded-md border overflow-hidden">
+          <div className="flex rounded-md border overflow-hidden bg-background">
             <button
               type="button"
-              onClick={() => setAllDaysMode(false)}
-              className={cn("px-3 py-1 text-xs font-medium",
-                dynamicDays.length === 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+              onClick={() => setGlobalMode(false)}
+              className={cn("px-4 py-1.5 text-xs font-medium transition-colors",
+                !isDynamicGlobal ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
             >Standard</button>
             <button
               type="button"
-              onClick={() => setAllDaysMode(true)}
-              className={cn("px-3 py-1 text-xs font-medium",
-                dynamicDays.length > 0 ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}
+              onClick={() => setGlobalMode(true)}
+              className={cn("px-4 py-1.5 text-xs font-medium transition-colors",
+                isDynamicGlobal ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
             >Dynamic</button>
           </div>
-          <span className="text-[11px] text-muted-foreground">
-            Standard auto-fits {paxForMix} pax into rooms. Dynamic opens a day-by-day room mix builder.
+          <span className="text-[11px] text-muted-foreground hidden sm:inline">
+            {isDynamicGlobal ? "Control per-night room mixes." : "Pricing displayed per room type."}
           </span>
         </div>
+        
+        {/* Quad Toggle */}
         <div className="flex items-center gap-2 ml-auto">
-          <Checkbox
-            id="showQuad"
-            checked={showQuad}
-            onCheckedChange={(checked) => setShowQuad(checked === true)}
-          />
-          <Label htmlFor="showQuad" className="text-xs cursor-pointer">Show Quad column</Label>
+          <Checkbox id="showQuad" checked={showQuad} onCheckedChange={(checked) => setShowQuad(checked === true)} />
+          <Label htmlFor="showQuad" className="text-xs cursor-pointer select-none">Show Quad column</Label>
         </div>
       </div>
 
-      {anyNoHotels && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
-            Some cities have no hotels for the selected category. Please add hotels or choose a different category.
-          </span>
-          <Button size="sm" variant="outline" onClick={() => {
-            const firstMissing = rows.find((r) => r.noCategoryMatch && r.hotelPool.length === 0);
-            if (firstMissing) onQuickAdd(firstMissing.cityId, firstMissing.city);
-          }}>
-            <Plus className="h-3 w-3" /> Add Hotel
-          </Button>
-        </div>
-      )}
-
-      <Card className="p-0 overflow-hidden border border-[#E2E8F0] shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="bg-[#F1F4F9] border-b border-[#E2E8F0]">
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Day</th>
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Date</th>
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Destination</th>
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Hotel</th>
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Room</th>
-                <th className="text-left py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Meal Plan</th>
-                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">SGL</th>
-                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">DBL</th>
-                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">TRP</th>
-                {showQuad && (
-                  <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Quad</th>
-                )}
-                <th className="text-right py-2.5 px-3 text-[11px] font-semibold text-[#475569] uppercase tracking-wider">Edit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, idx) => {
-                const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
-                const extraCols = showQuad ? 1 : 0;
-                if (r.noQuadHotel) {
-                  // Quad required but unavailable in this city: keep the row blank
-                  // and let the popup drive the admin into Dynamic Costing.
+      {/* ============================================ */}
+      {/* STANDARD MODE - HORIZONTAL TABLE             */}
+      {/* ============================================ */}
+      {!isDynamicGlobal && (
+        <div className="border border-[#E2E8F0] rounded-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-[#F1F4F9] text-[11px] font-semibold text-[#475569] uppercase tracking-wider border-b border-[#E2E8F0]">
+                <tr>
+                  <th className="text-left py-3 px-3">Day</th>
+                  <th className="text-left py-3 px-3">Date</th>
+                  <th className="text-left py-3 px-3">Destination</th>
+                  <th className="text-left py-3 px-3">Hotel</th>
+                  <th className="text-left py-3 px-3">Room</th>
+                  <th className="text-left py-3 px-3">Meal Plan</th>
+                  <th className="text-right py-3 px-3">SGL</th>
+                  <th className="text-right py-3 px-3">DBL</th>
+                  <th className="text-right py-3 px-3">TRP</th>
+                  {showQuad && <th className="text-right py-3 px-3">Quad</th>}
+                  <th className="text-right py-3 px-3">Edit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, idx) => {
+                  const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
                   return (
-                    <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
-                      <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
-                      <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
-                      <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
-                      {Array.from({ length: 6 + extraCols }).map((_, i) => (
-                        <td key={i} className="py-2.5 px-3" />
-                      ))}
-                      <td className="py-2.5 px-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs"
-                          onClick={() => setQuadAlertDay(r.day)}
-                        >
-                          Dynamic Costing
+                    <tr key={idx} className="border-b border-[#E2E8F0] last:border-0 align-top hover:bg-muted/10">
+                      <td className="py-3 px-3 font-medium text-[#0F172A]">{r.day}</td>
+                      <td className="py-3 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
+                      <td className="py-3 px-3 text-[#334155]">{r.city}</td>
+                      <td className="py-3 px-3 min-w-[180px]">
+                        {isMissingHotel ? (
+                          <div className="text-amber-600 text-xs flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" /> No hotels <Button size="sm" variant="link" className="h-auto p-0 text-xs" onClick={() => onQuickAdd(r.cityId, r.city)}>Add</Button>
+                          </div>
+                        ) : (
+                          <>
+                            <Select value={r.selectedHotelId} onValueChange={(v) => r.setSel({ hotel_id: v, room_id: "" })}>
+                              <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
+                              <SelectContent>
+                                {r.hotelPool.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}{r.noCategoryMatch ? ` (${h.hotel_category})` : ""}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            {r.offSeasonText && <div className="text-[11px] text-[#64748B] mt-1 truncate">{r.offSeasonText}</div>}
+                            {r.isFallback && r.selHotel && <div className="text-[10px] text-amber-700 bg-amber-50 inline-block px-1.5 py-0.5 rounded mt-1">⚠ {r.selHotel.hotel_category}</div>}
+                            <div className="text-[10px] text-muted-foreground mt-1">{r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available</div>
+                          </>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 min-w-[140px]">
+                        {r.sel?.hotel_id ? (
+                          <Select value={r.selectedRoomId} onValueChange={(v) => r.setSel({ room_id: v })} disabled={!r.sel?.hotel_id}>
+                            <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full"><SelectValue placeholder="Select room…" /></SelectTrigger>
+                            <SelectContent>
+                              {r.rooms.map((room) => <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        ) : <span className="text-xs text-muted-foreground">Select hotel first</span>}
+                      </td>
+                      <td className="py-3 px-3 min-w-[100px]">
+                        {r.sel?.room_id ? (
+                          <Select value={r.selectedMeal} onValueChange={(v) => r.setSel({ meal_plan: v as MealPlan })} disabled={r.meals.length === 0}>
+                            <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full"><SelectValue placeholder={r.meals.length === 0 ? "—" : "Select…"} /></SelectTrigger>
+                            <SelectContent>
+                              {(r.meals.length ? r.meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                      </td>
+                      {r.hasRate ? (
+                        <>
+                          <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">{inr(r.sglTotal)}<div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.sglNet)} + GST 5%</div></td>
+                          <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">{inr(r.dblTotal)}<div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.dblNet)} + GST 5%</div></td>
+                          <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">{inr(r.trpTotal)}<div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.trpNet)} + GST 5%</div></td>
+                          {showQuad && <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">{inr(r.quadTotal)}<div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.quadNet)} + GST 5%</div></td>}
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-3 px-3 text-right text-[#94A3B8] text-xs">—</td>
+                          <td className="py-3 px-3 text-right text-[#94A3B8] text-xs">—</td>
+                          <td className="py-3 px-3 text-right text-[#94A3B8] text-xs">—</td>
+                          {showQuad && <td className="py-3 px-3 text-right text-[#94A3B8] text-xs">—</td>}
+                        </>
+                      )}
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" disabled={!r.hasRate} onClick={() => setEditingDay(r.day)}>
+                          <Pencil className="h-3 w-3" /> Edit
                         </Button>
+                        {r.dayOverride && Object.keys(r.dayOverride).length > 0 && <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>}
                       </td>
                     </tr>
                   );
-                }
-                return (
-                  <tr key={idx} className="border-b border-[#E2E8F0] last:border-b-0 align-top">
-                    <td className="py-2.5 px-3 font-medium text-[#0F172A]">{r.day}</td>
-                    <td className="py-2.5 px-3 text-[#334155] whitespace-nowrap">{fmtDateShort(r.date)}</td>
-                    <td className="py-2.5 px-3 text-[#334155]">{r.city}</td>
-                    <td className="py-2.5 px-3 min-w-[140px]">
-                      {isMissingHotel ? (
-                        <div className="text-amber-600 text-xs flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" />
-                          No hotels
-                          <Button size="sm" variant="link" className="h-auto p-0 text-xs" onClick={() => onQuickAdd(r.cityId, r.city)}>
-                            Add
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <Select
-                            value={r.selectedHotelId}
-                            onValueChange={(v) => r.setSel({ hotel_id: v, room_id: "" })}
-                          >
-                            <SelectTrigger className="h-8 text-xs border-[#E2E8F0]">
-                              <SelectValue placeholder="Select hotel…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {r.hotelPool.map((h) => (
-                                <SelectItem key={h.id} value={h.id}>
-                                  {h.name}{r.noCategoryMatch ? ` (${h.hotel_category})` : ""}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {r.offSeasonText && (
-                            <div className="text-[11px] text-[#64748B] mt-1">{r.offSeasonText}</div>
-                          )}
-                          {r.isFallback && r.selHotel && (
-                            <div className="text-[10px] text-amber-700 bg-amber-50 inline-block px-1.5 py-0.5 rounded mt-1">
-                              ⚠ {r.selHotel.hotel_category} selected (differs from option)
+                })}
+              </tbody>
+              {rows.some((r) => r.hasRate) && (
+                <tfoot className="border-t-2 border-[#CBD5E1] bg-[#F8FAFC]">
+                  <tr>
+                    <td colSpan={6} className="py-3 px-3 text-sm font-semibold text-[#0F172A] text-right">Net rate with GST</td>
+                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalSgl)}</td>
+                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalDbl)}</td>
+                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalTrp)}</td>
+                    {showQuad && <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalQuad)}</td>}
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================ */}
+      {/* DYNAMIC MODE - VERTICAL CARD LAYOUT         */}
+      {/* ============================================ */}
+      {isDynamicGlobal && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" onClick={copyDayOneToAll} disabled={overnightRouting.length < 2}>Copy Day 1 to all</Button>
+          </div>
+          
+          {rows.map((r) => {
+            const mix = dayMixFor(r.day);
+            const covered = dayMixCoversPax(mix);
+            const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+
+            // Calculate night total exactly
+            let nightTotal = 0;
+            let hasRate = r.hasRate;
+            if (r.hasRate) {
+              nightTotal += mix.single * r.sglTotal;
+              nightTotal += mix.double * r.dblTotal;
+              nightTotal += mix.triple * r.trpTotal;
+              nightTotal += mix.quad * r.quadTotal;
+            }
+
+            return (
+              <Card key={r.day} className="p-4 shadow-sm border space-y-3">
+                <div className="flex flex-wrap lg:flex-nowrap items-start lg:items-center gap-3">
+                  <div className="text-sm font-semibold min-w-[180px]">
+                    Day {r.day} · {r.city}
+                    <span className="text-xs text-muted-foreground ml-2 font-normal">{fmtDateShort(r.date)}</span>
+                  </div>
+                  
+                  <div className="flex-1 flex flex-wrap gap-2 min-w-[240px]">
+                    <div className="flex-1 min-w-[120px]">
+                      <Select value={r.selectedHotelId} onValueChange={(v) => r.setSel({ hotel_id: v, room_id: "" })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Hotel" /></SelectTrigger>
+                        <SelectContent>
+                          {isMissingHotel ? (
+                            <div className="p-2 text-xs text-amber-600 flex items-center gap-2 cursor-pointer" onClick={() => onQuickAdd(r.cityId, r.city)}>
+                              <Plus className="h-3 w-3" /> Add Hotel
                             </div>
+                          ) : r.noQuadHotel ? (
+                            <div className="p-2 text-xs text-amber-600 flex items-center gap-2"><AlertCircle className="h-3 w-3" /> No Quad rooms</div>
+                          ) : (
+                            r.hotelPool.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)
                           )}
-                          {r.noCategoryMatch && (
-                            <div className="text-[10px] text-amber-600 mt-1">
-                              No {activeCategory} hotels; showing closest lower categories.
-                            </div>
-                          )}
-                          {r.needsQuad && (
-                            <div className="text-[10px] text-primary mt-1">Showing Quad-capable hotels only</div>
-                          )}
-                          <div className="text-[10px] text-muted-foreground mt-1">
-                            {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""} available
-                          </div>
-                        </>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 min-w-[120px]">
-                      {r.sel?.hotel_id ? (
-                        <Select
-                          value={r.selectedRoomId}
-                          onValueChange={(v) => r.setSel({ room_id: v })}
-                          disabled={!r.sel?.hotel_id}
-                        >
-                          <SelectTrigger className="h-8 text-xs border-[#E2E8F0]">
-                            <SelectValue placeholder="Select room…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {r.rooms.map((room) => (
-                              <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Select hotel first</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 min-w-[80px]">
-                      {r.sel?.room_id ? (
-                        <Select
-                          value={r.selectedMeal}
-                          onValueChange={(v) => r.setSel({ meal_plan: v as MealPlan })}
-                          disabled={r.meals.length === 0}
-                        >
-                          <SelectTrigger className="h-8 text-xs border-[#E2E8F0]">
-                            <SelectValue placeholder={r.meals.length === 0 ? "—" : "Select…"} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(r.meals.length ? r.meals : MEAL_PLANS).map((m) => (
-                              <SelectItem key={m} value={m}>{m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    {r.hasRate ? (
-                      <>
-                        {renderRateCell(r.day, "sgl", r.sglTotal, r.sglNet, r.sglGst)}
-                        {renderRateCell(r.day, "dbl", r.dblTotal, r.dblNet, r.dblGst)}
-                        {renderRateCell(r.day, "trp", r.trpTotal, r.trpNet, r.trpGst)}
-                        {showQuad && renderRateCell(r.day, "quad", r.quadTotal, r.quadNet, r.quadGst)}
-                      </>
-                    ) : (
-                      <>
-                        <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>
-                        <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>
-                        <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>
-                        {showQuad && <td className="py-2.5 px-3 text-right text-[#94A3B8] text-xs">—</td>}
-                      </>
-                    )}
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs"
-                          disabled={!r.hasRate}
-                          onClick={() => setEditingDay(r.day)}
-                        >
-                          <Pencil className="h-3 w-3" /> Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={isDynamicDay(r.day) ? "default" : "ghost"}
-                          className="h-7 text-xs"
-                          onClick={() => {
-                            if (isDynamicDay(r.day)) { setDayMode(r.day, false); return; }
-                            setDayMode(r.day, true);
-                            setDynamicDay(r.day);
-                          }}
-                        >
-                          {isDynamicDay(r.day) ? "Dynamic ✓" : "Dynamic"}
-                        </Button>
-                        {isDynamicDay(r.day) && (
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDynamicDay(r.day)}>
-                            Room mix
-                          </Button>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex-1 min-w-[100px]">
+                      <Select value={r.selectedRoomId} onValueChange={(v) => r.setSel({ room_id: v })} disabled={!r.sel?.hotel_id}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Room" /></SelectTrigger>
+                        <SelectContent>
+                          {r.rooms.map((rc) => <SelectItem key={rc.id} value={rc.id}>{rc.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="min-w-[80px]">
+                      <Select value={r.selectedMeal} onValueChange={(v) => r.setSel({ meal_plan: v as MealPlan })} disabled={!r.sel?.room_id}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(r.meals.length > 0 ? r.meals : MEAL_PLANS).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  <div className={cn("text-xs font-medium whitespace-nowrap", covered === paxForMix ? "text-emerald-700" : "text-amber-700")}>
+                    {covered} / {paxForMix} pax covered
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "single")}>All Single</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "double")}>All Double</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "triple")}>All Triple</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => applyDayPreset(r.day, "quad")}>All Quad</Button>
+                </div>
+
+                {/* Room Mix Inputs */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
+                  {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[]).map((k) => {
+                    // Hide Quad input if toggle is off
+                    if (k === "quad" && !showQuad) return null;
+                    
+                    const currentVal = mix[k];
+                    let rateHint = "";
+                    if (r.hasRate) {
+                      if (k === "single") rateHint = inr(r.sglTotal);
+                      else if (k === "double") rateHint = inr(r.dblTotal);
+                      else if (k === "triple") rateHint = inr(r.trpTotal);
+                      else if (k === "quad") rateHint = inr(r.quadTotal);
+                    }
+                    
+                    return (
+                      <div key={k} className="space-y-0.5">
+                        <Label className="text-[10px] uppercase text-muted-foreground">{k} rooms</Label>
+                        <Input
+                          type="number" min={0} className="h-8 text-xs"
+                          value={currentVal}
+                          onChange={(e) => setDayMix(r.day, { [k]: Math.max(0, parseInt(e.target.value) || 0) } as Partial<DayRoomMix>)}
+                        />
+                        {hasRate && currentVal > 0 && (
+                          <div className="text-[10px] font-medium text-primary text-right mt-0.5">{rateHint}/night</div>
                         )}
                       </div>
-                      {isDynamicDay(r.day) && (
-                        <div className="text-[10px] text-primary mt-1">
-                          Mix: {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[])
-                            .filter((k) => dayMixFor(r.day)[k] > 0)
-                            .map((k) => `${dayMixFor(r.day)[k]} ${k}`)
-                            .join(" + ") || "—"}
-                        </div>
-                      )}
-                      {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
-                        <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">Edited</div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {rows.some((r) => r.hasRate) && (
-              <tfoot>
-                <tr className="border-t-2 border-[#CBD5E1] bg-[#F8FAFC]">
-                  <td colSpan={6} className="py-3 px-3 text-sm font-semibold text-[#0F172A]">
-                    Net rate with GST
-                  </td>
-                  <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalSgl)}</td>
-                  <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalDbl)}</td>
-                  <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalTrp)}</td>
-                  {showQuad && (
-                    <td className="py-3 px-3 text-right font-bold text-[#0F172A]">{inr(totalQuad)}</td>
-                  )}
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-        {!rows.some((r) => r.hasRate) && (
-          <div className="p-4 text-sm text-amber-700 bg-amber-50 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
-            No rates found for the selected hotels. Please check room/meal plan selections.
-          </div>
-        )}
-      </Card>
+                    );
+                  })}
+                </div>
 
-      {/* Combined per-day rate edit (per-quotation override only) */}
+                {/* === UPDATED: Detailed Night Breakdown Table === */}
+                <div className="pt-3 border-t border-dashed border-muted-foreground/20">
+                  <div className="text-xs font-medium text-muted-foreground mb-2">Night Breakdown</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-muted-foreground uppercase text-[10px]">
+                        <th className="text-left py-1">Room Type</th>
+                        <th className="text-center py-1">Count</th>
+                        <th className="text-right py-1">Net Rate</th>
+                        <th className="text-right py-1">GST</th>
+                        <th className="text-right py-1">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hasRate && (() => {
+                        const rows = [];
+                        if (mix.single > 0 && r.sglTotal > 0) {
+                          rows.push({ type: 'Single', count: mix.single, net: r.sglNet, gst: r.sglGst, total: r.sglTotal });
+                        }
+                        if (mix.double > 0 && r.dblTotal > 0) {
+                          rows.push({ type: 'Double', count: mix.double, net: r.dblNet, gst: r.dblGst, total: r.dblTotal });
+                        }
+                        if (mix.triple > 0 && r.trpTotal > 0) {
+                          rows.push({ type: 'Triple', count: mix.triple, net: r.trpNet, gst: r.trpGst, total: r.trpTotal });
+                        }
+                        if (mix.quad > 0 && r.quadTotal > 0 && showQuad) {
+                          rows.push({ type: 'Quad', count: mix.quad, net: r.quadNet, gst: r.quadGst, total: r.quadTotal });
+                        }
+                        return rows.map((row, idx) => (
+                          <tr key={idx} className="border-t border-muted-foreground/10">
+                            <td className="py-1">{row.type}</td>
+                            <td className="text-center py-1">{row.count}</td>
+                            <td className="text-right py-1 tabular-nums">{inr(row.net)}</td>
+                            <td className="text-right py-1 tabular-nums">{inr(row.gst)}</td>
+                            <td className="text-right py-1 tabular-nums font-medium">{inr(row.total)}</td>
+                          </tr>
+                        ));
+                      })()}
+                      {hasRate && (
+                        <tr className="border-t border-muted-foreground/20 font-semibold">
+                          <td colSpan={4} className="text-right py-1">Night Total</td>
+                          <td className="text-right py-1 text-primary">{inr(nightTotal)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  {hasRate && (
+                    <div className="text-[10px] text-muted-foreground mt-1 text-right">
+                      Net: {inr(nightTotal / (1 + gstRateFor(nightTotal)))} + GST {(gstRateFor(nightTotal) * 100).toFixed(0)}%
+                    </div>
+                  )}
+                  {!hasRate && <div className="text-xs text-muted-foreground">Rate not found</div>}
+                </div>
+              </Card>
+            );
+          })}
+          
+          {/* Dynamic Standard Footer */}
+          {rows.some((r) => r.hasRate) && (
+            <div className="border-t-2 border-[#CBD5E1] bg-[#F8FAFC] rounded-b-lg px-4 py-3 flex flex-wrap justify-end items-center gap-8 mt-0">
+              <span className="text-sm font-semibold text-[#0F172A]">Net rate with GST</span>
+              <div className="flex flex-wrap gap-6">
+                <div className="text-right">
+                  <div className="font-bold text-[#0F172A]">{inr(totalSgl)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-[#0F172A]">{inr(totalDbl)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-[#0F172A]">{inr(totalTrp)}</div>
+                </div>
+                {showQuad && (
+                  <div className="text-right">
+                    <div className="font-bold text-[#0F172A]">{inr(totalQuad)}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Edit Rates Dialog - Standard Mode Only */}
       <Dialog open={!!editRow} onOpenChange={(v) => { if (!v) setEditingDay(null); }}>
         <DialogContent className="sm:max-w-md">
           {editRow && (
             <>
               <DialogHeader>
                 <DialogTitle>Edit rates — Day {editRow.day} · {editRow.city}</DialogTitle>
-                <DialogDescription>
-                  Applies to this quotation only. The hotel's saved contract rate stays unchanged.
-                </DialogDescription>
+                <DialogDescription>Applies to this quotation only. The hotel's master rate stays unchanged.</DialogDescription>
               </DialogHeader>
               <DayRateFields
-                showQuad={showQuad || editRow.needsQuad}
+                showQuad={showQuad || editRow.noQuadHotel}
                 base={{ sgl: editRow.sglNet, dbl: editRow.dblNet, trp: editRow.trpNet, quad: editRow.quadNet }}
                 override={overrides[editRow.day] ?? {}}
                 onChange={(field, value) => setOverride(editRow.day, field, value)}
               />
               <DialogFooter>
-                <Button variant="ghost" onClick={() => setDayOverride(editRow.day, undefined)}>
-                  <RotateCcw className="h-3.5 w-3.5" /> Reset to contract rates
-                </Button>
+                <Button variant="ghost" onClick={() => setDayOverride(editRow.day, undefined)}><RotateCcw className="h-3.5 w-3.5" /> Reset to master</Button>
                 <Button onClick={() => setEditingDay(null)}>Done</Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Quad unavailable → prompt to use Dynamic Costing */}
-      <Dialog open={!!quadAlertRow && !dynamicRow} onOpenChange={(v) => {
-        if (!v && quadAlertRow) {
-          setDismissedQuadDays((prev) => prev.includes(quadAlertRow.day) ? prev : [...prev, quadAlertRow.day]);
-          setQuadAlertDay(null);
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          {quadAlertRow && (
-            <>
-              <DialogHeader>
-                <DialogTitle>No Quad hotel available in {quadAlertRow.city}</DialogTitle>
-                <DialogDescription>
-                  Day {quadAlertRow.day} needs a Quad room, but no hotel in {quadAlertRow.city} offers one.
-                  Please complete this day's accommodation using Dynamic Costing.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setDismissedQuadDays((prev) => [...prev, quadAlertRow.day]);
-                    setQuadAlertDay(null);
-                  }}
-                >
-                  Later
-                </Button>
-                <Button onClick={() => { setDayMode(quadAlertRow.day, true); setDynamicDay(quadAlertRow.day); setQuadAlertDay(null); }}>
-                  Open Dynamic Costing
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Dynamic Costing for a single day */}
-      <Dialog open={!!dynamicRow} onOpenChange={(v) => { if (!v) setDynamicDay(null); }}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-          {dynamicRow && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Dynamic Costing — Day {dynamicRow.day} · {dynamicRow.city}</DialogTitle>
-                <DialogDescription>
-                  Pick a hotel, allocate the room mix and confirm rates for this night.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <Label className="text-xs">Hotel</Label>
-                    <Select
-                      value={dynamicRow.selectedHotelId}
-                      onValueChange={(v) => dynamicRow.setSel({ hotel_id: v, room_id: "" })}
-                    >
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select hotel…" /></SelectTrigger>
-                      <SelectContent>
-                        {dynamicRow.hotelPool.map((h) => (
-                          <SelectItem key={h.id} value={h.id}>{h.name} ({h.hotel_category})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs">Room</Label>
-                      <Select
-                        value={dynamicRow.selectedRoomId}
-                        onValueChange={(v) => dynamicRow.setSel({ room_id: v })}
-                        disabled={!dynamicRow.selectedHotelId}
-                      >
-                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select room…" /></SelectTrigger>
-                        <SelectContent>
-                          {dynamicRow.rooms.map((room) => (
-                            <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Meal Plan</Label>
-                      <Select
-                        value={dynamicRow.selectedMeal}
-                        onValueChange={(v) => dynamicRow.setSel({ meal_plan: v as MealPlan })}
-                        disabled={!dynamicRow.selectedRoomId}
-                      >
-                        <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
-                        <SelectContent>
-                          {(dynamicRow.meals.length ? dynamicRow.meals : MEAL_PLANS).map((m) => (
-                            <SelectItem key={m} value={m}>{m}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border p-3 space-y-2">
-                  <div className="text-sm font-semibold">Day {dynamicRow.day} Room Mix</div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(["single", "double", "triple", "quad"] as (keyof DayRoomMix)[]).map((k) => (
-                      <div key={k}>
-                        <Label className="text-xs capitalize">{k}</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          className="h-8"
-                          value={dayMixFor(dynamicRow.day)[k]}
-                          onChange={(e) => setDayMix(dynamicRow.day, { [k]: Math.max(0, parseInt(e.target.value) || 0) } as Partial<DayRoomMix>)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Quad isn't available in {dynamicRow.city} — allocate Single / Double / Triple instead.
-                  </p>
-                </div>
-
-                {dynamicRow.hasRate && (
-                  <div className="rounded-lg border p-3 space-y-2">
-                    <div className="text-sm font-semibold">Rates for this day</div>
-                    <DayRateFields
-                      showQuad={false}
-                      base={{ sgl: dynamicRow.sglNet, dbl: dynamicRow.dblNet, trp: dynamicRow.trpNet, quad: dynamicRow.quadNet }}
-                      override={overrides[dynamicRow.day] ?? {}}
-                      onChange={(field, value) => setOverride(dynamicRow.day, field, value)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              <DialogFooter>
-                <Button variant="ghost" onClick={() => setDynamicDay(null)}>Cancel</Button>
-                <Button
-                  disabled={!dynamicRow.selectedRoomId}
-                  onClick={() => {
-                    setDismissedQuadDays((prev) => prev.includes(dynamicRow.day) ? prev : [...prev, dynamicRow.day]);
-                    setDayMode(dynamicRow.day, true);
-                    setDynamicDay(null);
-                  }}
-                >
-                  Confirm & Continue to Costing
-                </Button>
               </DialogFooter>
             </>
           )}
@@ -957,8 +767,7 @@ function AccommodationSelectionTable({
 }
 
 // ------------------------------------------------------------
-// Combined per-day rate editor fields (SGL / DBL / TRP / Quad).
-// Per-quotation override only — never writes to the hotel master.
+// Day Rate Editor Fields (SGL / DBL / TRP / Quad)
 // ------------------------------------------------------------
 const RATE_FIELDS: { key: keyof DayRateOverride; label: string }[] = [
   { key: "sgl", label: "Single (SGL)" },
@@ -990,8 +799,7 @@ function DayRateFields({
             <div className="flex-1">
               <Label className="text-xs">{f.label} — net rate (excl. GST)</Label>
               <Input
-                type="number"
-                className="h-9"
+                type="number" className="h-9"
                 value={value ?? ""}
                 placeholder={String(contract)}
                 onChange={(e) => onChange(f.key, parseFloat(e.target.value) || undefined)}
@@ -1013,11 +821,8 @@ function DayRateFields({
   );
 }
 
-
-
 // ------------------------------------------------------------
-// Per-option Inclusions & Exclusions editor (Step 15).
-// (unchanged)
+// Per-option Inclusions & Exclusions editor
 // ------------------------------------------------------------
 function OptionInclusionsEditor({
   option, onChange,
@@ -1042,23 +847,14 @@ function OptionInclusionsEditor({
             {inclusions.map((x, i) => (
               <li key={i} className="text-sm flex justify-between gap-2">
                 <span>✓ {x}</span>
-                <button
-                  onClick={() => onChange({ inclusions: inclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive"
-                  aria-label="Remove"
-                >×</button>
+                <button onClick={() => onChange({ inclusions: inclusions.filter((_, j) => j !== i) })} className="text-destructive">×</button>
               </li>
             ))}
-            {inclusions.length === 0 && (
-              <li className="text-xs text-muted-foreground">No inclusions yet.</li>
-            )}
+            {inclusions.length === 0 && <li className="text-xs text-muted-foreground">No inclusions yet.</li>}
           </ul>
           <div className="flex gap-2">
             <Input value={newInc} onChange={(e) => setNewInc(e.target.value)} placeholder="Add inclusion" />
-            <Button size="sm" onClick={() => {
-              const v = newInc.trim();
-              if (v) { onChange({ inclusions: [...inclusions, v] }); setNewInc(""); }
-            }}>Add</Button>
+            <Button size="sm" onClick={() => { const v = newInc.trim(); if (v) { onChange({ inclusions: [...inclusions, v] }); setNewInc(""); } }}>Add</Button>
           </div>
         </Card>
         <Card className="p-3">
@@ -1067,23 +863,14 @@ function OptionInclusionsEditor({
             {exclusions.map((x, i) => (
               <li key={i} className="text-sm flex justify-between gap-2">
                 <span>✗ {x}</span>
-                <button
-                  onClick={() => onChange({ exclusions: exclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive"
-                  aria-label="Remove"
-                >×</button>
+                <button onClick={() => onChange({ exclusions: exclusions.filter((_, j) => j !== i) })} className="text-destructive">×</button>
               </li>
             ))}
-            {exclusions.length === 0 && (
-              <li className="text-xs text-muted-foreground">No exclusions yet.</li>
-            )}
+            {exclusions.length === 0 && <li className="text-xs text-muted-foreground">No exclusions yet.</li>}
           </ul>
           <div className="flex gap-2">
             <Input value={newExc} onChange={(e) => setNewExc(e.target.value)} placeholder="Add exclusion" />
-            <Button size="sm" onClick={() => {
-              const v = newExc.trim();
-              if (v) { onChange({ exclusions: [...exclusions, v] }); setNewExc(""); }
-            }}>Add</Button>
+            <Button size="sm" onClick={() => { const v = newExc.trim(); if (v) { onChange({ exclusions: [...exclusions, v] }); setNewExc(""); } }}>Add</Button>
           </div>
         </Card>
       </div>
@@ -1092,48 +879,29 @@ function OptionInclusionsEditor({
 }
 
 // ------------------------------------------------------------
-// Dynamic (day-by-day) room mix preview
-// (unchanged)
+// Preview Components (Required by StepCosting)
 // ------------------------------------------------------------
-function OptionDynamicPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
+export function OptionDynamicPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
   const d = useDB();
   const res = useMemo(() => {
     const all = computeDynamicOption(draft, option, d);
     const dyn = new Set(draft.dynamic_days ?? []);
     const days = all.days.filter((x) => dyn.has(x.day));
-    return {
-      days,
-      room_net: days.reduce((s, x) => s + x.net, 0),
-      room_gst: days.reduce((s, x) => s + x.gst, 0),
-    };
+    return { days, room_net: days.reduce((s, x) => s + x.net, 0), room_gst: days.reduce((s, x) => s + x.gst, 0) };
   }, [draft, option, d]);
   if (!res.days.length) return null;
   return (
     <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#FBF7EE" }}>
-      <div className="px-4 py-2.5 text-sm font-semibold text-primary">
-        OPTION {option.key} · Dynamic Room Mix Cost Preview
-      </div>
+      <div className="px-4 py-2.5 text-sm font-semibold text-primary">OPTION {option.key} · Dynamic Room Mix Cost Preview</div>
       <div className="px-4 pb-4 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="text-left py-1.5 font-medium">Day</th>
-              <th className="text-left py-1.5 font-medium">City</th>
-              <th className="text-left py-1.5 font-medium">Room Mix</th>
-              <th className="text-right py-1.5 font-medium">Net</th>
-              <th className="text-right py-1.5 font-medium">GST</th>
-              <th className="text-right py-1.5 font-medium">Total</th>
-            </tr>
+            <tr><th className="text-left py-1.5 font-medium">Day</th><th className="text-left py-1.5 font-medium">City</th><th className="text-left py-1.5 font-medium">Room Mix</th><th className="text-right py-1.5 font-medium">Net</th><th className="text-right py-1.5 font-medium">GST</th><th className="text-right py-1.5 font-medium">Total</th></tr>
           </thead>
           <tbody>
             {res.days.map((row) => {
               const city = d.cities.find((c) => c.id === row.city_id)?.name || "—";
-              const parts = [
-                row.mix.single ? `${row.mix.single} Single` : "",
-                row.mix.double ? `${row.mix.double} Double` : "",
-                row.mix.triple ? `${row.mix.triple} Triple` : "",
-                row.mix.quad ? `${row.mix.quad} Quad` : "",
-              ].filter(Boolean).join(" + ") || "—";
+              const parts = [row.mix.single ? `${row.mix.single} Single` : "", row.mix.double ? `${row.mix.double} Double` : "", row.mix.triple ? `${row.mix.triple} Triple` : "", row.mix.quad ? `${row.mix.quad} Quad` : ""].filter(Boolean).join(" + ") || "—";
               return (
                 <tr key={row.day} className="border-t">
                   <td className="py-1.5">Day {row.day}</td>
@@ -1158,33 +926,19 @@ function OptionDynamicPreview({ draft, option }: { draft: QuoteDraft; option: Ho
   );
 }
 
-// ------------------------------------------------------------
-// Live per-person cost preview
-// (unchanged)
-// ------------------------------------------------------------
 export function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; option: HotelOption }) {
   const d = useDB();
   const rows = useMemo(() => computePersonTotals(draft, option, d), [draft, option, d]);
   const nights = draft.routing.filter((r) => r.overnight && r.city_id).length;
   if (!rows.length) return null;
-
   const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
-
   return (
     <Card className="p-0 overflow-hidden border-primary/20" style={{ backgroundColor: "#FBF7EE" }}>
-      <div className="px-4 py-2.5 text-sm font-semibold text-primary">
-        OPTION {option.key} · Per-Person Cost Preview ({nights} night{nights === 1 ? "" : "s"})
-      </div>
+      <div className="px-4 py-2.5 text-sm font-semibold text-primary">OPTION {option.key} · Per-Person Cost Preview ({nights} night{nights === 1 ? "" : "s"})</div>
       <div className="px-4 pb-4 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="text-left py-1.5 font-medium">Person</th>
-              <th className="text-left py-1.5 font-medium">Room</th>
-              <th className="text-right py-1.5 font-medium">Room Net</th>
-              <th className="text-right py-1.5 font-medium">Room GST</th>
-              <th className="text-right py-1.5 font-medium">Rooms Total</th>
-            </tr>
+            <tr><th className="text-left py-1.5 font-medium">Person</th><th className="text-left py-1.5 font-medium">Room</th><th className="text-right py-1.5 font-medium">Room Net</th><th className="text-right py-1.5 font-medium">Room GST</th><th className="text-right py-1.5 font-medium">Rooms Total</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
@@ -1192,11 +946,7 @@ export function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; o
                 <td className="py-1.5">{r.label}</td>
                 <td className="py-1.5 text-muted-foreground">
                   {personRoomTypeLabel(r.room_type, r.sharing_with)}
-                  {r.sharing_with.length > 0 && (
-                    <span className="ml-1 text-xs">
-                      w/ {r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")}
-                    </span>
-                  )}
+                  {r.sharing_with.length > 0 && <span className="ml-1 text-xs">w/ {r.sharing_with.map((id) => nameById.get(id) || `#${id}`).join(", ")}</span>}
                 </td>
                 <td className="text-right tabular-nums">{inr(r.room_net)}</td>
                 <td className="text-right tabular-nums">{inr(r.room_gst)}</td>
@@ -1205,9 +955,6 @@ export function OptionPerPersonPreview({ draft, option }: { draft: QuoteDraft; o
             ))}
           </tbody>
         </table>
-        <div className="mt-2 text-[11px] text-muted-foreground italic">
-          Add-ons (transport, guide, activities) will be split equally across all {rows.length} traveller{rows.length === 1 ? "" : "s"} in Steps 16 & 17.
-        </div>
       </div>
     </Card>
   );
