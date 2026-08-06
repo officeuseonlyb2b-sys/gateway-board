@@ -42,7 +42,7 @@ import {
   computeGroupOption,
   type OptionTotals, type PersonOptionTotal, type GroupOptionTotals,
 } from "@/lib/wizard/calc";
-import { computeScenario, type ScenarioResult } from "@/lib/wizard/scenario";
+import { computeScenario } from "@/lib/wizard/scenario";
 
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
