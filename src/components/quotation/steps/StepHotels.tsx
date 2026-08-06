@@ -379,7 +379,7 @@ function AccommodationSelectionTable({
     };
 
     return {
-      day: day.day, date: day.date, city: cityName, cityId: day.city_id,
+      day: day.day, date: day.date, city: cityName, cityId: day.city_id, dayOverride,
       sel, hotelPool, rooms, meals, rate, selHotel, isFallback, noCategoryMatch, noQuadHotel,
       offSeasonText, hasRate, sglTotal, dblTotal, trpTotal, quadTotal, sglNet, sglGst, dblNet, dblGst, trpNet, trpGst, quadNet, quadGst,
       setSel, selectedHotelId: sel?.hotel_id || "", selectedRoomId: sel?.room_id || "", selectedMeal: sel?.meal_plan || "CP"
