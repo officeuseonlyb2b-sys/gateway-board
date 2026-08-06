@@ -173,6 +173,8 @@ export function Step16({ draft, set }: StepProps) {
       )}
 
 
+      <ScenarioComparison draft={draft} set={set} />
+
       <PerPersonSummaryBlock draft={draft} options={includedOptions} title="Per-Person Breakdown (Custom Allocation)" />
 
       <div className="text-xs text-muted-foreground italic">
