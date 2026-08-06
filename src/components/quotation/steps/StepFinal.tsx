@@ -109,6 +109,8 @@ export function Step17({ draft, set }: StepProps) {
         </>
       )}
 
+      <ScenarioFinalBlock draft={draft} />
+
 
       {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
         <details className="rounded-lg border bg-card">
