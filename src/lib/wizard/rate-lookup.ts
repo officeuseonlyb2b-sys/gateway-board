@@ -24,13 +24,30 @@ function rangeMatches(p: RatePlan, dateISO: string): boolean {
   return s <= e ? t >= s && t <= e : t >= s || t <= e;
 }
 
+/** A season is expired when its Validity To date is strictly before today. */
+export function isExpiredPlan(p: RatePlan, todayISO = new Date().toISOString().slice(0, 10)): boolean {
+  return !!p.validity_end && p.validity_end < todayISO;
+}
+
+/**
+ * Rows usable in quotation costing: explicitly de-selected components are
+ * dropped, and expired seasons are dropped whenever a non-expired season
+ * exists for the same room + meal plan (legacy-only data still resolves).
+ */
+export function usablePlans(plans: RatePlan[]): RatePlan[] {
+  const selected = plans.filter((p) => p.include_in_quote !== false);
+  const live = selected.filter((p) => !isExpiredPlan(p));
+  const keys = new Set(live.map((p) => `${p.room_category_id}|${p.meal_plan}`));
+  return selected.filter((p) => !isExpiredPlan(p) || !keys.has(`${p.room_category_id}|${p.meal_plan}`));
+}
+
 export function findRatePlan(
   plans: RatePlan[],
   room_id: string,
   meal: string,
   dateISO: string,
 ): RatePlan | null {
-  const pool = plans.filter((p) => p.room_category_id === room_id && p.meal_plan === meal);
+  const pool = usablePlans(plans).filter((p) => p.room_category_id === room_id && p.meal_plan === meal);
   // Prefer exact-year range, then recurring month/day, then latest-updated as tiebreak.
   const exact = pool.filter((p) => p.validity_start <= dateISO && p.validity_end >= dateISO);
   const cands = exact.length ? exact : pool.filter((p) => rangeMatches(p, dateISO));
@@ -42,7 +59,7 @@ export function availableMealPlans(
   room_id: string,
   dateISO?: string,
 ): string[] {
-  const pool = plans.filter((p) => p.room_category_id === room_id);
+  const pool = usablePlans(plans).filter((p) => p.room_category_id === room_id);
   const filtered = dateISO ? pool.filter((p) => rangeMatches(p, dateISO)) : pool;
   const set = new Set(filtered.map((p) => p.meal_plan));
   // Preserve canonical order

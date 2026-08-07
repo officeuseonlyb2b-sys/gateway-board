@@ -11,6 +11,7 @@ import { findRatePlan } from "./rate-lookup";
 import {
   gstRateFor, transportLineTotal, planForDay, computeMealsTotal,
   effectivePaxForPricing, optionUsesCustomAllocation, defaultDayMix,
+  landMarkup, landGst, hotelsMarkup, hotelsGst,
 } from "./calc";
 import type {
   QuoteDraft, HotelOption, DayRoomMix, PersonRoomType, CostScenario,
@@ -179,12 +180,18 @@ export function computeScenario(
       + (l.student_pax ?? 0) * (l.student_rate ?? 0), 0);
   const misc_total = draft.misc.reduce((s, l) => s + l.rate * l.qty, 0);
   const optionals_total = draft.optionals.reduce((s, l) => s + l.rate * l.qty, 0);
-  const meals_total = computeMealsTotal(draft, d);
+  const meals_total = computeMealsTotal(draft, d, opt.key);
 
   const addons_total = transport_total + guide_total + activities_total
     + entrances_total + misc_total + optionals_total + meals_total;
 
-  const mk = (draft.markup_percent || 0) / 100;
+  // Land Part and Hotels & Meals carry their own markup / GST percentages.
+  const landMk = landMarkup(draft);
+  const landGs = landGst(draft);
+  const hotelMk = hotelsMarkup(draft);
+  const hotelGs = hotelsGst(draft);
+  const land_total = transport_total + guide_total + activities_total
+    + entrances_total + misc_total + optionals_total;
   const allocs = opt.pax_allocations ?? [];
 
   const persons: ScenarioPersonRow[] = Array.from({ length: pax }, (_, p) => {
@@ -193,9 +200,15 @@ export function computeScenario(
     const hotel_total = hotel_net + hotel_gst;
     const share = (v: number) => v / pax;
     const addons_pp = share(addons_total);
+    const land_pp = share(land_total);
+    const meals_pp = share(meals_total);
     const subtotal = hotel_total + addons_pp;
-    const markup = subtotal * mk;
-    const gst5 = (subtotal + markup) * 0.05;
+    // Land Part markup/GST and Hotels & Meals markup/GST are computed apart.
+    const landMarkupAmt = land_pp * landMk;
+    const hotelMarkupAmt = (hotel_total + meals_pp) * hotelMk;
+    const markup = landMarkupAmt + hotelMarkupAmt;
+    const gst5 = (land_pp + landMarkupAmt) * landGs
+      + (hotel_total + meals_pp + hotelMarkupAmt) * hotelGs;
     return {
       person_id: p + 1,
       label: allocs[p]?.label || `Person ${p + 1}`,

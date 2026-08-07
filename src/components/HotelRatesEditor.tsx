@@ -44,6 +44,8 @@ export interface SeasonBlock {
   newyear: string; newyear_type: SupplementType;
   newyear_date_from: string; newyear_date_to: string;
   remarks: string;
+  /** Only checked seasons/components flow into quotation costing & rate sheets. */
+  include_in_quote: boolean;
 }
 
 export interface RoomBlock {
@@ -64,6 +66,7 @@ export const emptySeason = (): SeasonBlock => ({
   xmas: "", xmas_type: "per_person", xmas_date_from: "", xmas_date_to: "",
   newyear: "", newyear_type: "per_person", newyear_date_from: "", newyear_date_to: "",
   remarks: "",
+  include_in_quote: true,
 });
 
 export const rid = () => Math.random().toString(36).slice(2);
@@ -114,6 +117,7 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
         newyear_date_from: base.newyear_date_from ?? "",
         newyear_date_to: base.newyear_date_to ?? "",
         remarks: base.remarks ?? "",
+        include_in_quote: base.include_in_quote !== false,
       });
     }
     return { id: r.id, name: r.name, seasons: seasons.length ? seasons : [emptySeason()] };
@@ -166,6 +170,7 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
         newyear_date_from: sn.newyear_date_from || null,
         newyear_date_to: sn.newyear_date_to || null,
         remarks: sn.remarks.trim() || null,
+        include_in_quote: sn.include_in_quote !== false,
       }));
     });
     db.addRatePlans(plans);
@@ -246,7 +251,19 @@ export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
           {room.seasons.map((sn, si) => (
             <div key={si} className="rounded-lg bg-background border p-3 space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold">Season {si + 1}</h4>
+                <h4 className="text-xs font-semibold flex items-center gap-2">
+                  Season {si + 1}
+                  {sn.validity_end && sn.validity_end < new Date().toISOString().slice(0, 10) && (
+                    <span className="rounded bg-destructive/10 text-destructive px-1.5 py-0.5 text-[10px] font-medium">
+                      Expired — not used in costing
+                    </span>
+                  )}
+                  <label className="flex items-center gap-1 text-[10px] font-normal text-muted-foreground">
+                    <input type="checkbox" checked={sn.include_in_quote !== false}
+                      onChange={(e) => setSeason(ri, si, { include_in_quote: e.target.checked })} />
+                    Include in quotation
+                  </label>
+                </h4>
                 {room.seasons.length > 1 && (
                   <button type="button" onClick={() => removeSeason(ri, si)} className="text-xs text-destructive hover:underline">
                     Remove season

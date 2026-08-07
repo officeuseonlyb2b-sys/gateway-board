@@ -112,6 +112,8 @@ export interface RatePlan {
   newyear_date_from?: string | null;
   newyear_date_to?: string | null;
   remarks?: string | null;
+  /** When false, this season/rate row is excluded from quotation costing & rate sheets. */
+  include_in_quote?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -223,6 +225,8 @@ export interface Restaurant {
   city_name: string;    // denormalised for routing-city matching
   name: string;
   price_per_person: number;
+  /** Hotel-category tier this restaurant matches (e.g. "3 Star"). */
+  category?: string;
   meal_type?: string;   // optional: Lunch / Dinner / Breakfast
   notes?: string;
   is_active: boolean;

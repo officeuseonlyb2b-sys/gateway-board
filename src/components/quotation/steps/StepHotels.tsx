@@ -252,7 +252,9 @@ function AccommodationSelectionTable({
 }) {
   const d = useDB();
   const [editingDay, setEditingDay] = useState<number | null>(null);
-  const [showQuad, setShowQuad] = useState(false);
+  const [showQuadPref, setShowQuad] = useState(false);
+  // Quad only participates in Dynamic mode; Standard stays flat SGL/DBL/TRP.
+  const showQuad = showQuadPref && isDynamicGlobal;
 
   const overrides = option.rate_overrides ?? {};
   const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
@@ -435,8 +437,9 @@ function AccommodationSelectionTable({
           </span>
         </div>
         
-        {/* Quad Toggle */}
-        <div className="flex items-center gap-2 ml-auto">
+        {/* Quad column is a Dynamic-mode concern only — Standard mode stays
+            flat Single / Double / Triple with no room-mix logic. */}
+        <div className={cn("flex items-center gap-2 ml-auto", !isDynamicGlobal && "hidden")}>
           <Checkbox id="showQuad" checked={showQuad} onCheckedChange={(checked) => setShowQuad(checked === true)} />
           <Label htmlFor="showQuad" className="text-xs cursor-pointer select-none">Show Quad column</Label>
         </div>
