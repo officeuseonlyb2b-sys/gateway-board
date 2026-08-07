@@ -66,6 +66,7 @@ export function Step15({ draft, set }: StepProps) {
   const paxForMix = Math.max(1, effectivePaxForPricing(draft));
 
   // Global Mode Toggle (Standard vs Dynamic)
+  const showQuad = showQuadPref && isDynamicGlobalRef;
   const isDynamicGlobal = (draft.dynamic_days ?? []).length > 0;
   const setGlobalMode = (isDynamic: boolean) => {
     if (isDynamic) {
@@ -252,7 +253,7 @@ function AccommodationSelectionTable({
 }) {
   const d = useDB();
   const [editingDay, setEditingDay] = useState<number | null>(null);
-  const [showQuad, setShowQuad] = useState(false);
+  const [showQuadPref, setShowQuad] = useState(false);
 
   const overrides = option.rate_overrides ?? {};
   const setOverride = (dayNumber: number, field: keyof DayRateOverride, value: number | undefined) => {
