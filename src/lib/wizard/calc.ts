@@ -88,17 +88,36 @@ export interface MealDayRow {
   total: number;
 }
 
+/** Markup / GST percentages, split into Land Part vs Hotels & Meals. */
+export function landMarkup(d: QuoteDraft): number { return (d.land_markup_percent ?? d.markup_percent ?? 0) / 100; }
+export function landGst(d: QuoteDraft): number { return (d.land_gst_percent ?? 5) / 100; }
+export function hotelsMarkup(d: QuoteDraft): number { return (d.hotel_markup_percent ?? d.markup_percent ?? 0) / 100; }
+export function hotelsGst(d: QuoteDraft): number { return (d.hotel_gst_percent ?? 5) / 100; }
+
+/** Meal selections for one accommodation option (falls back to the shared map). */
+export function mealSelectionsFor(
+  draft: QuoteDraft,
+  optionKey?: string,
+): Record<number, import("./types").MealDaySelection> {
+  const byOpt = optionKey
+    ? draft.meal_selections_by_option?.[optionKey as import("./types").OptionKey]
+    : undefined;
+  return byOpt ?? draft.meal_selections ?? {};
+}
+
 export function computeMealDays(
   draft: QuoteDraft,
   d: import("@/lib/mock-store").DB,
+  optionKey?: string,
 ): { rows: MealDayRow[]; total: number } {
   const pax = Math.max(1, effectivePaxForPricing(draft));
-  const opt = draft.hotel_options?.[0];
+  const opt = draft.hotel_options?.find((o) => o.key === optionKey) ?? draft.hotel_options?.[0];
+  const selections = mealSelectionsFor(draft, optionKey);
   const rows: MealDayRow[] = [];
   let total = 0;
 
   draft.routing.forEach((day, i) => {
-    const sel = draft.meal_selections?.[day.day];
+    const sel = selections[day.day];
     if (!sel || sel.source === "none" || !sel.source) return;
     const date = day.date || addDaysISO(draft.start_date, i);
     const city = d.cities.find((c) => c.id === (day.city_id || day.to_city_id))?.name || "—";
@@ -132,9 +151,10 @@ export function computeMealDays(
 export function computeMealsTotal(
   draft: QuoteDraft,
   d?: import("@/lib/mock-store").DB,
+  optionKey?: string,
 ): number {
   if (!d) return 0;
-  return computeMealDays(draft, d).total;
+  return computeMealDays(draft, d, optionKey).total;
 }
 
 export function computeAddonsTotal(

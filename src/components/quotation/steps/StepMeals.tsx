@@ -2,7 +2,7 @@
 // Main table: each city in one row with source and rate for Lunch and Dinner.
 // Breakdown Summary: Simplified, showing only Source and Total (no PP/Pax).
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -11,7 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useDB, restaurantsForCityNames } from "@/lib/mock-store";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { useDB, restaurantsForCityNames, type Restaurant } from "@/lib/mock-store";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
 import { totalPax } from "@/lib/wizard/calc";
 import { inr, addDaysISO } from "@/lib/format";
@@ -23,6 +25,8 @@ type MealType = "Lunch" | "Dinner";
 type MealSource = "none" | "hotel" | "restaurant";
 
 interface MealSelection {
+  /** Accommodation option this selection belongs to (hotel-category variation). */
+  option_key?: string;
   day: number;
   city: string;
   mealType: MealType;
@@ -36,11 +40,22 @@ function getSelection(
   selections: MealSelection[],
   day: number,
   city: string,
-  mealType: MealType
+  mealType: MealType,
+  optionKey?: string,
 ): MealSelection | undefined {
   return selections.find(
-    (s) => s.day === day && s.city === city && s.mealType === mealType
+    (s) => s.day === day && s.city === city && s.mealType === mealType &&
+      (s.option_key ?? optionKey) === optionKey
   );
+}
+
+/** Restaurants matching the hotel-category tier of the active option. */
+export function restaurantsForCategory(list: Restaurant[], category?: string): Restaurant[] {
+  if (!category) return list;
+  const want = category.trim().toLowerCase();
+  const tiered = list.filter((r) => (r.category || "").trim().toLowerCase() === want);
+  // Untagged restaurants stay available so existing data keeps working.
+  return [...tiered, ...list.filter((r) => !r.category)];
 }
 
 function setSelection(
@@ -48,10 +63,12 @@ function setSelection(
   patch: Partial<MealSelection> & { day: number; city: string; mealType: MealType }
 ): MealSelection[] {
   const idx = prev.findIndex(
-    (s) => s.day === patch.day && s.city === patch.city && s.mealType === patch.mealType
+    (s) => s.day === patch.day && s.city === patch.city && s.mealType === patch.mealType &&
+      (s.option_key ?? patch.option_key) === patch.option_key
   );
   const existing = idx >= 0 ? prev[idx] : undefined;
   const updated: MealSelection = {
+    option_key: patch.option_key,
     day: patch.day,
     city: patch.city,
     mealType: patch.mealType,
@@ -110,7 +127,10 @@ function coveredByPlan(mealPlan?: string): { Lunch: boolean; Dinner: boolean } {
 export function StepMeals({ draft, set }: StepProps) {
   const d = useDB();
   const pax = Math.max(1, totalPax(draft));
-  const accOption = draft.hotel_options?.[0];
+  const options = draft.hotel_options ?? [];
+  const [optKey, setOptKey] = useState<string>(options[0]?.key ?? "A");
+  const accOption = options.find((o) => o.key === optKey) ?? options[0];
+  const activeKey = accOption?.key;
   const hotelSelections = accOption?.selections ?? [];
 
   // ====== Compute per-city data ======
@@ -145,7 +165,7 @@ export function StepMeals({ draft, set }: StepProps) {
         ["Lunch", "Dinner"].forEach((mealType) => {
           const mt = mealType as MealType;
           if (covered[mt]) return;
-          const sel = getSelection(selections, day, cityName, mt);
+          const sel = getSelection(selections, day, cityName, mt, activeKey);
           if (!sel || sel.source === "none") return;
 
           let rate = 0;
@@ -188,7 +208,7 @@ export function StepMeals({ draft, set }: StepProps) {
     });
 
     return { cityRows: cityData, totalLunch, totalDinner };
-  }, [draft, d, pax, hotelSelections]);
+  }, [draft, d, pax, hotelSelections, activeKey]);
 
   // ====== Compute detailed breakdown ======
   const { breakdownList, totalLunchBreakdown, totalDinnerBreakdown, grandTotalBreakdown } = useMemo(() => {
@@ -224,7 +244,7 @@ export function StepMeals({ draft, set }: StepProps) {
         const coveredHere = coveredByPlan(hotelSelections.find((s) => s.city_id === cityId)?.meal_plan);
         const getMealData = (mealType: MealType) => {
           if (coveredHere[mealType]) return { source: "Included in plan", total: 0 };
-          const sel = getSelection(selections, day, cityName, mealType);
+          const sel = getSelection(selections, day, cityName, mealType, activeKey);
           if (!sel || sel.source === "none") {
             return { source: "—", total: 0 };
           }
@@ -284,7 +304,7 @@ export function StepMeals({ draft, set }: StepProps) {
       totalDinnerBreakdown: totalDinnerSum,
       grandTotalBreakdown: totalLunchSum + totalDinnerSum,
     };
-  }, [draft, d, pax, hotelSelections]);
+  }, [draft, d, pax, hotelSelections, activeKey]);
 
   // ====== Helper to update a selection ======
   const updateSelection = (
@@ -294,7 +314,7 @@ export function StepMeals({ draft, set }: StepProps) {
     patch: Partial<Omit<MealSelection, "day" | "city" | "mealType">>
   ) => {
     const current = Array.isArray(draft.meal_selections) ? draft.meal_selections : [];
-    const updated = setSelection(current, { day, city, mealType, ...patch });
+    const updated = setSelection(current, { option_key: activeKey, day, city, mealType, ...patch });
     set({ meal_selections: updated });
   };
 
@@ -341,6 +361,25 @@ export function StepMeals({ draft, set }: StepProps) {
         </p>
       </div>
 
+      {options.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <Tabs value={activeKey ?? "A"} onValueChange={setOptKey}>
+            <TabsList>
+              {options.map((o) => (
+                <TabsTrigger key={o.key} value={o.key} className="text-xs">
+                  Option {o.key} · {o.category || o.label || "—"}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          {accOption?.category && (
+            <Badge variant="secondary" className="text-[10px]">
+              Showing {accOption.category} restaurants
+            </Badge>
+          )}
+        </div>
+      )}
+
       {draft.routing.length === 0 && (
         <p className="text-sm text-muted-foreground">Complete the routing step first.</p>
       )}
@@ -377,7 +416,10 @@ export function StepMeals({ draft, set }: StepProps) {
 
                   const hs = hotelSelections.find((s) => s.city_id === cityId);
                   const hotel = hs ? d.hotels.find((h) => h.id === hs.hotel_id) : undefined;
-                  const restaurants = restaurantsForCityNames(d.restaurants ?? [], [cityName]);
+                  const restaurants = restaurantsForCategory(
+                    restaurantsForCityNames(d.restaurants ?? [], [cityName]),
+                    accOption?.category,
+                  );
                   const options: { label: string; value: string }[] = [];
                   options.push({ label: "No meal", value: "none" });
                   if (hotel) {
@@ -391,7 +433,7 @@ export function StepMeals({ draft, set }: StepProps) {
                     const selections = Array.isArray(draft.meal_selections)
                       ? draft.meal_selections
                       : [];
-                    const sel = getSelection(selections, day, cityName, mealType);
+                    const sel = getSelection(selections, day, cityName, mealType, activeKey);
                     if (!sel || sel.source === "none") return "none";
                     if (sel.source === "hotel" && sel.hotel_id) return `hotel:${sel.hotel_id}`;
                     if (sel.source === "restaurant" && sel.restaurant_id)

@@ -92,6 +92,7 @@ function MealsPage() {
             <TableRow>
               <TableHead>Restaurant</TableHead>
               <TableHead>City</TableHead>
+              <TableHead>Category Tier</TableHead>
               <TableHead>Meal Type</TableHead>
               <TableHead className="text-right">Price / person</TableHead>
               <TableHead>Status</TableHead>
@@ -101,7 +102,7 @@ function MealsPage() {
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
                   <UtensilsCrossed className="h-6 w-6 mx-auto mb-2 opacity-50" />
                   No restaurants yet. Add one to make it available in Hotels and quotations.
                 </TableCell>
@@ -111,6 +112,7 @@ function MealsPage() {
               <TableRow key={r.id}>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell>{r.city_name}</TableCell>
+                <TableCell>{r.category || "Any category"}</TableCell>
                 <TableCell>{r.meal_type || "Any"}</TableCell>
                 <TableCell className="text-right">{inr(r.price_per_person)}</TableCell>
                 <TableCell>{r.is_active === false ? "Inactive" : "Active"}</TableCell>
@@ -150,6 +152,7 @@ function RestaurantDialog({
   const [cityId, setCityId] = useState("");
   const [price, setPrice] = useState("");
   const [mealType, setMealType] = useState("Any");
+  const [category, setCategory] = useState("__any");
   const [notes, setNotes] = useState("");
   const [active, setActive] = useState(true);
   const [seeded, setSeeded] = useState<string | null>(null);
@@ -162,6 +165,7 @@ function RestaurantDialog({
     setCityId(editing?.city_id ?? "");
     setPrice(editing ? String(editing.price_per_person) : "");
     setMealType(editing?.meal_type ?? "Any");
+    setCategory(editing?.category || "__any");
     setNotes(editing?.notes ?? "");
     setActive(editing?.is_active !== false);
   }
@@ -174,12 +178,14 @@ function RestaurantDialog({
       db.updateRestaurant(editing.id, {
         name: name.trim(), city_id: cityId, price_per_person: p,
         meal_type: mealType, notes, is_active: active,
+        category: category === "__any" ? undefined : category,
       });
       toast.success("Restaurant updated.");
     } else {
       db.addRestaurant({
         name: name.trim(), city_id: cityId, price_per_person: p,
         meal_type: mealType, notes, is_active: active,
+        category: category === "__any" ? undefined : category,
       });
       toast.success("Restaurant added.");
     }
@@ -222,6 +228,18 @@ function RestaurantDialog({
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label className="text-xs">Hotel Category Tier</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__any">Any category</SelectItem>
+                  {HOTEL_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Notes</Label>
               <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />

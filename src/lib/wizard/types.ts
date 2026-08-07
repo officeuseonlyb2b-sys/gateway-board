@@ -261,6 +261,12 @@ export interface QuoteDraft {
 
   hotel_options: HotelOption[];
   markup_percent: number;
+  /** Markup/GST for the LAND part (transport, guide, entrances, activities, misc). */
+  land_markup_percent?: number;
+  land_gst_percent?: number;
+  /** Markup/GST for HOTELS & MEALS — independent from the land part. */
+  hotel_markup_percent?: number;
+  hotel_gst_percent?: number;
   inclusions: string[];
   exclusions: string[];
   recommended_option: OptionKey | null;
@@ -273,6 +279,8 @@ export interface QuoteDraft {
   day_room_mix?: Record<number, DayRoomMix>;
   // Meals step — per routing day number → lunch/dinner source & selection
   meal_selections?: Record<number, MealDaySelection>;
+  /** Per accommodation-option meal selections (category-matched restaurants). */
+  meal_selections_by_option?: Partial<Record<OptionKey, Record<number, MealDaySelection>>>;
 
   // Guide step UI state (Step 12) — non-calc
   guide_language?: string;
@@ -350,6 +358,10 @@ export const emptyDraft = (): QuoteDraft => ({
   misc: [],
   hotel_options: [{ key: "A", label: "", category: "", selections: [] }],
   markup_percent: 10,
+  land_markup_percent: 10,
+  land_gst_percent: 5,
+  hotel_markup_percent: 10,
+  hotel_gst_percent: 5,
   inclusions: [],
   exclusions: [
     "Airfare / train fare unless specified",

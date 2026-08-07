@@ -18,6 +18,7 @@ import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
 import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
 import { ScenarioComparison } from "../ScenarioComparison";
+import { CostingSheet } from "../CostingSheet";
 import type { StepProps } from "../shared";
 
 export function Step16({ draft, set }: StepProps) {
@@ -79,6 +80,8 @@ export function Step16({ draft, set }: StepProps) {
         </div>
         <div className="text-xs text-muted-foreground mt-2">Only selected options appear in the comparison and final quote.</div>
       </Card>
+
+      <CostingSheet draft={draft} />
 
       {includedOptions.filter((o) => optionUsesCustomAllocation(o)).map((o) => (
         <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
