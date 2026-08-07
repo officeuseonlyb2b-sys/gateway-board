@@ -1,4 +1,6 @@
-// Extracted verbatim from src/routes/_authenticated/costing.tsx (Step 14 UI — Transport).
+// src/components/quotation/steps/StepTransport.tsx (Step 10)
+// Transport with per-route rates, vehicle selection, and per-person breakdown.
+
 import { Plus, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +54,25 @@ export function Step10({ draft, set }: StepProps) {
     const v = d.travel_options.find((x) => x.id === t.travel_id);
     return v?.vehicle_type || "Vehicle";
   };
+
+  // ===== Per‑Person Breakdown Data =====
+  const MAX_PAX = 10;
+  const paxRange = Array.from({ length: MAX_PAX }, (_, i) => i + 1);
+
+  // Compute total cost per transport line (sum of per_route_rates * vehicles + reporting_cost)
+  const lineTotals = draft.transport.map((t) => transportLineTotal(t));
+
+  const breakdownData = paxRange.map((paxCount) => {
+    const perVehicle: Record<string, number> = {};
+    let totalPerPax = 0;
+    draft.transport.forEach((t, idx) => {
+      const lineTotal = lineTotals[idx] || 0;
+      const perPerson = paxCount > 0 ? lineTotal / paxCount : 0;
+      perVehicle[t.id] = perPerson;
+      totalPerPax += perPerson;
+    });
+    return { pax: paxCount, perVehicle, totalPerPax };
+  });
 
   return (
     <div className="space-y-4">
@@ -157,11 +178,8 @@ export function Step10({ draft, set }: StepProps) {
                           onChange={(e) => {
                             const totalVal = parseFloat(e.target.value) || 0;
                             const days = routing.length;
-                            // Auto-distribute the total across the days
                             const distributedVal = days > 0 ? totalVal / days : 0;
                             const newRates = Array(days).fill(distributedVal);
-                            
-                            // Update both total_rate and the daily rates array at once
                             patchLine(i, { 
                               total_rate: totalVal, 
                               per_route_rates: newRates 
@@ -206,7 +224,6 @@ export function Step10({ draft, set }: StepProps) {
                         return (
                           <td key={t.id} className="p-2">
                             {isTotalMode ? (
-                              /* 🔥 Kept blank, uneditable, and disabled */
                               <div className="h-7 flex items-center justify-end text-xs tabular-nums text-muted-foreground bg-muted/30 rounded px-2">
                                 {/* Intentionally empty */}
                               </div>
@@ -230,13 +247,12 @@ export function Step10({ draft, set }: StepProps) {
                     </tr>
                   );
                 })}
-                <tr className="bg-muted/30 border-b border-[#E5E7EB">
+                <tr className="bg-muted/30 border-b border-[#E5E7EB]">
                   <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Reporting Cost</td>
                   {draft.transport.map((t, ti) => {
                     const isTotalMode = t.rate_mode === "total";
                     return (
                       <td key={t.id} className="p-2">
-                        {/* 🔥 Disabled, blank, and uneditable when Total mode is active */}
                         <Input 
                           type="number" 
                           min={0} 
@@ -255,7 +271,6 @@ export function Step10({ draft, set }: StepProps) {
                     const isTotalMode = t.rate_mode === "total";
                     return (
                       <td key={t.id} className="p-2">
-                        {/* 🔥 Disabled, blank, and uneditable when Total mode is active */}
                         <Input 
                           className="h-7 text-xs" 
                           value={isTotalMode ? "" : t.remarks || ""}
@@ -277,6 +292,54 @@ export function Step10({ draft, set }: StepProps) {
           </div>
 
           <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
+
+          {/* ===== NEW: Per‑Person Cost Breakdown Sheet (1–10 pax) ===== */}
+          {draft.transport.length > 0 && (
+            <Card className="p-4 border-2 border-primary/20 bg-primary/5 mt-4">
+              <h3 className="text-sm font-semibold text-primary mb-3">
+                Per‑Person Cost Breakdown
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+                    <tr>
+                      <th className="text-left p-2">Pax</th>
+                      {draft.transport.map((t) => (
+                        <th key={t.id} className="text-right p-2 min-w-[80px]">
+                          {vehLabel(t)}
+                          <div className="font-normal text-[9px] text-muted-foreground">
+                            (total {inr(transportLineTotal(t))})
+                          </div>
+                        </th>
+                      ))}
+                      <th className="text-right p-2 font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {breakdownData.map((row) => (
+                      <tr
+                        key={row.pax}
+                        className="border-t border-muted-foreground/20 hover:bg-muted/10"
+                      >
+                        <td className="p-2 font-medium">{row.pax} pax</td>
+                        {draft.transport.map((t) => (
+                          <td key={t.id} className="p-2 text-right tabular-nums">
+                            {inr(row.perVehicle[t.id] || 0)}
+                          </td>
+                        ))}
+                        <td className="p-2 text-right tabular-nums font-bold text-primary">
+                          {inr(row.totalPerPax)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                * Per‑person costs are calculated as (total cost per vehicle) / pax.
+              </div>
+            </Card>
+          )}
         </>
       )}
     </div>

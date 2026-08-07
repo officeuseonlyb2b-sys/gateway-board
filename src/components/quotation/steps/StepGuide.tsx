@@ -1,5 +1,5 @@
 // StepGuide.tsx (exports Step13)
-// Guide charges with per-city+tour rows, per-language totals, and per-person summary.
+// Guide charges with per-city+tour rows, per-language totals, and per-person breakdown sheet.
 
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -315,6 +315,21 @@ export function Step13({ draft, set }: StepProps) {
     }
   };
 
+  // ===== Per‑Person Breakdown Data =====
+  const MAX_PAX = 10;
+  const paxRange = Array.from({ length: MAX_PAX }, (_, i) => i + 1);
+
+  const breakdownData = paxRange.map((paxCount) => {
+    const perLang: Record<string, number> = {};
+    visibleLangs.forEach((lang) => {
+      const total = totalPerLang[lang] || 0;
+      perLang[lang] = paxCount > 0 ? total / paxCount : 0;
+    });
+    const escortPerPax = paxCount > 0 ? escortTotal / paxCount : 0;
+    const totalPerPax = Object.values(perLang).reduce((sum, v) => sum + v, 0) + escortPerPax;
+    return { pax: paxCount, perLang, escortPerPax, totalPerPax };
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -503,7 +518,7 @@ export function Step13({ draft, set }: StepProps) {
             {/* Per-person row (Individual per language + Escort) */}
             <tr className="bg-[#F0FDF4] border-t border-[#E5E7EB] font-semibold">
               <td colSpan={3} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
-                Per-person
+                Per-person (current pax)
               </td>
               {visibleLangs.map((lang) => {
                 const pp = pax > 0 ? (totalPerLang[lang] || 0) / pax : 0;
@@ -530,6 +545,51 @@ export function Step13({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
+
+      {/* ===== NEW: Per‑Person Cost Breakdown Sheet (1–10 pax) ===== */}
+      <Card className="p-4 border-2 border-primary/20 bg-primary/5">
+        <h3 className="text-sm font-semibold text-primary mb-3">
+          Per‑Person Cost Breakdown
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="text-left p-2">Pax</th>
+                {visibleLangs.map((lang) => (
+                  <th key={lang} className="text-right p-2 min-w-[80px]">{lang}</th>
+                ))}
+                <th className="text-right p-2 min-w-[80px]">Escort</th>
+                <th className="text-right p-2 font-semibold">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdownData.map((row) => (
+                <tr
+                  key={row.pax}
+                  className="border-t border-muted-foreground/20 hover:bg-muted/10"
+                >
+                  <td className="p-2 font-medium">{row.pax} pax</td>
+                  {visibleLangs.map((lang) => (
+                    <td key={lang} className="p-2 text-right tabular-nums">
+                      {inr(row.perLang[lang])}
+                    </td>
+                  ))}
+                  <td className="p-2 text-right tabular-nums">
+                    {inr(row.escortPerPax)}
+                  </td>
+                  <td className="p-2 text-right tabular-nums font-bold text-primary">
+                    {inr(row.totalPerPax)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          * Guide fees and reporting costs are fixed group rates. Per‑person = total cost / pax.
+        </div>
+      </Card>
 
       {/* Summary chips */}
       <div className="flex flex-wrap gap-2 text-xs">

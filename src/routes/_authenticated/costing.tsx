@@ -42,6 +42,7 @@ import {
   computeGroupOption,
   type OptionTotals, type PersonOptionTotal, type GroupOptionTotals,
 } from "@/lib/wizard/calc";
+import { computeScenario } from "@/lib/wizard/scenario";
 
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
@@ -1357,6 +1358,39 @@ function Step18({ draft, set }: StepProps) {
             }));
           })()
         : undefined,
+      scenarios: (() => {
+        const defs = (draft.scenarios && draft.scenarios.length)
+          ? draft.scenarios
+          : (recOpt ? [{ id: "default", label: "Selected Package", option_key: recOpt.key }] : []);
+        return defs
+          .map((s) => computeScenario(draft, s, d))
+          .filter(Boolean)
+          .map((r) => {
+            const res = r!;
+            return {
+              label: res.label,
+              hotel_category: res.option_label,
+              vehicle: res.vehicle_label,
+              pax: res.pax,
+              per_person_avg: res.per_person_avg,
+              grand_total: res.grand_total,
+              persons: res.persons.map((p) => ({
+                label: p.label,
+                room_label: p.room_label,
+                hotel: p.hotel_total,
+                transport: p.transport,
+                guide: p.guide,
+                activities: p.activities,
+                entrances: p.entrances,
+                misc: p.misc,
+                meals: p.meals,
+                markup: p.markup,
+                gst5: p.gst5,
+                total: p.total,
+              })),
+            };
+          });
+      })(),
       ...(isGroupTour(draft) && recOpt ? (() => {
         const pax = Math.max(1, totalPax(draft));
         const dbl = computeGroupOption(draft, recOpt, d, autoDoubleMix(pax));
