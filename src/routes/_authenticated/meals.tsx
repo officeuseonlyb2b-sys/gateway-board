@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
-import { db, useDB, type Restaurant } from "@/lib/mock-store";
+import { db, useDB, HOTEL_CATEGORIES, type Restaurant } from "@/lib/mock-store";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
