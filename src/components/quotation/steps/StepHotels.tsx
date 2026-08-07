@@ -435,8 +435,9 @@ function AccommodationSelectionTable({
           </span>
         </div>
         
-        {/* Quad Toggle */}
-        <div className="flex items-center gap-2 ml-auto">
+        {/* Quad column is a Dynamic-mode concern only — Standard mode stays
+            flat Single / Double / Triple with no room-mix logic. */}
+        <div className={cn("flex items-center gap-2 ml-auto", !isDynamicGlobal && "hidden")}>
           <Checkbox id="showQuad" checked={showQuad} onCheckedChange={(checked) => setShowQuad(checked === true)} />
           <Label htmlFor="showQuad" className="text-xs cursor-pointer select-none">Show Quad column</Label>
         </div>
