@@ -215,6 +215,24 @@ export interface HotelOption {
 }
 
 
+/** Pax categories priced on a monument entrance line. */
+export type EntranceCat = "indian" | "foreign" | "student";
+
+/**
+ * Per routing-day inclusion picks made on the Costing sheet. A missing entry
+ * means "everything for that day is included" (backwards compatible default).
+ * Values are arrays of the line ids explicitly UNCHECKED-aware: we store the
+ * checked ids, and `undefined` = all checked.
+ */
+export interface CostingSelection {
+  transport?: Record<number, string[]>;
+  guide?: Record<number, string[]>;
+  entrances?: Record<number, string[]>;
+  entrance_cats?: Record<number, EntranceCat[]>;
+  activities?: Record<number, string[]>;
+  misc?: Record<number, string[]>;
+}
+
 export interface QuoteDraft {
   step: number;
   query_type: QueryType | null;
