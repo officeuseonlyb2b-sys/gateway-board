@@ -144,7 +144,7 @@ export function buildLandPart(
     const g = d.guides?.find((x) => x.id === l.guide_id);
     target.forEach((day) => opts[day].guide.push({
       id: l.id,
-      label: l.is_escort ? "Tour Escorted" : (l.language || g?.language || "Guide"),
+      label: l.is_escort ? "Tour Escorted" : (l.language || g?.guide_type || "Guide"),
       sub: g?.tour_program || undefined,
       amount: each,
       checked: isPicked(draft, "guide", day, l.id),
@@ -165,7 +165,7 @@ export function buildLandPart(
         (s, c) => s + (catPicked(draft, day, c) ? parts[c] : 0), 0) / target.length;
       opts[day].entrances.push({
         id: l.id,
-        label: l.custom_name || d.entrance_sites?.find((s) => s.id === l.site_id)?.name || "Entrance",
+        label: l.custom_name || d.entrance_sites?.find((s) => s.id === l.site_id)?.site_name || "Entrance",
         amount,
         checked: isPicked(draft, "entrances", day, l.id),
       });
@@ -179,7 +179,7 @@ export function buildLandPart(
     const each = (l.rate * l.qty) / target.length;
     target.forEach((day) => opts[day].activities.push({
       id: l.id,
-      label: l.custom_name || d.activities?.find((a) => a.id === l.activity_id)?.name || "Activity",
+      label: l.custom_name || d.activities?.find((a) => a.id === l.activity_id)?.activity_name || "Activity",
       amount: each,
       checked: isPicked(draft, "activities", day, l.id),
     }));
@@ -192,7 +192,7 @@ export function buildLandPart(
     const each = (l.rate * l.qty) / target.length;
     target.forEach((day) => opts[day].misc.push({
       id: l.id,
-      label: l.custom_name || d.misc_items?.find((m) => m.id === l.item_id)?.name || "Item",
+      label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
       sub: l.unit || undefined,
       amount: each,
       checked: isPicked(draft, "misc", day, l.id),
