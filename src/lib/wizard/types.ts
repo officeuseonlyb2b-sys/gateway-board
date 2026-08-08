@@ -277,6 +277,8 @@ export interface QuoteDraft {
   allocation_mode?: AllocationMode;
   // Dynamic mode: per itinerary day number → room mix chosen manually
   day_room_mix?: Record<number, DayRoomMix>;
+  /** Costing sheet — per routing day, which land-part components are included. */
+  costing_selection?: CostingSelection;
   // Meals step — per routing day number → lunch/dinner source & selection
   meal_selections?: Record<number, MealDaySelection>;
   /** Per accommodation-option meal selections (category-matched restaurants). */
