@@ -24,9 +24,20 @@ function mealPicks(draft: QuoteDraft): MealPick[] {
   const raw = draft.meal_selections as unknown;
   return Array.isArray(raw) ? (raw as MealPick[]) : [];
 }
-import type { QuoteDraft, HotelOption, TransportLine } from "./types";
+import type {
+  QuoteDraft, HotelOption, TransportLine, EntranceCat,
+} from "./types";
 
 // ---------------------------------------------------------------- Land part
+
+/** One selectable component shown as a checkbox inside a Land Part column. */
+export interface SheetOption {
+  id: string;
+  label: string;
+  sub?: string;
+  amount: number;     // amount contributed to THIS day when checked
+  checked: boolean;
+}
 
 export interface LandDayRow {
   day: number;
@@ -40,26 +51,48 @@ export interface LandDayRow {
   activities: number;
   misc: number;
   total: number;
+  transport_opts: SheetOption[];
+  guide_opts: SheetOption[];
+  entrance_opts: SheetOption[];
+  activity_opts: SheetOption[];
+  misc_opts: SheetOption[];
+  entrance_cats: Record<EntranceCat, boolean>;
 }
 
 export interface LandPartSheet {
   rows: LandDayRow[];
   transport_total: number;
-  guide_total: number;
+  guide_total: number;        // guides + escorts (column line total)
+  guide_only_total: number;   // non-escort guides
+  escort_total: number;
   entrances_total: number;
   activities_total: number;
   misc_total: number;
   grand_total: number;
 }
 
-type DayBucket = Record<number, number>;
+const ALL_CATS: EntranceCat[] = ["indian", "foreign", "student"];
 
-/** Spread a line total across the routing days it belongs to (evenly). */
-function spread(days: number[] | undefined, amount: number, all: number[], into: DayBucket) {
-  const target = days && days.length ? days.filter((x) => all.includes(x)) : all;
-  if (!target.length || amount === 0) return;
-  const each = amount / target.length;
-  target.forEach((d) => { into[d] = (into[d] || 0) + each; });
+/** Checked state for a component on a given day (default: checked). */
+export function isPicked(
+  draft: QuoteDraft,
+  bucket: "transport" | "guide" | "entrances" | "activities" | "misc",
+  day: number,
+  id: string,
+): boolean {
+  const list = draft.costing_selection?.[bucket]?.[day];
+  return list ? list.includes(id) : true;
+}
+
+export function catPicked(draft: QuoteDraft, day: number, cat: EntranceCat): boolean {
+  const list = draft.costing_selection?.entrance_cats?.[day];
+  return list ? list.includes(cat) : true;
+}
+
+/** Days a line applies to, restricted to the routing days that exist. */
+function targetDays(days: number[] | undefined, all: number[]): number[] {
+  const t = days && days.length ? days.filter((x) => all.includes(x)) : all;
+  return t.length ? t : [];
 }
 
 export function buildLandPart(
@@ -69,36 +102,104 @@ export function buildLandPart(
 ): LandPartSheet {
   const all = draft.routing.map((r) => r.day);
   const cityName = (id?: string) => d.cities.find((c) => c.id === id)?.name || "";
+  const dayIndex = new Map(draft.routing.map((r, i) => [r.day, i]));
 
-  const transportB: DayBucket = {};
-  const guideB: DayBucket = {};
-  const entranceB: DayBucket = {};
-  const activityB: DayBucket = {};
-  const miscB: DayBucket = {};
+  const opts: Record<number, {
+    transport: SheetOption[]; guide: SheetOption[]; entrances: SheetOption[];
+    activities: SheetOption[]; misc: SheetOption[];
+  }> = {};
+  all.forEach((day) => { opts[day] = { transport: [], guide: [], entrances: [], activities: [], misc: [] }; });
 
+  // ------- Transport (one checkbox per vehicle option, per day)
   const lines = line ? [line] : draft.transport;
   lines.forEach((l) => {
-    if (l.rate_format === "per_route" && l.per_route_rates?.length) {
-      draft.routing.forEach((day, i) => {
-        const v = l.per_route_rates?.[i] || 0;
-        if (v) transportB[day.day] = (transportB[day.day] || 0) + v * (l.vehicles || 1);
+    const vehicle = d.travel_options.find((t) => t.id === l.travel_id)?.vehicle_type || "Vehicle";
+    const rep = (l.reporting_cost || 0) * (l.vehicles || 1);
+    const target = targetDays(undefined, all);
+    if (!target.length) return;
+    const perRoute = l.rate_format === "per_route" && l.per_route_rates?.length;
+    target.forEach((day) => {
+      const base = perRoute
+        ? (l.per_route_rates?.[dayIndex.get(day) ?? 0] || 0) * (l.vehicles || 1)
+        : transportLineTotal(l) / target.length;
+      const amount = base + (perRoute ? rep / target.length : 0);
+      opts[day].transport.push({
+        id: l.id,
+        label: vehicle,
+        sub: [
+          l.reporting_cost ? `Reporting ${l.reporting_cost}` : null,
+          l.remarks || null,
+        ].filter(Boolean).join(" · ") || undefined,
+        amount,
+        checked: isPicked(draft, "transport", day, l.id),
       });
-      const rep = (l.reporting_cost || 0) * (l.vehicles || 1);
-      if (rep) spread(undefined, rep, all, transportB);
-    } else {
-      spread(undefined, transportLineTotal(l), all, transportB);
-    }
+    });
   });
 
-  draft.guides.forEach((l) => spread(l.from_routing_days, l.rate * l.guides * l.days, all, guideB));
-  draft.entrances.forEach((l) => spread(
-    l.from_routing_days,
-    l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate
-      + (l.student_pax ?? 0) * (l.student_rate ?? 0),
-    all, entranceB,
-  ));
-  draft.activities.forEach((l) => spread(l.from_routing_days, l.rate * l.qty, all, activityB));
-  draft.misc.forEach((l) => spread(l.from_routing_days, l.rate * l.qty, all, miscB));
+  // ------- Guides & escorts
+  draft.guides.forEach((l) => {
+    const target = targetDays(l.from_routing_days, all);
+    if (!target.length) return;
+    const each = (l.rate * l.guides * l.days) / target.length;
+    const g = d.guides?.find((x) => x.id === l.guide_id);
+    target.forEach((day) => opts[day].guide.push({
+      id: l.id,
+      label: l.is_escort ? "Tour Escorted" : (l.language || g?.language || "Guide"),
+      sub: g?.tour_program || undefined,
+      amount: each,
+      checked: isPicked(draft, "guide", day, l.id),
+    }));
+  });
+
+  // ------- Entrances (per line, priced by the pax categories checked that day)
+  draft.entrances.forEach((l) => {
+    const target = targetDays(l.from_routing_days, all);
+    if (!target.length) return;
+    target.forEach((day) => {
+      const parts: Record<EntranceCat, number> = {
+        indian: l.indian_pax * l.indian_rate,
+        foreign: l.foreign_pax * l.foreign_rate,
+        student: (l.student_pax ?? 0) * (l.student_rate ?? 0),
+      };
+      const amount = ALL_CATS.reduce(
+        (s, c) => s + (catPicked(draft, day, c) ? parts[c] : 0), 0) / target.length;
+      opts[day].entrances.push({
+        id: l.id,
+        label: l.custom_name || d.entrance_sites?.find((s) => s.id === l.site_id)?.name || "Entrance",
+        amount,
+        checked: isPicked(draft, "entrances", day, l.id),
+      });
+    });
+  });
+
+  // ------- Activities
+  draft.activities.forEach((l) => {
+    const target = targetDays(l.from_routing_days, all);
+    if (!target.length) return;
+    const each = (l.rate * l.qty) / target.length;
+    target.forEach((day) => opts[day].activities.push({
+      id: l.id,
+      label: l.custom_name || d.activities?.find((a) => a.id === l.activity_id)?.name || "Activity",
+      amount: each,
+      checked: isPicked(draft, "activities", day, l.id),
+    }));
+  });
+
+  // ------- Miscellaneous
+  draft.misc.forEach((l) => {
+    const target = targetDays(l.from_routing_days, all);
+    if (!target.length) return;
+    const each = (l.rate * l.qty) / target.length;
+    target.forEach((day) => opts[day].misc.push({
+      id: l.id,
+      label: l.custom_name || d.misc_items?.find((m) => m.id === l.item_id)?.name || "Item",
+      sub: l.unit || undefined,
+      amount: each,
+      checked: isPicked(draft, "misc", day, l.id),
+    }));
+  });
+
+  const sumOn = (list: SheetOption[]) => list.reduce((s, o) => s + (o.checked ? o.amount : 0), 0);
 
   const rows: LandDayRow[] = draft.routing.map((day, i) => {
     const tours = Object.values(day.tours_selected_by_city ?? {}).flat();
@@ -106,11 +207,12 @@ export function buildLandPart(
       ? day.from_city
       : cityName(day.from_city) || day.from_city || "";
     const to = cityName(day.to_city_id) || day.to_city || "";
-    const transport = transportB[day.day] || 0;
-    const guide = guideB[day.day] || 0;
-    const entrances = entranceB[day.day] || 0;
-    const activities = activityB[day.day] || 0;
-    const misc = miscB[day.day] || 0;
+    const o = opts[day.day];
+    const transport = sumOn(o.transport);
+    const guide = sumOn(o.guide);
+    const entrances = sumOn(o.entrances);
+    const activities = sumOn(o.activities);
+    const misc = sumOn(o.misc);
     return {
       day: day.day,
       date: day.date || addDaysISO(draft.start_date, i),
@@ -119,6 +221,16 @@ export function buildLandPart(
       tours: tours.length ? tours.join(", ") : (day.tour_title || "—"),
       transport, guide, entrances, activities, misc,
       total: transport + guide + entrances + activities + misc,
+      transport_opts: o.transport,
+      guide_opts: o.guide,
+      entrance_opts: o.entrances,
+      activity_opts: o.activities,
+      misc_opts: o.misc,
+      entrance_cats: {
+        indian: catPicked(draft, day.day, "indian"),
+        foreign: catPicked(draft, day.day, "foreign"),
+        student: catPicked(draft, day.day, "student"),
+      },
     };
   });
 
@@ -128,8 +240,16 @@ export function buildLandPart(
   const entrances_total = sum((r) => r.entrances);
   const activities_total = sum((r) => r.activities);
   const misc_total = sum((r) => r.misc);
+
+  const escortIds = new Set(draft.guides.filter((g) => g.is_escort).map((g) => g.id));
+  const escort_total = rows.reduce(
+    (s, r) => s + r.guide_opts.reduce((a, o) => a + (o.checked && escortIds.has(o.id) ? o.amount : 0), 0), 0);
+
   return {
-    rows, transport_total, guide_total, entrances_total, activities_total, misc_total,
+    rows, transport_total, guide_total,
+    guide_only_total: guide_total - escort_total,
+    escort_total,
+    entrances_total, activities_total, misc_total,
     grand_total: transport_total + guide_total + entrances_total + activities_total + misc_total,
   };
 }
