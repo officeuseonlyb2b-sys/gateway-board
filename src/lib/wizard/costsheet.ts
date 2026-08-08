@@ -425,11 +425,6 @@ export function buildRateSheet(
   const lunch = gross(hotels.lunch_total, mk.h, mk.hg);
   const dinner = gross(hotels.dinner_total, mk.h, mk.hg);
 
-  const escortTotal = draft.guides.filter((g) => g.is_escort)
-    .reduce((s, g) => s + g.rate * g.guides * g.days, 0);
-  const guideTotal = draft.guides.filter((g) => !g.is_escort)
-    .reduce((s, g) => s + g.rate * g.guides * g.days, 0);
-
   const groups = (lines.length ? lines : [undefined]) as (TransportLine | undefined)[];
 
   return groups.map((line) => {
@@ -440,8 +435,8 @@ export function buildRateSheet(
     const rows: RateSheetRow[] = paxList.map((pax) => {
       const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
       const transport = pp(land.transport_total);
-      const guide = pp(guideTotal);
-      const escort = pp(escortTotal);
+      const guide = pp(land.guide_only_total);
+      const escort = pp(land.escort_total);
       const entrances = pp(land.entrances_total);
       const activities = pp(land.activities_total);
       const misc = pp(land.misc_total);
