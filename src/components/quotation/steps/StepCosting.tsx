@@ -81,7 +81,7 @@ export function Step16({ draft, set }: StepProps) {
         <div className="text-xs text-muted-foreground mt-2">Only selected options appear in the comparison and final quote.</div>
       </Card>
 
-      <CostingSheet draft={draft} />
+      <CostingSheet draft={draft} set={set} />
 
       {includedOptions.filter((o) => optionUsesCustomAllocation(o)).map((o) => (
         <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
