@@ -202,16 +202,29 @@ function WizardPage() {
     return id;
   };
 
-  const go = (n: number) => {
+  const go = (n: number, subIndex = 0) => {
     if (n < 1 || n > TOTAL_STEPS) return;
     if (n > step && !canProceed) return;
     const current = loadDraft() ?? draft;
     const next = { ...current, step: n };
     writeDraft(next);
+    setSub(subIndex);
     if (n > step && n >= 3) {
       persistToDrafts(next, { silent: true });
     }
   };
+
+  const subCount = STEPS[step - 1]?.subs?.length ?? 0;
+  const goNext = () => {
+    if (subCount > 0 && sub < subCount - 1) { setSub(sub + 1); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    go(step + 1);
+  };
+  const goBack = () => {
+    if (subCount > 0 && sub > 0) { setSub(sub - 1); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    const prevSubs = STEPS[step - 2]?.subs?.length ?? 0;
+    go(step - 1, prevSubs > 0 ? prevSubs - 1 : 0);
+  };
+
 
   return (
     <div className="min-h-full bg-muted/20">
