@@ -19,7 +19,9 @@ import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
 import { ScenarioComparison } from "../ScenarioComparison";
 import { CostingSheet } from "../CostingSheet";
+import { MarkupGstSettings } from "../MarkupGstSettings";
 import type { StepProps } from "../shared";
+
 
 export function Step16({ draft, set }: StepProps) {
   const d = useDB();
