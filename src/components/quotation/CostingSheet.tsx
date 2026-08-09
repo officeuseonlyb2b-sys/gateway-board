@@ -45,7 +45,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 
     let daysToUpdate: number[];
     if (day === -1) {
-      daysToUpdate = allDays ?? (draft.itinerary?.days?.map(d => d.day) ?? Object.keys(map).map(Number));
+      daysToUpdate = allDays ?? (draft.routing?.map((rd) => rd.day) ?? Object.keys(map).map(Number));
       if (daysToUpdate.length === 0) return;
     } else {
       daysToUpdate = [day];
@@ -77,7 +77,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 
     let daysToUpdate: number[];
     if (day === -1) {
-      daysToUpdate = allDays ?? (draft.itinerary?.days?.map(d => d.day) ?? Object.keys(map).map(Number));
+      daysToUpdate = allDays ?? (draft.routing?.map((rd) => rd.day) ?? Object.keys(map).map(Number));
       if (daysToUpdate.length === 0) return;
     } else {
       daysToUpdate = [day];
