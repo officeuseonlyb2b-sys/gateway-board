@@ -170,6 +170,8 @@ function WizardPage() {
     });
   }, [draft, currentDraftId]);
 
+  const [sub, setSub] = useState(0);
+
   if (!draft) {
     return (
       <div className="p-8">
