@@ -282,21 +282,22 @@ function WizardPage() {
 
         <div className="mt-6">
           <Card className="p-6 card-elevated">
-            <StepContent draft={draft} set={set} />
+            <StepContent draft={draft} set={set} sub={sub} setSub={setSub} />
           </Card>
         </div>
 
         {/* Nav footer */}
         <div className="flex justify-between mt-6">
-          <Button variant="ghost" onClick={() => go(step - 1)} disabled={step === 1}>
+          <Button variant="ghost" onClick={goBack} disabled={step === 1 && sub === 0}>
             <ChevronLeft className="h-4 w-4 mr-1" /> Back
           </Button>
-          {step < TOTAL_STEPS ? (
-            <Button onClick={() => go(step + 1)} disabled={!canProceed}>
+          {step < TOTAL_STEPS || sub < subCount - 1 ? (
+            <Button onClick={goNext} disabled={!canProceed}>
               Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           ) : null}
         </div>
+
       </div>
     </div>
   );
