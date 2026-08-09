@@ -75,23 +75,18 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // ============================================================
 // Step definitions — Room Allocation now lives inside Hotels → 15 steps
 // ============================================================
-const TOTAL_STEPS = 15;
-const STEPS: { n: number; label: string }[] = [
+const TOTAL_STEPS = 10;
+const STEPS: { n: number; label: string; subs?: string[] }[] = [
   { n: 1, label: "Type" },
   { n: 2, label: "Who" },
   { n: 3, label: "Trip Basics" },
   { n: 4, label: "Program" },
   { n: 5, label: "Routing" },
-  { n: 6, label: "Activities" },
-  { n: 7, label: "Entrances" },
-  { n: 8, label: "Guide" },
-  { n: 9, label: "Misc" },
-  { n: 10, label: "Transport" },
-  { n: 11, label: "Hotels" },
-  { n: 12, label: "Meals" },
-  { n: 13, label: "Costing" },
-  { n: 14, label: "Final" },
-  { n: 15, label: "Optionals" },
+  { n: 6, label: "Land Part", subs: ["Activity", "Guide", "Entrances", "Misc", "Transport"] },
+  { n: 7, label: "Accommodation Part", subs: ["Hotels", "Meals"] },
+  { n: 8, label: "Costing" },
+  { n: 9, label: "Final" },
+  { n: 10, label: "Optionals" },
 ];
 
 
@@ -384,7 +379,7 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    case 12: { // Hotels (was case 13)
+    case 7: { // Accommodation Part — Hotels
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
       const A = d.hotel_options.find((o) => o.key === "A");
@@ -398,25 +393,66 @@ function validate(d: QuoteDraft, step: number): boolean {
 // ============================================================
 // Step router — maps slot → component (renumbered)
 // ============================================================
-function StepContent({ draft, set }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
-  switch (Math.min(draft.step, TOTAL_STEPS)) {
-    case 1: return <Step1 draft={draft} set={set} />;
-    case 2: return <Step2 draft={draft} set={set} />;
-    case 3: return <StepTripBasics draft={draft} set={set} />;
-    case 4: return <Step4 draft={draft} set={set} />;
-    case 5: return <Step9 draft={draft} set={set} />;          // Routing (was Step9)
-    case 6: return <Step11 draft={draft} set={set} />;         // Activities
-    case 7: return <Step12 draft={draft} set={set} />;         // Entrances
-    case 8: return <Step13 draft={draft} set={set} />;         // Guide
-    case 9: return <Step14 draft={draft} set={set} />;         // Misc
-    case 10: return <Step10 draft={draft} set={set} />;        // Transport
-    case 11: return <Step15 draft={draft} set={set} />;        // Hotels (Standard + Dynamic)
-    case 12: return <StepMeals draft={draft} set={set} />;
-    case 13: return <Step16 draft={draft} set={set} />;        // Costing
-    case 14: return <Step17 draft={draft} set={set} />;        // Final
-    case 15: return <Step18 draft={draft} set={set} />;        // Optionals
-    default: return null;
-  }
+function StepContent({ draft, set, sub, setSub }: {
+  draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void; sub: number; setSub: (n: number) => void;
+}) {
+  const step = Math.min(draft.step, TOTAL_STEPS);
+  const def = STEPS[step - 1];
+  const subs = def?.subs;
+
+  const inner = (() => {
+    switch (step) {
+      case 1: return <Step1 draft={draft} set={set} />;
+      case 2: return <Step2 draft={draft} set={set} />;
+      case 3: return <StepTripBasics draft={draft} set={set} />;
+      case 4: return <Step4 draft={draft} set={set} />;
+      case 5: return <Step9 draft={draft} set={set} />;          // Routing
+      case 6: {                                                  // Land Part
+        switch (sub) {
+          case 0: return <Step11 draft={draft} set={set} />;      // Activities
+          case 1: return <Step13 draft={draft} set={set} />;      // Guide
+          case 2: return <Step12 draft={draft} set={set} />;      // Entrances
+          case 3: return <Step14 draft={draft} set={set} />;      // Misc
+          default: return <Step10 draft={draft} set={set} />;     // Transport
+        }
+      }
+      case 7:                                                     // Accommodation Part
+        return sub === 1 ? <StepMeals draft={draft} set={set} /> : <Step15 draft={draft} set={set} />;
+      case 8: return <Step16 draft={draft} set={set} />;          // Costing
+      case 9: return <Step17 draft={draft} set={set} />;          // Final
+      case 10: return <Step18 draft={draft} set={set} />;         // Optionals
+      default: return null;
+    }
+  })();
+
+  if (!subs) return inner;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-1 border-b pb-3">
+        {subs.map((label, i) => {
+          const active = i === Math.min(sub, subs.length - 1);
+          return (
+            <div key={label} className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setSub(i)}
+                className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-muted/60"
+              >
+                <span className={cn(
+                  "h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-semibold border-2",
+                  active ? "bg-accent border-accent text-accent-foreground" : "bg-background border-muted-foreground/30 text-muted-foreground",
+                )}>{i + 1}</span>
+                <span className={cn("text-xs font-medium", active ? "text-accent" : "text-muted-foreground")}>{label}</span>
+              </button>
+              {i < subs.length - 1 && <div className="h-[2px] w-4 bg-muted-foreground/20" />}
+            </div>
+          );
+        })}
+      </div>
+      {inner}
+    </div>
+  );
 }
 
 type StepProps = { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void };
