@@ -19,7 +19,9 @@ import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
 import { ScenarioComparison } from "../ScenarioComparison";
 import { CostingSheet } from "../CostingSheet";
+import { MarkupGstSettings } from "../MarkupGstSettings";
 import type { StepProps } from "../shared";
+
 
 export function Step16({ draft, set }: StepProps) {
   const d = useDB();
@@ -54,14 +56,10 @@ export function Step16({ draft, set }: StepProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">Costing Variations</h2>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Markup %</Label>
-          <Input type="number" value={draft.markup_percent} className="w-20"
-            onChange={(e) => set({ markup_percent: parseFloat(e.target.value) || 0 })} />
-        </div>
-      </div>
+      <h2 className="text-lg font-semibold">Costing Variations</h2>
+
+      <MarkupGstSettings draft={draft} set={set} />
+
 
       <Card className="p-4 bg-primary/5 border-primary/20">
         <div className="text-sm font-semibold text-primary mb-2">Include Options in Final Quote</div>

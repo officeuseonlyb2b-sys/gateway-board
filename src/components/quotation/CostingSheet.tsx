@@ -45,7 +45,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 
     let daysToUpdate: number[];
     if (day === -1) {
-      daysToUpdate = allDays ?? (draft.itinerary?.days?.map(d => d.day) ?? Object.keys(map).map(Number));
+      daysToUpdate = allDays ?? (draft.routing?.map((rd) => rd.day) ?? Object.keys(map).map(Number));
       if (daysToUpdate.length === 0) return;
     } else {
       daysToUpdate = [day];
@@ -77,7 +77,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 
     let daysToUpdate: number[];
     if (day === -1) {
-      daysToUpdate = allDays ?? (draft.itinerary?.days?.map(d => d.day) ?? Object.keys(map).map(Number));
+      daysToUpdate = allDays ?? (draft.routing?.map((rd) => rd.day) ?? Object.keys(map).map(Number));
       if (daysToUpdate.length === 0) return;
     } else {
       daysToUpdate = [day];
@@ -306,13 +306,24 @@ function LandPartBlock({
                 <div className="text-[10px] text-muted-foreground">{r.tours}</div>
               </td>
 
-              {/* Vehicle Price (Globally Selected) */}
-              <td className={td}>
+              {/* Vehicle Price (Globally Selected) — each vehicle shown separately */}
+              <td className="p-1.5 align-top">
                 {(() => {
-                  const selected = r.transport_opts.filter(o => o.checked);
-                  return selected.length > 0 ? inr(selected.reduce((a, b) => a + b.amount, 0)) : '—';
+                  const selected = r.transport_opts.filter((o) => o.checked);
+                  if (selected.length === 0) return <div className="text-right text-muted-foreground">—</div>;
+                  return (
+                    <div className="space-y-1">
+                      {selected.map((o) => (
+                        <div key={o.id} className="flex items-start gap-1.5">
+                          <span className="flex-1 truncate max-w-[120px]">{o.label}</span>
+                          <span className="tabular-nums">{inr(o.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
                 })()}
               </td>
+
 
               {/* Guide Price(s) (Globally Selected) */}
               <td className={td}>
