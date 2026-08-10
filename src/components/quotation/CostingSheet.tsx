@@ -12,10 +12,11 @@ import {
   landMarkup, landGst, hotelsMarkup, hotelsGst, effectivePaxForPricing, gstRateFor,
 } from "@/lib/wizard/calc";
 import {
-  buildLandPart, buildHotelMealSheet, buildRateSheet,
+  buildLandPart, buildHotelMealSheet, buildRateSheet, mixTotals,
   type LandPartSheet, type HotelMealSheet, type RateSheetGroup,
   type SheetOption, type LandDayRow,
 } from "@/lib/wizard/costsheet";
+
 import type { QuoteDraft, HotelOption, EntranceCat, CostingSelection } from "@/lib/wizard/types";
 
 type Bucket = "transport" | "guide" | "entrances" | "activities" | "misc";
