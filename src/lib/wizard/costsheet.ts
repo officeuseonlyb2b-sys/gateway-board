@@ -90,6 +90,21 @@ export function catPicked(draft: QuoteDraft, day: number, cat: EntranceCat): boo
   return list ? list.includes(cat) : true;
 }
 
+/** The three guide language checkboxes shown on every guide line. */
+export const GUIDE_LANGS = ["Hindi", "English", "Language"] as const;
+export type GuideLangOpt = (typeof GUIDE_LANGS)[number];
+export const guideOptId = (lineId: string, lang: string) => `${lineId}::${lang}`;
+
+/** Language checkbox state — defaults to the line's own language only. */
+function guideLangPicked(
+  draft: QuoteDraft, day: number, lineId: string, lang: string, defaultLang: string,
+): boolean {
+  const list = draft.costing_selection?.guide?.[day];
+  if (list) return list.includes(guideOptId(lineId, lang));
+  return lang === defaultLang;
+}
+
+
 /** Days a line applies to, restricted to the routing days that exist. */
 function targetDays(days: number[] | undefined, all: number[]): number[] {
   const t = days && days.length ? days.filter((x) => all.includes(x)) : all;
