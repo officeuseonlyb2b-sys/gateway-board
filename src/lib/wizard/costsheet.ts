@@ -308,12 +308,18 @@ export interface HotelNightRow {
   dbl: number;
   trp: number;
   quad: number;
+  /** Dynamic mode: this night is priced off an explicit room mix, not flat categories. */
+  dynamic?: boolean;
+  mix?: DayRoomMix;
+  mix_label?: string;
+  mix_net?: number;
   lunch_source: string;
   lunch_total: number;
   dinner_source: string;
   dinner_total: number;
   missing?: boolean;
 }
+
 
 export interface HotelMealSheet {
   option_key: string;
