@@ -485,13 +485,21 @@ export function buildRateSheet(
   const mk = { land: landMarkup(draft), lg: landGst(draft), h: hotelsMarkup(draft), hg: hotelsGst(draft) };
 
   // Room shares (per person) including room GST slab, then hotels markup/GST.
+  // Dynamic nights are priced from their allocated room mix and split across
+  // the actual pax count instead of a flat per-category share.
+  const actualPax = Math.max(1, effectivePaxForPricing(draft));
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
+      if (r.dynamic) {
+        const m = r.mix_net || 0;
+        return s + (m + m * gstRateFor(m)) / actualPax;
+      }
       const tariff = pick(r);
       return s + (tariff + tariff * gstRateFor(tariff)) / size;
     }, 0);
     return gross(net, mk.h, mk.hg);
   };
+
   const single = roomShare((r) => r.sgl, 1);
   const dbl = roomShare((r) => r.dbl, 2);
   const trp = roomShare((r) => r.trp, 3);
