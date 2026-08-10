@@ -489,6 +489,21 @@ function HotelMealBlock({
               </td>
               <td className="p-1.5">{r.meal_plan}</td>
               
+              {r.dyn ? (
+                /* Dynamic mode — one consolidated line for the allocated room mix */
+                <td className="p-1.5" colSpan={4}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{r.mix_label || "No rooms"}</span>
+                    <span className="text-right">
+                      <span className="block font-semibold tabular-nums">{inr(r.dyn.total)}</span>
+                      <span className="block text-[11px] text-muted-foreground tabular-nums">
+                        Net: {inr(r.dyn.net)} + GST {inr(r.dyn.gst)} · {inr(r.dyn.total / pax)}/person
+                      </span>
+                    </span>
+                  </div>
+                </td>
+              ) : (
+                <>
               {/* SGL */}
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.sglTotal ? inr(r.sglTotal) : '—'}</div>
@@ -512,6 +527,9 @@ function HotelMealBlock({
                 <div className="text-[#0F172A] font-semibold">{r.quadTotal ? inr(r.quadTotal) : '—'}</div>
                 {r.quadTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%</div>}
               </td>
+                </>
+              )}
+
               
               <td className="p-1.5">{r.lunch_source}</td>
               {/* Lunch */}
