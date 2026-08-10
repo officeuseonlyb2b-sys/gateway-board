@@ -507,10 +507,7 @@ export function buildRateSheet(
   const actualPax = Math.max(1, effectivePaxForPricing(draft));
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
-      if (r.dynamic) {
-        const m = r.mix_net || 0;
-        return s + (m + m * gstRateFor(m)) / actualPax;
-      }
+      if (r.dynamic) return s + mixTotals(r).total / actualPax;
       const tariff = pick(r);
       return s + (tariff + tariff * gstRateFor(tariff)) / size;
     }, 0);
