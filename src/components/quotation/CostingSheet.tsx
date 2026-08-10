@@ -193,7 +193,7 @@ function OptionCell({
   onToggle: Handlers["toggle"];
 }) {
   if (opts.length === 0) return <td className="p-1.5 text-right text-muted-foreground">—</td>;
-  const allIds = opts.map((o) => o.id);
+  const checkedByDay = { [day]: opts.filter((o) => o.checked).map((o) => o.id) };
   return (
     <td className="p-1.5 align-top">
       <div className="space-y-1">
@@ -201,7 +201,7 @@ function OptionCell({
           <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
             <Checkbox
               checked={o.checked}
-              onCheckedChange={() => onToggle(bucket, day, o.id, allIds)}
+              onCheckedChange={() => onToggle(bucket, day, o.id, checkedByDay)}
               className="mt-0.5"
             />
             <span className="flex-1 min-w-0">
