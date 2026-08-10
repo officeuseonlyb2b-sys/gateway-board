@@ -573,7 +573,25 @@ function HotelMealBlock({
             <td className="p-1.5" />
             <td className={td}>{inr(totals.dinnerTotal)}</td>
           </tr>
+          {dynamicNights > 0 && (
+            <tr className="bg-accent/10 font-semibold">
+              <td className="p-1.5" colSpan={3}>Dynamic rooms ({dynamicNights} night(s))</td>
+              <td className="p-1.5" colSpan={4}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] uppercase text-muted-foreground">Allocated mix</span>
+                  <span className="text-right">
+                    <span className="block tabular-nums">{inr(totals.dynTotal)}</span>
+                    <span className="block text-[11px] font-normal text-muted-foreground tabular-nums">
+                      {inr(totals.dynTotal / pax)}/person ({pax} pax)
+                    </span>
+                  </span>
+                </div>
+              </td>
+              <td className="p-1.5" colSpan={4} />
+            </tr>
+          )}
           <HotelMarkupRows totals={totals} pct={pct} pax={pax} />
+
         </tfoot>
       </table>
     </Card>
