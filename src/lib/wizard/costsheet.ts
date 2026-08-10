@@ -153,19 +153,42 @@ export function buildLandPart(
   });
 
   // ------- Guides & escorts
+  const paxForGuide = Math.max(1, effectivePaxForPricing(draft));
   draft.guides.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
-    const each = (l.rate * l.guides * l.days) / target.length;
     const g = d.guides?.find((x) => x.id === l.guide_id);
-    target.forEach((day) => opts[day].guide.push({
-      id: l.id,
-      label: l.is_escort ? "Tour Escorted" : (l.language || g?.guide_type || "Guide"),
-      sub: g?.tour_program || undefined,
-      amount: each,
-      checked: isPicked(draft, "guide", day, l.id),
-    }));
+    if (l.is_escort) {
+      const each = (l.rate * l.guides * l.days) / target.length;
+      target.forEach((day) => opts[day].guide.push({
+        id: l.id,
+        label: "Tour Escorted",
+        sub: g?.tour_program || undefined,
+        amount: each,
+        checked: isPicked(draft, "guide", day, l.id),
+      }));
+      return;
+    }
+    // Every guide line exposes the three language checkboxes (Hindi / English /
+    // Language). Default: only the language chosen on the Guide step is on.
+    const defaultLang = (GUIDE_LANGS as readonly string[]).includes(l.language || "")
+      ? (l.language as string)
+      : "English";
+    target.forEach((day) => {
+      GUIDE_LANGS.forEach((lang) => {
+        const rate = g ? guideRateForPax(g, paxForGuide, lang as GuideLanguage) : l.rate;
+        const amount = ((rate || l.rate) * l.guides * l.days) / target.length;
+        opts[day].guide.push({
+          id: guideOptId(l.id, lang),
+          label: lang,
+          sub: g?.tour_program || g?.name || undefined,
+          amount,
+          checked: guideLangPicked(draft, day, l.id, lang, defaultLang),
+        });
+      });
+    });
   });
+
 
   // ------- Entrances (per line, priced by the pax categories checked that day)
   draft.entrances.forEach((l) => {
