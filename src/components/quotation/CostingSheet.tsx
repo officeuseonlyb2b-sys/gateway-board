@@ -111,9 +111,13 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 }
 
 interface Handlers {
-  toggle: (bucket: Bucket, day: number, id: string, allIds: string[], allDays?: number[]) => void;
+  toggle: (
+    bucket: Bucket, day: number, id: string,
+    checkedByDay: Record<number, string[]>, allDays?: number[],
+  ) => void;
   toggleCat: (day: number, cat: EntranceCat, allDays?: number[]) => void;
 }
+
 
 function Variation({
   draft, d, opt, toggle, toggleCat,
