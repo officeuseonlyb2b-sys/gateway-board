@@ -331,13 +331,8 @@ function LandPartBlock({
               </td>
 
 
-              {/* Guide Price(s) (Globally Selected) */}
-              <td className={td}>
-                {(() => {
-                  const selected = r.guide_opts.filter(o => o.checked);
-                  return selected.length > 0 ? inr(selected.reduce((a, b) => a + b.amount, 0)) : '—';
-                })()}
-              </td>
+              {/* Guide — Hindi / English / Language checkboxes for this day */}
+              <OptionCell opts={r.guide_opts} bucket="guide" day={r.day} onToggle={toggle} />
 
               {/* Monuments - Per Day Checkboxes */}
               <td className="p-1.5 align-top">
@@ -349,9 +344,10 @@ function LandPartBlock({
                       <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
                         <Checkbox
                           checked={o.checked}
-                          onCheckedChange={() => toggle("entrances", r.day, o.id, r.entrance_opts.map((x) => x.id))}
+                          onCheckedChange={() => toggle("entrances", r.day, o.id, checkedByDay("entrances"))}
                           className="mt-0.5"
                         />
+
                         <span className="flex-1 truncate max-w-[150px]">{o.label}</span>
                         <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
                           {inr(o.amount)}
