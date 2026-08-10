@@ -25,8 +25,9 @@ function mealPicks(draft: QuoteDraft): MealPick[] {
   return Array.isArray(raw) ? (raw as MealPick[]) : [];
 }
 import type {
-  QuoteDraft, HotelOption, TransportLine, EntranceCat,
+  QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix,
 } from "./types";
+
 
 // ---------------------------------------------------------------- Land part
 
