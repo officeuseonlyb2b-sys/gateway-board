@@ -249,7 +249,7 @@ function LandPartBlock({
                   <label key={o.id} className="flex items-center gap-1.5 cursor-pointer">
                     <Checkbox
                       checked={o.checked}
-                      onCheckedChange={() => toggle('transport', -1, o.id, firstRow.transport_opts.map(x => x.id), allDayNumbers)}
+                      onCheckedChange={() => toggle('transport', -1, o.id, checkedByDay('transport'), allDayNumbers)}
                       className="mt-0.5"
                     />
                     <span className="block truncate max-w-[120px]">{o.label}</span>
@@ -258,22 +258,14 @@ function LandPartBlock({
               </div>
             </th>
 
-            {/* 🗣️ Global Guide Options Header */}
-            <th className={thL} style={{ minWidth: '140px', verticalAlign: 'top' }}>
+            {/* 🗣️ Guide Options — Hindi / English / Language, per day */}
+            <th className={thL} style={{ minWidth: '180px', verticalAlign: 'top' }}>
               <div className="mb-1">Guide Options</div>
-              <div className="flex flex-col gap-1 font-normal">
-                {firstRow?.guide_opts.map((o) => (
-                  <label key={o.id} className="flex items-center gap-1.5 cursor-pointer">
-                    <Checkbox
-                      checked={o.checked}
-                      onCheckedChange={() => toggle('guide', -1, o.id, firstRow.guide_opts.map(x => x.id), allDayNumbers)}
-                      className="mt-0.5"
-                    />
-                    <span className="block truncate max-w-[120px]">{o.label}</span>
-                  </label>
-                ))}
+              <div className="text-[9px] normal-case font-normal text-muted-foreground">
+                Hindi · English · Language
               </div>
             </th>
+
 
             {/* 🏛️ Global Monument Categories Header */}
             <th className={thL} style={{ minWidth: '150px', verticalAlign: 'top' }}>
