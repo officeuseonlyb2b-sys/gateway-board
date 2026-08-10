@@ -223,7 +223,20 @@ function LandPartBlock({
 }: { land: LandPartSheet; pax: number; pct: { mk: number; gst: number } } & Handlers) {
   const cats: [EntranceCat, string][] = [["indian", "Indian"], ["foreign", "Foreigner"], ["student", "Student"]];
   const firstRow = land.rows[0];
-  const allDayNumbers = land.rows.map(r => r.day); 
+  const allDayNumbers = land.rows.map(r => r.day);
+  /** Currently-checked option ids per day, so global toggles keep other days intact. */
+  const checkedByDay = (bucket: Bucket): Record<number, string[]> => {
+    const key = {
+      transport: "transport_opts", guide: "guide_opts", entrances: "entrance_opts",
+      activities: "activity_opts", misc: "misc_opts",
+    }[bucket] as keyof LandDayRow;
+    const out: Record<number, string[]> = {};
+    land.rows.forEach((r) => {
+      out[r.day] = (r[key] as SheetOption[]).filter((o) => o.checked).map((o) => o.id);
+    });
+    return out;
+  };
+
 
   return (
     <Card className="p-3 space-y-2 shrink-0">
