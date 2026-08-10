@@ -2,7 +2,9 @@
 // wizard already computes. Nothing here re-derives guide / activity / entrance
 // / misc / transport / hotel figures; they are only grouped per day, per
 // hotel category and per pax so the Costing page can be rendered as a sheet.
-import type { DB } from "@/lib/mock-store";
+import type { DB, GuideLanguage } from "@/lib/mock-store";
+import { guideRateForPax } from "@/lib/mock-store";
+
 import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
 import {
@@ -25,8 +27,9 @@ function mealPicks(draft: QuoteDraft): MealPick[] {
   return Array.isArray(raw) ? (raw as MealPick[]) : [];
 }
 import type {
-  QuoteDraft, HotelOption, TransportLine, EntranceCat,
+  QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix,
 } from "./types";
+
 
 // ---------------------------------------------------------------- Land part
 
@@ -89,6 +92,21 @@ export function catPicked(draft: QuoteDraft, day: number, cat: EntranceCat): boo
   return list ? list.includes(cat) : true;
 }
 
+/** The three guide language checkboxes shown on every guide line. */
+export const GUIDE_LANGS = ["Hindi", "English", "Language"] as const;
+export type GuideLangOpt = (typeof GUIDE_LANGS)[number];
+export const guideOptId = (lineId: string, lang: string) => `${lineId}::${lang}`;
+
+/** Language checkbox state — defaults to the line's own language only. */
+function guideLangPicked(
+  draft: QuoteDraft, day: number, lineId: string, lang: string, defaultLang: string,
+): boolean {
+  const list = draft.costing_selection?.guide?.[day];
+  if (list) return list.includes(guideOptId(lineId, lang));
+  return lang === defaultLang;
+}
+
+
 /** Days a line applies to, restricted to the routing days that exist. */
 function targetDays(days: number[] | undefined, all: number[]): number[] {
   const t = days && days.length ? days.filter((x) => all.includes(x)) : all;
@@ -137,19 +155,42 @@ export function buildLandPart(
   });
 
   // ------- Guides & escorts
+  const paxForGuide = Math.max(1, effectivePaxForPricing(draft));
   draft.guides.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
-    const each = (l.rate * l.guides * l.days) / target.length;
     const g = d.guides?.find((x) => x.id === l.guide_id);
-    target.forEach((day) => opts[day].guide.push({
-      id: l.id,
-      label: l.is_escort ? "Tour Escorted" : (l.language || g?.guide_type || "Guide"),
-      sub: g?.tour_program || undefined,
-      amount: each,
-      checked: isPicked(draft, "guide", day, l.id),
-    }));
+    if (l.is_escort) {
+      const each = (l.rate * l.guides * l.days) / target.length;
+      target.forEach((day) => opts[day].guide.push({
+        id: l.id,
+        label: "Tour Escorted",
+        sub: g?.tour_program || undefined,
+        amount: each,
+        checked: isPicked(draft, "guide", day, l.id),
+      }));
+      return;
+    }
+    // Every guide line exposes the three language checkboxes (Hindi / English /
+    // Language). Default: only the language chosen on the Guide step is on.
+    const defaultLang = (GUIDE_LANGS as readonly string[]).includes(l.language || "")
+      ? (l.language as string)
+      : "English";
+    target.forEach((day) => {
+      GUIDE_LANGS.forEach((lang) => {
+        const rate = g ? guideRateForPax(g, paxForGuide, lang as GuideLanguage) : l.rate;
+        const amount = ((rate || l.rate) * l.guides * l.days) / target.length;
+        opts[day].guide.push({
+          id: guideOptId(l.id, lang),
+          label: lang,
+          sub: g?.tour_program || g?.name || undefined,
+          amount,
+          checked: guideLangPicked(draft, day, l.id, lang, defaultLang),
+        });
+      });
+    });
   });
+
 
   // ------- Entrances (per line, priced by the pax categories checked that day)
   draft.entrances.forEach((l) => {
@@ -267,6 +308,11 @@ export interface HotelNightRow {
   dbl: number;
   trp: number;
   quad: number;
+  /** Dynamic mode: this night is priced off an explicit room mix, not flat categories. */
+  dynamic?: boolean;
+  mix?: DayRoomMix;
+  mix_label?: string;
+  mix_net?: number;
   lunch_source: string;
   lunch_total: number;
   dinner_source: string;
@@ -274,12 +320,16 @@ export interface HotelNightRow {
   missing?: boolean;
 }
 
+
 export interface HotelMealSheet {
   option_key: string;
   category: string;
   nights: number;
   rows: HotelNightRow[];
   sgl: number; dbl: number; trp: number; quad: number;
+  /** Net room cost of all Dynamic-mode nights (mix priced), excluded from the flat columns. */
+  dynamic_net: number;
+
   lunch_total: number;
   dinner_total: number;
 }
@@ -322,13 +372,34 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
       else { dinnerSource = source; dinnerTotal = amount; }
     });
 
+    const sgl = plan?.single_rate || 0;
+    const trp = plan ? dbl + eb : 0;
+    const quad = plan ? (plan.quad_rate || dbl + eb * 2) : 0;
+
+    // Dynamic mode — this night is priced from the allocated room mix.
+    const isDynamic = (draft.dynamic_days ?? []).includes(day.day);
+    const mix = isDynamic ? draft.day_room_mix?.[day.day] : undefined;
+    const mixNet = mix
+      ? mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad
+      : 0;
+    const mixLabel = mix
+      ? ([
+          [mix.double, "Double"], [mix.triple, "Triple"],
+          [mix.quad, "Quad"], [mix.single, "Single"],
+        ] as [number, string][])
+          .filter(([n]) => n > 0)
+          .map(([n, l]) => `${n} ${l}`)
+          .join(" + ") || "No rooms"
+      : undefined;
+
     rows.push({
       day: day.day, date, city, hotel, room,
       meal_plan: sel?.meal_plan || "—",
-      sgl: plan?.single_rate || 0,
-      dbl,
-      trp: plan ? dbl + eb : 0,
-      quad: plan ? (plan.quad_rate || dbl + eb * 2) : 0,
+      sgl, dbl, trp, quad,
+      dynamic: !!mix,
+      mix,
+      mix_label: mixLabel,
+      mix_net: mixNet,
       lunch_source: lunchSource, lunch_total: lunchTotal,
       dinner_source: dinnerSource, dinner_total: dinnerTotal,
       missing: !plan,
@@ -336,19 +407,39 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
   });
 
   const sum = (f: (r: HotelNightRow) => number) => rows.reduce((s, r) => s + f(r), 0);
+  const flat = (f: (r: HotelNightRow) => number) => (r: HotelNightRow) => (r.dynamic ? 0 : f(r));
   return {
     option_key: opt.key,
     category: opt.category || opt.label || `Option ${opt.key}`,
     nights: rows.length,
     rows,
-    sgl: sum((r) => r.sgl),
-    dbl: sum((r) => r.dbl),
-    trp: sum((r) => r.trp),
-    quad: sum((r) => r.quad),
+    sgl: sum(flat((r) => r.sgl)),
+    dbl: sum(flat((r) => r.dbl)),
+    trp: sum(flat((r) => r.trp)),
+    quad: sum(flat((r) => r.quad)),
+    dynamic_net: sum((r) => (r.dynamic ? r.mix_net || 0 : 0)),
     lunch_total: sum((r) => r.lunch_total),
     dinner_total: sum((r) => r.dinner_total),
   };
 }
+
+/** Net / GST / gross for a Dynamic-mode night, GST slabbed per room tariff. */
+export function mixTotals(r: HotelNightRow): { net: number; gst: number; total: number } {
+  const m = r.mix;
+  if (!m) return { net: 0, gst: 0, total: 0 };
+  const parts: [number, number][] = [
+    [m.single, r.sgl], [m.double, r.dbl], [m.triple, r.trp], [m.quad, r.quad],
+  ];
+  let net = 0, gst = 0;
+  parts.forEach(([count, rate]) => {
+    if (!count || !rate) return;
+    net += count * rate;
+    gst += count * rate * gstRateFor(rate);
+  });
+  return { net, gst, total: net + gst };
+}
+
+
 
 // ------------------------------------------------------------- Rate sheet
 
@@ -411,13 +502,18 @@ export function buildRateSheet(
   const mk = { land: landMarkup(draft), lg: landGst(draft), h: hotelsMarkup(draft), hg: hotelsGst(draft) };
 
   // Room shares (per person) including room GST slab, then hotels markup/GST.
+  // Dynamic nights are priced from their allocated room mix and split across
+  // the actual pax count instead of a flat per-category share.
+  const actualPax = Math.max(1, effectivePaxForPricing(draft));
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
+      if (r.dynamic) return s + mixTotals(r).total / actualPax;
       const tariff = pick(r);
       return s + (tariff + tariff * gstRateFor(tariff)) / size;
     }, 0);
     return gross(net, mk.h, mk.hg);
   };
+
   const single = roomShare((r) => r.sgl, 1);
   const dbl = roomShare((r) => r.dbl, 2);
   const trp = roomShare((r) => r.trp, 3);
