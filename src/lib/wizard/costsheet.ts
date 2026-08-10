@@ -369,13 +369,34 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
       else { dinnerSource = source; dinnerTotal = amount; }
     });
 
+    const sgl = plan?.single_rate || 0;
+    const trp = plan ? dbl + eb : 0;
+    const quad = plan ? (plan.quad_rate || dbl + eb * 2) : 0;
+
+    // Dynamic mode — this night is priced from the allocated room mix.
+    const isDynamic = (draft.dynamic_days ?? []).includes(day.day);
+    const mix = isDynamic ? draft.day_room_mix?.[day.day] : undefined;
+    const mixNet = mix
+      ? mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad
+      : 0;
+    const mixLabel = mix
+      ? ([
+          [mix.double, "Double"], [mix.triple, "Triple"],
+          [mix.quad, "Quad"], [mix.single, "Single"],
+        ] as [number, string][])
+          .filter(([n]) => n > 0)
+          .map(([n, l]) => `${n} ${l}`)
+          .join(" + ") || "No rooms"
+      : undefined;
+
     rows.push({
       day: day.day, date, city, hotel, room,
       meal_plan: sel?.meal_plan || "—",
-      sgl: plan?.single_rate || 0,
-      dbl,
-      trp: plan ? dbl + eb : 0,
-      quad: plan ? (plan.quad_rate || dbl + eb * 2) : 0,
+      sgl, dbl, trp, quad,
+      dynamic: !!mix,
+      mix,
+      mix_label: mixLabel,
+      mix_net: mixNet,
       lunch_source: lunchSource, lunch_total: lunchTotal,
       dinner_source: dinnerSource, dinner_total: dinnerTotal,
       missing: !plan,
@@ -383,19 +404,22 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
   });
 
   const sum = (f: (r: HotelNightRow) => number) => rows.reduce((s, r) => s + f(r), 0);
+  const flat = (f: (r: HotelNightRow) => number) => (r: HotelNightRow) => (r.dynamic ? 0 : f(r));
   return {
     option_key: opt.key,
     category: opt.category || opt.label || `Option ${opt.key}`,
     nights: rows.length,
     rows,
-    sgl: sum((r) => r.sgl),
-    dbl: sum((r) => r.dbl),
-    trp: sum((r) => r.trp),
-    quad: sum((r) => r.quad),
+    sgl: sum(flat((r) => r.sgl)),
+    dbl: sum(flat((r) => r.dbl)),
+    trp: sum(flat((r) => r.trp)),
+    quad: sum(flat((r) => r.quad)),
+    dynamic_net: sum((r) => (r.dynamic ? r.mix_net || 0 : 0)),
     lunch_total: sum((r) => r.lunch_total),
     dinner_total: sum((r) => r.dinner_total),
   };
 }
+
 
 // ------------------------------------------------------------- Rate sheet
 
