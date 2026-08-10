@@ -2,7 +2,9 @@
 // wizard already computes. Nothing here re-derives guide / activity / entrance
 // / misc / transport / hotel figures; they are only grouped per day, per
 // hotel category and per pax so the Costing page can be rendered as a sheet.
-import type { DB } from "@/lib/mock-store";
+import type { DB, GuideLanguage } from "@/lib/mock-store";
+import { guideRateForPax } from "@/lib/mock-store";
+
 import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
 import {
