@@ -399,20 +399,25 @@ function HotelMealBlock({
   const n = Math.max(1, sheet.nights);
 
   // Step 1: Calculate Net, GST, and Total (Inclusive) per row exactly like StepHotels.tsx
+  // Dynamic-mode nights skip the flat SGL/DBL/TRP/QUAD columns and are priced
+  // from the room mix allocated for that night instead.
   const computedRows = sheet.rows.map(r => {
-    const sglNet = r.sgl || 0;
+    const dyn = r.dynamic ? mixTotals(r) : null;
+    const z = (v: number) => (dyn ? 0 : v);
+
+    const sglNet = z(r.sgl || 0);
     const sglGst = sglNet * gstRateFor(sglNet);
     const sglTotal = sglNet + sglGst;
 
-    const dblNet = r.dbl || 0;
+    const dblNet = z(r.dbl || 0);
     const dblGst = dblNet * gstRateFor(dblNet);
     const dblTotal = dblNet + dblGst;
     
-    const trpNet = r.trp || 0;
+    const trpNet = z(r.trp || 0);
     const trpGst = trpNet * gstRateFor(trpNet);
     const trpTotal = trpNet + trpGst;
 
-    const quadNet = r.quad || 0;
+    const quadNet = z(r.quad || 0);
     const quadGst = quadNet * gstRateFor(quadNet);
     const quadTotal = quadNet + quadGst;
 
@@ -424,7 +429,11 @@ function HotelMealBlock({
     const dinnerGst = dinnerNet * gstRateFor(dinnerNet);
     const dinnerTotal = dinnerNet + dinnerGst;
 
-    return { ...r, sglNet, sglGst, sglTotal, dblNet, dblGst, dblTotal, trpNet, trpGst, trpTotal, quadNet, quadGst, quadTotal, lunchNet, lunchGst, lunchTotal, dinnerNet, dinnerGst, dinnerTotal };
+    return {
+      ...r, dyn,
+      sglNet, sglGst, sglTotal, dblNet, dblGst, dblTotal, trpNet, trpGst, trpTotal,
+      quadNet, quadGst, quadTotal, lunchNet, lunchGst, lunchTotal, dinnerNet, dinnerGst, dinnerTotal,
+    };
   });
 
   // Step 2: Sum up the totals
@@ -435,7 +444,10 @@ function HotelMealBlock({
     quadNet: acc.quadNet + r.quadNet, quadGst: acc.quadGst + r.quadGst, quadTotal: acc.quadTotal + r.quadTotal,
     lunchNet: acc.lunchNet + r.lunchNet, lunchGst: acc.lunchGst + r.lunchGst, lunchTotal: acc.lunchTotal + r.lunchTotal,
     dinnerNet: acc.dinnerNet + r.dinnerNet, dinnerGst: acc.dinnerGst + r.dinnerGst, dinnerTotal: acc.dinnerTotal + r.dinnerTotal,
-  }), { sglNet:0, sglGst:0, sglTotal:0, dblNet:0, dblGst:0, dblTotal:0, trpNet:0, trpGst:0, trpTotal:0, quadNet:0, quadGst:0, quadTotal:0, lunchNet:0, lunchGst:0, lunchTotal:0, dinnerNet:0, dinnerGst:0, dinnerTotal:0 });
+    dynNet: acc.dynNet + (r.dyn?.net ?? 0), dynTotal: acc.dynTotal + (r.dyn?.total ?? 0),
+  }), { sglNet:0, sglGst:0, sglTotal:0, dblNet:0, dblGst:0, dblTotal:0, trpNet:0, trpGst:0, trpTotal:0, quadNet:0, quadGst:0, quadTotal:0, lunchNet:0, lunchGst:0, lunchTotal:0, dinnerNet:0, dinnerGst:0, dinnerTotal:0, dynNet:0, dynTotal:0 });
+  const dynamicNights = computedRows.filter((r) => r.dyn).length;
+
 
   // Step 3: Display the table
   return (
