@@ -423,6 +423,23 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
   };
 }
 
+/** Net / GST / gross for a Dynamic-mode night, GST slabbed per room tariff. */
+export function mixTotals(r: HotelNightRow): { net: number; gst: number; total: number } {
+  const m = r.mix;
+  if (!m) return { net: 0, gst: 0, total: 0 };
+  const parts: [number, number][] = [
+    [m.single, r.sgl], [m.double, r.dbl], [m.triple, r.trp], [m.quad, r.quad],
+  ];
+  let net = 0, gst = 0;
+  parts.forEach(([count, rate]) => {
+    if (!count || !rate) return;
+    net += count * rate;
+    gst += count * rate * gstRateFor(rate);
+  });
+  return { net, gst, total: net + gst };
+}
+
+
 
 // ------------------------------------------------------------- Rate sheet
 
