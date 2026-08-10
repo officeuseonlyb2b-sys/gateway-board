@@ -327,6 +327,9 @@ export interface HotelMealSheet {
   nights: number;
   rows: HotelNightRow[];
   sgl: number; dbl: number; trp: number; quad: number;
+  /** Net room cost of all Dynamic-mode nights (mix priced), excluded from the flat columns. */
+  dynamic_net: number;
+
   lunch_total: number;
   dinner_total: number;
 }
