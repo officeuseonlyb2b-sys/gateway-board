@@ -138,7 +138,10 @@ const INTERNATIONAL_CITIES = [
 // ============================================================
 function WizardPage() {
   const draft = useDraft();
+  const dbData = useDB();
+  const user = useAuth();
   const search = Route.useSearch();
+
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
