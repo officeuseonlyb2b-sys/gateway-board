@@ -255,22 +255,22 @@ function LandPartBlock({
             <th className={thL}>Route</th>
             <th className={thL}>City / Tour</th>
             
-            {/* 🚗 Global Vehicle Options Header */}
-            <th className={thL} style={{ minWidth: '150px', verticalAlign: 'top' }}>
+            {/* 🚗 Global Vehicle Options Header — laid out horizontally */}
+            <th className={thL} style={{ minWidth: '220px', verticalAlign: 'top' }}>
               <div className="mb-1">Vehicle Options</div>
-              <div className="flex flex-col gap-1 font-normal">
+              <div className="flex flex-wrap gap-2 font-normal">
                 {firstRow?.transport_opts.map((o) => (
-                  <label key={o.id} className="flex items-center gap-1.5 cursor-pointer">
+                  <label key={o.id} className="flex items-center gap-1 text-[9px] cursor-pointer">
                     <Checkbox
                       checked={o.checked}
                       onCheckedChange={() => toggle('transport', -1, o.id, checkedByDay('transport'), allDayNumbers)}
-                      className="mt-0.5"
                     />
-                    <span className="block truncate max-w-[120px]">{o.label}</span>
+                    <span className="truncate max-w-[110px] normal-case">{o.label}</span>
                   </label>
                 ))}
               </div>
             </th>
+
 
             {/* 🗣️ Guide Options — Hindi / English / Language, per day */}
             <th className={thL} style={{ minWidth: '180px', verticalAlign: 'top' }}>
@@ -448,6 +448,9 @@ function HotelMealBlock({
     dynNet: acc.dynNet + (r.dyn?.net ?? 0), dynTotal: acc.dynTotal + (r.dyn?.total ?? 0),
   }), { sglNet:0, sglGst:0, sglTotal:0, dblNet:0, dblGst:0, dblTotal:0, trpNet:0, trpGst:0, trpTotal:0, quadNet:0, quadGst:0, quadTotal:0, lunchNet:0, lunchGst:0, lunchTotal:0, dinnerNet:0, dinnerGst:0, dinnerTotal:0, dynNet:0, dynTotal:0 });
   const dynamicNights = computedRows.filter((r) => r.dyn).length;
+  /** All nights dynamic → collapse the four rate columns into one "Accommodation" column. */
+  const allDynamic = computedRows.length > 0 && dynamicNights === computedRows.length;
+
 
 
   // Step 3: Display the table
@@ -466,10 +469,17 @@ function HotelMealBlock({
             <th className={thL}>Night</th>
             <th className={thL}>Hotel / Room</th>
             <th className={thL}>Plan</th>
-            <th className={th}>SGL</th>
-            <th className={th}>DBL</th>
-            <th className={th}>TRP</th>
-            <th className={th}>QUAD</th>
+            {allDynamic ? (
+              <th className={thL} colSpan={4}>Accommodation</th>
+            ) : (
+              <>
+                <th className={th}>SGL</th>
+                <th className={th}>DBL</th>
+                <th className={th}>TRP</th>
+                <th className={th}>QUAD</th>
+              </>
+            )}
+
             <th className={thL}>Lunch</th>
             <th className={th}>Amt</th>
             <th className={thL}>Dinner</th>
@@ -553,10 +563,16 @@ function HotelMealBlock({
         <tfoot>
           <tr className="border-t-2 bg-muted/30 font-medium">
             <td className="p-1.5" colSpan={3}>Subtotal (Per Night)</td>
-            <td className={td}>{inr(totals.sglNet / n)}</td>
-            <td className={td}>{inr(totals.dblNet / n)}</td>
-            <td className={td}>{inr(totals.trpNet / n)}</td>
-            <td className={td}>{inr(totals.quadNet / n)}</td>
+            {allDynamic ? (
+              <td className={td} colSpan={4}>{inr(totals.dynNet / n)}</td>
+            ) : (
+              <>
+                <td className={td}>{inr(totals.sglNet / n)}</td>
+                <td className={td}>{inr(totals.dblNet / n)}</td>
+                <td className={td}>{inr(totals.trpNet / n)}</td>
+                <td className={td}>{inr(totals.quadNet / n)}</td>
+              </>
+            )}
             <td className="p-1.5" />
             <td className={td}>{inr(totals.lunchNet / n)}</td>
             <td className="p-1.5" />
@@ -564,15 +580,22 @@ function HotelMealBlock({
           </tr>
           <tr className="bg-primary/10 font-bold">
             <td className="p-1.5" colSpan={3}>Total ({sheet.nights} Nights)</td>
-            <td className={td}>{inr(totals.sglTotal)}</td>
-            <td className={td}>{inr(totals.dblTotal)}</td>
-            <td className={td}>{inr(totals.trpTotal)}</td>
-            <td className={td}>{inr(totals.quadTotal)}</td>
+            {allDynamic ? (
+              <td className={td} colSpan={4}>{inr(totals.dynTotal)}</td>
+            ) : (
+              <>
+                <td className={td}>{inr(totals.sglTotal)}</td>
+                <td className={td}>{inr(totals.dblTotal)}</td>
+                <td className={td}>{inr(totals.trpTotal)}</td>
+                <td className={td}>{inr(totals.quadTotal)}</td>
+              </>
+            )}
             <td className="p-1.5" />
             <td className={td}>{inr(totals.lunchTotal)}</td>
             <td className="p-1.5" />
             <td className={td}>{inr(totals.dinnerTotal)}</td>
           </tr>
+
           {dynamicNights > 0 && (
             <tr className="bg-accent/10 font-semibold">
               <td className="p-1.5" colSpan={3}>Dynamic rooms ({dynamicNights} night(s))</td>

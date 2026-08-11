@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning, Pencil } from "lucide-react";
+import { Plus, Search, Upload, Wifi, Waves, Building2, X, Download, Loader2, FileWarning, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useDB, HOTEL_CATEGORIES, type HotelCategory } from "@/lib/mock-store";
+import { db, useDB, HOTEL_CATEGORIES, type HotelCategory } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -34,7 +35,9 @@ function HotelsListPage() {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
 
   async function handleFile(file: File) {
     setImporting(true); setSummary(null); setProgress({ done: 0, total: 0 });
@@ -83,6 +86,32 @@ function HotelsListPage() {
     setCatFilters((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
   }
 
+  const visibleIds = rows.map((r) => r.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+
+  function toggleRow(id: string) {
+    setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAllVisible() {
+    setSelected((prev) => allVisibleSelected ? prev.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...prev, ...visibleIds])));
+  }
+  function deleteSelected() {
+    if (selected.length === 0) return;
+    if (!confirm(`Delete ${selected.length} selected hotel(s)? This also removes their rooms and rate plans. This cannot be undone.`)) return;
+    selected.forEach((id) => db.deleteHotel(id));
+    toast.success(`${selected.length} hotel(s) deleted.`);
+    setSelected([]);
+  }
+  function deleteAll() {
+    const count = data.hotels.length;
+    if (count === 0) return;
+    if (!confirm(`Delete ALL ${count} hotels? This also removes every room and rate plan. This cannot be undone.`)) return;
+    if (!confirm("Are you absolutely sure? This clears the entire hotels master.")) return;
+    data.hotels.map((h) => h.id).forEach((id) => db.deleteHotel(id));
+    toast.success("All hotels deleted.");
+    setSelected([]);
+  }
+
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -91,6 +120,15 @@ function HotelsListPage() {
           <p className="text-sm text-muted-foreground mt-1">{data.hotels.length} hotels across {new Set(data.hotels.map((h) => h.city_id)).size} cities.</p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.length > 0 && (
+            <Button variant="destructive" onClick={deleteSelected}>
+              <Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selected.length})
+            </Button>
+          )}
+          <Button variant="outline" className="text-destructive hover:text-destructive"
+            disabled={data.hotels.length === 0} onClick={deleteAll}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete All
+          </Button>
           <Button variant="outline" onClick={() => exportExcel()}>
             <Download className="h-4 w-4 mr-2" /> Export to Excel
           </Button>
@@ -102,6 +140,7 @@ function HotelsListPage() {
           } />
         </div>
       </div>
+
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -150,6 +189,9 @@ function HotelsListPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="font-medium py-3 px-4 w-10">
+                  <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} aria-label="Select all hotels" />
+                </th>
                 <th className="font-medium py-3 px-4">Hotel</th>
                 <th className="font-medium py-3 px-4">City</th>
                 <th className="font-medium py-3 px-4">Category</th>
@@ -162,7 +204,10 @@ function HotelsListPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {rows.map((h) => (
-                <tr key={h.id} className="hover:bg-muted/30 transition-colors cursor-pointer">
+                <tr key={h.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="py-3 px-4">
+                    <Checkbox checked={selected.includes(h.id)} onCheckedChange={() => toggleRow(h.id)} aria-label={`Select ${h.name}`} />
+                  </td>
                   <td className="py-3 px-4">
                     <Link to="/hotels/$id" params={{ id: h.id }} className="font-medium hover:text-primary">
                       {h.name}
@@ -191,11 +236,22 @@ function HotelsListPage() {
                         </Button>
                       }
                     />
+                    <Button size="sm" variant="ghost" className="ml-1" title="Delete hotel"
+                      onClick={() => {
+                        if (confirm(`Delete "${h.name}"? This also removes its rooms and rate plans.`)) {
+                          db.deleteHotel(h.id);
+                          setSelected((prev) => prev.filter((x) => x !== h.id));
+                          toast.success("Hotel deleted.");
+                        }
+                      }}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
                   </td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={8}>
+                <tr><td colSpan={9}>
+
                   <div className="py-16 text-center">
                     <Building2 className="h-12 w-12 mx-auto text-muted-foreground/40" />
                     <div className="mt-3 font-medium">No hotels found</div>
