@@ -255,22 +255,22 @@ function LandPartBlock({
             <th className={thL}>Route</th>
             <th className={thL}>City / Tour</th>
             
-            {/* 🚗 Global Vehicle Options Header */}
-            <th className={thL} style={{ minWidth: '150px', verticalAlign: 'top' }}>
+            {/* 🚗 Global Vehicle Options Header — laid out horizontally */}
+            <th className={thL} style={{ minWidth: '220px', verticalAlign: 'top' }}>
               <div className="mb-1">Vehicle Options</div>
-              <div className="flex flex-col gap-1 font-normal">
+              <div className="flex flex-wrap gap-2 font-normal">
                 {firstRow?.transport_opts.map((o) => (
-                  <label key={o.id} className="flex items-center gap-1.5 cursor-pointer">
+                  <label key={o.id} className="flex items-center gap-1 text-[9px] cursor-pointer">
                     <Checkbox
                       checked={o.checked}
                       onCheckedChange={() => toggle('transport', -1, o.id, checkedByDay('transport'), allDayNumbers)}
-                      className="mt-0.5"
                     />
-                    <span className="block truncate max-w-[120px]">{o.label}</span>
+                    <span className="truncate max-w-[110px] normal-case">{o.label}</span>
                   </label>
                 ))}
               </div>
             </th>
+
 
             {/* 🗣️ Guide Options — Hindi / English / Language, per day */}
             <th className={thL} style={{ minWidth: '180px', verticalAlign: 'top' }}>
