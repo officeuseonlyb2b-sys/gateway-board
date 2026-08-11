@@ -86,6 +86,32 @@ function HotelsListPage() {
     setCatFilters((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
   }
 
+  const visibleIds = rows.map((r) => r.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+
+  function toggleRow(id: string) {
+    setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAllVisible() {
+    setSelected((prev) => allVisibleSelected ? prev.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...prev, ...visibleIds])));
+  }
+  function deleteSelected() {
+    if (selected.length === 0) return;
+    if (!confirm(`Delete ${selected.length} selected hotel(s)? This also removes their rooms and rate plans. This cannot be undone.`)) return;
+    selected.forEach((id) => db.deleteHotel(id));
+    toast.success(`${selected.length} hotel(s) deleted.`);
+    setSelected([]);
+  }
+  function deleteAll() {
+    const count = data.hotels.length;
+    if (count === 0) return;
+    if (!confirm(`Delete ALL ${count} hotels? This also removes every room and rate plan. This cannot be undone.`)) return;
+    if (!confirm("Are you absolutely sure? This clears the entire hotels master.")) return;
+    data.hotels.map((h) => h.id).forEach((id) => db.deleteHotel(id));
+    toast.success("All hotels deleted.");
+    setSelected([]);
+  }
+
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -94,6 +120,15 @@ function HotelsListPage() {
           <p className="text-sm text-muted-foreground mt-1">{data.hotels.length} hotels across {new Set(data.hotels.map((h) => h.city_id)).size} cities.</p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.length > 0 && (
+            <Button variant="destructive" onClick={deleteSelected}>
+              <Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selected.length})
+            </Button>
+          )}
+          <Button variant="outline" className="text-destructive hover:text-destructive"
+            disabled={data.hotels.length === 0} onClick={deleteAll}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete All
+          </Button>
           <Button variant="outline" onClick={() => exportExcel()}>
             <Download className="h-4 w-4 mr-2" /> Export to Excel
           </Button>
@@ -105,6 +140,7 @@ function HotelsListPage() {
           } />
         </div>
       </div>
+
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-3">
