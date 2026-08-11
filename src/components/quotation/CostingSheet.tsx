@@ -563,10 +563,16 @@ function HotelMealBlock({
         <tfoot>
           <tr className="border-t-2 bg-muted/30 font-medium">
             <td className="p-1.5" colSpan={3}>Subtotal (Per Night)</td>
-            <td className={td}>{inr(totals.sglNet / n)}</td>
-            <td className={td}>{inr(totals.dblNet / n)}</td>
-            <td className={td}>{inr(totals.trpNet / n)}</td>
-            <td className={td}>{inr(totals.quadNet / n)}</td>
+            {allDynamic ? (
+              <td className={td} colSpan={4}>{inr(totals.dynNet / n)}</td>
+            ) : (
+              <>
+                <td className={td}>{inr(totals.sglNet / n)}</td>
+                <td className={td}>{inr(totals.dblNet / n)}</td>
+                <td className={td}>{inr(totals.trpNet / n)}</td>
+                <td className={td}>{inr(totals.quadNet / n)}</td>
+              </>
+            )}
             <td className="p-1.5" />
             <td className={td}>{inr(totals.lunchNet / n)}</td>
             <td className="p-1.5" />
@@ -574,15 +580,22 @@ function HotelMealBlock({
           </tr>
           <tr className="bg-primary/10 font-bold">
             <td className="p-1.5" colSpan={3}>Total ({sheet.nights} Nights)</td>
-            <td className={td}>{inr(totals.sglTotal)}</td>
-            <td className={td}>{inr(totals.dblTotal)}</td>
-            <td className={td}>{inr(totals.trpTotal)}</td>
-            <td className={td}>{inr(totals.quadTotal)}</td>
+            {allDynamic ? (
+              <td className={td} colSpan={4}>{inr(totals.dynTotal)}</td>
+            ) : (
+              <>
+                <td className={td}>{inr(totals.sglTotal)}</td>
+                <td className={td}>{inr(totals.dblTotal)}</td>
+                <td className={td}>{inr(totals.trpTotal)}</td>
+                <td className={td}>{inr(totals.quadTotal)}</td>
+              </>
+            )}
             <td className="p-1.5" />
             <td className={td}>{inr(totals.lunchTotal)}</td>
             <td className="p-1.5" />
             <td className={td}>{inr(totals.dinnerTotal)}</td>
           </tr>
+
           {dynamicNights > 0 && (
             <tr className="bg-accent/10 font-semibold">
               <td className="p-1.5" colSpan={3}>Dynamic rooms ({dynamicNights} night(s))</td>
