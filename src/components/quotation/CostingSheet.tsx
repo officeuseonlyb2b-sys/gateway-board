@@ -448,6 +448,9 @@ function HotelMealBlock({
     dynNet: acc.dynNet + (r.dyn?.net ?? 0), dynTotal: acc.dynTotal + (r.dyn?.total ?? 0),
   }), { sglNet:0, sglGst:0, sglTotal:0, dblNet:0, dblGst:0, dblTotal:0, trpNet:0, trpGst:0, trpTotal:0, quadNet:0, quadGst:0, quadTotal:0, lunchNet:0, lunchGst:0, lunchTotal:0, dinnerNet:0, dinnerGst:0, dinnerTotal:0, dynNet:0, dynTotal:0 });
   const dynamicNights = computedRows.filter((r) => r.dyn).length;
+  /** All nights dynamic → collapse the four rate columns into one "Accommodation" column. */
+  const allDynamic = computedRows.length > 0 && dynamicNights === computedRows.length;
+
 
 
   // Step 3: Display the table
