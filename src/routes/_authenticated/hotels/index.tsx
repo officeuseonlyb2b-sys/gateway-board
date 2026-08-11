@@ -189,6 +189,9 @@ function HotelsListPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="font-medium py-3 px-4 w-10">
+                  <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} aria-label="Select all hotels" />
+                </th>
                 <th className="font-medium py-3 px-4">Hotel</th>
                 <th className="font-medium py-3 px-4">City</th>
                 <th className="font-medium py-3 px-4">Category</th>
@@ -201,7 +204,10 @@ function HotelsListPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {rows.map((h) => (
-                <tr key={h.id} className="hover:bg-muted/30 transition-colors cursor-pointer">
+                <tr key={h.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="py-3 px-4">
+                    <Checkbox checked={selected.includes(h.id)} onCheckedChange={() => toggleRow(h.id)} aria-label={`Select ${h.name}`} />
+                  </td>
                   <td className="py-3 px-4">
                     <Link to="/hotels/$id" params={{ id: h.id }} className="font-medium hover:text-primary">
                       {h.name}
@@ -230,11 +236,22 @@ function HotelsListPage() {
                         </Button>
                       }
                     />
+                    <Button size="sm" variant="ghost" className="ml-1" title="Delete hotel"
+                      onClick={() => {
+                        if (confirm(`Delete "${h.name}"? This also removes its rooms and rate plans.`)) {
+                          db.deleteHotel(h.id);
+                          setSelected((prev) => prev.filter((x) => x !== h.id));
+                          toast.success("Hotel deleted.");
+                        }
+                      }}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
                   </td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={8}>
+                <tr><td colSpan={9}>
+
                   <div className="py-16 text-center">
                     <Building2 className="h-12 w-12 mx-auto text-muted-foreground/40" />
                     <div className="mt-3 font-medium">No hotels found</div>
