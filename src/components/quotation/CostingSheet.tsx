@@ -21,11 +21,16 @@ import type { QuoteDraft, HotelOption, EntranceCat, CostingSelection } from "@/l
 
 type Bucket = "transport" | "guide" | "entrances" | "activities" | "misc";
 type SetDraft = (p: Partial<QuoteDraft>) => void;
+type GuideLang = "Hindi" | "English" | "Language";
 
 export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft }) {
   const d = useDB();
   const options = draft.hotel_options ?? [];
   const [tab, setTab] = useState<string>(options[0]?.key ?? "A");
+
+  // Land Part doesn't depend on the hotel option, so build it once here and
+  // share it across every variation instead of recomputing it per tab.
+  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
 
   if (options.length === 0) {
     return (
@@ -66,7 +71,6 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
     set({ costing_selection: sel });
   };
 
-
   // Toggle Monument Categories globally
   const toggleCat = (day: number, cat: EntranceCat, allDays?: number[]) => {
     if (!set) return;
@@ -90,6 +94,33 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
     set({ costing_selection: sel });
   };
 
+  // Global Guide language selector — applies one language to every guide
+  // line-item, on every day, in a single state update (so it can't be
+  // clobbered by sequential toggle() calls reading a stale draft).
+  const toggleGuideLangGlobal = (lang: GuideLang) => {
+    if (!set) return;
+    const sel: CostingSelection = { ...(draft.costing_selection ?? {}) };
+    const map: Record<number, string[]> = { ...(sel.guide ?? {}) };
+
+    land.rows.forEach((row) => {
+      const prefixes = Array.from(
+        new Set(row.guide_opts.map((o) => o.id.split("::")[0])),
+      );
+      if (prefixes.length === 0) return;
+
+      const current = map[row.day] ?? [];
+      // Drop every existing selection for each line-item on this day, then
+      // select only the requested language for each one.
+      const withoutLines = current.filter(
+        (x) => !prefixes.some((p) => x.startsWith(`${p}::`)),
+      );
+      map[row.day] = [...withoutLines, ...prefixes.map((p) => `${p}::${lang}`)];
+    });
+
+    (sel as Record<string, unknown>)["guide"] = map;
+    set({ costing_selection: sel });
+  };
+
   return (
     <Tabs value={options.some((o) => o.key === tab) ? tab : options[0].key} onValueChange={setTab}>
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -104,7 +135,10 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
       </div>
       {options.map((o) => (
         <TabsContent key={o.key} value={o.key} className="space-y-4 mt-3">
-          <Variation draft={draft} d={d} opt={o} toggle={toggle} toggleCat={toggleCat} />
+          <Variation
+            draft={draft} d={d} opt={o} land={land}
+            toggle={toggle} toggleCat={toggleCat} toggleGuideLangGlobal={toggleGuideLangGlobal}
+          />
         </TabsContent>
       ))}
     </Tabs>
@@ -117,13 +151,12 @@ interface Handlers {
     checkedByDay: Record<number, string[]>, allDays?: number[],
   ) => void;
   toggleCat: (day: number, cat: EntranceCat, allDays?: number[]) => void;
+  toggleGuideLangGlobal: (lang: GuideLang) => void;
 }
 
-
 function Variation({
-  draft, d, opt, toggle, toggleCat,
-}: { draft: QuoteDraft; d: ReturnType<typeof useDB>; opt: HotelOption } & Handlers) {
-  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  draft, d, opt, land, toggle, toggleCat, toggleGuideLangGlobal,
+}: { draft: QuoteDraft; d: ReturnType<typeof useDB>; opt: HotelOption; land: LandPartSheet } & Handlers) {
   const hotels = useMemo<HotelMealSheet>(() => buildHotelMealSheet(draft, d, opt), [draft, d, opt]);
   const sheets = useMemo<RateSheetGroup[]>(
     () => buildRateSheet(draft, d, opt, draft.transport ?? []),
@@ -138,7 +171,8 @@ function Variation({
       <div className="overflow-x-auto">
         <div className="flex gap-4 items-start min-w-max">
           <LandPartBlock
-            land={land} pax={pax} pct={landPct} toggle={toggle} toggleCat={toggleCat}
+            land={land} pax={pax} pct={landPct}
+            toggle={toggle} toggleCat={toggleCat} toggleGuideLangGlobal={toggleGuideLangGlobal}
           />
           <HotelMealBlock sheet={hotels} pax={pax} pct={hotelPct} />
         </div>
@@ -220,9 +254,10 @@ function OptionCell({
 }
 
 function LandPartBlock({
-  land, pax, pct, toggle, toggleCat,
+  land, pax, pct, toggle, toggleCat, toggleGuideLangGlobal,
 }: { land: LandPartSheet; pax: number; pct: { mk: number; gst: number } } & Handlers) {
   const cats: [EntranceCat, string][] = [["indian", "Indian"], ["foreign", "Foreigner"], ["student", "Student"]];
+  const guideLangs: GuideLang[] = ["Hindi", "English", "Language"];
   const firstRow = land.rows[0];
   const allDayNumbers = land.rows.map(r => r.day);
   /** Currently-checked option ids per day, so global toggles keep other days intact. */
@@ -238,6 +273,20 @@ function LandPartBlock({
     return out;
   };
 
+  /**
+   * Whether the header's global "Hindi/English/Language" pill should show as
+   * checked — true if every guide line-item on the first day currently has
+   * that language selected. This is a best-effort header indicator only;
+   * the actual per-day/per-line state is what drives pricing.
+   */
+  const headerGuideLangChecked = (lang: GuideLang): boolean => {
+    if (!firstRow || firstRow.guide_opts.length === 0) return false;
+    const prefixes = Array.from(new Set(firstRow.guide_opts.map((o) => o.id.split("::")[0])));
+    if (prefixes.length === 0) return false;
+    return prefixes.every((p) =>
+      firstRow.guide_opts.find((o) => o.id === `${p}::${lang}`)?.checked ?? false,
+    );
+  };
 
   return (
     <Card className="p-3 space-y-2 shrink-0">
@@ -254,32 +303,65 @@ function LandPartBlock({
             <th className={thL}>Date</th>
             <th className={thL}>Route</th>
             <th className={thL}>City / Tour</th>
-            
-            {/* 🚗 Global Vehicle Options Header — laid out horizontally */}
-            <th className={thL} style={{ minWidth: '220px', verticalAlign: 'top' }}>
-              <div className="mb-1">Vehicle Options</div>
-              <div className="flex flex-wrap gap-2 font-normal">
+
+            {/* 🚗 Global Vehicle Options Header — centered horizontal vehicle names with prices below */}
+            <th className={thL} style={{ minWidth: '320px', verticalAlign: 'top' }}>
+              <div className="mb-2 text-center">Vehicle Options</div>
+
+              <div
+                className="grid items-start gap-6 font-normal"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(firstRow?.transport_opts.length ?? 1, 1)}, minmax(150px, 1fr))`,
+                }}
+              >
                 {firstRow?.transport_opts.map((o) => (
-                  <label key={o.id} className="flex items-center gap-1 text-[9px] cursor-pointer">
-                    <Checkbox
-                      checked={o.checked}
-                      onCheckedChange={() => toggle('transport', -1, o.id, checkedByDay('transport'), allDayNumbers)}
-                    />
-                    <span className="truncate max-w-[110px] normal-case">{o.label}</span>
+                  <label
+                    key={o.id}
+                    className="flex min-w-0 flex-col items-center gap-1 text-[9px] cursor-pointer text-center"
+                  >
+                    <div className="flex items-center justify-center gap-1.5">
+                      <Checkbox
+                        checked={o.checked}
+                        onCheckedChange={() =>
+                          toggle(
+                            'transport',
+                            -1,
+                            o.id,
+                            checkedByDay('transport'),
+                            allDayNumbers,
+                          )
+                        }
+                        className="shrink-0"
+                      />
+                      <span className="normal-case whitespace-nowrap leading-tight">
+                        {o.label}
+                      </span>
+                    </div>
+
+                    <span className="text-[11px] font-semibold tabular-nums text-foreground">
+                      {inr(o.amount)}
+                    </span>
                   </label>
                 ))}
               </div>
             </th>
 
-
-            {/* 🗣️ Guide Options — Hindi / English / Language, per day */}
+            {/* 🗣️ Global Guide Options Header — Hindi / English / Language,
+                clickable to apply that language to every line-item on every day. */}
             <th className={thL} style={{ minWidth: '180px', verticalAlign: 'top' }}>
               <div className="mb-1">Guide Options</div>
-              <div className="text-[9px] normal-case font-normal text-muted-foreground">
-                Hindi · English · Language
+              <div className="flex flex-wrap gap-2 font-normal">
+                {guideLangs.map((lang) => (
+                  <label key={lang} className="flex items-center gap-1 text-[9px] cursor-pointer">
+                    <Checkbox
+                      checked={headerGuideLangChecked(lang)}
+                      onCheckedChange={() => toggleGuideLangGlobal(lang)}
+                    />
+                    <span className="normal-case">{lang}</span>
+                  </label>
+                ))}
               </div>
             </th>
-
 
             {/* 🏛️ Global Monument Categories Header */}
             <th className={thL} style={{ minWidth: '150px', verticalAlign: 'top' }}>
@@ -313,24 +395,36 @@ function LandPartBlock({
                 <div className="text-[10px] text-muted-foreground">{r.tours}</div>
               </td>
 
-              {/* Vehicle Price (Globally Selected) — each vehicle shown separately */}
+              {/* Vehicle Price (Globally Selected) — show only the price in day rows.
+                  Vehicle names are already shown in the Vehicle Options header. */}
               <td className="p-1.5 align-top">
                 {(() => {
                   const selected = r.transport_opts.filter((o) => o.checked);
-                  if (selected.length === 0) return <div className="text-right text-muted-foreground">—</div>;
+                  if (selected.length === 0) {
+                    return <div className="text-right text-muted-foreground">—</div>;
+                  }
+
                   return (
-                    <div className="space-y-1">
-                      {selected.map((o) => (
-                        <div key={o.id} className="flex items-start gap-1.5">
-                          <span className="flex-1 truncate max-w-[120px]">{o.label}</span>
-                          <span className="tabular-nums">{inr(o.amount)}</span>
+                    <div
+                      className="grid items-start gap-6"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.max(r.transport_opts.length, 1)}, minmax(150px, 1fr))`,
+                      }}
+                    >
+                      {r.transport_opts.map((o) => (
+                        <div
+                          key={o.id}
+                          className={`text-center tabular-nums font-medium ${
+                            o.checked ? "" : "text-muted-foreground"
+                          }`}
+                        >
+                          {o.checked ? inr(o.amount) : "—"}
                         </div>
                       ))}
                     </div>
                   );
                 })()}
               </td>
-
 
               {/* Guide — Hindi / English / Language checkboxes for this day */}
               <OptionCell opts={r.guide_opts} bucket="guide" day={r.day} onToggle={toggle} />
@@ -413,7 +507,7 @@ function HotelMealBlock({
     const dblNet = z(r.dbl || 0);
     const dblGst = dblNet * gstRateFor(dblNet);
     const dblTotal = dblNet + dblGst;
-    
+
     const trpNet = z(r.trp || 0);
     const trpGst = trpNet * gstRateFor(trpNet);
     const trpTotal = trpNet + trpGst;
@@ -450,8 +544,6 @@ function HotelMealBlock({
   const dynamicNights = computedRows.filter((r) => r.dyn).length;
   /** All nights dynamic → collapse the four rate columns into one "Accommodation" column. */
   const allDynamic = computedRows.length > 0 && dynamicNights === computedRows.length;
-
-
 
   // Step 3: Display the table
   return (
@@ -498,7 +590,7 @@ function HotelMealBlock({
                 <div className="text-[10px] text-muted-foreground">{r.room}</div>
               </td>
               <td className="p-1.5">{r.meal_plan}</td>
-              
+
               {r.dyn ? (
                 /* Dynamic mode — one consolidated line for the allocated room mix */
                 <td className="p-1.5" colSpan={4}>
@@ -519,19 +611,19 @@ function HotelMealBlock({
                 <div className="text-[#0F172A] font-semibold">{r.sglTotal ? inr(r.sglTotal) : '—'}</div>
                 {r.sglTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.sglNet)} + GST {(gstRateFor(r.sglNet) * 100).toFixed(0)}%</div>}
               </td>
-              
+
               {/* DBL */}
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.dblTotal ? inr(r.dblTotal) : '—'}</div>
                 {r.dblTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.dblNet)} + GST {(gstRateFor(r.dblNet) * 100).toFixed(0)}%</div>}
               </td>
-              
+
               {/* TRP */}
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.trpTotal ? inr(r.trpTotal) : '—'}</div>
                 {r.trpTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.trpNet)} + GST {(gstRateFor(r.trpNet) * 100).toFixed(0)}%</div>}
               </td>
-              
+
               {/* QUAD */}
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.quadTotal ? inr(r.quadTotal) : '—'}</div>
@@ -540,14 +632,13 @@ function HotelMealBlock({
                 </>
               )}
 
-              
               <td className="p-1.5">{r.lunch_source}</td>
               {/* Lunch */}
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.lunchTotal ? inr(r.lunchTotal) : '—'}</div>
                 {r.lunchTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.lunchNet)} + GST {(gstRateFor(r.lunchNet) * 100).toFixed(0)}%</div>}
               </td>
-              
+
               <td className="p-1.5">{r.dinner_source}</td>
               {/* Dinner */}
               <td className={td}>
@@ -626,7 +717,7 @@ function HotelMarkupRows({
 }: { totals: { sglTotal: number; dblTotal: number; trpTotal: number; quadTotal: number; lunchTotal: number; dinnerTotal: number }; pct: { mk: number; gst: number }; pax: number }) {
   const cells = [totals.sglTotal, totals.dblTotal, totals.trpTotal, totals.quadTotal];
   const shares = [1, 2, 3, 4];
-  
+
   // UPDATED: GST is now applied on the (Total + Markup), NOT on the markup alone!
   const rows: [string, (v: number) => number][] = [
     [`Markup ${pct.mk}%`, (v) => v * (pct.mk / 100)],
