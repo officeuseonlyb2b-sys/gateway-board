@@ -47,6 +47,8 @@ import { computeScenario } from "@/lib/wizard/scenario";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { buildSavedQuote as buildSavedQuoteFromDraft } from "@/lib/wizard/build-saved-quote";
+
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -264,7 +266,21 @@ function WizardPage() {
             }}>
               <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
             </Button>
+            <Button size="sm" onClick={() => {
+              const q = buildSavedQuoteFromDraft(draft, dbData, user?.name || "Unknown");
+              persistQuote(q);
+              toast.success(`Quote ${q.quote_number} saved to Saved Quotes.`);
+              addNotification({
+                kind: "success", category: "quote_saved",
+                title: `Quote ${q.quote_number} saved`,
+                message: `${q.tour_title} · ${q.total_nights}N`,
+                href: "/quotes",
+              });
+            }}>
+              <FileText className="h-3.5 w-3.5 mr-1.5" /> Save Quote
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => {
+
               if (confirm("Discard all progress and start over?")) {
                 if (currentDraftId) deleteDraft(currentDraftId);
                 setCurrentDraftId(null);
