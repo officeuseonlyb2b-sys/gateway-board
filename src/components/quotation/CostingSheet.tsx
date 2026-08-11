@@ -469,10 +469,17 @@ function HotelMealBlock({
             <th className={thL}>Night</th>
             <th className={thL}>Hotel / Room</th>
             <th className={thL}>Plan</th>
-            <th className={th}>SGL</th>
-            <th className={th}>DBL</th>
-            <th className={th}>TRP</th>
-            <th className={th}>QUAD</th>
+            {allDynamic ? (
+              <th className={thL} colSpan={4}>Accommodation</th>
+            ) : (
+              <>
+                <th className={th}>SGL</th>
+                <th className={th}>DBL</th>
+                <th className={th}>TRP</th>
+                <th className={th}>QUAD</th>
+              </>
+            )}
+
             <th className={thL}>Lunch</th>
             <th className={th}>Amt</th>
             <th className={thL}>Dinner</th>
