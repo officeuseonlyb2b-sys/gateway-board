@@ -952,36 +952,53 @@ function FragmentGroup({
       <tr className="border-t bg-primary/5">
         <td className="p-1.5 font-semibold" colSpan={19}>{g.vehicle}</td>
       </tr>
-      {g.rows.map((r) => (
-        <tr key={`${g.vehicle}-${r.pax}`} className="border-t">
-          <td className="p-1.5">{r.pax}</td>
-          <td className="p-1.5">{r.vehicle}</td>
-          <td className={td}>{inr(r.transport)}</td>
-          <td className={td}>{inr(r.guide)}</td>
-          <td className={td}>{inr(r.escort)}</td>
-          {/*
-            IMPORTANT:
-            Entrances / Activities / Misc are calculated from the LAND totals,
-            then Markup + GST are applied, and finally divided by the selected
-            total pax. The resulting per-person amount is intentionally the
-            SAME on every pax row and for every vehicle.
-          */}
-          <td className={td}>{inr(landPerPerson.entrances)}</td>
-          <td className={td}>{inr(landPerPerson.activities)}</td>
-          <td className={td}>{inr(landPerPerson.misc)}</td>
-          <td className={td}>{inr(r.single)}</td>
-          <td className={td}>{inr(r.double)}</td>
-          <td className={td}>{inr(r.triple)}</td>
-          <td className={td}>{inr(r.quad)}</td>
-          <td className={td}>{inr(r.lunch)}</td>
-          <td className={td}>{inr(r.dinner)}</td>
-          <td className={td}>{r.pax}</td>
-          <td className={`${td} font-semibold`}>{inr(r.pkg_single)}</td>
-          <td className={`${td} font-semibold`}>{inr(r.pkg_double)}</td>
-          <td className={`${td} font-semibold`}>{inr(r.pkg_triple)}</td>
-          <td className={`${td} font-semibold`}>{inr(r.pkg_quad)}</td>
-        </tr>
-      ))}
+      {g.rows.map((r) => {
+        // All land columns used below are already PER-PERSON values.
+        // Package price = transport + guide + escort + entrances +
+        // activities + misc + the selected accommodation sharing rate.
+        // There is intentionally NO second division by pax here.
+        const commonLandPerPerson =
+          r.transport +
+          r.guide +
+          r.escort +
+          landPerPerson.entrances +
+          landPerPerson.activities +
+          landPerPerson.misc;
+
+        const packageSingle = commonLandPerPerson + r.single;
+        const packageDouble = commonLandPerPerson + r.double;
+        const packageTriple = commonLandPerPerson + r.triple;
+        const packageQuad = commonLandPerPerson + r.quad;
+
+        return (
+          <tr key={`${g.vehicle}-${r.pax}`} className="border-t">
+            <td className="p-1.5">{r.pax}</td>
+            <td className="p-1.5">{r.vehicle}</td>
+            <td className={td}>{inr(r.transport)}</td>
+            <td className={td}>{inr(r.guide)}</td>
+            <td className={td}>{inr(r.escort)}</td>
+
+            {/* Final per-person values after Land Markup + GST. */}
+            <td className={td}>{inr(landPerPerson.entrances)}</td>
+            <td className={td}>{inr(landPerPerson.activities)}</td>
+            <td className={td}>{inr(landPerPerson.misc)}</td>
+
+            <td className={td}>{inr(r.single)}</td>
+            <td className={td}>{inr(r.double)}</td>
+            <td className={td}>{inr(r.triple)}</td>
+            <td className={td}>{inr(r.quad)}</td>
+            <td className={td}>{inr(r.lunch)}</td>
+            <td className={td}>{inr(r.dinner)}</td>
+            <td className={td}>{r.pax}</td>
+
+            {/* Package Cost = common land per-person + occupancy rate. */}
+            <td className={`${td} font-semibold`}>{inr(packageSingle)}</td>
+            <td className={`${td} font-semibold`}>{inr(packageDouble)}</td>
+            <td className={`${td} font-semibold`}>{inr(packageTriple)}</td>
+            <td className={`${td} font-semibold`}>{inr(packageQuad)}</td>
+          </tr>
+        );
+      })}
     </>
   );
 }
