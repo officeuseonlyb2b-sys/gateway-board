@@ -221,33 +221,54 @@ function MarkupRows({
   );
 }
 
+/**
+ * Returns the per‑person amount for an option.
+ * - If the option's sub OR label contains "per_person" or "per person" (case‑insensitive),
+ *   the amount is already per‑person → return amount.
+ * - Otherwise, it's a total (e.g., slab, fixed group charge) → return amount / pax.
+ */
+function getPerPersonAmount(opt: SheetOption, pax: number): number {
+  const text = `${opt.sub || ""} ${opt.label}`;
+  if (/per[_\s]person/i.test(text)) {
+    return opt.amount;
+  }
+  return opt.amount / pax;
+}
+
 function OptionCell({
-  opts, bucket, day, onToggle,
+  opts, bucket, day, onToggle, pax,
 }: {
   opts: SheetOption[]; bucket: Bucket; day: number;
   onToggle: Handlers["toggle"];
+  pax: number;
 }) {
   if (opts.length === 0) return <td className="p-1.5 text-right text-muted-foreground">—</td>;
   const checkedByDay = { [day]: opts.filter((o) => o.checked).map((o) => o.id) };
+  // For entrances, activities and misc we show per-person amount; guide is handled separately.
+  const perPersonBuckets: Bucket[] = ["entrances", "activities", "misc"];
+  const showPerPerson = perPersonBuckets.includes(bucket);
   return (
     <td className="p-1.5 align-top">
       <div className="space-y-1">
-        {opts.map((o) => (
-          <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
-            <Checkbox
-              checked={o.checked}
-              onCheckedChange={() => onToggle(bucket, day, o.id, checkedByDay)}
-              className="mt-0.5"
-            />
-            <span className="flex-1 min-w-0">
-              <span className="block truncate max-w-[150px]">{o.label}</span>
-              {o.sub && <span className="block text-[10px] text-muted-foreground truncate max-w-[150px]">{o.sub}</span>}
-            </span>
-            <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
-              {inr(o.amount)}
-            </span>
-          </label>
-        ))}
+        {opts.map((o) => {
+          const displayAmount = showPerPerson ? getPerPersonAmount(o, pax) : o.amount;
+          return (
+            <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
+              <Checkbox
+                checked={o.checked}
+                onCheckedChange={() => onToggle(bucket, day, o.id, checkedByDay)}
+                className="mt-0.5"
+              />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate max-w-[150px]">{o.label}</span>
+                {o.sub && <span className="block text-[10px] text-muted-foreground truncate max-w-[150px]">{o.sub}</span>}
+              </span>
+              <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
+                {inr(displayAmount)}
+              </span>
+            </label>
+          );
+        })}
       </div>
     </td>
   );
@@ -385,78 +406,110 @@ function LandPartBlock({
           </tr>
         </thead>
         <tbody>
-          {land.rows.map((r: LandDayRow) => (
-            <tr key={r.day} className="border-t align-top">
-              <td className="p-1.5">{r.day}</td>
-              <td className="p-1.5 whitespace-nowrap">{r.date ? fmtDateShort(r.date) : "—"}</td>
-              <td className="p-1.5">{r.route}</td>
-              <td className="p-1.5">
-                <div>{r.city}</div>
-                <div className="text-[10px] text-muted-foreground">{r.tours}</div>
-              </td>
+          {land.rows.map((r: LandDayRow) => {
+            // Guide: show only selected language(s) with per-person price
+            const selectedGuides = r.guide_opts.filter((o) => o.checked);
+            return (
+              <tr key={r.day} className="border-t align-top">
+                <td className="p-1.5">{r.day}</td>
+                <td className="p-1.5 whitespace-nowrap">{r.date ? fmtDateShort(r.date) : "—"}</td>
+                <td className="p-1.5">{r.route}</td>
+                <td className="p-1.5">
+                  <div>{r.city}</div>
+                  <div className="text-[10px] text-muted-foreground">{r.tours}</div>
+                </td>
 
-              {/* Vehicle Price (Globally Selected) — show only the price in day rows.
-                  Vehicle names are already shown in the Vehicle Options header. */}
-              <td className="p-1.5 align-top">
-                {(() => {
-                  const selected = r.transport_opts.filter((o) => o.checked);
-                  if (selected.length === 0) {
-                    return <div className="text-right text-muted-foreground">—</div>;
-                  }
+                {/* Vehicle Price (Globally Selected) — show only the price in day rows.
+                    Vehicle names are already shown in the Vehicle Options header. */}
+                <td className="p-1.5 align-top">
+                  {(() => {
+                    const selected = r.transport_opts.filter((o) => o.checked);
+                    if (selected.length === 0) {
+                      return <div className="text-right text-muted-foreground">—</div>;
+                    }
 
-                  return (
-                    <div
-                      className="grid items-start gap-6"
-                      style={{
-                        gridTemplateColumns: `repeat(${Math.max(r.transport_opts.length, 1)}, minmax(150px, 1fr))`,
-                      }}
-                    >
-                      {r.transport_opts.map((o) => (
-                        <div
-                          key={o.id}
-                          className={`text-center tabular-nums font-medium ${
-                            o.checked ? "" : "text-muted-foreground"
-                          }`}
-                        >
-                          {o.checked ? inr(o.amount) : "—"}
+                    return (
+                      <div
+                        className="grid items-start gap-6"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.max(r.transport_opts.length, 1)}, minmax(150px, 1fr))`,
+                        }}
+                      >
+                        {r.transport_opts.map((o) => (
+                          <div
+                            key={o.id}
+                            className={`text-center tabular-nums font-medium ${
+                              o.checked ? "" : "text-muted-foreground"
+                            }`}
+                          >
+                            {o.checked ? inr(o.amount) : "—"}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </td>
+
+                {/* Guide — display ONLY the selected language for each guide line,
+                    showing price per person (guide total ÷ pax), without checkboxes. */}
+                <td className="p-1.5 align-top">
+                  {selectedGuides.length === 0 ? (
+                    <div className="text-right text-muted-foreground">—</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {selectedGuides.map((o) => (
+                        <div key={o.id} className="flex justify-between gap-2">
+                          <span className="truncate max-w-[120px]">
+                            {o.label}
+                            {o.sub && <span className="block text-[10px] text-muted-foreground">{o.sub}</span>}
+                          </span>
+                          <span className="tabular-nums font-medium">
+                            {inr(o.amount / pax)}
+                          </span>
                         </div>
                       ))}
                     </div>
-                  );
-                })()}
-              </td>
+                  )}
+                </td>
 
-              {/* Guide — Hindi / English / Language checkboxes for this day */}
-              <OptionCell opts={r.guide_opts} bucket="guide" day={r.day} onToggle={toggle} />
+                {/* Monuments - Per Day Checkboxes (per-person amount, respecting per-person vs total) */}
+                <td className="p-1.5 align-top">
+                  {r.entrance_opts.length === 0 ? (
+                    <div className="text-right text-muted-foreground">—</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {r.entrance_opts.map((o) => {
+                        const perPerson = getPerPersonAmount(o, pax);
+                        return (
+                          <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
+                            <Checkbox
+                              checked={o.checked}
+                              onCheckedChange={() => toggle("entrances", r.day, o.id, checkedByDay("entrances"))}
+                              className="mt-0.5"
+                            />
+                            <span className="flex-1 truncate max-w-[150px]">{o.label}</span>
+                            <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
+                              {inr(perPerson)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </td>
 
-              {/* Monuments - Per Day Checkboxes */}
-              <td className="p-1.5 align-top">
-                {r.entrance_opts.length === 0 ? (
-                  <div className="text-right text-muted-foreground">—</div>
-                ) : (
-                  <div className="space-y-1">
-                    {r.entrance_opts.map((o) => (
-                      <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
-                        <Checkbox
-                          checked={o.checked}
-                          onCheckedChange={() => toggle("entrances", r.day, o.id, checkedByDay("entrances"))}
-                          className="mt-0.5"
-                        />
+                {/* Activities — using OptionCell with per-person detection */}
+                <td className="p-1.5 align-top">
+                  <OptionCell opts={r.activity_opts} bucket="activities" day={r.day} onToggle={toggle} pax={pax} />
+                </td>
 
-                        <span className="flex-1 truncate max-w-[150px]">{o.label}</span>
-                        <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
-                          {inr(o.amount)}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </td>
-
-              <OptionCell opts={r.activity_opts} bucket="activities" day={r.day} onToggle={toggle} />
-              <OptionCell opts={r.misc_opts} bucket="misc" day={r.day} onToggle={toggle} />
-            </tr>
-          ))}
+                {/* Miscellaneous — using OptionCell with per-person detection */}
+                <td className="p-1.5 align-top">
+                  <OptionCell opts={r.misc_opts} bucket="misc" day={r.day} onToggle={toggle} pax={pax} />
+                </td>
+              </tr>
+            );
+          })}
           {land.rows.length === 0 && (
             <tr><td colSpan={9} className="p-3 text-center text-muted-foreground">No routing days yet.</td></tr>
           )}
