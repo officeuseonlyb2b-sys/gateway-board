@@ -177,7 +177,13 @@ function Variation({
           <HotelMealBlock sheet={hotels} pax={pax} pct={hotelPct} />
         </div>
       </div>
-      <RateSheetBlock groups={sheets} landPct={landPct} hotelPct={hotelPct} />
+      <RateSheetBlock
+        groups={sheets}
+        land={land}
+        pax={pax}
+        landPct={landPct}
+        hotelPct={hotelPct}
+      />
     </div>
   );
 }
@@ -865,12 +871,22 @@ function HotelMarkupRows({
 }
 
 function RateSheetBlock({
-  groups, landPct, hotelPct,
+  groups, land, pax, landPct, hotelPct,
 }: {
   groups: RateSheetGroup[];
+  land: LandPartSheet;
+  pax: number;
   landPct: { mk: number; gst: number };
   hotelPct: { mk: number; gst: number };
 }) {
+  // Entrances, Activities and Misc are LAND-level totals.
+  // In the Rate Sheet they must always be shown as the SAME per-person amount
+  // for every pax row, after applying Land Markup and GST.
+  const landPerPerson = {
+    entrances: applyMarkupAndGst(land.entrances_total, landPct.mk, landPct.gst, pax).per_person,
+    activities: applyMarkupAndGst(land.activities_total, landPct.mk, landPct.gst, pax).per_person,
+    misc: applyMarkupAndGst(land.misc_total, landPct.mk, landPct.gst, pax).per_person,
+  };
   return (
     <Card className="p-3 space-y-2">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -915,7 +931,7 @@ function RateSheetBlock({
           </thead>
           <tbody>
             {groups.map((g) => (
-              <FragmentGroup key={g.line_id ?? g.vehicle} group={g} />
+              <FragmentGroup key={g.line_id ?? g.vehicle} group={g} landPerPerson={landPerPerson} />
             ))}
           </tbody>
         </table>
@@ -924,7 +940,13 @@ function RateSheetBlock({
   );
 }
 
-function FragmentGroup({ group: g }: { group: RateSheetGroup }) {
+function FragmentGroup({
+  group: g,
+  landPerPerson,
+}: {
+  group: RateSheetGroup;
+  landPerPerson: { entrances: number; activities: number; misc: number };
+}) {
   return (
     <>
       <tr className="border-t bg-primary/5">
@@ -937,9 +959,16 @@ function FragmentGroup({ group: g }: { group: RateSheetGroup }) {
           <td className={td}>{inr(r.transport)}</td>
           <td className={td}>{inr(r.guide)}</td>
           <td className={td}>{inr(r.escort)}</td>
-          <td className={td}>{inr(r.entrances)}</td>
-          <td className={td}>{inr(r.activities)}</td>
-          <td className={td}>{inr(r.misc)}</td>
+          {/*
+            IMPORTANT:
+            Entrances / Activities / Misc are calculated from the LAND totals,
+            then Markup + GST are applied, and finally divided by the selected
+            total pax. The resulting per-person amount is intentionally the
+            SAME on every pax row and for every vehicle.
+          */}
+          <td className={td}>{inr(landPerPerson.entrances)}</td>
+          <td className={td}>{inr(landPerPerson.activities)}</td>
+          <td className={td}>{inr(landPerPerson.misc)}</td>
           <td className={td}>{inr(r.single)}</td>
           <td className={td}>{inr(r.double)}</td>
           <td className={td}>{inr(r.triple)}</td>
