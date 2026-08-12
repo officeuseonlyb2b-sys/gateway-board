@@ -18,14 +18,12 @@ import { uid, type StepProps } from "../shared";
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
   const pax = effectivePaxForPricing(draft);
-  // Every vehicle that can physically seat the active pax count / range is a
-  // valid option — e.g. 4 pax fits both an AC Sedan and an Innova Crysta.
+  // Show all active vehicles with min_pax <= 7
   const opts = d.travel_options
     .filter((t) => {
       if (!t.is_active) return false;
-      const cap = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
       const min = t.min_pax ?? 1;
-      return cap >= pax && min <= pax;
+      return min <= 7;
     })
     .sort((a, b) => (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0));
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
@@ -89,7 +87,7 @@ export function Step10({ draft, set }: StepProps) {
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[320px] flex-1 space-y-1">
               <Label className="text-xs text-muted-foreground">
-                Vehicles that fit {pax} pax — pick one to add to the comparison
+                Vehicles with min capacity ≤ 7 — pick one to add to the comparison
               </Label>
               <Select value="" onValueChange={(v) => addVehicle(v)}>
                 <SelectTrigger className="h-9">

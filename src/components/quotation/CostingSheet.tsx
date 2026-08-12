@@ -406,7 +406,7 @@ function LandPartBlock({
           </tr>
         </thead>
         <tbody>
-          {land.rows.map((r: LandDayRow, ri: number) => {
+          {land.rows.map((r: LandDayRow) => {
             // Guide: show only selected language(s) with per-person price
             const selectedGuides = r.guide_opts.filter((o) => o.checked);
             return (
@@ -503,37 +503,10 @@ function LandPartBlock({
                   <OptionCell opts={r.activity_opts} bucket="activities" day={r.day} onToggle={toggle} pax={pax} />
                 </td>
 
-                {/* Miscellaneous — one consolidated block for the whole trip */}
-                {ri === 0 && (
-                  <td className="p-1.5 align-top" rowSpan={land.rows.length}>
-                    {r.misc_opts.length === 0 ? (
-                      <div className="text-right text-muted-foreground">—</div>
-                    ) : (
-                      <div className="space-y-1">
-                        {r.misc_opts.map((o) => (
-                          <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
-                            <Checkbox
-                              checked={o.checked}
-                              onCheckedChange={() => toggle("misc", r.day, o.id, checkedByDay("misc"))}
-                              className="mt-0.5"
-                            />
-                            <span className="flex-1 min-w-0">
-                              <span className="block truncate max-w-[150px]">{o.label}</span>
-                              {o.sub && <span className="block text-[10px] text-muted-foreground truncate max-w-[150px]">{o.sub}</span>}
-                            </span>
-                            <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
-                              {inr(o.amount / pax)}
-                            </span>
-                          </label>
-                        ))}
-                        <div className="flex justify-between gap-2 border-t pt-1 font-semibold">
-                          <span>Total / person</span>
-                          <span className="tabular-nums">{inr(land.misc_total / pax)}</span>
-                        </div>
-                      </div>
-                    )}
-                  </td>
-                )}
+                {/* Miscellaneous — using OptionCell with per-person detection */}
+                <td className="p-1.5 align-top">
+                  <OptionCell opts={r.misc_opts} bucket="misc" day={r.day} onToggle={toggle} pax={pax} />
+                </td>
               </tr>
             );
           })}
@@ -542,26 +515,92 @@ function LandPartBlock({
           )}
         </tbody>
         <tfoot>
-          <tr className="border-t-2 bg-primary/5 font-semibold">
-            <td className="p-1.5" colSpan={4}>Line Total</td>
-            <td className={td}>{inr(land.transport_total)}</td>
-            <td className={td}>{inr(land.guide_total)}</td>
-            <td className={td}>{inr(land.entrances_total)}</td>
-            <td className={td}>{inr(land.activities_total)}</td>
-            <td className={td}>{inr(land.misc_total)}</td>
-          </tr>
-          <MarkupRows
-            label="Land Part"
-            leadSpan={4}
-            mk={pct.mk}
-            gst={pct.gst}
-            pax={pax}
-            values={[land.transport_total, land.guide_total, land.entrances_total, land.activities_total, land.misc_total]}
-          />
-          <tr className="bg-primary/10 font-bold">
-            <td className="p-1.5" colSpan={8}>Land Part Total</td>
-            <td className={td}>{inr(land.grand_total)}</td>
-          </tr>
+          {(() => {
+            const vehicles = firstRow?.transport_opts ?? [];
+            const vehicleTotals = vehicles.map((vehicle) =>
+              land.rows.reduce((sum, row) => {
+                const dayVehicle = row.transport_opts.find((o) => o.id === vehicle.id);
+                return sum + (dayVehicle?.amount ?? 0);
+              }, 0),
+            );
+
+            const vehicleMarkup = vehicleTotals.map((total) => total * (pct.mk / 100));
+            const vehicleGst = vehicleTotals.map((total, index) =>
+              (total + vehicleMarkup[index]) * (pct.gst / 100),
+            );
+            const vehiclePerPerson = vehicleTotals.map((total, index) =>
+              (total + vehicleMarkup[index] + vehicleGst[index]) / pax,
+            );
+
+            const renderVehicleCells = (values: number[], empty = false) => (
+              <td className="p-1.5 align-top">
+                <div
+                  className="grid items-start gap-6"
+                  style={{
+                    gridTemplateColumns: `repeat(${Math.max(vehicles.length, 1)}, minmax(150px, 1fr))`,
+                  }}
+                >
+                  {vehicles.map((vehicle, index) => (
+                    <div
+                      key={`${vehicle.id}-${index}`}
+                      className={`text-center tabular-nums ${
+                        vehicle.checked ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {empty ? "—" : inr(values[index] ?? 0)}
+                    </div>
+                  ))}
+                </div>
+              </td>
+            );
+
+            return (
+              <>
+                {/* Combined costing summary: one set of 4 rows for vehicles + land categories. */}
+                <tr className="border-t-2 bg-primary/5 font-semibold">
+                  <td className="p-1.5" colSpan={4}>Line Total</td>
+                  {renderVehicleCells(vehicleTotals)}
+                  <td className={td}>{inr(land.guide_total)}</td>
+                  <td className={td}>{inr(land.entrances_total)}</td>
+                  <td className={td}>{inr(land.activities_total)}</td>
+                  <td className={td}>{inr(land.misc_total)}</td>
+                </tr>
+
+                <tr className="text-muted-foreground">
+                  <td className="p-1.5 text-[10px] uppercase" colSpan={4}>
+                    Markup {pct.mk}%
+                  </td>
+                  {renderVehicleCells(vehicleMarkup)}
+                  <td className={td}>{inr(land.guide_total * (pct.mk / 100))}</td>
+                  <td className={td}>{inr(land.entrances_total * (pct.mk / 100))}</td>
+                  <td className={td}>{inr(land.activities_total * (pct.mk / 100))}</td>
+                  <td className={td}>{inr(land.misc_total * (pct.mk / 100))}</td>
+                </tr>
+
+                <tr className="text-muted-foreground">
+                  <td className="p-1.5 text-[10px] uppercase" colSpan={4}>
+                    GST {pct.gst}% (on Base+Markup)
+                  </td>
+                  {renderVehicleCells(vehicleGst)}
+                  <td className={td}>{inr((land.guide_total * (1 + pct.mk / 100)) * (pct.gst / 100))}</td>
+                  <td className={td}>{inr((land.entrances_total * (1 + pct.mk / 100)) * (pct.gst / 100))}</td>
+                  <td className={td}>{inr((land.activities_total * (1 + pct.mk / 100)) * (pct.gst / 100))}</td>
+                  <td className={td}>{inr((land.misc_total * (1 + pct.mk / 100)) * (pct.gst / 100))}</td>
+                </tr>
+
+                <tr className="bg-primary/10 font-bold">
+                  <td className="p-1.5 text-[10px] uppercase" colSpan={4}>
+                    Per Person ({pax} Pax)
+                  </td>
+                  {renderVehicleCells(vehiclePerPerson)}
+                  <td className={td}>{inr((land.guide_total * (1 + pct.mk / 100) * (1 + pct.gst / 100)) / pax)}</td>
+                  <td className={td}>{inr((land.entrances_total * (1 + pct.mk / 100) * (1 + pct.gst / 100)) / pax)}</td>
+                  <td className={td}>{inr((land.activities_total * (1 + pct.mk / 100) * (1 + pct.gst / 100)) / pax)}</td>
+                  <td className={td}>{inr((land.misc_total * (1 + pct.mk / 100) * (1 + pct.gst / 100)) / pax)}</td>
+                </tr>
+              </>
+            );
+          })()}
         </tfoot>
       </table>
     </Card>
