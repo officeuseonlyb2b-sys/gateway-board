@@ -79,7 +79,7 @@ function serializeBlackouts(list?: BlackoutRange[]): string {
 }
 
 function parseSupType(v: string): SupplementType {
-  return /room/i.test(v) ? "per_room" : "per_person";
+  return /fixed|room/i.test(v) ? "fixed" : "per_person";
 }
 
 function parseDateCell(v: string): string | null {
