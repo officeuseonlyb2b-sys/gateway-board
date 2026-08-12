@@ -527,10 +527,15 @@ export function buildRateSheet(
 
   return groups.map((line) => {
     const land = buildLandPart(draft, d, line);
-    const vehicle = line
-      ? d.travel_options.find((t) => t.id === line.travel_id)?.vehicle_type || "Vehicle"
-      : "All vehicles";
-    const rows: RateSheetRow[] = paxList.map((pax) => {
+    const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
+    const vehicle = line ? veh?.vehicle_type || "Vehicle" : "All vehicles";
+    // Only show pax counts that actually fall inside this vehicle's fit range.
+    const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
+    const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;
+    const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
+    const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
+    const rows: RateSheetRow[] = (fitting.length ? fitting : paxList).map((pax) => {
+
       const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
       const transport = pp(land.transport_total);
       const guide = pp(land.guide_only_total);
