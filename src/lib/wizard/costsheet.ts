@@ -3,7 +3,7 @@
 // / misc / transport / hotel figures; they are only grouped per day, per
 // hotel category and per pax so the Costing page can be rendered as a sheet.
 import type { DB, GuideLanguage } from "@/lib/mock-store";
-import { guideRateForPax } from "@/lib/mock-store";
+import { guideRateForPax, VEHICLE_ALLOCATION } from "@/lib/mock-store";
 
 import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
@@ -226,19 +226,21 @@ export function buildLandPart(
     }));
   });
 
-  // ------- Miscellaneous
-  draft.misc.forEach((l) => {
-    const target = targetDays(l.from_routing_days, all);
-    if (!target.length) return;
-    const each = (l.rate * l.qty) / target.length;
-    target.forEach((day) => opts[day].misc.push({
-      id: l.id,
-      label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
-      sub: l.unit || undefined,
-      amount: each,
-      checked: isPicked(draft, "misc", day, l.id),
-    }));
-  });
+  // ------- Miscellaneous (consolidated for the whole trip on the first day)
+  const miscDay = all[0];
+  if (miscDay != null) {
+    draft.misc.forEach((l) => {
+      const target = targetDays(l.from_routing_days, all);
+      if (!target.length) return;
+      opts[miscDay].misc.push({
+        id: l.id,
+        label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
+        sub: l.unit || undefined,
+        amount: l.rate * l.qty,
+        checked: isPicked(draft, "misc", miscDay, l.id),
+      });
+    });
+  }
 
   const sumOn = (list: SheetOption[]) => list.reduce((s, o) => s + (o.checked ? o.amount : 0), 0);
 
@@ -525,10 +527,15 @@ export function buildRateSheet(
 
   return groups.map((line) => {
     const land = buildLandPart(draft, d, line);
-    const vehicle = line
-      ? d.travel_options.find((t) => t.id === line.travel_id)?.vehicle_type || "Vehicle"
-      : "All vehicles";
-    const rows: RateSheetRow[] = paxList.map((pax) => {
+    const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
+    const vehicle = line ? veh?.vehicle_type || "Vehicle" : "All vehicles";
+    // Only show pax counts that actually fall inside this vehicle's fit range.
+    const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
+    const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;
+    const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
+    const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
+    const rows: RateSheetRow[] = (fitting.length ? fitting : paxList).map((pax) => {
+
       const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
       const transport = pp(land.transport_total);
       const guide = pp(land.guide_only_total);

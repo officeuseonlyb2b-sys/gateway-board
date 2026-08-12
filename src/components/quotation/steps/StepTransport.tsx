@@ -24,7 +24,8 @@ export function Step10({ draft, set }: StepProps) {
     .filter((t) => {
       if (!t.is_active) return false;
       const cap = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
-      return cap >= pax;
+      const min = t.min_pax ?? 1;
+      return cap >= pax && min <= pax;
     })
     .sort((a, b) => (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0));
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
@@ -84,27 +85,29 @@ export function Step10({ draft, set }: StepProps) {
       </div>
 
       {opts.length > 0 && (
-        <Card className="p-3 space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">
-            Vehicles that fit {pax} pax — add any of them to compare
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {opts.map((o) => {
-              const used = draft.transport.some((t) => t.travel_id === o.id);
-              return (
-                <Button
-                  key={o.id}
-                  size="sm"
-                  variant={used ? "secondary" : "outline"}
-                  className="h-7 text-xs"
-                  onClick={() => addVehicle(o.id)}
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  {o.vehicle_type}
-                  <span className="ml-1 opacity-60">{o.capacity_persons} seats · {inr(o.rate_per_day)}/day</span>
-                </Button>
-              );
-            })}
+        <Card className="p-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[320px] flex-1 space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                Vehicles that fit {pax} pax — pick one to add to the comparison
+              </Label>
+              <Select value="" onValueChange={(v) => addVehicle(v)}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Select a vehicle to add…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {opts.map((o) => {
+                    const used = draft.transport.some((t) => t.travel_id === o.id);
+                    return (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.vehicle_type} · {o.capacity_persons} seats · {inr(o.rate_per_day)}/day
+                        {used ? " (added)" : ""}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </Card>
       )}

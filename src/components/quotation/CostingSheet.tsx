@@ -406,7 +406,7 @@ function LandPartBlock({
           </tr>
         </thead>
         <tbody>
-          {land.rows.map((r: LandDayRow) => {
+          {land.rows.map((r: LandDayRow, ri: number) => {
             // Guide: show only selected language(s) with per-person price
             const selectedGuides = r.guide_opts.filter((o) => o.checked);
             return (
@@ -503,10 +503,37 @@ function LandPartBlock({
                   <OptionCell opts={r.activity_opts} bucket="activities" day={r.day} onToggle={toggle} pax={pax} />
                 </td>
 
-                {/* Miscellaneous — using OptionCell with per-person detection */}
-                <td className="p-1.5 align-top">
-                  <OptionCell opts={r.misc_opts} bucket="misc" day={r.day} onToggle={toggle} pax={pax} />
-                </td>
+                {/* Miscellaneous — one consolidated block for the whole trip */}
+                {ri === 0 && (
+                  <td className="p-1.5 align-top" rowSpan={land.rows.length}>
+                    {r.misc_opts.length === 0 ? (
+                      <div className="text-right text-muted-foreground">—</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {r.misc_opts.map((o) => (
+                          <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
+                            <Checkbox
+                              checked={o.checked}
+                              onCheckedChange={() => toggle("misc", r.day, o.id, checkedByDay("misc"))}
+                              className="mt-0.5"
+                            />
+                            <span className="flex-1 min-w-0">
+                              <span className="block truncate max-w-[150px]">{o.label}</span>
+                              {o.sub && <span className="block text-[10px] text-muted-foreground truncate max-w-[150px]">{o.sub}</span>}
+                            </span>
+                            <span className={`tabular-nums ${o.checked ? "" : "line-through text-muted-foreground"}`}>
+                              {inr(o.amount / pax)}
+                            </span>
+                          </label>
+                        ))}
+                        <div className="flex justify-between gap-2 border-t pt-1 font-semibold">
+                          <span>Total / person</span>
+                          <span className="tabular-nums">{inr(land.misc_total / pax)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}

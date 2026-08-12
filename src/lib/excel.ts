@@ -2,7 +2,10 @@
 import * as XLSX from "xlsx";
 import { parseValidityRange, serializeValidity } from "./format";
 import { cityService, hotelService, roomService, ratePlanService } from "@/services/api";
-import { db, HOTEL_CATEGORIES, type HotelCategory, type MealPlan } from "@/lib/mock-store";
+import {
+  db, HOTEL_CATEGORIES,
+  type HotelCategory, type MealPlan, type HotelType, type BlackoutRange, type SupplementType,
+} from "@/lib/mock-store";
 
 export interface ImportRowError { row: number; reason: string; raw: Record<string, unknown>; }
 export interface ImportSummary {
@@ -35,7 +38,57 @@ const COL = {
   wifi: ["wifi", "wi-fi"],
   pool: ["pool", "swimming pool"],
   remarks: ["remarks", "notes"],
+  hotelType: ["hotel type", "type"],
+  address: ["address"],
+  season: ["season", "season label"],
+  quad: ["quad", "quad rate"],
+  cwbRule: ["cwb rule", "cwb rule text"],
+  xmasType: ["x'mas sup type", "xmas sup type", "xmas type"],
+  xmasFrom: ["x'mas from", "xmas from"],
+  xmasTo: ["x'mas to", "xmas to"],
+  nyType: ["n'year sup type", "newyear sup type", "new year type"],
+  nyFrom: ["n'year from", "newyear from", "new year from"],
+  nyTo: ["n'year to", "newyear to", "new year to"],
+  blackout: ["blackout dates", "blackout"],
+  include: ["include in quote", "include"],
 };
+
+const HOTEL_TYPES: string[] = [
+  "Box Building", "Resort Property", "Home Stay", "Wildlife - Jungle Resort",
+];
+
+function coerceHotelType(v: string): HotelType | undefined {
+  if (!v) return undefined;
+  const t = v.toLowerCase().trim();
+  return (HOTEL_TYPES.find((h) => h.toLowerCase() === t) as HotelType | undefined)
+    ?? (HOTEL_TYPES.find((h) => h.toLowerCase().includes(t)) as HotelType | undefined);
+}
+
+/** "2026-12-24 to 2026-12-26; 2027-01-01 to 2027-01-02" -> BlackoutRange[] */
+function parseBlackouts(v: string): BlackoutRange[] {
+  if (!v) return [];
+  return v.split(/[;|]/).map((chunk) => {
+    const r = parseValidityRange(chunk.trim());
+    return r ? { id: `bo_${Math.random().toString(36).slice(2, 9)}`, from: r.start, to: r.end } : null;
+  }).filter(Boolean) as BlackoutRange[];
+}
+
+function serializeBlackouts(list?: BlackoutRange[]): string {
+  if (!list?.length) return "";
+  return list.map((b) => serializeValidity(b.from, b.to)).join("; ");
+}
+
+function parseSupType(v: string): SupplementType {
+  return /fixed|room/i.test(v) ? "fixed" : "per_person";
+}
+
+function parseDateCell(v: string): string | null {
+  if (!v) return null;
+  const r = parseValidityRange(`${v} to ${v}`);
+  if (r) return r.start;
+  const d = new Date(v);
+  return isNaN(+d) ? null : d.toISOString().slice(0, 10);
+}
 
 function pick(row: Record<string, unknown>, keys: string[]): string {
   const norm = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -141,7 +194,9 @@ export async function importExcel(
       const hotel = await hotelService.findOrCreate({
         city_id: city.id, name: hotelName, hotel_category: category,
         contact_name: contact.name, contact_phone: contact.phone,
-        email: pick(raw, COL.email), address: "",
+        email: pick(raw, COL.email), address: pick(raw, COL.address),
+        hotel_type: coerceHotelType(pick(raw, COL.hotelType)),
+        blackout_ranges: parseBlackouts(pick(raw, COL.blackout)),
         has_wifi: parseBool(pick(raw, COL.wifi)),
         has_pool: parseBool(pick(raw, COL.pool)),
       });
@@ -150,20 +205,26 @@ export async function importExcel(
       await ratePlanService.createMany([{
         room_category_id: room.id,
         validity_start: range.start, validity_end: range.end,
-        season_label: pick(raw, ["season", "season label"]) || inferSeason(range.start, range.end),
+        season_label: pick(raw, COL.season) || inferSeason(range.start, range.end),
         meal_plan: meal,
         double_rate: parseNum(pick(raw, COL.double)),
         single_rate: parseNum(pick(raw, COL.single)),
+        quad_rate: parseNumOrNull(pick(raw, COL.quad)),
         extra_bed_rate: parseNum(pick(raw, COL.extraBed)),
         cwb_rate: parseNumOrNull(pick(raw, COL.cwb)),
-        cwb_rule_text: null,
+        cwb_rule_text: pick(raw, COL.cwbRule) || null,
         lunch_rate: parseNumOrNull(pick(raw, COL.lunch)),
         dinner_rate: parseNumOrNull(pick(raw, COL.dinner)),
         extra_breakfast_rate: parseNumOrNull(pick(raw, COL.extraBkf)),
         xmas_supplement: parseNumOrNull(pick(raw, COL.xmas)),
-        xmas_supplement_type: "per_person",
+        xmas_supplement_type: parseSupType(pick(raw, COL.xmasType)),
+        xmas_date_from: parseDateCell(pick(raw, COL.xmasFrom)),
+        xmas_date_to: parseDateCell(pick(raw, COL.xmasTo)),
         newyear_supplement: parseNumOrNull(pick(raw, COL.ny)),
-        newyear_supplement_type: "per_person",
+        newyear_supplement_type: parseSupType(pick(raw, COL.nyType)),
+        newyear_date_from: parseDateCell(pick(raw, COL.nyFrom)),
+        newyear_date_to: parseDateCell(pick(raw, COL.nyTo)),
+        include_in_quote: pick(raw, COL.include) ? parseBool(pick(raw, COL.include)) : true,
         remarks: pick(raw, COL.remarks) || null,
       }]);
 
@@ -200,23 +261,36 @@ export function exportExcel(): void {
     rows.push({
       "City": city?.name ?? "",
       "Hotel Category": hotel.hotel_category,
+      "Hotel Type": hotel.hotel_type ?? "",
       "Hotel Name": hotel.name,
+      "Address": hotel.address ?? "",
       "Room Category": room.name,
       "Validity": serializeValidity(p.validity_start, p.validity_end),
+      "Season": p.season_label ?? "",
       "Rates Standard Meal Plan": p.meal_plan,
       "Double": p.double_rate,
       "Single": p.single_rate,
+      "Quad": p.quad_rate ?? "",
       "Extra Bed": p.extra_bed_rate,
-      "CWB": p.cwb_rate ?? p.cwb_rule_text ?? "",
+      "CWB": p.cwb_rate ?? "",
+      "CWB Rule": p.cwb_rule_text ?? "",
       "Lunch": p.lunch_rate ?? "",
       "Dinner": p.dinner_rate ?? "",
       "Extra Breakfast": p.extra_breakfast_rate ?? "",
       "X'mas Sup": p.xmas_supplement ?? "",
+      "X'mas Sup Type": p.xmas_supplement_type ?? "",
+      "X'mas From": p.xmas_date_from ?? "",
+      "X'mas To": p.xmas_date_to ?? "",
       "N'year Sup": p.newyear_supplement ?? "",
+      "N'year Sup Type": p.newyear_supplement_type ?? "",
+      "N'year From": p.newyear_date_from ?? "",
+      "N'year To": p.newyear_date_to ?? "",
       "Rates From": [hotel.contact_name, hotel.contact_phone].filter(Boolean).join(" - "),
       "Email ID": hotel.email,
       "Wifi": hotel.has_wifi ? "Yes" : "No",
       "Pool": hotel.has_pool ? "Yes" : "No",
+      "Blackout Dates": serializeBlackouts(hotel.blackout_ranges),
+      "Include In Quote": p.include_in_quote === false ? "No" : "Yes",
       "Remarks": p.remarks ?? "",
     });
   });
