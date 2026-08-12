@@ -1,348 +1,974 @@
-// src/components/quotation/steps/StepTransport.tsx (Step 10)
+// src/components/quotation/steps/StepTransport.tsx
+// Step 10 — Transport
 // Transport with per-route rates, vehicle selection, and per-person breakdown.
 
 import { Plus, Trash2 } from "lucide-react";
+
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { effectivePaxForPricing, transportLineTotal } from "@/lib/wizard/calc";
+import { transportLineTotal } from "@/lib/wizard/calc";
 import { uid, type StepProps } from "../shared";
 
 // ============================================================
 // STEP 10 — Transport
 // ============================================================
+
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
-  const pax = effectivePaxForPricing(draft);
-  // Show all active vehicles with min_pax <= 7
-  const opts = d.travel_options
-    .filter((t) => {
-      if (!t.is_active) return false;
-      const min = t.min_pax ?? 1;
-      return min <= 7;
-    })
-    .sort((a, b) => (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0));
-  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+
+  const cityName = (id: string) =>
+    d.cities.find((c) => c.id === id)?.name || "";
+
   const routing = draft.routing;
-  const total = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
+
+  // ============================================================
+  // ALL ACTIVE VEHICLES
+  // ============================================================
+  //
+  // IMPORTANT:
+  // Previously this was restricted to min_pax <= 7.
+  // That caused vehicles such as 17, 20, 25, 27, 35,
+  // 40 and 45 seaters to disappear.
+  //
+  // Now ALL active vehicles are available.
+  // ============================================================
+
+  const opts = d.travel_options
+    .filter((t) => t.is_active)
+    .sort(
+      (a, b) =>
+        (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0)
+    );
+
+  // ============================================================
+  // TOTAL TRANSPORT COST
+  // ============================================================
+
+  const total = draft.transport.reduce(
+    (sum, line) => sum + transportLineTotal(line),
+    0
+  );
+
+  // ============================================================
+  // ADD VEHICLE
+  // ============================================================
 
   const addVehicle = (travelId?: string) => {
-    const first = (travelId && opts.find((o) => o.id === travelId)) || opts[0];
+    const first =
+      (travelId && opts.find((o) => o.id === travelId)) ||
+      opts[0];
+
+    if (!first) return;
+
+    const defaultRate = first.rate_per_day || 0;
+
     set({
-      transport: [...draft.transport, {
-        id: uid(), travel_id: first?.id || "", vehicles: 1, days: routing.length || 1,
-        rate: first?.rate_per_day || 0, rate_format: "per_route",
-        per_route_rates: Array(routing.length).fill(first?.rate_per_day || 0),
-        reporting_cost: 0, remarks: "",
-      }],
+      transport: [
+        ...draft.transport,
+        {
+          id: uid(),
+          travel_id: first.id,
+          vehicles: 1,
+          days: routing.length || 1,
+
+          rate: defaultRate,
+          rate_format: "per_route",
+
+          per_route_rates: Array(routing.length).fill(defaultRate),
+
+          reporting_cost: 0,
+          remarks: "",
+        },
+      ],
     });
   };
 
-  const patchLine = (i: number, p: Partial<typeof draft.transport[number]>) => {
-    const n = [...draft.transport]; n[i] = { ...n[i], ...p }; set({ transport: n });
+  // ============================================================
+  // PATCH TRANSPORT LINE
+  // ============================================================
+
+  const patchLine = (
+    index: number,
+    patch: Partial<typeof draft.transport[number]>
+  ) => {
+    const next = [...draft.transport];
+
+    next[index] = {
+      ...next[index],
+      ...patch,
+    };
+
+    set({
+      transport: next,
+    });
   };
 
-  const removeLine = (id: string) =>
-    set({ transport: draft.transport.filter((x) => x.id !== id) });
+  // ============================================================
+  // REMOVE VEHICLE
+  // ============================================================
 
-  const vehLabel = (t: typeof draft.transport[number]) => {
-    const v = d.travel_options.find((x) => x.id === t.travel_id);
-    return v?.vehicle_type || "Vehicle";
+  const removeLine = (id: string) => {
+    set({
+      transport: draft.transport.filter(
+        (item) => item.id !== id
+      ),
+    });
   };
 
-  // ===== Per‑Person Breakdown Data =====
-  const MAX_PAX = 10;
-  const paxRange = Array.from({ length: MAX_PAX }, (_, i) => i + 1);
+  // ============================================================
+  // VEHICLE LABEL
+  // ============================================================
 
-  // Compute total cost per transport line (sum of per_route_rates * vehicles + reporting_cost)
-  const lineTotals = draft.transport.map((t) => transportLineTotal(t));
+  const vehLabel = (
+    transport: typeof draft.transport[number]
+  ) => {
+    const vehicle = d.travel_options.find(
+      (x) => x.id === transport.travel_id
+    );
+
+    return vehicle?.vehicle_type || "Vehicle";
+  };
+
+  // ============================================================
+  // PER PERSON BREAKDOWN
+  // ============================================================
+  //
+  // Show 1–40 pax so large group costing can also be checked.
+  // ============================================================
+
+  const MAX_PAX = 40;
+
+  const paxRange = Array.from(
+    { length: MAX_PAX },
+    (_, index) => index + 1
+  );
+
+  const lineTotals = draft.transport.map((transport) =>
+    transportLineTotal(transport)
+  );
 
   const breakdownData = paxRange.map((paxCount) => {
     const perVehicle: Record<string, number> = {};
+
     let totalPerPax = 0;
-    draft.transport.forEach((t, idx) => {
-      const lineTotal = lineTotals[idx] || 0;
-      const perPerson = paxCount > 0 ? lineTotal / paxCount : 0;
-      perVehicle[t.id] = perPerson;
+
+    draft.transport.forEach((transport, index) => {
+      const lineTotal = lineTotals[index] || 0;
+
+      const perPerson =
+        paxCount > 0 ? lineTotal / paxCount : 0;
+
+      perVehicle[transport.id] = perPerson;
+
       totalPerPax += perPerson;
     });
-    return { pax: paxCount, perVehicle, totalPerPax };
+
+    return {
+      pax: paxCount,
+      perVehicle,
+      totalPerPax,
+    };
   });
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
     <div className="space-y-4">
+
+      {/* ======================================================
+          HEADER
+      ====================================================== */}
+
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-lg font-semibold">Transport — Per Route</h2>
-        <Button size="sm" onClick={() => addVehicle()} disabled={opts.length === 0}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Add Transport
+
+        <div>
+          <h2 className="text-lg font-semibold">
+            Transport — Per Route
+          </h2>
+
+          <p className="text-xs text-muted-foreground mt-0.5">
+            All active vehicles are available for comparison.
+          </p>
+        </div>
+
+        <Button
+          size="sm"
+          onClick={() => addVehicle()}
+          disabled={opts.length === 0}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          Add Transport
         </Button>
+
       </div>
+
+      {/* ======================================================
+          VEHICLE ADD DROPDOWN
+      ====================================================== */}
 
       {opts.length > 0 && (
         <Card className="p-3">
+
           <div className="flex flex-wrap items-end gap-3">
+
             <div className="min-w-[320px] flex-1 space-y-1">
+
               <Label className="text-xs text-muted-foreground">
-                Vehicles with min capacity ≤ 7 — pick one to add to the comparison
+                Select any vehicle to add to the comparison
               </Label>
-              <Select value="" onValueChange={(v) => addVehicle(v)}>
+
+              <Select
+                value=""
+                onValueChange={(value) => addVehicle(value)}
+              >
+
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Select a vehicle to add…" />
                 </SelectTrigger>
+
                 <SelectContent>
-                  {opts.map((o) => {
-                    const used = draft.transport.some((t) => t.travel_id === o.id);
+
+                  {opts.map((option) => {
+
+                    const used = draft.transport.some(
+                      (transport) =>
+                        transport.travel_id === option.id
+                    );
+
                     return (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.vehicle_type} · {o.capacity_persons} seats · {inr(o.rate_per_day)}/day
+                      <SelectItem
+                        key={option.id}
+                        value={option.id}
+                      >
+
+                        {option.vehicle_type}
+
+                        {option.capacity_persons
+                          ? ` · ${option.capacity_persons} seats`
+                          : ""}
+
+                        {option.rate_per_day
+                          ? ` · ${inr(option.rate_per_day)}/day`
+                          : ""}
+
                         {used ? " (added)" : ""}
+
                       </SelectItem>
                     );
                   })}
+
                 </SelectContent>
+
               </Select>
+
             </div>
+
           </div>
+
         </Card>
       )}
 
-      {draft.transport.length === 0 && (
-        <p className="text-sm text-muted-foreground">No transport added yet. Click "Add Transport" to add a vehicle column.</p>
+      {/* ======================================================
+          NO VEHICLE
+      ====================================================== */}
+
+      {opts.length === 0 && (
+        <Card className="p-4">
+          <p className="text-sm text-muted-foreground">
+            No active vehicles are available.
+          </p>
+        </Card>
       )}
+
+      {draft.transport.length === 0 && opts.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          No transport added yet. Select a vehicle above or click
+          "Add Transport" to add a vehicle column.
+        </p>
+      )}
+
+      {/* ======================================================
+          SELECTED VEHICLE CARDS
+      ====================================================== */}
 
       {draft.transport.length > 0 && (
         <>
-          {/* Vehicle selector cards (one per column) */}
+
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {draft.transport.map((t, i) => {
-              const current = d.travel_options.find((x) => x.id === t.travel_id);
-              const rowOpts = current && !opts.some((o) => o.id === current.id) ? [current, ...opts] : opts;
-              const isTotalMode = t.rate_mode === "total";
+
+            {draft.transport.map((transport, index) => {
+
+              const currentVehicle =
+                d.travel_options.find(
+                  (vehicle) =>
+                    vehicle.id === transport.travel_id
+                );
+
+              const rowOpts =
+                currentVehicle &&
+                !opts.some(
+                  (option) =>
+                    option.id === currentVehicle.id
+                )
+                  ? [currentVehicle, ...opts]
+                  : opts;
+
+              const isTotalMode =
+                transport.rate_mode === "total";
 
               return (
-                <Card key={t.id} className="p-2.5 space-y-2">
+                <Card
+                  key={transport.id}
+                  className="p-2.5 space-y-2"
+                >
+
+                  {/* Vehicle heading */}
+
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-muted-foreground">Vehicle {i + 1}</div>
-                    <Button size="icon" variant="ghost" onClick={() => removeLine(t.id)}>
+
+                    <div className="text-xs font-semibold text-muted-foreground">
+                      Vehicle {index + 1}
+                    </div>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() =>
+                        removeLine(transport.id)
+                      }
+                    >
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
+
                   </div>
+
+                  {/* Vehicle + number */}
+
                   <div className="grid grid-cols-[1fr_70px] gap-2">
+
                     <div>
-                      <Label className="text-[10px]">Vehicle Type</Label>
-                      <Select value={t.travel_id} onValueChange={(v) => {
-                        const to = rowOpts.find((x) => x.id === v);
-                        const perDay = to?.rate_per_day || 0;
-                        patchLine(i, {
-                          travel_id: v,
-                          per_route_rates: (t.per_route_rates ?? Array(routing.length).fill(0)).map((r) => r || perDay),
-                        });
-                      }}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
+
+                      <Label className="text-[10px]">
+                        Vehicle Type
+                      </Label>
+
+                      <Select
+                        value={transport.travel_id}
+                        onValueChange={(value) => {
+
+                          const selected =
+                            rowOpts.find(
+                              (vehicle) =>
+                                vehicle.id === value
+                            );
+
+                          const perDay =
+                            selected?.rate_per_day || 0;
+
+                          const existingRates =
+                            transport.per_route_rates ??
+                            Array(
+                              routing.length
+                            ).fill(0);
+
+                          patchLine(index, {
+                            travel_id: value,
+
+                            per_route_rates:
+                              existingRates.map(
+                                (rate) =>
+                                  rate || perDay
+                              ),
+
+                            rate:
+                              selected?.rate_per_day ||
+                              0,
+                          });
+                        }}
+                      >
+
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+
                         <SelectContent>
-                          {rowOpts.map((o) => <SelectItem key={o.id} value={o.id}>{o.vehicle_type}</SelectItem>)}
+
+                          {rowOpts.map((option) => (
+                            <SelectItem
+                              key={option.id}
+                              value={option.id}
+                            >
+                              {option.vehicle_type}
+                            </SelectItem>
+                          ))}
+
                         </SelectContent>
+
                       </Select>
+
                     </div>
+
                     <div>
-                      <Label className="text-[10px]"># Veh</Label>
-                      <Input type="number" min={1} value={t.vehicles} className="h-8 text-xs"
-                        onChange={(e) => patchLine(i, { vehicles: parseInt(e.target.value) || 1 })} />
+
+                      <Label className="text-[10px]">
+                        # Veh
+                      </Label>
+
+                      <Input
+                        type="number"
+                        min={1}
+                        value={transport.vehicles}
+                        className="h-8 text-xs"
+                        onChange={(event) =>
+                          patchLine(index, {
+                            vehicles:
+                              parseInt(
+                                event.target.value
+                              ) || 1,
+                          })
+                        }
+                      />
+
                     </div>
+
                   </div>
+
+                  {/* =================================================
+                      RATE MODE
+                  ================================================= */}
+
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Rate Mode</Label>
+
+                    <Label className="text-[10px]">
+                      Rate Mode
+                    </Label>
+
                     <div className="flex gap-1 text-[10px]">
+
                       <button
                         type="button"
-                        onClick={() => patchLine(i, { rate_mode: "daywise" })}
-                        className={`flex-1 px-2 py-1 rounded ${(t.rate_mode ?? "daywise") === "daywise" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-                      >Day-wise</button>
+                        onClick={() =>
+                          patchLine(index, {
+                            rate_mode: "daywise",
+                          })
+                        }
+                        className={`flex-1 px-2 py-1 rounded ${
+                          (transport.rate_mode ??
+                            "daywise") ===
+                          "daywise"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted"
+                        }`}
+                      >
+                        Day-wise
+                      </button>
+
                       <button
                         type="button"
-                        onClick={() => patchLine(i, { rate_mode: "total" })}
-                        className={`flex-1 px-2 py-1 rounded ${t.rate_mode === "total" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-                      >Total</button>
+                        onClick={() =>
+                          patchLine(index, {
+                            rate_mode: "total",
+                          })
+                        }
+                        className={`flex-1 px-2 py-1 rounded ${
+                          transport.rate_mode === "total"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted"
+                        }`}
+                      >
+                        Total
+                      </button>
+
                     </div>
+
+                    {/* Total rate */}
+
                     {isTotalMode && (
                       <div>
-                        <Label className="text-[10px]">Total Rate (₹)</Label>
-                        <Input 
-                          type="number" 
-                          min={0} 
-                          className="h-8 text-xs text-right" 
-                          value={t.total_rate || ""}
-                          onChange={(e) => {
-                            const totalVal = parseFloat(e.target.value) || 0;
-                            const days = routing.length;
-                            const distributedVal = days > 0 ? totalVal / days : 0;
-                            const newRates = Array(days).fill(distributedVal);
-                            patchLine(i, { 
-                              total_rate: totalVal, 
-                              per_route_rates: newRates 
+
+                        <Label className="text-[10px]">
+                          Total Rate (₹)
+                        </Label>
+
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8 text-xs text-right"
+                          value={
+                            transport.total_rate || ""
+                          }
+                          onChange={(event) => {
+
+                            const totalValue =
+                              parseFloat(
+                                event.target.value
+                              ) || 0;
+
+                            const days =
+                              routing.length;
+
+                            const distributedValue =
+                              days > 0
+                                ? totalValue / days
+                                : 0;
+
+                            const newRates =
+                              Array(days).fill(
+                                distributedValue
+                              );
+
+                            patchLine(index, {
+                              total_rate:
+                                totalValue,
+
+                              per_route_rates:
+                                newRates,
                             });
-                          }} 
+
+                          }}
                         />
+
                       </div>
                     )}
+
                   </div>
+
                 </Card>
               );
             })}
+
           </div>
 
-          {/* Per-route rates table */}
+          {/* ====================================================
+              PER ROUTE RATES TABLE
+          ==================================================== */}
+
           <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
+
             <table className="w-full text-xs border-collapse">
+
               <thead className="bg-[#F3F4F6] text-[10px] uppercase text-muted-foreground tracking-wide">
+
                 <tr className="border-b border-[#E5E7EB]">
-                  <th className="text-left p-2 w-[70px]">Day</th>
-                  <th className="text-left p-2">Route</th>
-                  {draft.transport.map((t, i) => (
-                    <th key={t.id} className="text-right p-2 w-[120px]">{vehLabel(t) || `V${i + 1}`}</th>
-                  ))}
+
+                  <th className="text-left p-2 w-[70px]">
+                    Day
+                  </th>
+
+                  <th className="text-left p-2">
+                    Route
+                  </th>
+
+                  {draft.transport.map(
+                    (transport, index) => (
+                      <th
+                        key={transport.id}
+                        className="text-right p-2 min-w-[130px]"
+                      >
+                        {vehLabel(transport) ||
+                          `V${index + 1}`}
+                      </th>
+                    )
+                  )}
+
                 </tr>
+
               </thead>
+
               <tbody>
-                {routing.map((r, ri) => {
-                  const fromLabel = r.from_city
-                    || (ri === 0 ? draft.departure_city : (cityName(routing[ri - 1]?.city_id || "") || "—"));
-                  const toLabel = cityName(r.city_id) || r.to_city || "—";
-                  const route = fromLabel && toLabel && fromLabel !== toLabel ? `${fromLabel} → ${toLabel}` : `${toLabel} Local`;
+
+                {/* ==================================================
+                    ROUTING ROWS
+                ================================================== */}
+
+                {routing.map((routeItem, routeIndex) => {
+
+                  const fromLabel =
+                    routeItem.from_city ||
+                    (routeIndex === 0
+                      ? draft.departure_city
+                      : cityName(
+                          routing[
+                            routeIndex - 1
+                          ]?.city_id || ""
+                        ) || "—");
+
+                  const toLabel =
+                    cityName(routeItem.city_id) ||
+                    routeItem.to_city ||
+                    "—";
+
+                  const route =
+                    fromLabel &&
+                    toLabel &&
+                    fromLabel !== toLabel
+                      ? `${fromLabel} → ${toLabel}`
+                      : `${toLabel} Local`;
+
                   return (
-                    <tr key={ri} className="border-b border-[#E5E7EB] bg-white">
-                      <td className="p-2 font-medium">Day {r.day}</td>
-                      <td className="p-2 text-muted-foreground">{route}</td>
-                      {draft.transport.map((t, ti) => {
-                        const arr = t.per_route_rates ?? Array(routing.length).fill(0);
-                        const val = arr[ri] ?? 0;
-                        const isTotalMode = t.rate_mode === "total";
-                        
-                        return (
-                          <td key={t.id} className="p-2">
-                            {isTotalMode ? (
-                              <div className="h-7 flex items-center justify-end text-xs tabular-nums text-muted-foreground bg-muted/30 rounded px-2">
-                                {/* Intentionally empty */}
-                              </div>
-                            ) : (
-                              <Input 
-                                type="number" 
-                                min={0} 
-                                className="h-7 text-xs text-right" 
-                                value={val || ""}
-                                onChange={(e) => {
-                                  const next = [...(t.per_route_rates ?? Array(routing.length).fill(0))];
-                                  while (next.length < routing.length) next.push(0);
-                                  next[ri] = parseFloat(e.target.value) || 0;
-                                  patchLine(ti, { per_route_rates: next.slice(0, routing.length) });
-                                }} 
-                              />
-                            )}
-                          </td>
-                        );
-                      })}
+                    <tr
+                      key={routeIndex}
+                      className="border-b border-[#E5E7EB] bg-white"
+                    >
+
+                      <td className="p-2 font-medium">
+                        Day {routeItem.day}
+                      </td>
+
+                      <td className="p-2 text-muted-foreground">
+                        {route}
+                      </td>
+
+                      {draft.transport.map(
+                        (transport, transportIndex) => {
+
+                          const rates =
+                            transport.per_route_rates ??
+                            Array(
+                              routing.length
+                            ).fill(0);
+
+                          const value =
+                            rates[routeIndex] ?? 0;
+
+                          const isTotalMode =
+                            transport.rate_mode ===
+                            "total";
+
+                          return (
+                            <td
+                              key={transport.id}
+                              className="p-2"
+                            >
+
+                              {isTotalMode ? (
+                                <div className="h-7 flex items-center justify-end text-xs tabular-nums text-muted-foreground bg-muted/30 rounded px-2">
+                                  —
+                                </div>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  className="h-7 text-xs text-right"
+                                  value={
+                                    value || ""
+                                  }
+                                  onChange={(event) => {
+
+                                    const next = [
+                                      ...(
+                                        transport.per_route_rates ??
+                                        Array(
+                                          routing.length
+                                        ).fill(0)
+                                      ),
+                                    ];
+
+                                    while (
+                                      next.length <
+                                      routing.length
+                                    ) {
+                                      next.push(0);
+                                    }
+
+                                    next[
+                                      routeIndex
+                                    ] =
+                                      parseFloat(
+                                        event.target.value
+                                      ) || 0;
+
+                                    patchLine(
+                                      transportIndex,
+                                      {
+                                        per_route_rates:
+                                          next.slice(
+                                            0,
+                                            routing.length
+                                          ),
+                                      }
+                                    );
+                                  }}
+                                />
+                              )}
+
+                            </td>
+                          );
+                        }
+                      )}
+
                     </tr>
                   );
                 })}
+
+                {/* ==================================================
+                    REPORTING COST
+                ================================================== */}
+
                 <tr className="bg-muted/30 border-b border-[#E5E7EB]">
-                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Reporting Cost</td>
-                  {draft.transport.map((t, ti) => {
-                    const isTotalMode = t.rate_mode === "total";
-                    return (
-                      <td key={t.id} className="p-2">
-                        <Input 
-                          type="number" 
-                          min={0} 
-                          className="h-7 text-xs text-right" 
-                          value={isTotalMode ? "" : t.reporting_cost || ""}
-                          disabled={isTotalMode}
-                          onChange={(e) => patchLine(ti, { reporting_cost: parseFloat(e.target.value) || 0 })} 
-                        />
-                      </td>
-                    );
-                  })}
+
+                  <td
+                    colSpan={2}
+                    className="p-2 text-right text-[10px] uppercase text-muted-foreground"
+                  >
+                    Reporting Cost
+                  </td>
+
+                  {draft.transport.map(
+                    (transport, index) => {
+
+                      const isTotalMode =
+                        transport.rate_mode ===
+                        "total";
+
+                      return (
+                        <td
+                          key={transport.id}
+                          className="p-2"
+                        >
+
+                          <Input
+                            type="number"
+                            min={0}
+                            className="h-7 text-xs text-right"
+                            value={
+                              isTotalMode
+                                ? ""
+                                : transport.reporting_cost ||
+                                  ""
+                            }
+                            disabled={isTotalMode}
+                            onChange={(event) =>
+                              patchLine(index, {
+                                reporting_cost:
+                                  parseFloat(
+                                    event.target.value
+                                  ) || 0,
+                              })
+                            }
+                          />
+
+                        </td>
+                      );
+                    }
+                  )}
+
                 </tr>
+
+                {/* ==================================================
+                    REMARKS
+                ================================================== */}
+
                 <tr className="bg-muted/10 border-b border-[#E5E7EB]">
-                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">Remarks</td>
-                  {draft.transport.map((t, ti) => {
-                    const isTotalMode = t.rate_mode === "total";
-                    return (
-                      <td key={t.id} className="p-2">
-                        <Input 
-                          className="h-7 text-xs" 
-                          value={isTotalMode ? "" : t.remarks || ""}
-                          disabled={isTotalMode}
-                          onChange={(e) => patchLine(ti, { remarks: e.target.value })} 
-                        />
-                      </td>
-                    );
-                  })}
+
+                  <td
+                    colSpan={2}
+                    className="p-2 text-right text-[10px] uppercase text-muted-foreground"
+                  >
+                    Remarks
+                  </td>
+
+                  {draft.transport.map(
+                    (transport, index) => {
+
+                      const isTotalMode =
+                        transport.rate_mode ===
+                        "total";
+
+                      return (
+                        <td
+                          key={transport.id}
+                          className="p-2"
+                        >
+
+                          <Input
+                            className="h-7 text-xs"
+                            value={
+                              isTotalMode
+                                ? ""
+                                : transport.remarks ||
+                                  ""
+                            }
+                            disabled={isTotalMode}
+                            onChange={(event) =>
+                              patchLine(index, {
+                                remarks:
+                                  event.target.value,
+                              })
+                            }
+                          />
+
+                        </td>
+                      );
+                    }
+                  )}
+
                 </tr>
+
+                {/* ==================================================
+                    LINE TOTAL
+                ================================================== */}
+
                 <tr className="bg-primary/5 font-semibold">
-                  <td colSpan={2} className="p-2 text-right text-xs">Line Total</td>
-                  {draft.transport.map((t) => (
-                    <td key={t.id} className="p-2 text-right tabular-nums">{inr(transportLineTotal(t))}</td>
-                  ))}
+
+                  <td
+                    colSpan={2}
+                    className="p-2 text-right text-xs"
+                  >
+                    Line Total
+                  </td>
+
+                  {draft.transport.map(
+                    (transport) => (
+                      <td
+                        key={transport.id}
+                        className="p-2 text-right tabular-nums"
+                      >
+                        {inr(
+                          transportLineTotal(
+                            transport
+                          )
+                        )}
+                      </td>
+                    )
+                  )}
+
                 </tr>
+
               </tbody>
+
             </table>
+
           </div>
 
-          <div className="text-right font-semibold">Transport Total: {inr(total)}</div>
+          {/* ====================================================
+              TRANSPORT TOTAL
+          ==================================================== */}
 
-          {/* ===== NEW: Per‑Person Cost Breakdown Sheet (1–10 pax) ===== */}
+          <div className="text-right font-semibold">
+            Transport Total: {inr(total)}
+          </div>
+
+          {/* ====================================================
+              PER PERSON BREAKDOWN
+          ==================================================== */}
+
           {draft.transport.length > 0 && (
             <Card className="p-4 border-2 border-primary/20 bg-primary/5 mt-4">
+
               <h3 className="text-sm font-semibold text-primary mb-3">
-                Per‑Person Cost Breakdown
+                Per-Person Cost Breakdown
               </h3>
+
               <div className="overflow-x-auto">
+
                 <table className="w-full text-xs border-collapse">
+
                   <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+
                     <tr>
-                      <th className="text-left p-2">Pax</th>
-                      {draft.transport.map((t) => (
-                        <th key={t.id} className="text-right p-2 min-w-[80px]">
-                          {vehLabel(t)}
-                          <div className="font-normal text-[9px] text-muted-foreground">
-                            (total {inr(transportLineTotal(t))})
-                          </div>
-                        </th>
-                      ))}
-                      <th className="text-right p-2 font-semibold">Total</th>
+
+                      <th className="text-left p-2">
+                        Pax
+                      </th>
+
+                      {draft.transport.map(
+                        (transport) => (
+                          <th
+                            key={transport.id}
+                            className="text-right p-2 min-w-[110px]"
+                          >
+
+                            {vehLabel(transport)}
+
+                            <div className="font-normal text-[9px] text-muted-foreground">
+                              total{" "}
+                              {inr(
+                                transportLineTotal(
+                                  transport
+                                )
+                              )}
+                            </div>
+
+                          </th>
+                        )
+                      )}
+
+                      <th className="text-right p-2 font-semibold">
+                        Total
+                      </th>
+
                     </tr>
+
                   </thead>
+
                   <tbody>
+
                     {breakdownData.map((row) => (
+
                       <tr
                         key={row.pax}
                         className="border-t border-muted-foreground/20 hover:bg-muted/10"
                       >
-                        <td className="p-2 font-medium">{row.pax} pax</td>
-                        {draft.transport.map((t) => (
-                          <td key={t.id} className="p-2 text-right tabular-nums">
-                            {inr(row.perVehicle[t.id] || 0)}
-                          </td>
-                        ))}
+
+                        <td className="p-2 font-medium">
+                          {row.pax} pax
+                        </td>
+
+                        {draft.transport.map(
+                          (transport) => (
+                            <td
+                              key={transport.id}
+                              className="p-2 text-right tabular-nums"
+                            >
+                              {inr(
+                                row.perVehicle[
+                                  transport.id
+                                ] || 0
+                              )}
+                            </td>
+                          )
+                        )}
+
                         <td className="p-2 text-right tabular-nums font-bold text-primary">
                           {inr(row.totalPerPax)}
                         </td>
+
                       </tr>
+
                     ))}
+
                   </tbody>
+
                 </table>
+
               </div>
+
               <div className="mt-2 text-[11px] text-muted-foreground">
-                * Per‑person costs are calculated as (total cost per vehicle) / pax.
+                * Per-person costs are calculated as total
+                transport cost divided by selected pax count.
               </div>
+
             </Card>
           )}
+
         </>
       )}
+
     </div>
   );
 }
