@@ -24,7 +24,8 @@ export function Step10({ draft, set }: StepProps) {
     .filter((t) => {
       if (!t.is_active) return false;
       const cap = t.max_pax ?? t.capacity_persons ?? Number.MAX_SAFE_INTEGER;
-      return cap >= pax;
+      const min = t.min_pax ?? 1;
+      return cap >= pax && min <= pax;
     })
     .sort((a, b) => (a.capacity_persons ?? 0) - (b.capacity_persons ?? 0));
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
