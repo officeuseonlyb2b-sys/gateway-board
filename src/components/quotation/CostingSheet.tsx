@@ -406,7 +406,7 @@ function LandPartBlock({
           </tr>
         </thead>
         <tbody>
-          {land.rows.map((r: LandDayRow) => {
+          {land.rows.map((r: LandDayRow, ri: number) => {
             // Guide: show only selected language(s) with per-person price
             const selectedGuides = r.guide_opts.filter((o) => o.checked);
             return (
