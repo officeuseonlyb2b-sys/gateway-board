@@ -226,19 +226,21 @@ export function buildLandPart(
     }));
   });
 
-  // ------- Miscellaneous
-  draft.misc.forEach((l) => {
-    const target = targetDays(l.from_routing_days, all);
-    if (!target.length) return;
-    const each = (l.rate * l.qty) / target.length;
-    target.forEach((day) => opts[day].misc.push({
-      id: l.id,
-      label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
-      sub: l.unit || undefined,
-      amount: each,
-      checked: isPicked(draft, "misc", day, l.id),
-    }));
-  });
+  // ------- Miscellaneous (consolidated for the whole trip on the first day)
+  const miscDay = all[0];
+  if (miscDay != null) {
+    draft.misc.forEach((l) => {
+      const target = targetDays(l.from_routing_days, all);
+      if (!target.length) return;
+      opts[miscDay].misc.push({
+        id: l.id,
+        label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
+        sub: l.unit || undefined,
+        amount: l.rate * l.qty,
+        checked: isPicked(draft, "misc", miscDay, l.id),
+      });
+    });
+  }
 
   const sumOn = (list: SheetOption[]) => list.reduce((s, o) => s + (o.checked ? o.amount : 0), 0);
 
