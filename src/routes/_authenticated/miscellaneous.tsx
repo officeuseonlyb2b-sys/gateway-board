@@ -237,14 +237,14 @@ function MiscDialog({
           ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Total-Price Slabs</Label>
+                <Label>Pax-Range Slabs</Label>
                 <Button size="sm" variant="outline" onClick={addRange}>
                   <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
                 </Button>
               </div>
               <div className="border rounded-md divide-y">
                 <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/50 text-[10px] uppercase text-muted-foreground">
-                  <div>From Pax</div><div>To Pax</div><div>Total Price (₹)</div><div></div>
+                  <div>From Pax</div><div>To Pax</div><div>Price Per Person (₹)</div><div></div>
                 </div>
                 {ranges.map((r, i) => (
                   <div key={i} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 items-center">
@@ -258,7 +258,7 @@ function MiscDialog({
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Fixed total for the whole group in the matching pax range.
+                The slab matching total pax is applied, then multiplied by pax count.
               </p>
             </div>
           )}
