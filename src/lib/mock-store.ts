@@ -266,7 +266,7 @@ export interface ActivityDestination {
   created_at: string;
 }
 export type ActivityPricingType = "per_person" | "total_fixed" | "per_vehicle";
-export type ActivitySlabPricing = "per_person" | "total";
+export type ActivitySlabPricing = "per_person" | "total" | "slab";
 export interface ActivitySlab {
   id: string;
   from_pax: number;
@@ -337,15 +337,21 @@ export function guideRateForPax(g: Guide, pax: number, language?: GuideLanguage)
   return g.rate_per_day;
 }
 export function activityRateForPax(a: Activity, pax: number): number {
-  if (a.pricing_slabs && a.pricing_slabs.length > 0) {
-    const slab = a.pricing_slabs.find((s) => pax >= s.from_pax && pax <= s.to_pax);
+  const slabs = a.pricing_slabs ?? [];
+  // Flat "Per Person" mode — one price × actual pax, no slab lookup at all.
+  if (a.slab_pricing_type === "per_person" && slabs.length === 0) {
+    return (a.price || 0) * Math.max(1, pax);
+  }
+  if (slabs.length > 0) {
+    const slab = slabs.find((s) => pax >= s.from_pax && pax <= s.to_pax);
     const chosen = slab ?? (() => {
-      const sorted = [...a.pricing_slabs!].sort((x, y) => x.from_pax - y.from_pax);
+      const sorted = [...slabs].sort((x, y) => x.from_pax - y.from_pax);
       return pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1];
     })();
-    return a.slab_pricing_type === "per_person"
-      ? chosen.price * Math.max(1, pax)
-      : chosen.price;
+    // Slab (Range) and legacy per-person slabs → per-person price × pax.
+    return a.slab_pricing_type === "total"
+      ? chosen.price
+      : chosen.price * Math.max(1, pax);
   }
   if (pax <= 6 && a.group_rate_1_to_6 != null) return a.group_rate_1_to_6;
   if (pax <= 14 && a.group_rate_7_to_14 != null) return a.group_rate_7_to_14;

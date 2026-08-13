@@ -207,19 +207,22 @@ function ActDialog({
 }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  // Two clean modes: "per_person" (flat price × pax) and "slab" (pax-range table).
   const [pricingType, setPricingType] = useState<ActivitySlabPricing>("per_person");
+  const [flatPrice, setFlatPrice] = useState(0);
   const [slabs, setSlabs] = useState<ActivitySlab[]>([]);
   const [active, setActive] = useState(true);
+  const isSlab = pricingType !== "per_person";
 
   useEffect(() => {
     if (!open) return;
     setName(editing?.activity_name ?? "");
     setDesc(editing?.description ?? "");
-    setPricingType(editing?.slab_pricing_type ?? "per_person");
+    const hadSlabs = !!(editing?.pricing_slabs && editing.pricing_slabs.length > 0);
+    setPricingType(hadSlabs ? "slab" : "per_person");
+    setFlatPrice(editing && !hadSlabs ? editing.price ?? 0 : 0);
     setSlabs(
-      editing?.pricing_slabs && editing.pricing_slabs.length > 0
-        ? editing.pricing_slabs.map((s) => ({ ...s }))
-        : [newSlab()],
+      hadSlabs ? editing!.pricing_slabs!.map((s) => ({ ...s })) : [newSlab()],
     );
     setActive(editing?.is_active ?? true);
   }, [open, editing]);
@@ -240,6 +243,10 @@ function ActDialog({
 
   function validate(): string | null {
     if (!name.trim()) return "Activity name is required.";
+    if (!isSlab) {
+      if (flatPrice < 0) return "Price per person cannot be negative.";
+      return null;
+    }
     if (slabs.length === 0) return "At least one pricing slab is required.";
     for (const s of slabs) {
       if (s.from_pax < 1) return "From Pax must be at least 1.";
@@ -260,17 +267,17 @@ function ActDialog({
     const err = validate();
     if (err) return toast.error(err);
     const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
-    const displayPrice = sorted[0]?.price ?? 0;
+    const displayPrice = isSlab ? (sorted[0]?.price ?? 0) : flatPrice;
     const payload = {
       destination_id: destId,
       activity_name: name.trim(),
       description: desc,
-      pricing_type: pricingType === "per_person" ? ("per_person" as const) : ("total_fixed" as const),
+      pricing_type: "per_person" as const,
       price: displayPrice,
-      unit_label: pricingType === "per_person" ? "Per Person" : "Total",
+      unit_label: "Per Person",
       is_active: active,
-      slab_pricing_type: pricingType,
-      pricing_slabs: sorted,
+      slab_pricing_type: (isSlab ? "slab" : "per_person") as ActivitySlabPricing,
+      pricing_slabs: isSlab ? sorted : [],
     };
     const destName = db.get().destination_cities.find((d) => d.id === destId)?.name ?? "";
     if (editing) {
@@ -300,21 +307,27 @@ function ActDialog({
           </div>
           <div>
             <Label>Pricing Type</Label>
-            <Select value={pricingType} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
+            <Select value={isSlab ? "slab" : "per_person"} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="per_person">Per Person</SelectItem>
-                <SelectItem value="total">Slab (Total)</SelectItem>
+                <SelectItem value="slab">Slab (Range)</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground mt-1">
-              {pricingType === "per_person"
-                ? "Price per person × actual pax. Slab determines the per-person rate."
-                : "Fixed TOTAL for the whole group in the matching pax slab."}
+              {isSlab
+                ? "Price per person for each pax range. The slab matching total pax is multiplied by pax count."
+                : "One flat price per person × actual pax. No slabs."}
             </p>
           </div>
 
-
+          {!isSlab ? (
+            <div>
+              <Label>Price Per Person (₹)</Label>
+              <Input type="number" min={0} value={flatPrice}
+                onChange={(e) => setFlatPrice(+e.target.value || 0)} />
+            </div>
+          ) : (
           <div className="border rounded-md p-3 space-y-3">
             <div className="flex items-center justify-between">
               <div className="font-medium text-sm">Pricing Slabs</div>
@@ -337,7 +350,7 @@ function ActDialog({
                       onChange={(e) => updateSlab(s.id, { to_pax: +e.target.value || 1 })} />
                   </div>
                   <div>
-                    <Label className="text-[11px]">{pricingType === "per_person" ? "Price Per Person (₹)" : "Total Price (₹)"}</Label>
+                    <Label className="text-[11px]">Price Per Person (₹)</Label>
                     <Input type="number" min={0} value={s.price}
                       onChange={(e) => updateSlab(s.id, { price: +e.target.value || 0 })} />
                   </div>
@@ -354,6 +367,8 @@ function ActDialog({
               Ranges cannot overlap. Example: 1–5, 6–20, 21–50.
             </p>
           </div>
+          )}
+
 
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={active} onCheckedChange={setActive} /> Active

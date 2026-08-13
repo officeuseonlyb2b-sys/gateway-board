@@ -669,6 +669,9 @@ function HotelMealBlock({
   const dynamicNights = computedRows.filter((r) => r.dyn).length;
   /** All nights dynamic → collapse the four rate columns into one "Accommodation" column. */
   const allDynamic = computedRows.length > 0 && dynamicNights === computedRows.length;
+  /** Quad column only appears when Quad rooms are actually in use for this option. */
+  const showQuad = computedRows.some((r) => !r.dyn && (r.quad || 0) > 0);
+  const rateCols = showQuad ? 4 : 3;
 
   // Step 3: Display the table
   return (
@@ -687,13 +690,13 @@ function HotelMealBlock({
             <th className={thL}>Hotel / Room</th>
             <th className={thL}>Plan</th>
             {allDynamic ? (
-              <th className={thL} colSpan={4}>Accommodation</th>
+              <th className={thL} colSpan={rateCols}>Accommodation</th>
             ) : (
               <>
                 <th className={th}>SGL</th>
                 <th className={th}>DBL</th>
                 <th className={th}>TRP</th>
-                <th className={th}>QUAD</th>
+                {showQuad && <th className={th}>QUAD</th>}
               </>
             )}
 
@@ -718,7 +721,7 @@ function HotelMealBlock({
 
               {r.dyn ? (
                 /* Dynamic mode — one consolidated line for the allocated room mix */
-                <td className="p-1.5" colSpan={4}>
+                <td className="p-1.5" colSpan={rateCols}>
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium">{r.mix_label || "No rooms"}</span>
                     <span className="text-right">
@@ -750,10 +753,12 @@ function HotelMealBlock({
               </td>
 
               {/* QUAD */}
+              {showQuad && (
               <td className={td}>
                 <div className="text-[#0F172A] font-semibold">{r.quadTotal ? inr(r.quadTotal) : '—'}</div>
                 {r.quadTotal > 0 && <div className="text-[11px] text-[#64748B] font-normal">Net: {inr(r.quadNet)} + GST {(gstRateFor(r.quadNet) * 100).toFixed(0)}%</div>}
               </td>
+              )}
                 </>
               )}
 
@@ -780,13 +785,13 @@ function HotelMealBlock({
           <tr className="border-t-2 bg-muted/30 font-medium">
             <td className="p-1.5" colSpan={3}>Subtotal (Per Night)</td>
             {allDynamic ? (
-              <td className={td} colSpan={4}>{inr(totals.dynNet / n)}</td>
+              <td className={td} colSpan={rateCols}>{inr(totals.dynNet / n)}</td>
             ) : (
               <>
                 <td className={td}>{inr(totals.sglNet / n)}</td>
                 <td className={td}>{inr(totals.dblNet / n)}</td>
                 <td className={td}>{inr(totals.trpNet / n)}</td>
-                <td className={td}>{inr(totals.quadNet / n)}</td>
+                {showQuad && <td className={td}>{inr(totals.quadNet / n)}</td>}
               </>
             )}
             <td className="p-1.5" />
@@ -797,13 +802,13 @@ function HotelMealBlock({
           <tr className="bg-primary/10 font-bold">
             <td className="p-1.5" colSpan={3}>Total ({sheet.nights} Nights)</td>
             {allDynamic ? (
-              <td className={td} colSpan={4}>{inr(totals.dynTotal)}</td>
+              <td className={td} colSpan={rateCols}>{inr(totals.dynTotal)}</td>
             ) : (
               <>
                 <td className={td}>{inr(totals.sglTotal)}</td>
                 <td className={td}>{inr(totals.dblTotal)}</td>
                 <td className={td}>{inr(totals.trpTotal)}</td>
-                <td className={td}>{inr(totals.quadTotal)}</td>
+                {showQuad && <td className={td}>{inr(totals.quadTotal)}</td>}
               </>
             )}
             <td className="p-1.5" />
@@ -815,7 +820,7 @@ function HotelMealBlock({
           {dynamicNights > 0 && (
             <tr className="bg-accent/10 font-semibold">
               <td className="p-1.5" colSpan={3}>Dynamic rooms ({dynamicNights} night(s))</td>
-              <td className="p-1.5" colSpan={4}>
+              <td className="p-1.5" colSpan={rateCols}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-[10px] uppercase text-muted-foreground">Allocated mix</span>
                   <span className="text-right">
@@ -829,7 +834,7 @@ function HotelMealBlock({
               <td className="p-1.5" colSpan={4} />
             </tr>
           )}
-          <HotelMarkupRows totals={totals} pct={pct} pax={pax} />
+          <HotelMarkupRows totals={totals} pct={pct} pax={pax} showQuad={showQuad} />
 
         </tfoot>
       </table>
@@ -838,9 +843,11 @@ function HotelMealBlock({
 }
 
 function HotelMarkupRows({
-  totals, pct, pax,
-}: { totals: { sglTotal: number; dblTotal: number; trpTotal: number; quadTotal: number; lunchTotal: number; dinnerTotal: number }; pct: { mk: number; gst: number }; pax: number }) {
-  const cells = [totals.sglTotal, totals.dblTotal, totals.trpTotal, totals.quadTotal];
+  totals, pct, pax, showQuad,
+}: { totals: { sglTotal: number; dblTotal: number; trpTotal: number; quadTotal: number; lunchTotal: number; dinnerTotal: number }; pct: { mk: number; gst: number }; pax: number; showQuad: boolean }) {
+  const cells = showQuad
+    ? [totals.sglTotal, totals.dblTotal, totals.trpTotal, totals.quadTotal]
+    : [totals.sglTotal, totals.dblTotal, totals.trpTotal];
   const shares = [1, 2, 3, 4];
 
   // UPDATED: GST is now applied on the (Total + Markup), NOT on the markup alone!
@@ -867,6 +874,33 @@ function HotelMarkupRows({
         </tr>
       ))}
     </>
+  );
+}
+
+/** Detailed Rate Sheet for one scenario (hotel option + optional single vehicle). */
+export function ScenarioRateSheet({
+  draft, optionKey, transportLineId,
+}: { draft: QuoteDraft; optionKey: string; transportLineId?: string }) {
+  const d = useDB();
+  const opt = (draft.hotel_options ?? []).find((o) => o.key === optionKey);
+  const transport = transportLineId
+    ? (draft.transport ?? []).filter((t) => t.id === transportLineId)
+    : (draft.transport ?? []);
+  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  const groups = useMemo<RateSheetGroup[]>(
+    () => (opt ? buildRateSheet(draft, d, opt, transport) : []),
+    [draft, d, opt, transportLineId],
+  );
+  if (!opt) return null;
+  const pax = Math.max(1, effectivePaxForPricing(draft));
+  return (
+    <RateSheetBlock
+      groups={groups}
+      land={land}
+      pax={pax}
+      landPct={{ mk: landMarkup(draft) * 100, gst: landGst(draft) * 100 }}
+      hotelPct={{ mk: hotelsMarkup(draft) * 100, gst: hotelsGst(draft) * 100 }}
+    />
   );
 }
 
