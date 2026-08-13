@@ -30,7 +30,18 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
 
   // Land Part doesn't depend on the hotel option, so build it once here and
   // share it across every variation instead of recomputing it per tab.
-  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  //
+  // IMPORTANT: Activity slab prices are TOTAL amounts for the selected pax
+  // range. The legacy costing builder can treat them as per-person because
+  // Activity.pricing_type is still stored as "per_person" for compatibility.
+  // Normalize the activity options here from the Activity master so a slab
+  // price is NEVER multiplied by pax or divided as though it were a
+  // per-person rate.
+  const pricingPax = Math.max(1, effectivePaxForPricing(draft));
+  const land = useMemo<LandPartSheet>(
+    () => normalizeActivitySlabPricing(buildLandPart(draft, d), d, pricingPax),
+    [draft, d, pricingPax],
+  );
 
   if (options.length === 0) {
     return (
@@ -183,6 +194,7 @@ function Variation({
         pax={pax}
         landPct={landPct}
         hotelPct={hotelPct}
+        db={d}
       />
     </div>
   );
@@ -228,17 +240,140 @@ function MarkupRows({
 }
 
 /**
- * Returns the per‑person amount for an option.
- * - If the option's sub OR label contains "per_person" or "per person" (case‑insensitive),
- *   the amount is already per‑person → return amount.
- * - Otherwise, it's a total (e.g., slab, fixed group charge) → return amount / pax.
+ * Activity pricing rules used by the costing sheet.
+ *
+ * Per-person activity:
+ *   ₹3,000/person -> costing base is ₹3,000 × pax.
+ *
+ * Slab activity:
+ *   1-5 pax = ₹1,500 TOTAL
+ *   6-10 pax = ₹2,000 TOTAL
+ *   11-15 pax = ₹2,500 TOTAL
+ *
+ * A slab amount is therefore NEVER multiplied by pax. When a per-person
+ * display is required, the selected slab total may be divided by pax exactly
+ * once for that display. The underlying land total always remains the slab
+ * total.
  */
+function isSlabOption(opt: SheetOption): boolean {
+  const text = `${opt.sub || ""} ${opt.label || ""}`.toLowerCase();
+  return /\bslab\b|\btotal\b|\/total\b/.test(text);
+}
+
 function getPerPersonAmount(opt: SheetOption, pax: number): number {
-  const text = `${opt.sub || ""} ${opt.label}`;
+  const safePax = Math.max(1, pax);
+
+  if (isSlabOption(opt)) {
+    return opt.amount / safePax;
+  }
+
+  const text = `${opt.sub || ""} ${opt.label || ""}`;
   if (/per[_\s]person/i.test(text)) {
     return opt.amount;
   }
-  return opt.amount / pax;
+
+  // Legacy non-slab fixed totals remain total charges.
+  return opt.amount / safePax;
+}
+
+/**
+ * Rebuild activity option amounts from the Activity master. This is the
+ * critical safeguard for old records where pricing_type was saved as
+ * "per_person" even though pricing_slabs exist.
+ */
+function normalizeActivitySlabPricing(
+  land: LandPartSheet,
+  db: ReturnType<typeof useDB>,
+  pax: number,
+): LandPartSheet {
+  const safePax = Math.max(1, pax);
+
+  const rows = land.rows.map((row) => {
+    const destination = db.destination_cities.find(
+      (city) => city.name.trim().toLowerCase() === row.city.trim().toLowerCase(),
+    );
+
+    const activity_opts = row.activity_opts.map((opt) => {
+      const activity = db.activities.find((a) => {
+        const sameName =
+          a.activity_name.trim().toLowerCase() === opt.label.trim().toLowerCase();
+
+        const sameDestination = destination
+          ? a.destination_id === destination.id
+          : true;
+
+        return sameName && sameDestination;
+      });
+
+      if (!activity) return opt;
+
+      const slabs = activity.pricing_slabs ?? [];
+
+      // If slabs exist, the matching slab price is the TOTAL activity amount.
+      if (slabs.length > 0) {
+        const slab = [...slabs]
+          .sort((a, b) => a.from_pax - b.from_pax)
+          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
+
+        if (!slab) {
+          return {
+            ...opt,
+            amount: 0,
+            sub: "No slab for selected pax",
+          };
+        }
+
+        return {
+          ...opt,
+          amount: slab.price,
+          sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)} total`,
+        };
+      }
+
+      // No slabs: normal activity price is per person.
+      return {
+        ...opt,
+        amount: activity.price ?? opt.amount,
+        sub: activity.price != null
+          ? `${inr(activity.price)}/person`
+          : opt.sub,
+      };
+    });
+
+    return {
+      ...row,
+      activity_opts,
+    };
+  });
+
+  // Recalculate the LAND activity total from the normalized option amounts.
+  // This prevents a slab amount from being treated as a per-person amount by
+  // the old buildLandPart implementation.
+  const activities_total = rows.reduce(
+    (sum, row) =>
+      sum +
+      row.activity_opts.reduce(
+        (rowSum, option) => {
+          if (!option.checked) return rowSum;
+
+          // Slab = already a TOTAL for the selected pax range.
+          // Per-person activity = rate × pax for the land total.
+          const total = isSlabOption(option)
+            ? option.amount
+            : option.amount * safePax;
+
+          return rowSum + total;
+        },
+        0,
+      ),
+    0,
+  );
+
+  return {
+    ...land,
+    rows,
+    activities_total,
+  };
 }
 
 function OptionCell({
@@ -257,7 +392,15 @@ function OptionCell({
     <td className="p-1.5 align-top">
       <div className="space-y-1">
         {opts.map((o) => {
-          const displayAmount = showPerPerson ? getPerPersonAmount(o, pax) : o.amount;
+          // Slab activity prices are TOTAL amounts. Show that total in the
+          // activity list; the final "Per Person" costing row divides the
+          // selected total by pax exactly once.
+          const displayAmount =
+            bucket === "activities" && isSlabOption(o)
+              ? o.amount
+              : showPerPerson
+                ? getPerPersonAmount(o, pax)
+                : o.amount;
           return (
             <label key={o.id} className="flex items-start gap-1.5 cursor-pointer">
               <Checkbox
@@ -900,24 +1043,28 @@ export function ScenarioRateSheet({
       pax={pax}
       landPct={{ mk: landMarkup(draft) * 100, gst: landGst(draft) * 100 }}
       hotelPct={{ mk: hotelsMarkup(draft) * 100, gst: hotelsGst(draft) * 100 }}
+      db={d}
     />
   );
 }
 
 function RateSheetBlock({
-  groups, land, pax, landPct, hotelPct,
+  groups, land, pax, landPct, hotelPct, db,
 }: {
   groups: RateSheetGroup[];
   land: LandPartSheet;
   pax: number;
   landPct: { mk: number; gst: number };
   hotelPct: { mk: number; gst: number };
+  db: ReturnType<typeof useDB>;
 }) {
   // Entrances, Activities and Misc are LAND-level totals.
   // In the Rate Sheet they must always be shown as the SAME per-person amount
   // for every pax row, after applying Land Markup and GST.
   const landPerPerson = {
     entrances: applyMarkupAndGst(land.entrances_total, landPct.mk, landPct.gst, pax).per_person,
+    // Activities are calculated per row/pax below because slab pricing changes
+    // with the pax range. Do NOT use the current quote pax for every rate-sheet row.
     activities: applyMarkupAndGst(land.activities_total, landPct.mk, landPct.gst, pax).per_person,
     misc: applyMarkupAndGst(land.misc_total, landPct.mk, landPct.gst, pax).per_person,
   };
@@ -965,7 +1112,14 @@ function RateSheetBlock({
           </thead>
           <tbody>
             {groups.map((g) => (
-              <FragmentGroup key={g.line_id ?? g.vehicle} group={g} landPerPerson={landPerPerson} />
+              <FragmentGroup
+                key={g.line_id ?? g.vehicle}
+                group={g}
+                land={land}
+                db={db}
+                landPerPerson={landPerPerson}
+                landPct={landPct}
+              />
             ))}
           </tbody>
         </table>
@@ -974,12 +1128,75 @@ function RateSheetBlock({
   );
 }
 
+/**
+ * Calculate the Activity & Experience cost for one exact pax row.
+ *
+ * Slab: matching slab price is a TOTAL -> total / pax.
+ * Per person: rate is already per person -> rate.
+ * Markup and GST are applied to the correct total before converting to
+ * per-person, so a slab is never treated as a per-person price.
+ */
+function getActivitiesPerPersonForPax(
+  land: LandPartSheet,
+  db: ReturnType<typeof useDB>,
+  pax: number,
+  landPct: { mk: number; gst: number },
+): number {
+  const safePax = Math.max(1, pax);
+
+  const total = land.rows.reduce((sum, row) => {
+    const destination = db.destination_cities.find(
+      (city) => city.name.trim().toLowerCase() === row.city.trim().toLowerCase(),
+    );
+
+    const rowTotal = row.activity_opts.reduce((rowSum, option) => {
+      if (!option.checked) return rowSum;
+
+      const activity = db.activities.find((a) => {
+        const sameName =
+          a.activity_name.trim().toLowerCase() === option.label.trim().toLowerCase();
+        const sameDestination = destination
+          ? a.destination_id === destination.id
+          : true;
+        return sameName && sameDestination;
+      });
+
+      if (activity?.pricing_slabs?.length) {
+        const slab = [...activity.pricing_slabs]
+          .sort((a, b) => a.from_pax - b.from_pax)
+          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
+
+        return rowSum + (slab?.price ?? 0);
+      }
+
+      // Normal Activity price is per person. Convert it to a group total
+      // before applying markup/GST and dividing back to per person.
+      return rowSum + ((activity?.price ?? option.amount) * safePax);
+    }, 0);
+
+    return sum + rowTotal;
+  }, 0);
+
+  return applyMarkupAndGst(
+    total,
+    landPct.mk,
+    landPct.gst,
+    safePax,
+  ).per_person;
+}
+
 function FragmentGroup({
   group: g,
+  land,
+  db,
   landPerPerson,
+  landPct,
 }: {
   group: RateSheetGroup;
+  land: LandPartSheet;
+  db: ReturnType<typeof useDB>;
   landPerPerson: { entrances: number; activities: number; misc: number };
+  landPct: { mk: number; gst: number };
 }) {
   return (
     <>
@@ -987,16 +1204,24 @@ function FragmentGroup({
         <td className="p-1.5 font-semibold" colSpan={19}>{g.vehicle}</td>
       </tr>
       {g.rows.map((r) => {
-        // All land columns used below are already PER-PERSON values.
-        // Package price = transport + guide + escort + entrances +
-        // activities + misc + the selected accommodation sharing rate.
-        // There is intentionally NO second division by pax here.
+        // Activity pricing is dynamic by pax. A slab is a TOTAL for its
+        // matching range, while a normal activity is PER PERSON. Calculate
+        // the correct activity total for this exact rate-sheet row, then
+        // apply markup/GST and divide by this row's pax exactly once.
+        const activitiesPerPerson = getActivitiesPerPersonForPax(
+          land,
+          db,
+          r.pax,
+          landPct,
+        );
+
+        // All other land columns are already per-person values.
         const commonLandPerPerson =
           r.transport +
           r.guide +
           r.escort +
           landPerPerson.entrances +
-          landPerPerson.activities +
+          activitiesPerPerson +
           landPerPerson.misc;
 
         const packageSingle = commonLandPerPerson + r.single;
@@ -1014,7 +1239,7 @@ function FragmentGroup({
 
             {/* Final per-person values after Land Markup + GST. */}
             <td className={td}>{inr(landPerPerson.entrances)}</td>
-            <td className={td}>{inr(landPerPerson.activities)}</td>
+            <td className={td}>{inr(activitiesPerPerson)}</td>
             <td className={td}>{inr(landPerPerson.misc)}</td>
 
             <td className={td}>{inr(r.single)}</td>
