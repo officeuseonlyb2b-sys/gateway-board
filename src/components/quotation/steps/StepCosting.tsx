@@ -9,10 +9,8 @@ import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import {
-  computeOption, totalPax, effectivePaxForPricing, transportLineTotal,
-  optionUsesCustomAllocation, isGroupTour, autoDoubleMix, autoTripleMix,
-  mixCoversPax, mixLabel, computeGroupOption,
-  type OptionTotals, type GroupOptionTotals,
+  computeOption, transportLineTotal, optionUsesCustomAllocation,
+  type OptionTotals,
 } from "@/lib/wizard/calc";
 import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
 import { OptionPerPersonPreview } from "./StepHotels";
@@ -183,9 +181,3 @@ export function Step16({ draft, set }: StepProps) {
     </div>
   );
 }
-
-
-
-
-// ============================================================
-// STEP 17 — Final Costing
