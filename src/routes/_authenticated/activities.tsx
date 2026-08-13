@@ -3,8 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, Compass, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import {
-  db, useDB,
-  type Activity, type ActivitySlab, type ActivitySlabPricing,
+  db,
+  useDB,
+  type Activity,
+  type ActivitySlab,
+  type ActivitySlabPricing,
 } from "@/lib/mock-store";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,14 +17,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { inr } from "@/lib/format";
 import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/activities")({
-  head: () => ({ meta: [{ title: "Activity & Experience — MP Tourism Hub" }] }),
+  head: () => ({
+    meta: [{ title: "Activity & Experience — MP Tourism Hub" }],
+  }),
   component: ActivitiesPage,
 });
 
@@ -32,84 +56,181 @@ const uid = () =>
 
 function ActivitiesPage() {
   const data = useDB();
+
   // Cities come from Destinations master (shared).
   const destinations = useMemo(
-    () => [...data.destination_cities].sort((a, b) => a.name.localeCompare(b.name)),
-    [data.destination_cities],
+    () =>
+      [...data.destination_cities].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      ),
+    [data.destination_cities]
   );
+
   const [selectedId, setSelectedId] = useState("");
 
   useEffect(() => {
-    if (!selectedId && destinations.length) setSelectedId(destinations[0].id);
-    if (selectedId && !destinations.find((c) => c.id === selectedId)) setSelectedId(destinations[0]?.id ?? "");
+    if (!selectedId && destinations.length) {
+      setSelectedId(destinations[0].id);
+    }
+
+    if (
+      selectedId &&
+      !destinations.find((c) => c.id === selectedId)
+    ) {
+      setSelectedId(destinations[0]?.id ?? "");
+    }
   }, [destinations, selectedId]);
 
   const activities = useMemo(
-    () => data.activities.filter((a) => a.destination_id === selectedId),
-    [data.activities, selectedId],
+    () =>
+      data.activities.filter(
+        (a) => a.destination_id === selectedId
+      ),
+    [data.activities, selectedId]
   );
 
   const [actOpen, setActOpen] = useState(false);
-  const [editingAct, setEditingAct] = useState<Activity | null>(null);
+  const [editingAct, setEditingAct] =
+    useState<Activity | null>(null);
 
-  function actCount(id: string) { return data.activities.filter((a) => a.destination_id === id).length; }
-  function deleteAct(a: Activity) {
-    if (!confirm(`Delete "${a.activity_name}"?`)) return;
-    db.deleteActivity(a.id); toast.success("Activity deleted.");
+  function actCount(id: string) {
+    return data.activities.filter(
+      (a) => a.destination_id === id
+    ).length;
   }
 
+  function deleteAct(a: Activity) {
+    if (!confirm(`Delete "${a.activity_name}"?`)) return;
+
+    db.deleteActivity(a.id);
+    toast.success("Activity deleted.");
+  }
+
+  /*
+   * Show pricing correctly:
+   *
+   * Per Person:
+   *   ₹1500 per person
+   *
+   * Slab / Total:
+   *   1-5: ₹1500
+   *   6-14: ₹2000
+   *
+   * IMPORTANT:
+   * Slab prices are TOTAL amounts, not per-person amounts.
+   */
   function slabsSummary(a: Activity): string {
-    if (a.pricing_slabs && a.pricing_slabs.length > 0) {
+    if (
+      a.pricing_slabs &&
+      a.pricing_slabs.length > 0
+    ) {
       return a.pricing_slabs
         .slice()
         .sort((x, y) => x.from_pax - y.from_pax)
-        .map((s) => `${s.from_pax}-${s.to_pax}: ${inr(s.price)}`)
+        .map(
+          (s) =>
+            `${s.from_pax}-${s.to_pax}: ${inr(s.price)}`
+        )
         .join(" · ");
     }
+
     return a.price ? inr(a.price) : "—";
+  }
+
+  function pricingLabel(a: Activity): string {
+    /*
+     * Slab data takes priority because old records may not
+     * have the correct pricing_type saved.
+     */
+    if (
+      a.pricing_slabs &&
+      a.pricing_slabs.length > 0
+    ) {
+      return "Slab / Total";
+    }
+
+    if (
+      a.slab_pricing_type === "total" ||
+      a.pricing_type === "total"
+    ) {
+      return "Slab / Total";
+    }
+
+    return "Per Person";
   }
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Activity &amp; Experience</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Activity &amp; Experience
+        </h1>
+
         <p className="text-sm text-muted-foreground mt-1">
-          Manage destination-wise activities with pax-range slab pricing. Cities are shared from{" "}
-          <Link to="/destinations" className="text-primary underline underline-offset-2">Destinations</Link>.
+          Manage destination-wise activities with per-person
+          and slab-based total pricing. Cities are shared from{" "}
+          <Link
+            to="/destinations"
+            className="text-primary underline underline-offset-2"
+          >
+            Destinations
+          </Link>
+          .
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* DESTINATIONS */}
         <Card className="p-4 lg:col-span-1 h-fit">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">Destinations</h3>
-            <Button asChild size="sm" variant="outline">
+            <h3 className="font-semibold text-sm">
+              Destinations
+            </h3>
+
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+            >
               <Link to="/destinations">Manage</Link>
             </Button>
           </div>
+
           {destinations.length === 0 ? (
             <div className="text-center py-8 text-sm text-muted-foreground">
               <MapPin className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
+
               No destinations yet.
             </div>
           ) : (
             <ul className="space-y-1">
               {destinations.map((d) => {
                 const active = d.id === selectedId;
+
                 return (
                   <li key={d.id}>
                     <button
                       onClick={() => setSelectedId(d.id)}
                       className={cn(
                         "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                        active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : "hover:bg-muted"
                       )}
                     >
                       <Compass className="h-3.5 w-3.5" />
-                      <span className="flex-1 text-left truncate">{d.name}</span>
+
+                      <span className="flex-1 text-left truncate">
+                        {d.name}
+                      </span>
+
                       <Badge
                         variant="secondary"
-                        className={cn("text-[10px]", active && "bg-primary-foreground/20 text-primary-foreground")}
+                        className={cn(
+                          "text-[10px]",
+                          active &&
+                            "bg-primary-foreground/20 text-primary-foreground"
+                        )}
                       >
                         {actCount(d.id)}
                       </Badge>
@@ -121,62 +242,142 @@ function ActivitiesPage() {
           )}
         </Card>
 
+        {/* ACTIVITIES */}
         <Card className="p-0 lg:col-span-3 overflow-hidden">
           {!selectedId ? (
             <div className="p-12 text-center">
               <Compass className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-              <div className="font-medium">Add a destination in the Destinations module to manage activities.</div>
+
+              <div className="font-medium">
+                Add a destination in the Destinations module
+                to manage activities.
+              </div>
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between px-5 py-3 border-b">
                 <div>
                   <div className="font-semibold">
-                    Activities in {destinations.find((c) => c.id === selectedId)?.name}
+                    Activities in{" "}
+                    {
+                      destinations.find(
+                        (c) => c.id === selectedId
+                      )?.name
+                    }
                   </div>
-                  <div className="text-xs text-muted-foreground">{activities.length} activity(s)</div>
+
+                  <div className="text-xs text-muted-foreground">
+                    {activities.length} activity(s)
+                  </div>
                 </div>
-                <Button size="sm" onClick={() => { setEditingAct(null); setActOpen(true); }}>
-                  <Plus className="h-4 w-4 mr-1.5" /> Add Activity
+
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditingAct(null);
+                    setActOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Add Activity
                 </Button>
               </div>
+
               {activities.length === 0 ? (
                 <div className="p-12 text-center">
-                  <div className="text-sm text-muted-foreground mb-3">No activities for this destination yet.</div>
-                  <Button variant="outline" size="sm" onClick={() => { setEditingAct(null); setActOpen(true); }}>
-                    <Plus className="h-4 w-4 mr-1.5" /> Add First Activity
+                  <div className="text-sm text-muted-foreground mb-3">
+                    No activities for this destination yet.
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditingAct(null);
+                      setActOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-1.5" />
+                    Add First Activity
                   </Button>
                 </div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Activity Name</TableHead>
-                      <TableHead>Pricing Type</TableHead>
-                      <TableHead>Slabs</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-24 text-right">Actions</TableHead>
+                      <TableHead>
+                        Activity Name
+                      </TableHead>
+
+                      <TableHead>
+                        Pricing Type
+                      </TableHead>
+
+                      <TableHead>
+                        Pricing
+                      </TableHead>
+
+                      <TableHead>
+                        Description
+                      </TableHead>
+
+                      <TableHead>
+                        Status
+                      </TableHead>
+
+                      <TableHead className="w-24 text-right">
+                        Actions
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
+
                   <TableBody>
                     {activities.map((a) => (
                       <TableRow key={a.id}>
-                        <TableCell className="font-medium">{a.activity_name}</TableCell>
-                        <TableCell className="text-xs">
-                          {a.slab_pricing_type === "total" ? "Slab" : "Per Person"}
+                        <TableCell className="font-medium">
+                          {a.activity_name}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{slabsSummary(a)}</TableCell>
 
-                        <TableCell className="text-muted-foreground text-xs max-w-xs">{a.description || "—"}</TableCell>
-                        <TableCell>
-                          <Switch checked={a.is_active} onCheckedChange={(v) => db.updateActivity(a.id, { is_active: v })} />
+                        <TableCell className="text-xs">
+                          {pricingLabel(a)}
                         </TableCell>
+
+                        <TableCell className="text-xs text-muted-foreground">
+                          {slabsSummary(a)}
+                        </TableCell>
+
+                        <TableCell className="text-muted-foreground text-xs max-w-xs">
+                          {a.description || "—"}
+                        </TableCell>
+
+                        <TableCell>
+                          <Switch
+                            checked={a.is_active}
+                            onCheckedChange={(v) =>
+                              db.updateActivity(a.id, {
+                                is_active: v,
+                              })
+                            }
+                          />
+                        </TableCell>
+
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => { setEditingAct(a); setActOpen(true); }}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setEditingAct(a);
+                              setActOpen(true);
+                            }}
+                          >
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => deleteAct(a)}>
+
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteAct(a)}
+                          >
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </TableCell>
@@ -190,193 +391,589 @@ function ActivitiesPage() {
         </Card>
       </div>
 
-      <ActDialog open={actOpen} onOpenChange={setActOpen} editing={editingAct} destId={selectedId} />
+      <ActDialog
+        open={actOpen}
+        onOpenChange={setActOpen}
+        editing={editingAct}
+        destId={selectedId}
+      />
     </div>
   );
 }
 
 function newSlab(): ActivitySlab {
-  return { id: uid(), from_pax: 1, to_pax: 5, price: 0 };
+  return {
+    id: uid(),
+    from_pax: 1,
+    to_pax: 5,
+    price: 0,
+  };
 }
 
 function ActDialog({
-  open, onOpenChange, editing, destId,
+  open,
+  onOpenChange,
+  editing,
+  destId,
 }: {
-  open: boolean; onOpenChange: (v: boolean) => void;
-  editing: Activity | null; destId: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editing: Activity | null;
+  destId: string;
 }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  // Two clean modes: "per_person" (flat price × pax) and "slab" (pax-range table).
-  const [pricingType, setPricingType] = useState<ActivitySlabPricing>("per_person");
+
+  /*
+   * Two modes:
+   *
+   * 1. per_person
+   *    Price entered = price for ONE person.
+   *    Quotation calculation can multiply by pax.
+   *
+   * 2. total / slab
+   *    Price entered inside each slab = TOTAL activity amount.
+   *    It MUST NOT be multiplied by pax.
+   */
+  const [pricingType, setPricingType] =
+    useState<"per_person" | "slab">("per_person");
+
   const [flatPrice, setFlatPrice] = useState(0);
   const [slabs, setSlabs] = useState<ActivitySlab[]>([]);
   const [active, setActive] = useState(true);
-  const isSlab = pricingType !== "per_person";
+
+  const isSlab = pricingType === "slab";
 
   useEffect(() => {
     if (!open) return;
+
     setName(editing?.activity_name ?? "");
     setDesc(editing?.description ?? "");
-    const hadSlabs = !!(editing?.pricing_slabs && editing.pricing_slabs.length > 0);
-    setPricingType(hadSlabs ? "slab" : "per_person");
-    setFlatPrice(editing && !hadSlabs ? editing.price ?? 0 : 0);
-    setSlabs(
-      hadSlabs ? editing!.pricing_slabs!.map((s) => ({ ...s })) : [newSlab()],
+
+    const hadSlabs =
+      !!(
+        editing?.pricing_slabs &&
+        editing.pricing_slabs.length > 0
+      );
+
+    /*
+     * Detect old records correctly.
+     *
+     * If slabs exist, always open them in Slab mode.
+     */
+    setPricingType(
+      hadSlabs ||
+        editing?.slab_pricing_type === "total" ||
+        editing?.pricing_type === "total"
+        ? "slab"
+        : "per_person"
     );
+
+    /*
+     * Per-person price.
+     */
+    setFlatPrice(
+      editing && !hadSlabs
+        ? editing.price ?? 0
+        : 0
+    );
+
+    /*
+     * Preserve existing slabs.
+     */
+    setSlabs(
+      hadSlabs
+        ? editing!.pricing_slabs!.map((s) => ({
+            ...s,
+          }))
+        : [newSlab()]
+    );
+
     setActive(editing?.is_active ?? true);
   }, [open, editing]);
 
-  function updateSlab(id: string, patch: Partial<ActivitySlab>) {
-    setSlabs((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  function updateSlab(
+    id: string,
+    patch: Partial<ActivitySlab>
+  ) {
+    setSlabs((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              ...patch,
+            }
+          : s
+      )
+    );
   }
+
   function addSlab() {
     setSlabs((prev) => {
-      const last = [...prev].sort((a, b) => a.to_pax - b.to_pax).pop();
-      const from = last ? last.to_pax + 1 : 1;
-      return [...prev, { id: uid(), from_pax: from, to_pax: from + 4, price: 0 }];
+      const sorted = [...prev].sort(
+        (a, b) => a.to_pax - b.to_pax
+      );
+
+      const last = sorted[sorted.length - 1];
+
+      const from = last
+        ? last.to_pax + 1
+        : 1;
+
+      return [
+        ...prev,
+        {
+          id: uid(),
+          from_pax: from,
+          to_pax: from + 4,
+          price: 0,
+        },
+      ];
     });
   }
+
   function removeSlab(id: string) {
-    setSlabs((prev) => (prev.length <= 1 ? prev : prev.filter((s) => s.id !== id)));
+    setSlabs((prev) =>
+      prev.length <= 1
+        ? prev
+        : prev.filter((s) => s.id !== id)
+    );
   }
 
   function validate(): string | null {
-    if (!name.trim()) return "Activity name is required.";
+    if (!name.trim()) {
+      return "Activity name is required.";
+    }
+
     if (!isSlab) {
-      if (flatPrice < 0) return "Price per person cannot be negative.";
+      if (flatPrice < 0) {
+        return "Price per person cannot be negative.";
+      }
+
       return null;
     }
-    if (slabs.length === 0) return "At least one pricing slab is required.";
-    for (const s of slabs) {
-      if (s.from_pax < 1) return "From Pax must be at least 1.";
-      if (s.to_pax < s.from_pax) return "To Pax must be greater than or equal to From Pax.";
+
+    if (slabs.length === 0) {
+      return "At least one pricing slab is required.";
     }
-    // overlap check
-    const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
+
+    for (const s of slabs) {
+      if (s.from_pax < 1) {
+        return "From Pax must be at least 1.";
+      }
+
+      if (s.to_pax < s.from_pax) {
+        return "To Pax must be greater than or equal to From Pax.";
+      }
+
+      if (s.price < 0) {
+        return "Slab total amount cannot be negative.";
+      }
+    }
+
+    /*
+     * Check overlapping slabs.
+     */
+    const sorted = [...slabs].sort(
+      (a, b) => a.from_pax - b.from_pax
+    );
+
     for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i].from_pax <= sorted[i - 1].to_pax) {
+      if (
+        sorted[i].from_pax <=
+        sorted[i - 1].to_pax
+      ) {
         return `Slabs overlap between ${sorted[i - 1].from_pax}-${sorted[i - 1].to_pax} and ${sorted[i].from_pax}-${sorted[i].to_pax}.`;
       }
     }
+
     return null;
   }
 
   function save() {
-    if (!destId) return toast.error("Select a destination first.");
+    if (!destId) {
+      toast.error("Select a destination first.");
+      return;
+    }
+
     const err = validate();
-    if (err) return toast.error(err);
-    const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
-    const displayPrice = isSlab ? (sorted[0]?.price ?? 0) : flatPrice;
+
+    if (err) {
+      toast.error(err);
+      return;
+    }
+
+    const sorted = [...slabs].sort(
+      (a, b) => a.from_pax - b.from_pax
+    );
+
+    /*
+     * IMPORTANT FIX:
+     *
+     * Before:
+     * pricing_type: "per_person"
+     *
+     * That caused slab pricing to behave as per-person.
+     *
+     * Now:
+     * - Per Person => "per_person"
+     * - Slab => "total"
+     */
+    const displayPrice = isSlab
+      ? sorted[0]?.price ?? 0
+      : flatPrice;
+
     const payload = {
       destination_id: destId,
+
       activity_name: name.trim(),
+
       description: desc,
-      pricing_type: "per_person" as const,
+
+      /*
+       * This is the main pricing mode.
+       *
+       * Slab = total amount for matching pax range.
+       */
+      pricing_type: (isSlab
+        ? "total"
+        : "per_person") as const,
+
+      /*
+       * Keep the base price as the first slab amount
+       * for backward compatibility.
+       */
       price: displayPrice,
-      unit_label: "Per Person",
+
+      unit_label: isSlab
+        ? "Total"
+        : "Per Person",
+
       is_active: active,
-      slab_pricing_type: (isSlab ? "slab" : "per_person") as ActivitySlabPricing,
-      pricing_slabs: isSlab ? sorted : [],
+
+      /*
+       * IMPORTANT:
+       * Slab is represented as TOTAL pricing.
+       * Do NOT save "slab" here.
+       */
+      slab_pricing_type: (isSlab
+        ? "total"
+        : "per_person") as ActivitySlabPricing,
+
+      /*
+       * Slab prices are total amounts.
+       */
+      pricing_slabs: isSlab
+        ? sorted
+        : [],
     };
-    const destName = db.get().destination_cities.find((d) => d.id === destId)?.name ?? "";
+
+    const destName =
+      db
+        .get()
+        .destination_cities.find(
+          (d) => d.id === destId
+        )?.name ?? "";
+
     if (editing) {
-      db.updateActivity(editing.id, payload);
+      db.updateActivity(
+        editing.id,
+        payload
+      );
+
       toast.success("Activity updated.");
-      notify.info("Activity Updated", `${name.trim()} updated.`);
+
+      notify.info(
+        "Activity Updated",
+        `${name.trim()} updated.`
+      );
     } else {
       db.addActivity(payload);
+
       toast.success("Activity added.");
-      notify.success("Activity Added", `${name.trim()}${destName ? ` in ${destName}` : ""} has been added.`);
+
+      notify.success(
+        "Activity Added",
+        `${name.trim()}${
+          destName
+            ? ` in ${destName}`
+            : ""
+        } has been added.`
+      );
     }
+
     onOpenChange(false);
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+    >
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{editing ? "Edit Activity" : "Add Activity"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>
+            {editing
+              ? "Edit Activity"
+              : "Add Activity"}
+          </DialogTitle>
+        </DialogHeader>
+
         <div className="space-y-4">
+          {/* ACTIVITY NAME */}
           <div>
             <Label>Activity Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Jungle Safari" />
+
+            <Input
+              value={name}
+              onChange={(e) =>
+                setName(e.target.value)
+              }
+              placeholder="e.g. Jungle Safari"
+            />
           </div>
+
+          {/* DESCRIPTION */}
           <div>
             <Label>Description</Label>
-            <Textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} />
+
+            <Textarea
+              value={desc}
+              onChange={(e) =>
+                setDesc(e.target.value)
+              }
+              rows={2}
+              placeholder="Enter activity description"
+            />
           </div>
+
+          {/* PRICING TYPE */}
           <div>
             <Label>Pricing Type</Label>
-            <Select value={isSlab ? "slab" : "per_person"} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+
+            <Select
+              value={pricingType}
+              onValueChange={(v) =>
+                setPricingType(
+                  v as
+                    | "per_person"
+                    | "slab"
+                )
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+
               <SelectContent>
-                <SelectItem value="per_person">Per Person</SelectItem>
-                <SelectItem value="slab">Slab (Range)</SelectItem>
+                <SelectItem value="per_person">
+                  Per Person
+                </SelectItem>
+
+                <SelectItem value="slab">
+                  Slab (Range)
+                </SelectItem>
               </SelectContent>
             </Select>
+
             <p className="text-[11px] text-muted-foreground mt-1">
               {isSlab
-                ? "Price per person for each pax range. The slab matching total pax is multiplied by pax count."
-                : "One flat price per person × actual pax. No slabs."}
+                ? "Enter one total amount for each pax range. This amount will NOT be multiplied by pax."
+                : "Enter the amount charged for one person. This amount can be multiplied by pax."}
             </p>
           </div>
 
+          {/* PER PERSON */}
           {!isSlab ? (
             <div>
-              <Label>Price Per Person (₹)</Label>
-              <Input type="number" min={0} value={flatPrice}
-                onChange={(e) => setFlatPrice(+e.target.value || 0)} />
+              <Label>
+                Price Per Person (₹)
+              </Label>
+
+              <Input
+                type="number"
+                min={0}
+                value={flatPrice}
+                onChange={(e) =>
+                  setFlatPrice(
+                    Math.max(
+                      0,
+                      Number(
+                        e.target.value
+                      ) || 0
+                    )
+                  )
+                }
+                placeholder="e.g. 1500"
+              />
             </div>
           ) : (
-          <div className="border rounded-md p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="font-medium text-sm">Pricing Slabs</div>
-              <Button size="sm" variant="outline" onClick={addSlab}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {slabs.map((s, i) => (
-                <div key={s.id} className="grid grid-cols-[auto,1fr,1fr,1fr,auto] gap-2 items-end">
-                  <div className="text-xs text-muted-foreground pb-2 w-14">Slab {i + 1}</div>
-                  <div>
-                    <Label className="text-[11px]">From Pax</Label>
-                    <Input type="number" min={1} value={s.from_pax}
-                      onChange={(e) => updateSlab(s.id, { from_pax: +e.target.value || 1 })} />
-                  </div>
-                  <div>
-                    <Label className="text-[11px]">To Pax</Label>
-                    <Input type="number" min={1} value={s.to_pax}
-                      onChange={(e) => updateSlab(s.id, { to_pax: +e.target.value || 1 })} />
-                  </div>
-                  <div>
-                    <Label className="text-[11px]">Price Per Person (₹)</Label>
-                    <Input type="number" min={0} value={s.price}
-                      onChange={(e) => updateSlab(s.id, { price: +e.target.value || 0 })} />
+            /* SLAB */
+            <div className="border rounded-md p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-sm">
+                    Pricing Slabs
                   </div>
 
-                  <Button variant="ghost" size="icon"
-                    onClick={() => removeSlab(s.id)}
-                    disabled={slabs.length <= 1}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    Slab amount is the TOTAL amount for that pax range.
+                  </div>
                 </div>
-              ))}
+
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={addSlab}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add Slab
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {slabs.map((s, i) => (
+                  <div
+                    key={s.id}
+                    className="grid grid-cols-[auto,1fr,1fr,1.2fr,auto] gap-2 items-end"
+                  >
+                    <div className="text-xs text-muted-foreground pb-2 w-14">
+                      Slab {i + 1}
+                    </div>
+
+                    {/* FROM PAX */}
+                    <div>
+                      <Label className="text-[11px]">
+                        From Pax
+                      </Label>
+
+                      <Input
+                        type="number"
+                        min={1}
+                        value={s.from_pax}
+                        onChange={(e) =>
+                          updateSlab(
+                            s.id,
+                            {
+                              from_pax:
+                                Math.max(
+                                  1,
+                                  Number(
+                                    e.target.value
+                                  ) || 1
+                                ),
+                            }
+                          )
+                        }
+                      />
+                    </div>
+
+                    {/* TO PAX */}
+                    <div>
+                      <Label className="text-[11px]">
+                        To Pax
+                      </Label>
+
+                      <Input
+                        type="number"
+                        min={1}
+                        value={s.to_pax}
+                        onChange={(e) =>
+                          updateSlab(
+                            s.id,
+                            {
+                              to_pax:
+                                Math.max(
+                                  1,
+                                  Number(
+                                    e.target.value
+                                  ) || 1
+                                ),
+                            }
+                          )
+                        }
+                      />
+                    </div>
+
+                    {/* TOTAL AMOUNT */}
+                    <div>
+                      <Label className="text-[11px]">
+                        Total Amount (₹)
+                      </Label>
+
+                      <Input
+                        type="number"
+                        min={0}
+                        value={s.price}
+                        onChange={(e) =>
+                          updateSlab(
+                            s.id,
+                            {
+                              price:
+                                Math.max(
+                                  0,
+                                  Number(
+                                    e.target.value
+                                  ) || 0
+                                ),
+                            }
+                          )
+                        }
+                        placeholder="e.g. 1500"
+                      />
+                    </div>
+
+                    {/* DELETE */}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        removeSlab(s.id)
+                      }
+                      disabled={
+                        slabs.length <= 1
+                      }
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                Example: 1–5 Pax = ₹1,500 total,
+                6–14 Pax = ₹2,000 total,
+                15–50 Pax = ₹2,500 total.
+              </p>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Ranges cannot overlap. Example: 1–5, 6–20, 21–50.
-            </p>
-          </div>
           )}
 
-
+          {/* ACTIVE */}
           <label className="flex items-center gap-2 text-sm">
-            <Switch checked={active} onCheckedChange={setActive} /> Active
+            <Switch
+              checked={active}
+              onCheckedChange={setActive}
+            />
+
+            Active
           </label>
         </div>
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save}>Save</Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              onOpenChange(false)
+            }
+          >
+            Cancel
+          </Button>
+
+          <Button onClick={save}>
+            Save
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
