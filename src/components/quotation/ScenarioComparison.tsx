@@ -13,6 +13,7 @@ import { computeScenario, type ScenarioResult } from "@/lib/wizard/scenario";
 import { transportLineTotal } from "@/lib/wizard/calc";
 import type { QuoteDraft, CostScenario, OptionKey } from "@/lib/wizard/types";
 import { uid } from "./shared";
+import { ScenarioRateSheet } from "./CostingSheet";
 
 export function ScenarioComparison({
   draft, set,
@@ -131,6 +132,13 @@ export function ScenarioComparison({
                     </div>
                   )}
                   <ScenarioBreakdown res={res} markup={draft.markup_percent} />
+                  <div className="overflow-x-auto">
+                    <ScenarioRateSheet
+                      draft={draft}
+                      optionKey={s.option_key}
+                      transportLineId={s.transport_line_id}
+                    />
+                  </div>
                 </>
               )}
             </Card>

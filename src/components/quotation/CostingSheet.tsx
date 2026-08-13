@@ -877,6 +877,33 @@ function HotelMarkupRows({
   );
 }
 
+/** Detailed Rate Sheet for one scenario (hotel option + optional single vehicle). */
+export function ScenarioRateSheet({
+  draft, optionKey, transportLineId,
+}: { draft: QuoteDraft; optionKey: string; transportLineId?: string }) {
+  const d = useDB();
+  const opt = (draft.hotel_options ?? []).find((o) => o.key === optionKey);
+  const transport = transportLineId
+    ? (draft.transport ?? []).filter((t) => t.id === transportLineId)
+    : (draft.transport ?? []);
+  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  const groups = useMemo<RateSheetGroup[]>(
+    () => (opt ? buildRateSheet(draft, d, opt, transport) : []),
+    [draft, d, opt, transportLineId],
+  );
+  if (!opt) return null;
+  const pax = Math.max(1, effectivePaxForPricing(draft));
+  return (
+    <RateSheetBlock
+      groups={groups}
+      land={land}
+      pax={pax}
+      landPct={{ mk: landMarkup(draft) * 100, gst: landGst(draft) * 100 }}
+      hotelPct={{ mk: hotelsMarkup(draft) * 100, gst: hotelsGst(draft) * 100 }}
+    />
+  );
+}
+
 function RateSheetBlock({
   groups, land, pax, landPct, hotelPct,
 }: {
