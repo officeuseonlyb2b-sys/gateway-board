@@ -307,21 +307,27 @@ function ActDialog({
           </div>
           <div>
             <Label>Pricing Type</Label>
-            <Select value={pricingType} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
+            <Select value={isSlab ? "slab" : "per_person"} onValueChange={(v) => setPricingType(v as ActivitySlabPricing)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="per_person">Per Person</SelectItem>
-                <SelectItem value="total">Slab (Total)</SelectItem>
+                <SelectItem value="slab">Slab (Range)</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground mt-1">
-              {pricingType === "per_person"
-                ? "Price per person × actual pax. Slab determines the per-person rate."
-                : "Fixed TOTAL for the whole group in the matching pax slab."}
+              {isSlab
+                ? "Price per person for each pax range. The slab matching total pax is multiplied by pax count."
+                : "One flat price per person × actual pax. No slabs."}
             </p>
           </div>
 
-
+          {!isSlab ? (
+            <div>
+              <Label>Price Per Person (₹)</Label>
+              <Input type="number" min={0} value={flatPrice}
+                onChange={(e) => setFlatPrice(+e.target.value || 0)} />
+            </div>
+          ) : (
           <div className="border rounded-md p-3 space-y-3">
             <div className="flex items-center justify-between">
               <div className="font-medium text-sm">Pricing Slabs</div>
@@ -344,7 +350,7 @@ function ActDialog({
                       onChange={(e) => updateSlab(s.id, { to_pax: +e.target.value || 1 })} />
                   </div>
                   <div>
-                    <Label className="text-[11px]">{pricingType === "per_person" ? "Price Per Person (₹)" : "Total Price (₹)"}</Label>
+                    <Label className="text-[11px]">Price Per Person (₹)</Label>
                     <Input type="number" min={0} value={s.price}
                       onChange={(e) => updateSlab(s.id, { price: +e.target.value || 0 })} />
                   </div>
@@ -361,6 +367,8 @@ function ActDialog({
               Ranges cannot overlap. Example: 1–5, 6–20, 21–50.
             </p>
           </div>
+          )}
+
 
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={active} onCheckedChange={setActive} /> Active
