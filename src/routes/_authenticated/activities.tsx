@@ -267,17 +267,17 @@ function ActDialog({
     const err = validate();
     if (err) return toast.error(err);
     const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
-    const displayPrice = sorted[0]?.price ?? 0;
+    const displayPrice = isSlab ? (sorted[0]?.price ?? 0) : flatPrice;
     const payload = {
       destination_id: destId,
       activity_name: name.trim(),
       description: desc,
-      pricing_type: pricingType === "per_person" ? ("per_person" as const) : ("total_fixed" as const),
+      pricing_type: "per_person" as const,
       price: displayPrice,
-      unit_label: pricingType === "per_person" ? "Per Person" : "Total",
+      unit_label: "Per Person",
       is_active: active,
-      slab_pricing_type: pricingType,
-      pricing_slabs: sorted,
+      slab_pricing_type: (isSlab ? "slab" : "per_person") as ActivitySlabPricing,
+      pricing_slabs: isSlab ? sorted : [],
     };
     const destName = db.get().destination_cities.find((d) => d.id === destId)?.name ?? "";
     if (editing) {
