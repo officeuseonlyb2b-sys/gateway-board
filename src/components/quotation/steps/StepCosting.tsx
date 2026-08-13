@@ -1,18 +1,14 @@
 // Extracted verbatim from src/routes/_authenticated/costing.tsx (Step 16 UI — Costing).
 import { useMemo } from "react";
-import { AlertCircle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import {
   computeOption, transportLineTotal, optionUsesCustomAllocation,
   type OptionTotals,
 } from "@/lib/wizard/calc";
-import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
+import type { OptionKey } from "@/lib/wizard/types";
 import { OptionPerPersonPreview } from "./StepHotels";
 import { PerPersonSummaryBlock } from "./StepFinal";
 import { ScenarioComparison } from "../ScenarioComparison";
