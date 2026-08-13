@@ -168,16 +168,16 @@ function MiscDialog({
 
   function save() {
     if (!name.trim()) return toast.error("Item name is required.");
-    const unit: MiscUnit = type === "per_person" ? "per_person" : "fixed";
-    const firstRate = ranges[0]?.price ?? rate;
+    const isSlab = type === "slab";
+    const unit: MiscUnit = isSlab ? "fixed" : "per_person";
     const payload = {
       name: name.trim(),
       description,
-      rate: firstRate,
+      rate: isSlab ? (ranges[0]?.price ?? 0) : rate,
       unit,
-      pricing_type: type,
-      price_ranges: ranges,
-      slab_is_per_person: type === "per_person",
+      pricing_type: (isSlab ? "slab" : "per_person") as MiscPricingType,
+      price_ranges: isSlab ? ranges : [],
+      slab_is_per_person: false,
       is_active: active,
     };
 
