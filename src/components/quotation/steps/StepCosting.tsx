@@ -85,9 +85,7 @@ export function Step16({ draft, set }: StepProps) {
         <OptionPerPersonPreview key={`alloc-${o.key}`} draft={draft} option={o} />
       ))}
 
-      {isGroupTour(draft) ? (
-        <GroupCostingBlock draft={draft} set={set} options={includedOptions} />
-      ) : totals.length === 0 ? (
+      {totals.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Select at least one option above to see the comparison.</Card>
       ) : (
 
