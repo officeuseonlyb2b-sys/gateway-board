@@ -225,31 +225,13 @@ function MiscDialog({
             </p>
           </div>
 
-          {type === "per_person" ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Per-Person Slabs</Label>
-                <Button size="sm" variant="outline" onClick={addRange}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Slab
-                </Button>
-              </div>
-              <div className="border rounded-md divide-y">
-                <div className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/50 text-[10px] uppercase text-muted-foreground">
-                  <div>From Pax</div><div>To Pax</div><div>Price Per Person (₹)</div><div></div>
-                </div>
-                {ranges.map((r, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 items-center">
-                    <Input type="number" min={1} value={r.from_pax} onChange={(e) => updateRange(i, { from_pax: +e.target.value || 1 })} className="h-8" />
-                    <Input type="number" min={1} value={r.to_pax} onChange={(e) => updateRange(i, { to_pax: +e.target.value || 1 })} className="h-8" />
-                    <Input type="number" min={0} value={r.price} onChange={(e) => updateRange(i, { price: +e.target.value || 0 })} className="h-8" />
-                    <Button size="icon" variant="ghost" onClick={() => removeRange(i)}>
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Wizard applies the slab that matches total pax, then multiplies by pax count.
+          {type !== "slab" ? (
+            <div>
+              <Label>Price Per Person (₹)</Label>
+              <Input type="number" min={0} value={rate}
+                onChange={(e) => setRate(+e.target.value || 0)} />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                One flat price per person × actual pax. No slabs.
               </p>
             </div>
           ) : (
