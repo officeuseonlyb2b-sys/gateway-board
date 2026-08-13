@@ -177,7 +177,7 @@ function MiscDialog({
       unit,
       pricing_type: (isSlab ? "slab" : "per_person") as MiscPricingType,
       price_ranges: isSlab ? ranges : [],
-      slab_is_per_person: false,
+      slab_is_per_person: isSlab,
       is_active: active,
     };
 
