@@ -834,7 +834,7 @@ function HotelMealBlock({
               <td className="p-1.5" colSpan={4} />
             </tr>
           )}
-          <HotelMarkupRows totals={totals} pct={pct} pax={pax} />
+          <HotelMarkupRows totals={totals} pct={pct} pax={pax} showQuad={showQuad} />
 
         </tfoot>
       </table>
@@ -843,9 +843,11 @@ function HotelMealBlock({
 }
 
 function HotelMarkupRows({
-  totals, pct, pax,
-}: { totals: { sglTotal: number; dblTotal: number; trpTotal: number; quadTotal: number; lunchTotal: number; dinnerTotal: number }; pct: { mk: number; gst: number }; pax: number }) {
-  const cells = [totals.sglTotal, totals.dblTotal, totals.trpTotal, totals.quadTotal];
+  totals, pct, pax, showQuad,
+}: { totals: { sglTotal: number; dblTotal: number; trpTotal: number; quadTotal: number; lunchTotal: number; dinnerTotal: number }; pct: { mk: number; gst: number }; pax: number; showQuad: boolean }) {
+  const cells = showQuad
+    ? [totals.sglTotal, totals.dblTotal, totals.trpTotal, totals.quadTotal]
+    : [totals.sglTotal, totals.dblTotal, totals.trpTotal];
   const shares = [1, 2, 3, 4];
 
   // UPDATED: GST is now applied on the (Total + Markup), NOT on the markup alone!
