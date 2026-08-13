@@ -207,19 +207,22 @@ function ActDialog({
 }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  // Two clean modes: "per_person" (flat price × pax) and "slab" (pax-range table).
   const [pricingType, setPricingType] = useState<ActivitySlabPricing>("per_person");
+  const [flatPrice, setFlatPrice] = useState(0);
   const [slabs, setSlabs] = useState<ActivitySlab[]>([]);
   const [active, setActive] = useState(true);
+  const isSlab = pricingType !== "per_person";
 
   useEffect(() => {
     if (!open) return;
     setName(editing?.activity_name ?? "");
     setDesc(editing?.description ?? "");
-    setPricingType(editing?.slab_pricing_type ?? "per_person");
+    const hadSlabs = !!(editing?.pricing_slabs && editing.pricing_slabs.length > 0);
+    setPricingType(hadSlabs ? "slab" : "per_person");
+    setFlatPrice(editing && !hadSlabs ? editing.price ?? 0 : 0);
     setSlabs(
-      editing?.pricing_slabs && editing.pricing_slabs.length > 0
-        ? editing.pricing_slabs.map((s) => ({ ...s }))
-        : [newSlab()],
+      hadSlabs ? editing!.pricing_slabs!.map((s) => ({ ...s })) : [newSlab()],
     );
     setActive(editing?.is_active ?? true);
   }, [open, editing]);
