@@ -243,6 +243,10 @@ function ActDialog({
 
   function validate(): string | null {
     if (!name.trim()) return "Activity name is required.";
+    if (!isSlab) {
+      if (flatPrice < 0) return "Price per person cannot be negative.";
+      return null;
+    }
     if (slabs.length === 0) return "At least one pricing slab is required.";
     for (const s of slabs) {
       if (s.from_pax < 1) return "From Pax must be at least 1.";
