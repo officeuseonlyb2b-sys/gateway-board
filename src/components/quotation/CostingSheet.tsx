@@ -1330,8 +1330,17 @@ function FragmentGroup({
         const packageTriple = commonLandPerPerson + r.triple;
         const packageQuad = commonLandPerPerson + r.quad;
 
+        const rowPicked = picked.includes(r.pax);
         return (
-          <tr key={`${g.vehicle}-${r.pax}`} className="border-t">
+          <tr
+            key={`${g.vehicle}-${r.pax}`}
+            className={`border-t ${showPick && !rowPicked ? "opacity-60" : ""}`}
+          >
+            {showPick && (
+              <td className="p-1.5">
+                <Checkbox checked={rowPicked} onCheckedChange={() => onToggleRow?.(r.pax)} />
+              </td>
+            )}
             <td className="p-1.5">{r.pax}</td>
             <td className="p-1.5">{r.vehicle}</td>
             <td className={td}>{inr(r.transport)}</td>
