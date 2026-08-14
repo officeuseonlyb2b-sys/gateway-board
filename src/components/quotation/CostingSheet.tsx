@@ -160,7 +160,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
       {options.map((o) => (
         <TabsContent key={o.key} value={o.key} className="space-y-4 mt-3">
           <Variation
-            draft={draft} d={d} opt={o} land={land}
+            draft={draft} set={set} d={d} opt={o} land={land}
             toggle={toggle} toggleCat={toggleCat} toggleGuideLangGlobal={toggleGuideLangGlobal}
           />
         </TabsContent>
@@ -179,8 +179,11 @@ interface Handlers {
 }
 
 function Variation({
-  draft, d, opt, land, toggle, toggleCat, toggleGuideLangGlobal,
-}: { draft: QuoteDraft; d: ReturnType<typeof useDB>; opt: HotelOption; land: LandPartSheet } & Handlers) {
+  draft, set, d, opt, land, toggle, toggleCat, toggleGuideLangGlobal,
+}: {
+  draft: QuoteDraft; set?: SetDraft; d: ReturnType<typeof useDB>;
+  opt: HotelOption; land: LandPartSheet;
+} & Handlers) {
   const hotels = useMemo<HotelMealSheet>(() => buildHotelMealSheet(draft, d, opt), [draft, d, opt]);
   const sheets = useMemo<RateSheetGroup[]>(
     () => buildRateSheet(draft, d, opt, draft.transport ?? []),
@@ -208,6 +211,9 @@ function Variation({
         landPct={landPct}
         hotelPct={hotelPct}
         db={d}
+        draft={draft}
+        set={set}
+        optionKey={opt.key}
       />
     </div>
   );
