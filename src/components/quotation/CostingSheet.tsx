@@ -113,19 +113,32 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
     const sel: CostingSelection = { ...(draft.costing_selection ?? {}) };
     const map: Record<number, string[]> = { ...(sel.guide ?? {}) };
 
+    // If this language is already applied everywhere, the click DESELECTS it
+    // — "no guide language selected" is a valid state (no guide cost).
+    const rowsWithGuides = land.rows.filter((r) => r.guide_opts.length > 0);
+    const alreadyAll = rowsWithGuides.length > 0 && rowsWithGuides.every((row) =>
+      row.guide_opts
+        .filter((o) => o.id.endsWith(`::${lang}`))
+        .every((o) => o.checked)
+      && row.guide_opts.some((o) => o.id.endsWith(`::${lang}`)),
+    );
+
     land.rows.forEach((row) => {
       const prefixes = Array.from(
         new Set(row.guide_opts.map((o) => o.id.split("::")[0])),
       );
       if (prefixes.length === 0) return;
 
-      const current = map[row.day] ?? [];
+      const current = map[row.day]
+        ?? row.guide_opts.filter((o) => o.checked).map((o) => o.id);
       // Drop every existing selection for each line-item on this day, then
-      // select only the requested language for each one.
+      // select only the requested language for each one (unless deselecting).
       const withoutLines = current.filter(
         (x) => !prefixes.some((p) => x.startsWith(`${p}::`)),
       );
-      map[row.day] = [...withoutLines, ...prefixes.map((p) => `${p}::${lang}`)];
+      map[row.day] = alreadyAll
+        ? withoutLines
+        : [...withoutLines, ...prefixes.map((p) => `${p}::${lang}`)];
     });
 
     (sel as Record<string, unknown>)["guide"] = map;
