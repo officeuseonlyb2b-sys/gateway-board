@@ -47,6 +47,20 @@ export function CostingSheet({
   const options = draft.hotel_options ?? [];
   const [tab, setTab] = useState<string>(options[0]?.key ?? "A");
 
+  /*
+   * IMPORTANT:
+   *
+   * Activity & Experiences are normalized here as TOTAL activity amounts.
+   *
+   * Example:
+   * Batik Art = 10000
+   * VIP Darshan = 2800
+   * Boat Ride = 3000
+   *
+   * Activity Total = 15800
+   *
+   * This total must NEVER be multiplied by pax.
+   */
   const pricingPax = Math.max(1, effectivePaxForPricing(draft));
 
   const land = useMemo<LandPartSheet>(
@@ -166,17 +180,22 @@ export function CostingSheet({
       (r) => r.guide_opts.length > 0,
     );
 
-    const alreadyAll =
-      rowsWithGuides.length > 0 &&
-      rowsWithGuides.every(
-        (row) =>
-          row.guide_opts
-            .filter((o) => o.id.endsWith(`::${lang}`))
-            .every((o) => o.checked) &&
-          row.guide_opts.some((o) => o.id.endsWith(`::${lang}`)),
-      );
+    // 检查是否所有行的所有导游前缀都已选中了该语言
+    let allSelected = true;
+    for (const row of rowsWithGuides) {
+      const prefixes = Array.from(new Set(row.guide_opts.map((o) => o.id.split("::")[0])));
+      const current = map[row.day] ?? row.guide_opts.filter((o) => o.checked).map((o) => o.id);
+      const rowHasAll = prefixes.every((p) => current.includes(`${p}::${lang}`));
+      if (!rowHasAll) {
+        allSelected = false;
+        break;
+      }
+    }
 
-    land.rows.forEach((row) => {
+    // 如果已经全选了，则本次操作是取消全选；否则是全选
+    const shouldSelect = !allSelected;
+
+    rowsWithGuides.forEach((row) => {
       const prefixes = Array.from(
         new Set(
           row.guide_opts.map(
@@ -200,14 +219,16 @@ export function CostingSheet({
           ),
       );
 
-      map[row.day] = alreadyAll
-        ? withoutLines
-        : [
-            ...withoutLines,
-            ...prefixes.map(
-              (p) => `${p}::${lang}`,
-            ),
-          ];
+      if (shouldSelect) {
+        map[row.day] = [
+          ...withoutLines,
+          ...prefixes.map(
+            (p) => `${p}::${lang}`,
+          ),
+        ];
+      } else {
+        map[row.day] = withoutLines;
+      }
     });
 
     (sel as Record<string, unknown>)["guide"] = map;
@@ -699,6 +720,10 @@ function normalizeActivityPricing(
               );
 
             if (!activity) {
+              /*
+               * Existing option amount is already
+               * considered a total amount.
+               */
               return {
                 ...opt,
                 sub:
@@ -713,6 +738,13 @@ function normalizeActivityPricing(
               activity.pricing_slabs ??
               [];
 
+            /*
+             * If pricing slabs exist, select the
+             * correct slab for pax.
+             *
+             * IMPORTANT:
+             * The selected slab price is a TOTAL.
+             */
             if (slabs.length > 0) {
               const slab =
                 pickActivitySlab(
@@ -729,6 +761,12 @@ function normalizeActivityPricing(
               };
             }
 
+            /*
+             * No slabs:
+             *
+             * Activity price is also treated as
+             * the TOTAL amount for this costing.
+             */
             return {
               ...opt,
               amount:
@@ -754,6 +792,15 @@ function normalizeActivityPricing(
     },
   );
 
+  /*
+   * CRITICAL:
+   *
+   * Activity total =
+   * sum of selected activity amounts.
+   *
+   * NEVER:
+   * activity amount × pax
+   */
   const activities_total =
     rows.reduce(
       (sum, row) =>
@@ -825,6 +872,13 @@ function OptionCell({
     <td className="p-1.5 align-top">
       <div className="space-y-1">
         {opts.map((o) => {
+          /*
+           * ACTIVITY:
+           * Always show the TOTAL amount.
+           *
+           * Entrances/Misc:
+           * Keep existing per-person behavior.
+           */
           const displayAmount =
             bucket === "activities"
               ? getActivityDisplayAmount(o)
@@ -1325,11 +1379,9 @@ function LandPartBlock({
                                 )}
                               </span>
 
+                              {/* ✅ 已修改：此处不再除以 pax，直接展示当天总价 */}
                               <span className="tabular-nums font-medium">
-                                {inr(
-                                  o.amount /
-                                    pax,
-                                )}
+                                {inr(o.amount)}
                               </span>
                             </div>
                           ),
@@ -1444,8 +1496,8 @@ function LandPartBlock({
 
         <tfoot>
           {(() => {
-            // ===== FIXED: Vehicle total = sum of each selected vehicle only once =====
-            // 1. Get all unique vehicle labels from all rows.
+            // ---------- FIXED VEHICLE TOTAL CALCULATION ----------
+            // 1. Collect all unique vehicle labels from all rows.
             const allVehicleLabels = Array.from(
               new Set(
                 land.rows.flatMap(row =>
@@ -1454,18 +1506,15 @@ function LandPartBlock({
               )
             );
 
-            // 2. For each label, check if it is selected on any day.
-            //    If yes, take its amount (once) as the total cost.
-            const vehicleTotals = allVehicleLabels.map(label => {
-              // Find if any row has this label checked
-              const anyChecked = land.rows.some(row =>
-                row.transport_opts.some(o => o.label === label && o.checked)
-              );
-              if (!anyChecked) return 0;
-              // Get the amount from the first occurrence (all occurrences should have same amount)
-              const firstOpt = land.rows.flatMap(row => row.transport_opts).find(o => o.label === label);
-              return firstOpt ? firstOpt.amount : 0;
-            });
+            // 2. For each label, sum only the checked amounts across all days.
+            const vehicleTotals = allVehicleLabels.map(label =>
+              land.rows.reduce((sum, row) => {
+                const opt = row.transport_opts.find(
+                  o => o.label === label && o.checked
+                );
+                return sum + (opt ? opt.amount : 0);
+              }, 0)
+            );
 
             // 3. Compute markup, GST, and per‑person for each vehicle.
             const vehicleMarkup = vehicleTotals.map(total =>
@@ -1480,18 +1529,11 @@ function LandPartBlock({
               (total + vehicleMarkup[i] + vehicleGst[i]) / pax
             );
 
-            /*
-             * ACTIVITY ONLY:
-             *
-             * Use rounded per‑person calculation.
-             */
-            const activityCalc =
-              applyActivityMarkupAndGst(
-                land.activities_total,
-                pct.mk,
-                pct.gst,
-                pax,
-              );
+            // ===== FIXED: Activity total markup and GST on total, not per-person =====
+            const activityMarkupTotal = land.activities_total * (pct.mk / 100);
+            const activityGstTotal = (land.activities_total + activityMarkupTotal) * (pct.gst / 100);
+            const activityTotalFinal = land.activities_total + activityMarkupTotal + activityGstTotal;
+            const activityPerPerson = activityTotalFinal / pax;
 
             const renderVehicleCells =
               (values: number[], empty = false) => (
@@ -1597,12 +1639,12 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ACTIVITY MARKUP */}
+                  {/* ACTIVITY MARKUP TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      activityCalc.markup,
+                      activityMarkupTotal,
                     )}
                   </td>
 
@@ -1657,12 +1699,12 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ACTIVITY GST */}
+                  {/* ACTIVITY GST TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      activityCalc.gstAmt,
+                      activityGstTotal,
                     )}
                   </td>
 
@@ -1729,7 +1771,7 @@ function LandPartBlock({
                     className={`${td} font-bold`}
                   >
                     {inr(
-                      activityCalc.finalPerPerson,
+                      activityPerPerson,
                     )}
                   </td>
 
@@ -3059,6 +3101,10 @@ function RateSheetBlock({
         pax,
       ).per_person,
 
+    /*
+     * Activity is calculated dynamically
+     * for each pax row below.
+     */
     activities:
       applyActivityMarkupAndGst(
         land.activities_total,
@@ -3396,6 +3442,14 @@ function getActivitiesPerPersonForPax(
                   },
                 );
 
+              /*
+               * IMPORTANT:
+               *
+               * Activity amount is already
+               * a GROUP TOTAL.
+               *
+               * Do NOT multiply by pax.
+               */
               if (
                 activity?.pricing_slabs
                   ?.length
@@ -3513,6 +3567,12 @@ function FragmentGroup({
       </tr>
 
       {g.rows.map((r) => {
+        /*
+         * ACTIVITY:
+         *
+         * Calculate using the exact pax of this
+         * Rate Sheet row.
+         */
         const activitiesPerPerson =
           getActivitiesPerPersonForPax(
             land,
@@ -3607,6 +3667,7 @@ function FragmentGroup({
               )}
             </td>
 
+            {/* ACTIVITY FINAL PER PERSON */}
             <td
               className={`${td} font-semibold`}
             >
