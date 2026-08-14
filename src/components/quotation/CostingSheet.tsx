@@ -257,7 +257,17 @@ function MarkupRows({
  */
 function isSlabOption(opt: SheetOption): boolean {
   const text = `${opt.sub || ""} ${opt.label || ""}`.toLowerCase();
+  if (/\/person\b|per[_\s]person/.test(text)) return false;
   return /\bslab\b|\btotal\b|\/total\b/.test(text);
+}
+
+/** Same slab matching as miscRateForPax — match, else clamp to nearest slab. */
+function pickActivitySlab<T extends { from_pax: number; to_pax: number; price: number }>(
+  slabs: T[], pax: number,
+): T {
+  const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
+  return sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+    ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
 }
 
 function getPerPersonAmount(opt: SheetOption, pax: number): number {
