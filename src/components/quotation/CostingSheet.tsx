@@ -113,19 +113,32 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
     const sel: CostingSelection = { ...(draft.costing_selection ?? {}) };
     const map: Record<number, string[]> = { ...(sel.guide ?? {}) };
 
+    // If this language is already applied everywhere, the click DESELECTS it
+    // — "no guide language selected" is a valid state (no guide cost).
+    const rowsWithGuides = land.rows.filter((r) => r.guide_opts.length > 0);
+    const alreadyAll = rowsWithGuides.length > 0 && rowsWithGuides.every((row) =>
+      row.guide_opts
+        .filter((o) => o.id.endsWith(`::${lang}`))
+        .every((o) => o.checked)
+      && row.guide_opts.some((o) => o.id.endsWith(`::${lang}`)),
+    );
+
     land.rows.forEach((row) => {
       const prefixes = Array.from(
         new Set(row.guide_opts.map((o) => o.id.split("::")[0])),
       );
       if (prefixes.length === 0) return;
 
-      const current = map[row.day] ?? [];
+      const current = map[row.day]
+        ?? row.guide_opts.filter((o) => o.checked).map((o) => o.id);
       // Drop every existing selection for each line-item on this day, then
-      // select only the requested language for each one.
+      // select only the requested language for each one (unless deselecting).
       const withoutLines = current.filter(
         (x) => !prefixes.some((p) => x.startsWith(`${p}::`)),
       );
-      map[row.day] = [...withoutLines, ...prefixes.map((p) => `${p}::${lang}`)];
+      map[row.day] = alreadyAll
+        ? withoutLines
+        : [...withoutLines, ...prefixes.map((p) => `${p}::${lang}`)];
     });
 
     (sel as Record<string, unknown>)["guide"] = map;
@@ -147,7 +160,7 @@ export function CostingSheet({ draft, set }: { draft: QuoteDraft; set?: SetDraft
       {options.map((o) => (
         <TabsContent key={o.key} value={o.key} className="space-y-4 mt-3">
           <Variation
-            draft={draft} d={d} opt={o} land={land}
+            draft={draft} set={set} d={d} opt={o} land={land}
             toggle={toggle} toggleCat={toggleCat} toggleGuideLangGlobal={toggleGuideLangGlobal}
           />
         </TabsContent>
@@ -166,8 +179,11 @@ interface Handlers {
 }
 
 function Variation({
-  draft, d, opt, land, toggle, toggleCat, toggleGuideLangGlobal,
-}: { draft: QuoteDraft; d: ReturnType<typeof useDB>; opt: HotelOption; land: LandPartSheet } & Handlers) {
+  draft, set, d, opt, land, toggle, toggleCat, toggleGuideLangGlobal,
+}: {
+  draft: QuoteDraft; set?: SetDraft; d: ReturnType<typeof useDB>;
+  opt: HotelOption; land: LandPartSheet;
+} & Handlers) {
   const hotels = useMemo<HotelMealSheet>(() => buildHotelMealSheet(draft, d, opt), [draft, d, opt]);
   const sheets = useMemo<RateSheetGroup[]>(
     () => buildRateSheet(draft, d, opt, draft.transport ?? []),
@@ -195,6 +211,9 @@ function Variation({
         landPct={landPct}
         hotelPct={hotelPct}
         db={d}
+        draft={draft}
+        set={set}
+        optionKey={opt.key}
       />
     </div>
   );
@@ -257,7 +276,17 @@ function MarkupRows({
  */
 function isSlabOption(opt: SheetOption): boolean {
   const text = `${opt.sub || ""} ${opt.label || ""}`.toLowerCase();
+  if (/\/person\b|per[_\s]person/.test(text)) return false;
   return /\bslab\b|\btotal\b|\/total\b/.test(text);
+}
+
+/** Same slab matching as miscRateForPax — match, else clamp to nearest slab. */
+function pickActivitySlab<T extends { from_pax: number; to_pax: number; price: number }>(
+  slabs: T[], pax: number,
+): T {
+  const sorted = [...slabs].sort((a, b) => a.from_pax - b.from_pax);
+  return sorted.find((s) => pax >= s.from_pax && pax <= s.to_pax)
+    ?? (pax < sorted[0].from_pax ? sorted[0] : sorted[sorted.length - 1]);
 }
 
 function getPerPersonAmount(opt: SheetOption, pax: number): number {
@@ -309,25 +338,24 @@ function normalizeActivitySlabPricing(
 
       const slabs = activity.pricing_slabs ?? [];
 
-      // If slabs exist, the matching slab price is the TOTAL activity amount.
+      // Slab lookup mirrors Miscellaneous exactly: find the matching slab and,
+      // when the pax count falls outside every configured range, clamp to the
+      // nearest slab instead of returning 0 / "No slab for selected pax".
       if (slabs.length > 0) {
-        const slab = [...slabs]
-          .sort((a, b) => a.from_pax - b.from_pax)
-          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
+        const slab = pickActivitySlab(slabs, safePax);
+        const perPersonSlab = activity.slab_pricing_type !== "total";
 
-        if (!slab) {
-          return {
+        return perPersonSlab
+          ? {
             ...opt,
-            amount: 0,
-            sub: "No slab for selected pax",
+            amount: slab.price,
+            sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)}/person`,
+          }
+          : {
+            ...opt,
+            amount: slab.price,
+            sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)} total`,
           };
-        }
-
-        return {
-          ...opt,
-          amount: slab.price,
-          sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)} total`,
-        };
       }
 
       // No slabs: normal activity price is per person.
@@ -1048,8 +1076,61 @@ export function ScenarioRateSheet({
   );
 }
 
+/**
+ * Final Costing view of the Rate Sheet — shows ONLY the pax rows the admin
+ * checked on the Costing step, for every included accommodation option.
+ */
+export function FinalRateSheet({ draft }: { draft: QuoteDraft }) {
+  const d = useDB();
+  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  const pax = Math.max(1, effectivePaxForPricing(draft));
+  const includedKeys = draft.included_option_keys?.length
+    ? draft.included_option_keys
+    : (draft.hotel_options ?? []).map((o) => o.key);
+  const options = (draft.hotel_options ?? []).filter((o) => includedKeys.includes(o.key));
+  if (!options.length) return null;
+  return (
+    <>
+      {options.map((o) => (
+        <FinalRateSheetOption key={o.key} draft={draft} opt={o} land={land} pax={pax} d={d} />
+      ))}
+    </>
+  );
+}
+
+function FinalRateSheetOption({
+  draft, opt, land, pax, d,
+}: {
+  draft: QuoteDraft; opt: HotelOption; land: LandPartSheet;
+  pax: number; d: ReturnType<typeof useDB>;
+}) {
+  const groups = useMemo<RateSheetGroup[]>(
+    () => buildRateSheet(draft, d, opt, draft.transport ?? []),
+    [draft, d, opt],
+  );
+  return (
+    <RateSheetBlock
+      groups={groups}
+      land={land}
+      pax={pax}
+      landPct={{ mk: landMarkup(draft) * 100, gst: landGst(draft) * 100 }}
+      hotelPct={{ mk: hotelsMarkup(draft) * 100, gst: hotelsGst(draft) * 100 }}
+      db={d}
+      draft={draft}
+      optionKey={opt.key}
+      selectedOnly
+      title={`Selected Rate Sheet Rows — ${opt.category || opt.label || `Option ${opt.key}`}`}
+    />
+  );
+}
+
+
+export const rateRowKey = (optionKey: string, g: RateSheetGroup) =>
+  `${optionKey}|${g.line_id ?? g.vehicle}`;
+
 function RateSheetBlock({
   groups, land, pax, landPct, hotelPct, db,
+  draft, set, optionKey, selectedOnly, title,
 }: {
   groups: RateSheetGroup[];
   land: LandPartSheet;
@@ -1057,7 +1138,45 @@ function RateSheetBlock({
   landPct: { mk: number; gst: number };
   hotelPct: { mk: number; gst: number };
   db: ReturnType<typeof useDB>;
+  /** Row-selection wiring (Costing step). Omit for read-only sheets. */
+  draft?: QuoteDraft;
+  set?: SetDraft;
+  optionKey?: string;
+  /** Render only the rows the admin checked (Final Costing). */
+  selectedOnly?: boolean;
+  title?: string;
 }) {
+  const selectable = !!(set && draft && optionKey);
+  const showPick = selectable && !selectedOnly;
+
+  const picksFor = (g: RateSheetGroup): number[] | null => {
+    if (!optionKey || !draft) return null;
+    return draft.rate_sheet_rows?.[rateRowKey(optionKey, g)] ?? null;
+  };
+
+  const writePicks = (g: RateSheetGroup, rows: number[]) => {
+    if (!set || !draft || !optionKey) return;
+    set({
+      rate_sheet_rows: {
+        ...(draft.rate_sheet_rows ?? {}),
+        [rateRowKey(optionKey, g)]: rows,
+      },
+    });
+  };
+
+  const toggleRow = (g: RateSheetGroup, paxRow: number) => {
+    const current = picksFor(g) ?? [];
+    writePicks(g, current.includes(paxRow)
+      ? current.filter((x) => x !== paxRow)
+      : [...current, paxRow].sort((a, b) => a - b));
+  };
+
+  const toggleGroup = (g: RateSheetGroup) => {
+    const current = picksFor(g) ?? [];
+    const all = g.rows.map((r) => r.pax);
+    writePicks(g, current.length === all.length ? [] : all);
+  };
+
   // Entrances, Activities and Misc are LAND-level totals.
   // In the Rate Sheet they must always be shown as the SAME per-person amount
   // for every pax row, after applying Land Markup and GST.
@@ -1068,12 +1187,24 @@ function RateSheetBlock({
     activities: applyMarkupAndGst(land.activities_total, landPct.mk, landPct.gst, pax).per_person,
     misc: applyMarkupAndGst(land.misc_total, landPct.mk, landPct.gst, pax).per_person,
   };
+
+  const visibleGroups = selectedOnly
+    ? groups
+      .map((g) => ({ ...g, rows: g.rows.filter((r) => (picksFor(g) ?? []).includes(r.pax)) }))
+      .filter((g) => g.rows.length > 0)
+    : groups;
+
+  if (selectedOnly && visibleGroups.length === 0) return null;
+
   return (
     <Card className="p-3 space-y-2">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div className="section-label">Rate Sheet (Per Pax / Person)</div>
-          <div className="text-xs text-muted-foreground">Land Part + Accommodation Part</div>
+          <div className="section-label">{title ?? "Rate Sheet (Per Pax / Person)"}</div>
+          <div className="text-xs text-muted-foreground">
+            Land Part + Accommodation Part
+            {showPick && " · tick the pax rows that should carry forward to Final Costing"}
+          </div>
         </div>
         <div className="flex gap-2">
           <Badge variant="secondary" className="text-[10px]">Land: Markup {landPct.mk}% · GST {landPct.gst}%</Badge>
@@ -1084,11 +1215,12 @@ function RateSheetBlock({
         <table className="w-full text-xs">
           <thead className="text-[10px] uppercase text-muted-foreground">
             <tr className="bg-muted/60">
-              <th className={thL} colSpan={8}>Land Part</th>
+              <th className={thL} colSpan={showPick ? 9 : 8}>Land Part</th>
               <th className={th} colSpan={6}>Accommodation Part</th>
               <th className={th} colSpan={5}>Package Cost (Per Person)</th>
             </tr>
             <tr className="bg-muted/40">
+              {showPick && <th className={thL}>Use</th>}
               <th className={thL}>Pax</th>
               <th className={thL}>Vehicle</th>
               <th className={th}>Transport</th>
@@ -1111,7 +1243,7 @@ function RateSheetBlock({
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) => (
+            {visibleGroups.map((g) => (
               <FragmentGroup
                 key={g.line_id ?? g.vehicle}
                 group={g}
@@ -1119,6 +1251,10 @@ function RateSheetBlock({
                 db={db}
                 landPerPerson={landPerPerson}
                 landPct={landPct}
+                showPick={showPick}
+                picked={picksFor(g) ?? []}
+                onToggleRow={(p) => toggleRow(g, p)}
+                onToggleGroup={() => toggleGroup(g)}
               />
             ))}
           </tbody>
@@ -1162,11 +1298,12 @@ function getActivitiesPerPersonForPax(
       });
 
       if (activity?.pricing_slabs?.length) {
-        const slab = [...activity.pricing_slabs]
-          .sort((a, b) => a.from_pax - b.from_pax)
-          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
-
-        return rowSum + (slab?.price ?? 0);
+        const slab = pickActivitySlab(activity.pricing_slabs, safePax);
+        // Slab (Range) price is a group TOTAL; legacy per-person slabs are
+        // a per-head rate and must be multiplied by pax first.
+        return rowSum + (activity.slab_pricing_type === "total"
+          ? slab.price
+          : slab.price * safePax);
       }
 
       // Normal Activity price is per person. Convert it to a group total
@@ -1191,17 +1328,36 @@ function FragmentGroup({
   db,
   landPerPerson,
   landPct,
+  showPick,
+  picked = [],
+  onToggleRow,
+  onToggleGroup,
 }: {
   group: RateSheetGroup;
   land: LandPartSheet;
   db: ReturnType<typeof useDB>;
   landPerPerson: { entrances: number; activities: number; misc: number };
   landPct: { mk: number; gst: number };
+  showPick?: boolean;
+  picked?: number[];
+  onToggleRow?: (pax: number) => void;
+  onToggleGroup?: () => void;
 }) {
+  const allPicked = g.rows.length > 0 && picked.length === g.rows.length;
   return (
     <>
       <tr className="border-t bg-primary/5">
-        <td className="p-1.5 font-semibold" colSpan={19}>{g.vehicle}</td>
+        <td className="p-1.5 font-semibold" colSpan={showPick ? 20 : 19}>
+          <div className="flex items-center gap-2">
+            {showPick && (
+              <label className="flex items-center gap-1 text-[10px] font-normal cursor-pointer">
+                <Checkbox checked={allPicked} onCheckedChange={() => onToggleGroup?.()} />
+                Select all
+              </label>
+            )}
+            <span>{g.vehicle}</span>
+          </div>
+        </td>
       </tr>
       {g.rows.map((r) => {
         // Activity pricing is dynamic by pax. A slab is a TOTAL for its
@@ -1229,8 +1385,17 @@ function FragmentGroup({
         const packageTriple = commonLandPerPerson + r.triple;
         const packageQuad = commonLandPerPerson + r.quad;
 
+        const rowPicked = picked.includes(r.pax);
         return (
-          <tr key={`${g.vehicle}-${r.pax}`} className="border-t">
+          <tr
+            key={`${g.vehicle}-${r.pax}`}
+            className={`border-t ${showPick && !rowPicked ? "opacity-60" : ""}`}
+          >
+            {showPick && (
+              <td className="p-1.5">
+                <Checkbox checked={rowPicked} onCheckedChange={() => onToggleRow?.(r.pax)} />
+              </td>
+            )}
             <td className="p-1.5">{r.pax}</td>
             <td className="p-1.5">{r.vehicle}</td>
             <td className={td}>{inr(r.transport)}</td>

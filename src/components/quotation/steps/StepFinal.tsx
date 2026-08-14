@@ -13,6 +13,7 @@ import {
 } from "@/lib/wizard/calc";
 import type { QuoteDraft, HotelOption, OptionKey } from "@/lib/wizard/types";
 import { computeScenario } from "@/lib/wizard/scenario";
+import { FinalRateSheet } from "../CostingSheet";
 import type { StepProps } from "../shared";
 
 function ScenarioFinalBlock({ draft }: { draft: QuoteDraft }) {
@@ -175,6 +176,8 @@ export function Step17({ draft, set }: StepProps) {
       )}
 
       <ScenarioFinalBlock draft={draft} />
+
+      <FinalRateSheet draft={draft} />
 
 
       {draft.hotel_options.some((o) => optionUsesCustomAllocation(o)) && (
