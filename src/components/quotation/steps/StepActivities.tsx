@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { effectivePaxForPricing } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, landMarkup, landGst } from "@/lib/wizard/calc";
 import {
   uid,
   dayDestInfo,
