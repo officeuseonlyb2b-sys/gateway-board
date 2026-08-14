@@ -661,7 +661,14 @@ export function Step11({ draft, set }: StepProps) {
                       )}
 
                       <td className="p-2 text-right tabular-nums font-semibold">
-                        {inr(rowTotal)}
+                        {inr(
+                          withMarkupGst(
+                            rowTotal
+                          )
+                        )}
+                        <div className="text-[9px] font-normal text-muted-foreground">
+                          base {inr(rowTotal)}
+                        </div>
                       </td>
                     </tr>
                   );
