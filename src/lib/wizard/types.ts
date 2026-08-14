@@ -297,6 +297,12 @@ export interface QuoteDraft {
   day_room_mix?: Record<number, DayRoomMix>;
   /** Costing sheet — per routing day, which land-part components are included. */
   costing_selection?: CostingSelection;
+  /**
+   * Rate Sheet row picks. Key: "<optionKey>|<vehicle group id>",
+   * value: the pax counts checked in that vehicle group. Only these rows
+   * carry forward into Final Costing.
+   */
+  rate_sheet_rows?: Record<string, number[]>;
   // Meals step — per routing day number → lunch/dinner source & selection
   meal_selections?: Record<number, MealDaySelection>;
   /** Per accommodation-option meal selections (category-matched restaurants). */
