@@ -1070,8 +1070,12 @@ export function ScenarioRateSheet({
   );
 }
 
+export const rateRowKey = (optionKey: string, g: RateSheetGroup) =>
+  `${optionKey}|${g.line_id ?? g.vehicle}`;
+
 function RateSheetBlock({
   groups, land, pax, landPct, hotelPct, db,
+  draft, set, optionKey, selectedOnly, title,
 }: {
   groups: RateSheetGroup[];
   land: LandPartSheet;
@@ -1079,7 +1083,45 @@ function RateSheetBlock({
   landPct: { mk: number; gst: number };
   hotelPct: { mk: number; gst: number };
   db: ReturnType<typeof useDB>;
+  /** Row-selection wiring (Costing step). Omit for read-only sheets. */
+  draft?: QuoteDraft;
+  set?: SetDraft;
+  optionKey?: string;
+  /** Render only the rows the admin checked (Final Costing). */
+  selectedOnly?: boolean;
+  title?: string;
 }) {
+  const selectable = !!(set && draft && optionKey);
+  const showPick = selectable && !selectedOnly;
+
+  const picksFor = (g: RateSheetGroup): number[] | null => {
+    if (!optionKey || !draft) return null;
+    return draft.rate_sheet_rows?.[rateRowKey(optionKey, g)] ?? null;
+  };
+
+  const writePicks = (g: RateSheetGroup, rows: number[]) => {
+    if (!set || !draft || !optionKey) return;
+    set({
+      rate_sheet_rows: {
+        ...(draft.rate_sheet_rows ?? {}),
+        [rateRowKey(optionKey, g)]: rows,
+      },
+    });
+  };
+
+  const toggleRow = (g: RateSheetGroup, paxRow: number) => {
+    const current = picksFor(g) ?? [];
+    writePicks(g, current.includes(paxRow)
+      ? current.filter((x) => x !== paxRow)
+      : [...current, paxRow].sort((a, b) => a - b));
+  };
+
+  const toggleGroup = (g: RateSheetGroup) => {
+    const current = picksFor(g) ?? [];
+    const all = g.rows.map((r) => r.pax);
+    writePicks(g, current.length === all.length ? [] : all);
+  };
+
   // Entrances, Activities and Misc are LAND-level totals.
   // In the Rate Sheet they must always be shown as the SAME per-person amount
   // for every pax row, after applying Land Markup and GST.
@@ -1090,12 +1132,24 @@ function RateSheetBlock({
     activities: applyMarkupAndGst(land.activities_total, landPct.mk, landPct.gst, pax).per_person,
     misc: applyMarkupAndGst(land.misc_total, landPct.mk, landPct.gst, pax).per_person,
   };
+
+  const visibleGroups = selectedOnly
+    ? groups
+      .map((g) => ({ ...g, rows: g.rows.filter((r) => (picksFor(g) ?? []).includes(r.pax)) }))
+      .filter((g) => g.rows.length > 0)
+    : groups;
+
+  if (selectedOnly && visibleGroups.length === 0) return null;
+
   return (
     <Card className="p-3 space-y-2">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div className="section-label">Rate Sheet (Per Pax / Person)</div>
-          <div className="text-xs text-muted-foreground">Land Part + Accommodation Part</div>
+          <div className="section-label">{title ?? "Rate Sheet (Per Pax / Person)"}</div>
+          <div className="text-xs text-muted-foreground">
+            Land Part + Accommodation Part
+            {showPick && " · tick the pax rows that should carry forward to Final Costing"}
+          </div>
         </div>
         <div className="flex gap-2">
           <Badge variant="secondary" className="text-[10px]">Land: Markup {landPct.mk}% · GST {landPct.gst}%</Badge>
@@ -1106,11 +1160,12 @@ function RateSheetBlock({
         <table className="w-full text-xs">
           <thead className="text-[10px] uppercase text-muted-foreground">
             <tr className="bg-muted/60">
-              <th className={thL} colSpan={8}>Land Part</th>
+              <th className={thL} colSpan={showPick ? 9 : 8}>Land Part</th>
               <th className={th} colSpan={6}>Accommodation Part</th>
               <th className={th} colSpan={5}>Package Cost (Per Person)</th>
             </tr>
             <tr className="bg-muted/40">
+              {showPick && <th className={thL}>Use</th>}
               <th className={thL}>Pax</th>
               <th className={thL}>Vehicle</th>
               <th className={th}>Transport</th>
@@ -1133,7 +1188,7 @@ function RateSheetBlock({
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) => (
+            {visibleGroups.map((g) => (
               <FragmentGroup
                 key={g.line_id ?? g.vehicle}
                 group={g}
@@ -1141,6 +1196,10 @@ function RateSheetBlock({
                 db={db}
                 landPerPerson={landPerPerson}
                 landPct={landPct}
+                showPick={showPick}
+                picked={picksFor(g) ?? []}
+                onToggleRow={(p) => toggleRow(g, p)}
+                onToggleGroup={() => toggleGroup(g)}
               />
             ))}
           </tbody>
