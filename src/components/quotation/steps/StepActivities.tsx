@@ -17,6 +17,11 @@ import {
 export function Step11({ draft, set }: StepProps) {
   const d = useDB();
   const pax = effectivePaxForPricing(draft);
+  // Land Part markup & GST — same treatment as Guide / Entrances / Misc.
+  const mkPct = landMarkup(draft);
+  const gstPct = landGst(draft);
+  const withMarkupGst = (base: number) =>
+    base * (1 + mkPct) * (1 + gstPct);
 
   const cityName = (id: string) =>
     d.cities.find((c) => c.id === id)?.name || "";
