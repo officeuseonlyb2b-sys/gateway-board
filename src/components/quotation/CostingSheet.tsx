@@ -309,25 +309,24 @@ function normalizeActivitySlabPricing(
 
       const slabs = activity.pricing_slabs ?? [];
 
-      // If slabs exist, the matching slab price is the TOTAL activity amount.
+      // Slab lookup mirrors Miscellaneous exactly: find the matching slab and,
+      // when the pax count falls outside every configured range, clamp to the
+      // nearest slab instead of returning 0 / "No slab for selected pax".
       if (slabs.length > 0) {
-        const slab = [...slabs]
-          .sort((a, b) => a.from_pax - b.from_pax)
-          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
+        const slab = pickActivitySlab(slabs, safePax);
+        const perPersonSlab = activity.slab_pricing_type !== "total";
 
-        if (!slab) {
-          return {
+        return perPersonSlab
+          ? {
             ...opt,
-            amount: 0,
-            sub: "No slab for selected pax",
+            amount: slab.price,
+            sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)}/person`,
+          }
+          : {
+            ...opt,
+            amount: slab.price,
+            sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)} total`,
           };
-        }
-
-        return {
-          ...opt,
-          amount: slab.price,
-          sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(slab.price)} total`,
-        };
       }
 
       // No slabs: normal activity price is per person.
