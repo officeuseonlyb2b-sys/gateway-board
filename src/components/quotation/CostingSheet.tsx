@@ -1076,6 +1076,55 @@ export function ScenarioRateSheet({
   );
 }
 
+/**
+ * Final Costing view of the Rate Sheet — shows ONLY the pax rows the admin
+ * checked on the Costing step, for every included accommodation option.
+ */
+export function FinalRateSheet({ draft }: { draft: QuoteDraft }) {
+  const d = useDB();
+  const land = useMemo<LandPartSheet>(() => buildLandPart(draft, d), [draft, d]);
+  const pax = Math.max(1, effectivePaxForPricing(draft));
+  const includedKeys = draft.included_option_keys?.length
+    ? draft.included_option_keys
+    : (draft.hotel_options ?? []).map((o) => o.key);
+  const options = (draft.hotel_options ?? []).filter((o) => includedKeys.includes(o.key));
+  if (!options.length) return null;
+  return (
+    <>
+      {options.map((o) => (
+        <FinalRateSheetOption key={o.key} draft={draft} opt={o} land={land} pax={pax} d={d} />
+      ))}
+    </>
+  );
+}
+
+function FinalRateSheetOption({
+  draft, opt, land, pax, d,
+}: {
+  draft: QuoteDraft; opt: HotelOption; land: LandPartSheet;
+  pax: number; d: ReturnType<typeof useDB>;
+}) {
+  const groups = useMemo<RateSheetGroup[]>(
+    () => buildRateSheet(draft, d, opt, draft.transport ?? []),
+    [draft, d, opt],
+  );
+  return (
+    <RateSheetBlock
+      groups={groups}
+      land={land}
+      pax={pax}
+      landPct={{ mk: landMarkup(draft) * 100, gst: landGst(draft) * 100 }}
+      hotelPct={{ mk: hotelsMarkup(draft) * 100, gst: hotelsGst(draft) * 100 }}
+      db={d}
+      draft={draft}
+      optionKey={opt.key}
+      selectedOnly
+      title={`Selected Rate Sheet Rows — ${opt.category || opt.label || `Option ${opt.key}`}`}
+    />
+  );
+}
+
+
 export const rateRowKey = (optionKey: string, g: RateSheetGroup) =>
   `${optionKey}|${g.line_id ?? g.vehicle}`;
 
