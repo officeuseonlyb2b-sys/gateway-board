@@ -1273,17 +1273,36 @@ function FragmentGroup({
   db,
   landPerPerson,
   landPct,
+  showPick,
+  picked = [],
+  onToggleRow,
+  onToggleGroup,
 }: {
   group: RateSheetGroup;
   land: LandPartSheet;
   db: ReturnType<typeof useDB>;
   landPerPerson: { entrances: number; activities: number; misc: number };
   landPct: { mk: number; gst: number };
+  showPick?: boolean;
+  picked?: number[];
+  onToggleRow?: (pax: number) => void;
+  onToggleGroup?: () => void;
 }) {
+  const allPicked = g.rows.length > 0 && picked.length === g.rows.length;
   return (
     <>
       <tr className="border-t bg-primary/5">
-        <td className="p-1.5 font-semibold" colSpan={19}>{g.vehicle}</td>
+        <td className="p-1.5 font-semibold" colSpan={showPick ? 20 : 19}>
+          <div className="flex items-center gap-2">
+            {showPick && (
+              <label className="flex items-center gap-1 text-[10px] font-normal cursor-pointer">
+                <Checkbox checked={allPicked} onCheckedChange={() => onToggleGroup?.()} />
+                Select all
+              </label>
+            )}
+            <span>{g.vehicle}</span>
+          </div>
+        </td>
       </tr>
       {g.rows.map((r) => {
         // Activity pricing is dynamic by pax. A slab is a TOTAL for its
