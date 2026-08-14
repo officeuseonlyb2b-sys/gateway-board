@@ -680,6 +680,9 @@ export function Step11({ draft, set }: StepProps) {
           <p className="text-[10px] text-muted-foreground mt-2">
             Slab activities keep the same total;
             per-person activities scale linearly.
+            Total includes Land Part markup{" "}
+            {(mkPct * 100).toFixed(1)}% and GST{" "}
+            {(gstPct * 100).toFixed(1)}%.
           </p>
         </Card>
       )}
