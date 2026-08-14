@@ -1171,11 +1171,12 @@ function getActivitiesPerPersonForPax(
       });
 
       if (activity?.pricing_slabs?.length) {
-        const slab = [...activity.pricing_slabs]
-          .sort((a, b) => a.from_pax - b.from_pax)
-          .find((s) => safePax >= s.from_pax && safePax <= s.to_pax);
-
-        return rowSum + (slab?.price ?? 0);
+        const slab = pickActivitySlab(activity.pricing_slabs, safePax);
+        // Slab (Range) price is a group TOTAL; legacy per-person slabs are
+        // a per-head rate and must be multiplied by pax first.
+        return rowSum + (activity.slab_pricing_type === "total"
+          ? slab.price
+          : slab.price * safePax);
       }
 
       // Normal Activity price is per person. Convert it to a group total
