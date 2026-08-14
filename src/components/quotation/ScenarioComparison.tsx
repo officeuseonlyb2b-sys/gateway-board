@@ -71,7 +71,7 @@ export function ScenarioComparison({
         </p>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4">
         {scenarios.map((s) => {
           const res = results.find((r) => r.id === s.id);
           return (
@@ -181,7 +181,7 @@ function ScenarioBreakdown({ res, markup }: { res: ScenarioResult; markup: numbe
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[720px] text-xs">
           <thead className="bg-muted/40 uppercase text-[10px] text-muted-foreground">
             <tr>
               <th className="text-left p-1.5">Line</th>
