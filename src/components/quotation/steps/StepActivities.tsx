@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { effectivePaxForPricing } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, landMarkup, landGst } from "@/lib/wizard/calc";
 import {
   uid,
   dayDestInfo,
@@ -17,6 +17,11 @@ import {
 export function Step11({ draft, set }: StepProps) {
   const d = useDB();
   const pax = effectivePaxForPricing(draft);
+  // Land Part markup & GST — same treatment as Guide / Entrances / Misc.
+  const mkPct = landMarkup(draft);
+  const gstPct = landGst(draft);
+  const withMarkupGst = (base: number) =>
+    base * (1 + mkPct) * (1 + gstPct);
 
   const cityName = (id: string) =>
     d.cities.find((c) => c.id === id)?.name || "";
@@ -656,7 +661,14 @@ export function Step11({ draft, set }: StepProps) {
                       )}
 
                       <td className="p-2 text-right tabular-nums font-semibold">
-                        {inr(rowTotal)}
+                        {inr(
+                          withMarkupGst(
+                            rowTotal
+                          )
+                        )}
+                        <div className="text-[9px] font-normal text-muted-foreground">
+                          base {inr(rowTotal)}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -668,6 +680,9 @@ export function Step11({ draft, set }: StepProps) {
           <p className="text-[10px] text-muted-foreground mt-2">
             Slab activities keep the same total;
             per-person activities scale linearly.
+            Total includes Land Part markup{" "}
+            {(mkPct * 100).toFixed(1)}% and GST{" "}
+            {(gstPct * 100).toFixed(1)}%.
           </p>
         </Card>
       )}
