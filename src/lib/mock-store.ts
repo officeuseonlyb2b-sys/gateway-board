@@ -1102,6 +1102,9 @@ export const db = {
     if (ec) ec.name = n;
     const ad = d.activity_destinations.find((x) => x.id === id);
     if (ad) ad.name = n;
+    // Keep the shared `cities` list (Routing dropdowns) in sync.
+    const shared = d.cities.find((x) => x.id === id) || d.cities.find((x) => x.name.toLowerCase() === old.toLowerCase());
+    if (shared) shared.name = n;
     d.guide_cities = d.guide_cities.map((x) => x === old ? n : x);
     d.guides.forEach((g) => {
       if (g.city === old) g.city = n;
