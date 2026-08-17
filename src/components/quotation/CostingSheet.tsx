@@ -3019,7 +3019,9 @@ function RateSheetBlock({
 
   title?: string;
 }) {
+  const sheetRef = useRef<HTMLDivElement>(null);
   const selectable = !!(
+
     set &&
     draft &&
     optionKey
