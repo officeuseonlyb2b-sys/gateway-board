@@ -533,8 +533,19 @@ export function buildRateSheet(
     const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
     const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;
     const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
-    const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
+    let fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
+    // No explicit pax range on the draft: still show the vehicle's full fit
+    // range so every environment renders the same multi-row sheet (the single
+    // computed pax alone would collapse the group to one row).
+    if (!hasExplicitRange && Number.isFinite(maxFit)) {
+      const from = Math.max(1, minFit);
+      const to = Math.min(maxFit as number, from + 14);
+      const span: number[] = [];
+      for (let p = from; p <= to; p++) span.push(p);
+      if (span.length) fitting = span;
+    }
     const rows: RateSheetRow[] = (fitting.length ? fitting : paxList).map((pax) => {
+
 
       const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
       const transport = pp(land.transport_total);
