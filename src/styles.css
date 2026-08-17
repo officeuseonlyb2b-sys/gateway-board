@@ -246,5 +246,30 @@
   }
   body.costing-print-open .printing-section thead { display: table-header-group; }
   body.costing-print-open .printing-section tr { page-break-inside: avoid; }
+
+  /* Stack Land Part and Hotels & Meals vertically for print (side-by-side on screen). */
+  body.costing-print-open .printing-section .print-stack-wrap,
+  body.costing-print-open .printing-section .print-stack {
+    display: block !important;
+    overflow: visible !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    gap: 0 !important;
+  }
+  body.costing-print-open .printing-section .print-stack > * {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    float: none !important;
+    margin: 0 0 6mm 0 !important;
+  }
+  body.costing-print-open .printing-section .print-stack > * + * {
+    break-before: page;
+    page-break-before: always;
+  }
+  body.costing-print-open .printing-section .print-stack > * {
+    break-inside: auto;
+  }
 }
 
