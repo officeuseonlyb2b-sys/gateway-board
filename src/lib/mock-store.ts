@@ -799,6 +799,14 @@ function load(): DB {
         });
         parsed.destination_tours = tours;
       }
+      // Ensure every Destinations city also exists in the shared `cities` list
+      // that Routing's From/To dropdowns read from.
+      parsed.cities = parsed.cities ?? [];
+      (parsed.destination_cities ?? []).forEach((dc) => {
+        if (!parsed.cities.some((c) => c.name.toLowerCase() === dc.name.toLowerCase())) {
+          parsed.cities.push({ id: dc.id, name: dc.name });
+        }
+      });
       _db = parsed;
       return _db;
     }
