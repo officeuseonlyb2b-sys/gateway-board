@@ -208,3 +208,43 @@
   }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
+
+/* -------- Costing / Rate Sheet landscape print -------- */
+@page costing-landscape { size: A4 landscape; margin: 8mm; }
+
+@media print {
+  body.costing-print-open * { visibility: hidden !important; }
+  body.costing-print-open .printing-section,
+  body.costing-print-open .printing-section * { visibility: visible !important; }
+  body.costing-print-open .printing-section {
+    page: costing-landscape;
+    position: absolute !important;
+    top: 0; left: 0; width: 100%;
+    margin: 0 !important;
+    box-shadow: none !important;
+    font-size: 7.5pt;
+  }
+  body.costing-print-open .printing-section .no-print,
+  body.costing-print-open .printing-section button { display: none !important; }
+  body.costing-print-open .printing-section [class*="overflow-x-auto"],
+  body.costing-print-open .printing-section [class*="overflow-auto"] {
+    overflow: visible !important;
+  }
+  body.costing-print-open .printing-section .min-w-max,
+  body.costing-print-open .printing-section [class*="min-w-["] {
+    min-width: 0 !important;
+  }
+  body.costing-print-open .printing-section table {
+    width: 100% !important;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+  body.costing-print-open .printing-section th,
+  body.costing-print-open .printing-section td {
+    border: 0.5pt solid #99a; padding: 2pt 3pt !important;
+    white-space: normal !important;
+  }
+  body.costing-print-open .printing-section thead { display: table-header-group; }
+  body.costing-print-open .printing-section tr { page-break-inside: avoid; }
+}
+
