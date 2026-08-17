@@ -362,8 +362,20 @@ function Variation({
     gst: hotelsGst(draft) * 100,
   };
 
+  const printRef = useRef<HTMLDivElement>(null);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={printRef}>
+      <div className="flex justify-end no-print">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => printSection(printRef.current)}
+        >
+          <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Costing (Landscape)
+        </Button>
+      </div>
+
       <div className="overflow-x-auto">
         <div className="flex gap-4 items-start min-w-max">
           <LandPartBlock
@@ -395,10 +407,12 @@ function Variation({
         draft={draft}
         set={set}
         optionKey={opt.key}
+        optionLabel={opt.category || opt.label || `Option ${opt.key}`}
       />
     </div>
   );
 }
+
 
 const th =
   "p-1.5 text-right font-medium whitespace-nowrap";
