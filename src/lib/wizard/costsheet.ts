@@ -500,6 +500,8 @@ export function buildRateSheet(
   lines: TransportLine[],
 ): RateSheetGroup[] {
   const paxList = paxScale(draft);
+  const hasExplicitRange = !!(draft.pax_range && draft.pax_range !== "auto");
+
   const hotels = buildHotelMealSheet(draft, d, opt);
   const mk = { land: landMarkup(draft), lg: landGst(draft), h: hotelsMarkup(draft), hg: hotelsGst(draft) };
 
