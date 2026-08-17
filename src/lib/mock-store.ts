@@ -1083,6 +1083,10 @@ export const db = {
     d.entrance_cities.push({ id: c.id, name: n, created_at: c.created_at });
     d.activity_destinations.push({ id: c.id, name: n, created_at: c.created_at });
     if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
+    // Mirror into the shared `cities` list (used by Routing From/To dropdowns).
+    if (!d.cities.some((x) => x.name.toLowerCase() === n.toLowerCase())) {
+      d.cities.push({ id: c.id, name: n });
+    }
     persist(); emit();
     return c;
   },
