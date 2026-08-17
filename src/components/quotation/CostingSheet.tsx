@@ -1861,7 +1861,62 @@ function LandPartBlock({
                     )}
                   </td>
                 </tr>
+
+                {/* ---- SINGLE FINAL CHAIN: Line Total -> Markup -> GST -> Total -> Per Person ---- */}
+                {(allVehicleLabels.length
+                  ? allVehicleLabels
+                  : ["Land Part"]
+                ).map((label, i) => {
+                  const base =
+                    (vehicleTotals[i] ?? 0) +
+                    land.guide_total +
+                    land.entrances_total +
+                    land.activities_total +
+                    land.misc_total;
+                  const markup = base * (pct.mk / 100);
+                  const gstAmt =
+                    (base + markup) * (pct.gst / 100);
+                  const total = base + markup + gstAmt;
+                  return (
+                    <tr
+                      key={`summary-${label}-${i}`}
+                      className="border-t-2"
+                    >
+                      <td colSpan={9} className="p-2">
+                        <div className="rounded border bg-muted/30 p-2 text-xs">
+                          <div className="font-semibold mb-1">
+                            {allVehicleLabels.length
+                              ? `Land Part Total — ${label}`
+                              : "Land Part Total"}
+                          </div>
+                          <div className="flex flex-wrap gap-x-8 gap-y-1 tabular-nums">
+                            <span>
+                              Line Total{" "}
+                              <b>{inr(base)}</b>
+                            </span>
+                            <span>
+                              Markup {pct.mk}%{" "}
+                              <b>{inr(markup)}</b>
+                            </span>
+                            <span>
+                              GST {pct.gst}%{" "}
+                              <b>{inr(gstAmt)}</b>
+                            </span>
+                            <span className="text-primary">
+                              Total <b>{inr(total)}</b>
+                            </span>
+                            <span>
+                              Per Person ({pax} Pax){" "}
+                              <b>{inr(total / pax)}</b>
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </>
+
             );
           })()}
         </tfoot>
