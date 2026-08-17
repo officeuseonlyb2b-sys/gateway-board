@@ -799,6 +799,14 @@ function load(): DB {
         });
         parsed.destination_tours = tours;
       }
+      // Ensure every Destinations city also exists in the shared `cities` list
+      // that Routing's From/To dropdowns read from.
+      parsed.cities = parsed.cities ?? [];
+      (parsed.destination_cities ?? []).forEach((dc) => {
+        if (!parsed.cities.some((c) => c.name.toLowerCase() === dc.name.toLowerCase())) {
+          parsed.cities.push({ id: dc.id, name: dc.name });
+        }
+      });
       _db = parsed;
       return _db;
     }
@@ -1083,6 +1091,10 @@ export const db = {
     d.entrance_cities.push({ id: c.id, name: n, created_at: c.created_at });
     d.activity_destinations.push({ id: c.id, name: n, created_at: c.created_at });
     if (!d.guide_cities.includes(n)) d.guide_cities.push(n);
+    // Mirror into the shared `cities` list (used by Routing From/To dropdowns).
+    if (!d.cities.some((x) => x.name.toLowerCase() === n.toLowerCase())) {
+      d.cities.push({ id: c.id, name: n });
+    }
     persist(); emit();
     return c;
   },
@@ -1098,6 +1110,9 @@ export const db = {
     if (ec) ec.name = n;
     const ad = d.activity_destinations.find((x) => x.id === id);
     if (ad) ad.name = n;
+    // Keep the shared `cities` list (Routing dropdowns) in sync.
+    const shared = d.cities.find((x) => x.id === id) || d.cities.find((x) => x.name.toLowerCase() === old.toLowerCase());
+    if (shared) shared.name = n;
     d.guide_cities = d.guide_cities.map((x) => x === old ? n : x);
     d.guides.forEach((g) => {
       if (g.city === old) g.city = n;
