@@ -2993,6 +2993,7 @@ function RateSheetBlock({
   draft,
   set,
   optionKey,
+  optionLabel,
   selectedOnly,
   title,
 }: {
@@ -3013,7 +3014,9 @@ function RateSheetBlock({
   draft?: QuoteDraft;
   set?: SetDraft;
   optionKey?: string;
+  optionLabel?: string;
   selectedOnly?: boolean;
+
   title?: string;
 }) {
   const selectable = !!(
