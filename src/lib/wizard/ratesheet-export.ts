@@ -101,15 +101,37 @@ export function exportRateSheetExcel(
 
 // Print a specific DOM section in landscape.
 export function printSection(el: HTMLElement | null): void {
-  if (!el) return;
+  if (!el || typeof window === "undefined") return;
+
   el.classList.add("printing-section");
   document.body.classList.add("costing-print-open");
+
+  let done = false;
   const cleanup = () => {
+    if (done) return;
+    done = true;
     el.classList.remove("printing-section");
     document.body.classList.remove("costing-print-open");
     window.removeEventListener("afterprint", cleanup);
   };
   window.addEventListener("afterprint", cleanup);
-  window.print();
-  setTimeout(cleanup, 1500);
+
+  // Let the print-only layout paint before opening the dialog, otherwise some
+  // browsers snapshot the on-screen (side-by-side) layout or skip the dialog.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        window.focus();
+        const mql = window.matchMedia?.("print");
+        mql?.addEventListener?.("change", (e) => {
+          if (!e.matches) cleanup();
+        });
+        window.print();
+      } catch {
+        /* ignore */
+      }
+      // Fallback cleanup for browsers that never fire afterprint.
+      setTimeout(cleanup, 3000);
+    });
+  });
 }
