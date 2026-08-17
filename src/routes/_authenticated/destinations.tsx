@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { notify } from "@/lib/notify";
+import { destinationsRemote } from "@/lib/destinations-remote";
 
 export const Route = createFileRoute("/_authenticated/destinations")({
   head: () => ({ meta: [{ title: "Destinations — MP Tourism Hub" }] }),
@@ -45,15 +46,23 @@ function DestinationsPage() {
   const tourCount = (cityId: string) =>
     data.destination_tours.filter((t) => t.city_id === cityId).length;
 
-  function deleteCity(c: DestinationCity) {
+  async function deleteCity(c: DestinationCity) {
     if (!confirm(`Delete "${c.name}"?\n\nThis will remove the city from Entrances and Guide.`)) return;
-    db.deleteDestinationCity(c.id);
-    toast.success("City deleted.");
+    try {
+      await destinationsRemote.deleteCity(c.id);
+      toast.success("City deleted.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   }
-  function deleteTour(t: DestinationTour) {
+  async function deleteTour(t: DestinationTour) {
     if (!confirm(`Delete "${t.title}"?\n\nThis will remove it from Entrances and Guide.`)) return;
-    db.deleteDestinationTour(t.id);
-    toast.success("Tour deleted.");
+    try {
+      await destinationsRemote.deleteTour(t.id);
+      toast.success("Tour deleted.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   }
 
   const selectedCity = cities.find((c) => c.id === selectedId);
@@ -203,22 +212,35 @@ function CityDialog({
   const [name, setName] = useState("");
   useEffect(() => { if (open) setName(editing?.name ?? ""); }, [open, editing]);
 
-  function save() {
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
     const n = name.trim();
     if (!n) return toast.error("City name is required.");
-    if (editing) {
-      db.renameDestinationCity(editing.id, n);
-      toast.success("City updated.");
-      notify.info("Destination Updated", `${n} updated.`);
-      onSaved(editing.id);
-    } else {
-      const c = db.addDestinationCity(n);
-      if (!c) return toast.error("City already exists.");
-      toast.success("City added.");
-      notify.success("Destination Added", `${n} has been added.`);
-      onSaved(c.id);
+    setSaving(true);
+    try {
+      if (editing) {
+        await destinationsRemote.renameCity(editing.id, n);
+        toast.success("City updated.");
+        notify.info("Destination Updated", `${n} updated.`);
+        onSaved(editing.id);
+      } else {
+        const exists = db.get().destination_cities.some((c) => c.name.toLowerCase() === n.toLowerCase());
+        if (exists) {
+          setSaving(false);
+          return toast.error("City already exists.");
+        }
+        const id = await destinationsRemote.addCity(n);
+        toast.success("City added.");
+        notify.success("Destination Added", `${n} has been added.`);
+        onSaved(id);
+      }
+      onOpenChange(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
     }
-    onOpenChange(false);
   }
 
   return (
@@ -231,7 +253,7 @@ function CityDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -253,21 +275,36 @@ function TourDialog({
     }
   }, [open, editing]);
 
-  function save() {
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
     if (!cityId) return toast.error("Select a city first.");
     const t = title.trim();
     if (!t) return toast.error("Tour title is required.");
-    if (editing) {
-      db.updateDestinationTour(editing.id, { title: t, description });
-      toast.success("Tour updated.");
-      notify.info("Tour Updated", `${t} updated across Entrances & Guide.`);
-    } else {
-      const created = db.addDestinationTour({ city_id: cityId, title: t, description });
-      if (!created) return toast.error("Tour already exists in this city.");
-      toast.success("Tour added.");
-      notify.success("Tour Added", `${t} is now available in Entrances & Guide.`);
+    setSaving(true);
+    try {
+      if (editing) {
+        await destinationsRemote.updateTour(editing.id, { title: t, description });
+        toast.success("Tour updated.");
+        notify.info("Tour Updated", `${t} updated across Entrances & Guide.`);
+      } else {
+        const exists = db
+          .get()
+          .destination_tours.some((x) => x.city_id === cityId && x.title.toLowerCase() === t.toLowerCase());
+        if (exists) {
+          setSaving(false);
+          return toast.error("Tour already exists in this city.");
+        }
+        await destinationsRemote.addTour({ city_id: cityId, title: t, description });
+        toast.success("Tour added.");
+        notify.success("Tour Added", `${t} is now available in Entrances & Guide.`);
+      }
+      onOpenChange(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
     }
-    onOpenChange(false);
   }
 
   return (
@@ -289,7 +326,7 @@ function TourDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

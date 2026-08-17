@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-ro
 import { useEffect, useState } from "react";
 import { Mail, Lock, Loader2, Hotel } from "lucide-react";
 import { toast } from "sonner";
-import { auth, DEMO_CREDENTIALS, useAuth } from "@/lib/auth-mock";
+import { auth, useAuth } from "@/lib/auth-mock";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,13 +27,31 @@ function LoginPage() {
     if (user) navigate({ to: "/dashboard" });
   }, [user, navigate, router.location.pathname]);
 
-  const [email, setEmail] = useState("admin@mptourism.in");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    if (mode === "signup") {
+      const out = await auth.signUp(email, password, fullName);
+      setLoading(false);
+      if (!out.ok) {
+        toast.error(out.error);
+        return;
+      }
+      if (out.needsConfirmation) {
+        toast.success("Account created. Check your email to confirm, then sign in.");
+        setMode("signin");
+        return;
+      }
+      toast.success("Account created.");
+      navigate({ to: "/dashboard" });
+      return;
+    }
     const res = await auth.signIn(email, password);
     setLoading(false);
     if (!res.ok) {
@@ -102,13 +120,24 @@ function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold tracking-tight">Sign in to your account</h2>
+            <h2 className="text-2xl font-bold tracking-tight">{mode === "signup" ? "Create your account" : "Sign in to your account"}</h2>
             <p className="text-sm text-muted-foreground">
               Enter your credentials to access the operations dashboard.
             </p>
           </div>
 
           <form onSubmit={submit} className="space-y-5">
+            {mode === "signup" && (
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full name</Label>
+                <Input
+                  id="fullName" required value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Aarav Sharma" className="h-11"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -144,27 +173,26 @@ function LoginPage() {
 
             <Button type="submit" disabled={loading} className="w-full h-11 text-sm font-semibold">
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Sign in
+              {mode === "signup" ? "Create account" : "Sign in"}
             </Button>
           </form>
 
-          <div className="rounded-lg border border-dashed border-border bg-muted/40 p-4 space-y-2">
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Demo accounts
-            </div>
-            <div className="space-y-1.5">
-              {DEMO_CREDENTIALS.map((c) => (
-                <button
-                  key={c.email}
-                  type="button"
-                  onClick={() => { setEmail(c.email); setPassword(c.password); }}
-                  className="w-full flex items-center justify-between text-xs px-2.5 py-1.5 rounded hover:bg-background transition-colors"
-                >
-                  <span className="font-medium">{c.role}</span>
-                  <span className="font-mono text-muted-foreground">{c.email}</span>
+          <div className="rounded-lg border border-dashed border-border bg-muted/40 p-4 text-xs text-muted-foreground">
+            {mode === "signin" ? (
+              <>
+                New admin?{" "}
+                <button type="button" className="text-primary hover:underline font-medium" onClick={() => setMode("signup")}>
+                  Create an account
                 </button>
-              ))}
-            </div>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <button type="button" className="text-primary hover:underline font-medium" onClick={() => setMode("signin")}>
+                  Sign in
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
