@@ -1,10 +1,18 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Printer, FileSpreadsheet } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { inr, fmtDateShort } from "@/lib/format";
+import {
+  exportRateSheetExcel,
+  printSection,
+  type RateSheetExportRow,
+} from "@/lib/wizard/ratesheet-export";
 import { useDB } from "@/lib/mock-store";
+
 import {
   landMarkup,
   landGst,
