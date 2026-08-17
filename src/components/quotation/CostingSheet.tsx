@@ -384,8 +384,8 @@ function Variation({
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="flex gap-4 items-start min-w-max">
+      <div className="overflow-x-auto print-stack-wrap">
+        <div className="flex gap-4 items-start min-w-max print-stack">
           <LandPartBlock
             land={land}
             pax={pax}
