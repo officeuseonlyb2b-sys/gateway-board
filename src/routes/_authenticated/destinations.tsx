@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { notify } from "@/lib/notify";
 import { destinationsRemote } from "@/lib/destinations-remote";
@@ -246,7 +246,12 @@ function CityDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{editing ? "Edit City" : "Add City"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{editing ? "Edit City" : "Add City"}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {editing ? "Rename this destination city." : "Add a destination city to the master list."}
+          </DialogDescription>
+        </DialogHeader>
         <div>
           <Label>City Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gwalior" />
@@ -310,7 +315,12 @@ function TourDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{editing ? "Edit Tour" : "Add Tour"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{editing ? "Edit Tour" : "Add Tour"}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {editing ? "Update this tour title or description." : "Add a tour title for the selected city."}
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-4">
           <div>
             <Label>Tour Title *</Label>
