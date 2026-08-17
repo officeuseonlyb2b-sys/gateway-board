@@ -3176,8 +3176,51 @@ function RateSheetBlock({
     return null;
   }
 
+  // Rows carried into Excel/print: only the ticked ones (all rows if none selectable).
+  const exportGroups = selectable
+    ? groups
+        .map((g) => ({
+          ...g,
+          rows: g.rows.filter((r) =>
+            (picksFor(g) ?? []).includes(r.pax),
+          ),
+        }))
+        .filter((g) => g.rows.length > 0)
+    : visibleGroups;
+
+  const exportRows: RateSheetExportRow[] = exportGroups.flatMap((g) =>
+    g.rows.map((r) => {
+      const activities = getActivitiesPerPersonForPax(
+        land, db, r.pax, landPct,
+      );
+      const common =
+        r.transport + r.guide + r.escort +
+        landPerPerson.entrances + activities + landPerPerson.misc;
+      return {
+        vehicle: g.vehicle,
+        pax: r.pax,
+        transport: r.transport,
+        guide: r.guide,
+        escort: r.escort,
+        entrances: landPerPerson.entrances,
+        activities,
+        misc: landPerPerson.misc,
+        single: r.single,
+        double: r.double,
+        triple: r.triple,
+        quad: r.quad,
+        lunch: r.lunch,
+        dinner: r.dinner,
+        pkg_single: common + r.single,
+        pkg_double: common + r.double,
+        pkg_triple: common + r.triple,
+        pkg_quad: common + r.quad,
+      };
+    }),
+  );
+
   return (
-    <Card className="p-3 space-y-2">
+    <Card className="p-3 space-y-2" ref={sheetRef}>
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <div className="section-label">
@@ -3193,7 +3236,7 @@ function RateSheetBlock({
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center flex-wrap">
           <Badge
             variant="secondary"
             className="text-[10px]"
@@ -3212,8 +3255,37 @@ function RateSheetBlock({
             {hotelPct.mk}% · GST{" "}
             {hotelPct.gst}%
           </Badge>
+
+          <div className="flex gap-2 no-print">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exportRows.length === 0}
+              onClick={() =>
+                exportRateSheetExcel(exportRows, {
+                  title: title ?? "Rate Sheet (Per Pax / Person)",
+                  option: optionLabel ?? optionKey,
+                  landMarkup: landPct.mk,
+                  landGst: landPct.gst,
+                  hotelMarkup: hotelPct.mk,
+                  hotelGst: hotelPct.gst,
+                })
+              }
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" /> Download Excel
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => printSection(sheetRef.current)}
+            >
+              <Printer className="h-3.5 w-3.5 mr-1.5" /> Print
+            </Button>
+          </div>
         </div>
       </div>
+
 
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
