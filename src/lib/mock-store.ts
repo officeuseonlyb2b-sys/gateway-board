@@ -1080,12 +1080,12 @@ export const db = {
   },
 
   // ── Destinations (shared master for cities + tours) ───────────────────
-  addDestinationCity(name: string): DestinationCity | null {
+  addDestinationCity(name: string, forcedId?: string): DestinationCity | null {
     const d = load();
     const n = name.trim();
     if (!n) return null;
     if (d.destination_cities.some((c) => c.name.toLowerCase() === n.toLowerCase())) return null;
-    const c: DestinationCity = { id: uid(), name: n, created_at: now() };
+    const c: DestinationCity = { id: forcedId ?? uid(), name: n, created_at: now() };
     d.destination_cities.push(c);
     // Mirror to entrance_cities, activity_destinations (same id) + guide_cities (by name).
     d.entrance_cities.push({ id: c.id, name: n, created_at: c.created_at });
@@ -1136,7 +1136,7 @@ export const db = {
     d.guides = d.guides.filter((g) => (g.city ?? g.destination) !== name && !(g.tour_id && tourIds.includes(g.tour_id)));
     persist(); emit();
   },
-  addDestinationTour(input: { city_id: string; title: string; description?: string }): DestinationTour | null {
+  addDestinationTour(input: { city_id: string; title: string; description?: string; forcedId?: string }): DestinationTour | null {
     const d = load();
     const title = input.title.trim();
     if (!title) return null;
@@ -1144,7 +1144,7 @@ export const db = {
     if (!city) return null;
     if (d.destination_tours.some((t) => t.city_id === city.id && t.title.toLowerCase() === title.toLowerCase())) return null;
     const t: DestinationTour = {
-      id: uid(), city_id: city.id, title,
+      id: input.forcedId ?? uid(), city_id: city.id, title,
       description: input.description?.trim() || undefined,
       created_at: now(),
     };

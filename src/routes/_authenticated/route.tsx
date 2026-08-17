@@ -6,6 +6,7 @@ import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
 import { auth, useAuth } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
+import { startDestinationsSync } from "@/lib/destinations-remote";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -29,6 +30,13 @@ function AuthenticatedLayout() {
     if (!user) return;
     seedIfEmpty();
     checkExpiringRatesOnce(db.get().rate_plans);
+  }, [user]);
+
+  // Shared Destinations master data: initial pull + realtime subscription.
+  useEffect(() => {
+    if (!user) return;
+    const stop = startDestinationsSync();
+    return stop;
   }, [user]);
 
   if (!user) return null;

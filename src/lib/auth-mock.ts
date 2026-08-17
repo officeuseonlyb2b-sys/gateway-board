@@ -1,5 +1,8 @@
-// Tiny mock auth — replace with Supabase later. Two pre-seeded users.
+// Auth backed by Lovable Cloud (real accounts, shared across devices).
+// The module keeps its original API (auth.current/subscribe/signIn/signOut,
+// useAuth) so every existing consumer keeps working unchanged.
 import { useSyncExternalStore } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export type Role = "admin" | "staff";
 
@@ -11,50 +14,113 @@ export interface AuthUser {
   avatarUrl?: string | null;
 }
 
-const KEY = "mp-tourism-auth-v1";
-
-const SEED_USERS: Array<AuthUser & { password: string }> = [
-  { id: "u_admin", email: "admin@mptourism.in", name: "Aarav Sharma", role: "admin", password: "admin123", avatarUrl: null },
-  { id: "u_staff", email: "staff@mptourism.in", name: "Maya Iyer", role: "staff", password: "staff123", avatarUrl: null },
-];
-
 let current: AuthUser | null = null;
 let initialized = false;
 const listeners = new Set<() => void>();
 
-function load() {
-  if (initialized) return;
-  initialized = true;
-  if (typeof window === "undefined") return;
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+function toUser(u: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null | undefined): AuthUser | null {
+  if (!u) return null;
+  const email = u.email ?? "";
+  const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+  const name =
+    (typeof meta.full_name === "string" && meta.full_name) ||
+    (typeof meta.name === "string" && meta.name) ||
+    email.split("@")[0] ||
+    "User";
+  const role = (typeof meta.role === "string" && meta.role === "staff" ? "staff" : "admin") as Role;
+  return { id: u.id, email, name, role, avatarUrl: null };
+}
+
+/**
+ * Synchronously bootstrap from the persisted session so route guards
+ * (which read auth.current() during beforeLoad) don't bounce to /login
+ * before the async session check resolves.
+ */
+function bootstrapFromStorage(): AuthUser | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) current = JSON.parse(raw) as AuthUser;
-  } catch {/* */}
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith("sb-") || !k.endsWith("-auth-token")) continue;
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { user?: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
+      const u = toUser(parsed?.user);
+      if (u) return u;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
-function persist() {
-  if (typeof window === "undefined") return;
-  if (current) localStorage.setItem(KEY, JSON.stringify(current));
-  else localStorage.removeItem(KEY);
-}
+function init() {
+  if (initialized || typeof window === "undefined") return;
+  initialized = true;
+  current = bootstrapFromStorage();
 
-function emit() { listeners.forEach((l) => l()); }
+  supabase.auth.onAuthStateChange((_event, session) => {
+    current = toUser(session?.user ?? null);
+    emit();
+  });
+
+  void supabase.auth.getSession().then(({ data }) => {
+    current = toUser(data.session?.user ?? null);
+    emit();
+  });
+}
 
 export const auth = {
-  current(): AuthUser | null { load(); return current; },
-  subscribe(fn: () => void) { listeners.add(fn); return () => listeners.delete(fn); },
-  async signIn(email: string, password: string): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string }> {
-    await new Promise((r) => setTimeout(r, 350));
-    const u = SEED_USERS.find((x) => x.email.toLowerCase() === email.toLowerCase() && x.password === password);
-    if (!u) return { ok: false, error: "Invalid email or password." };
-    const { password: _pw, ...safe } = u;
-    current = safe;
-    persist(); emit();
-    return { ok: true, user: safe };
+  current(): AuthUser | null {
+    init();
+    return current;
   },
-  signOut() {
+  subscribe(fn: () => void) {
+    init();
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  },
+  async signIn(
+    email: string,
+    password: string,
+  ): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string }> {
+    init();
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error || !data.user) return { ok: false, error: error?.message ?? "Invalid email or password." };
+    current = toUser(data.user);
+    emit();
+    return { ok: true, user: current! };
+  },
+  async signUp(
+    email: string,
+    password: string,
+    fullName: string,
+  ): Promise<{ ok: true; needsConfirmation: boolean } | { ok: false; error: string }> {
+    init();
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+        data: { full_name: fullName.trim() || email.split("@")[0], role: "admin" },
+      },
+    });
+    if (error) return { ok: false, error: error.message };
+    if (data.session) {
+      current = toUser(data.user);
+      emit();
+      return { ok: true, needsConfirmation: false };
+    }
+    return { ok: true, needsConfirmation: true };
+  },
+  async signOut() {
+    await supabase.auth.signOut();
     current = null;
-    persist(); emit();
+    emit();
   },
 };
 
@@ -62,11 +128,6 @@ export function useAuth(): AuthUser | null {
   return useSyncExternalStore(
     (cb) => auth.subscribe(cb),
     () => auth.current(),
-    () => auth.current(),
+    () => null,
   );
 }
-
-export const DEMO_CREDENTIALS = [
-  { role: "Admin", email: "admin@mptourism.in", password: "admin123" },
-  { role: "Staff", email: "staff@mptourism.in", password: "staff123" },
-];
