@@ -69,9 +69,11 @@
   --popover: #FFFFFF;
   --popover-foreground: #0F2D48;
 
-  --primary: #0F2D48;          /* dark navy */
+  --primary: #0F2D48;
+  /* dark navy */
   --primary-foreground: #FFFFFF;
-  --primary-light: #1A4A6B;    /* medium navy */
+  --primary-light: #1A4A6B;
+  /* medium navy */
 
   --secondary: #F3F4F6;
   --secondary-foreground: #0F2D48;
@@ -79,9 +81,11 @@
   --muted: #F3F4F6;
   --muted-foreground: #9CA3AF;
 
-  --accent: #C9A84C;           /* muted gold */
+  --accent: #C9A84C;
+  /* muted gold */
   --accent-foreground: #FFFFFF;
-  --accent-light: #F5EDD6;     /* very light gold */
+  --accent-light: #F5EDD6;
+  /* very light gold */
 
   --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
@@ -134,8 +138,8 @@
   --accent-foreground: #FFFFFF;
   --destructive: #E74C3C;
   --destructive-foreground: #FFFFFF;
-  --border: rgba(255,255,255,0.10);
-  --input: rgba(255,255,255,0.12);
+  --border: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.12);
   --ring: #E67E22;
 }
 
@@ -143,13 +147,18 @@
   * {
     border-color: var(--color-border);
   }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, h4 {
+
+  h1,
+  h2,
+  h3,
+  h4 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
     font-weight: 700;
@@ -157,10 +166,11 @@
 }
 
 @utility card-elevated {
-  box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07), 0 4px 16px rgba(0, 0, 0, 0.04);
   transition: box-shadow 200ms ease, transform 200ms ease;
+
   &:hover {
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
   }
 }
 
@@ -171,6 +181,7 @@
   letter-spacing: -0.02em;
   position: relative;
   padding-bottom: 10px;
+
   &::after {
     content: "";
     position: absolute;
@@ -193,59 +204,109 @@
 
 /* -------- Quote print / PDF CSS -------- */
 @media print {
-  @page { size: A4; margin: 10mm; }
-  body.quote-viewer-open * { visibility: hidden !important; }
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  body.quote-viewer-open * {
+    visibility: hidden !important;
+  }
+
   body.quote-viewer-open .quote-print-target,
-  body.quote-viewer-open .quote-print-target * { visibility: visible !important; }
+  body.quote-viewer-open .quote-print-target * {
+    visibility: visible !important;
+  }
+
   body.quote-viewer-open .quote-viewer-overlay {
-    position: static !important; background: transparent !important;
-    overflow: visible !important; display: block !important;
+    position: static !important;
+    background: transparent !important;
+    overflow: visible !important;
+    display: block !important;
   }
-  body.quote-viewer-open .quote-viewer-actions { display: none !important; }
+
+  body.quote-viewer-open .quote-viewer-actions {
+    display: none !important;
+  }
+
   body.quote-viewer-open .quote-print-target {
-    position: absolute; top: 0; left: 0; width: 100%; box-shadow: none !important;
-    margin: 0 !important; padding: 8mm 10mm !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 8mm 10mm !important;
   }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }
 
 /* -------- Costing / Rate Sheet landscape print -------- */
-@page costing-landscape { size: A4 landscape; margin: 8mm; }
+@page costing-landscape {
+  size: A4 landscape;
+  margin: 8mm;
+}
 
 @media print {
-  body.costing-print-open * { visibility: hidden !important; }
+  body.costing-print-open * {
+    visibility: hidden !important;
+  }
+
   body.costing-print-open .printing-section,
-  body.costing-print-open .printing-section * { visibility: visible !important; }
+  body.costing-print-open .printing-section * {
+    visibility: visible !important;
+  }
+
   body.costing-print-open .printing-section {
     page: costing-landscape;
     position: absolute !important;
-    top: 0; left: 0; width: 100%;
+    top: 0;
+    left: 0;
+    width: 100%;
     margin: 0 !important;
     box-shadow: none !important;
     font-size: 7.5pt;
   }
+
   body.costing-print-open .printing-section .no-print,
-  body.costing-print-open .printing-section button { display: none !important; }
+  body.costing-print-open .printing-section button {
+    display: none !important;
+  }
+
   body.costing-print-open .printing-section [class*="overflow-x-auto"],
   body.costing-print-open .printing-section [class*="overflow-auto"] {
     overflow: visible !important;
   }
+
   body.costing-print-open .printing-section .min-w-max,
   body.costing-print-open .printing-section [class*="min-w-["] {
     min-width: 0 !important;
   }
+
   body.costing-print-open .printing-section table {
     width: 100% !important;
     border-collapse: collapse;
     page-break-inside: auto;
   }
+
   body.costing-print-open .printing-section th,
   body.costing-print-open .printing-section td {
-    border: 0.5pt solid #99a; padding: 2pt 3pt !important;
-    white-space: normal !important;
+    border: 0.75pt solid #222222 !important;
+    color: #000000 !important;
+    opacity: 1 !important;
   }
-  body.costing-print-open .printing-section thead { display: table-header-group; }
-  body.costing-print-open .printing-section tr { page-break-inside: avoid; }
+
+  body.costing-print-open .printing-section thead {
+    display: table-header-group;
+  }
+
+  body.costing-print-open .printing-section tr {
+    page-break-inside: avoid;
+  }
 
   /* Stack Land Part and Hotels & Meals vertically for print (side-by-side on screen). */
   body.costing-print-open .printing-section .print-stack-wrap,
@@ -256,7 +317,8 @@
     width: 100% !important;
     gap: 0 !important;
   }
-  body.costing-print-open .printing-section .print-stack > * {
+
+  body.costing-print-open .printing-section .print-stack>* {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
@@ -264,12 +326,13 @@
     float: none !important;
     margin: 0 0 6mm 0 !important;
   }
-  body.costing-print-open .printing-section .print-stack > * + * {
-    break-before: page;
-    page-break-before: always;
+
+  body.costing-print-open .printing-section .print-stack>*+* {
+    break-before: auto !important;
+    page-break-before: auto !important;
   }
-  body.costing-print-open .printing-section .print-stack > * {
+
+  body.costing-print-open .printing-section .print-stack>* {
     break-inside: auto;
   }
 }
-
