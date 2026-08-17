@@ -1746,7 +1746,55 @@ function LandPartBlock({
                   </td>
                 </tr>
 
+                {/* TOTAL = Line Total + Markup + GST (per column) */}
+                <tr className="border-t bg-primary/5 font-semibold">
+                  <td
+                    className="p-1.5 text-[10px] uppercase"
+                    colSpan={4}
+                  >
+                    Total (Line + Markup + GST)
+                  </td>
+
+                  {renderVehicleCells(
+                    vehicleTotals.map(
+                      (t, i) =>
+                        t +
+                        vehicleMarkup[i] +
+                        vehicleGst[i],
+                    ),
+                  )}
+
+                  <td className={td}>
+                    {inr(
+                      land.guide_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
+                    )}
+                  </td>
+
+                  <td className={td}>
+                    {inr(
+                      land.entrances_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
+                    )}
+                  </td>
+
+                  <td className={td}>
+                    {inr(activityTotalFinal)}
+                  </td>
+
+                  <td className={td}>
+                    {inr(
+                      land.misc_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
+                    )}
+                  </td>
+                </tr>
+
                 <tr className="bg-primary/10 font-bold">
+
                   <td
                     className="p-1.5 text-[10px] uppercase"
                     colSpan={4}
