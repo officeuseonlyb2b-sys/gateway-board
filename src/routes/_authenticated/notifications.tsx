@@ -34,6 +34,7 @@ const CATEGORY_LABELS: Record<keyof NotifPrefs, string> = {
   export: "Quote exported",
   hotel_added: "New hotel added",
   rate_expiring: "Rate plans expiring",
+  query_followup: "Query follow-ups",
   system: "System messages",
 };
 
