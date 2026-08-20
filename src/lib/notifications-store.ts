@@ -7,7 +7,7 @@ const PREF_KEY = "mp_tourism_notification_prefs";
 export type NotifKind = "success" | "warning" | "info" | "error";
 export type NotifCategory =
   | "quote_saved" | "draft_saved" | "rate_missing" | "import" | "export"
-  | "hotel_added" | "rate_expiring" | "system";
+  | "hotel_added" | "rate_expiring" | "query_followup" | "system";
 
 export interface Notification {
   id: string;
@@ -28,12 +28,13 @@ export interface NotifPrefs {
   export: boolean;
   hotel_added: boolean;
   rate_expiring: boolean;
+  query_followup: boolean;
   system: boolean;
 }
 
 const DEFAULT_PREFS: NotifPrefs = {
   quote_saved: true, draft_saved: true, rate_missing: true, import: true,
-  export: true, hotel_added: true, rate_expiring: true, system: true,
+  export: true, hotel_added: true, rate_expiring: true, query_followup: true, system: true,
 };
 
 const isBrowser = () => typeof window !== "undefined";
