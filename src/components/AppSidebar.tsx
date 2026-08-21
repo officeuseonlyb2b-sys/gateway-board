@@ -33,7 +33,7 @@ const SECTIONS: Section[] = [
   {
     label: "Sales & Queries",
     items: [
-      { label: "Manager Dashboard", to: "/manager-dashboard", icon: Gauge, managerOnly: true },
+      { label: "Manager Dashboard", to: "/manager-dashboard", icon: Gauge },
       { label: "Query Tracker", to: "/query-tracker", icon: Search },
       { label: "New Lead", to: "/new-lead", icon: UserPlus },
       { label: "My Tasks", to: "/my-tasks", icon: CheckSquare },
