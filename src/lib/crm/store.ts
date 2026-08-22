@@ -355,35 +355,113 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     commercials: { cost_price: 0, selling_price: 0, commission_pct: 10 },
   };
   queries = [q, ...queries];
+  logEvent({
+    type: "lead_created", by: input.owner, at: iso(now),
+    title: `Lead created by ${input.owner}`,
+    detail: `${q.lead_id} • ${q.enquiry_type} • ${q.destination}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+  });
+  logEvent({
+    type: "lead_assigned", by: input.owner, at: iso(now),
+    title: `Lead assigned to ${input.owner}`,
+    detail: `${q.lead_id} • ${q.customer}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+  });
+  tasks = [
+    {
+      id: "tk_" + now.getTime(),
+      title: `Review new requirement (${q.query_id})`,
+      query_id: q.query_id,
+      due_at: iso(addDays(now, 1)),
+      owner: input.owner,
+      note: `${q.pax} Pax ${q.enquiry_type}`,
+      done: false,
+    },
+    ...tasks,
+  ];
   persist();
   return { query: q, assigned_to: input.owner };
 }
 
+/** Move a query to a new stage; records the lifecycle step, activity + event. */
+export function setQueryStage(queryId: string, stage: Stage, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const actor = by ?? q.owner;
+    const lifecycleLabel = stage === "Confirmed" || stage === "Lost" ? "Confirmed / Lost" : stage;
+    const lifecycle = q.lifecycle.map((s) => (s.label === lifecycleLabel ? { ...s, at: iso(now) } : s));
+    const activity: ActivityItem = { id: "a_" + now.getTime(), title: `Stage changed to ${stage}`, at: iso(now), by: actor };
+    logEvent({
+      type: stage === "Confirmed" ? "won" : stage === "Lost" ? "lost" : stage === "Quotation Sent" ? "quotation_sent" : "stage_changed",
+      by: actor, at: iso(now),
+      title:
+        stage === "Confirmed" ? `Query confirmed by ${actor}`
+          : stage === "Lost" ? `Query marked lost by ${actor}`
+            : stage === "Quotation Sent" ? `Quotation sent by ${actor}`
+              : `${q.query_id} moved to ${stage} by ${actor}`,
+      detail: `${q.query_id} • ${q.customer} • ${q.destination}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+    });
+    return { ...q, stage, lifecycle, activities: [activity, ...q.activities] };
+  });
+  persist();
+}
+
+/** Log a follow-up against a query (optionally pushing the next due date). */
+export function logFollowup(queryId: string, note: string, nextDue?: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const actor = by ?? q.owner;
+    logEvent({
+      type: "followup_logged", by: actor, at: iso(now),
+      title: `Follow-up logged by ${actor}`,
+      detail: `${q.query_id} • ${note}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+    });
+    return {
+      ...q,
+      followup_due: nextDue ?? q.followup_due,
+      activities: [{ id: "a_" + now.getTime(), title: note || "Follow-up logged", at: iso(now), by: actor }, ...q.activities],
+    };
+  });
+  persist();
+}
+
 export function toggleTask(id: string) {
+  if (!inited) load();
+  const task = tasks.find((t) => t.id === id);
   tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+  if (task && !task.done) {
+    logEvent({
+      type: "task_completed", by: task.owner,
+      title: `Task completed by ${task.owner}`,
+      detail: task.title, query_id: task.query_id,
+    });
+  }
   persist();
 }
 
 function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
+const EMPTY: never[] = [];
+
 export function useCrmQueries(): CrmQuery[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return queries; }, () => []);
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return queries; }, () => EMPTY);
 }
 export function useCrmTasks(): CrmTask[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return tasks; }, () => []);
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return tasks; }, () => EMPTY);
+}
+export function useEmployees(): Employee[] {
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return employees; }, () => EMPTY);
+}
+export function useCrmEvents(): CrmEvent[] {
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return events; }, () => EMPTY);
 }
 
 // ---- derived helpers -------------------------------------------------------
 export const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 
-export function teamActivity(list: CrmQuery[]): ActivityItem[] {
-  return list
-    .slice(0, 6)
-    .map((q, i) => ({
-      id: q.id + i,
-      title: `${q.stage === "Confirmed" ? "Query confirmed" : q.stage === "Quotation Sent" ? "Quotation sent" : "Lead assigned"} by ${q.owner}`,
-      at: q.activities[0]?.at ?? q.created_at,
-      by: q.owner,
-      meta: `${q.lead_id} • ${q.travel_type} • ${q.destination}`,
-    }));
-}
