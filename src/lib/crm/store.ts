@@ -1,11 +1,15 @@
 // CRM store — localStorage backed, seeded with realistic sample data so every
 // stat card / chart in the module is derived from real records.
+// This module is THE single source of truth for the CRM: queries, tasks,
+// employees and the activity log all live here.
 import { useSyncExternalStore } from "react";
-import type { ActivityItem, CrmQuery, CrmTask, Executive, Stage } from "./types";
+import type { ActivityItem, CrmEvent, CrmEventType, CrmQuery, CrmTask, Employee, Executive, Stage } from "./types";
 import { DESTINATIONS, LIFECYCLE, MARKETS, STAGES, TRAVEL_TYPES } from "./types";
 
 const KEY = "mp_crm_queries_v1";
 const TASK_KEY = "mp_crm_tasks_v1";
+const EMP_KEY = "mp_crm_employees_v1";
+const EVENT_KEY = "mp_crm_events_v1";
 const isBrowser = () => typeof window !== "undefined";
 
 export const EXECUTIVES: Executive[] = [
@@ -16,6 +20,7 @@ export const EXECUTIVES: Executive[] = [
   { id: "ex5", name: "Aman Singh", role: "Sales Executive", email: "aman@mptourism.in" },
   { id: "ex6", name: "Vikram Rao", role: "Sales Manager", email: "vikram@mptourism.in" },
 ];
+
 
 export const PARTNERS = [
   "ABC Travels", "Globe Tours", "Travel Arc", "India Routes", "Destiny Holidays",
