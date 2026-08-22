@@ -153,10 +153,51 @@ function seedTasks(list: CrmQuery[]): CrmTask[] {
   });
 }
 
+function seedEmployees(): Employee[] {
+  const base = new Date();
+  return EXECUTIVES.map((e, i) => ({
+    ...e,
+    phone: "+91 98" + String(100000000 + i * 111111).slice(0, 8),
+    target_monthly: e.role === "Sales Manager" ? 0 : 1500000,
+    active: true,
+    joined_at: iso(addDays(base, -365 + i * 20)),
+  }));
+}
+
+/** Build the historical activity log out of the seeded queries + tasks. */
+function seedEvents(list: CrmQuery[], tks: CrmTask[]): CrmEvent[] {
+  const out: CrmEvent[] = [];
+  const push = (e: Omit<CrmEvent, "id">) => out.push({ ...e, id: "ev_" + out.length });
+  list.forEach((q) => {
+    const meta = `${q.lead_id} • ${q.travel_type} • ${q.destination}`;
+    push({ type: "lead_created", at: q.created_at, by: q.owner, title: `Lead created by ${q.owner}`, detail: meta, query_id: q.query_id, lead_id: q.lead_id });
+    push({ type: "lead_assigned", at: q.assigned_on, by: q.owner, title: `Lead assigned to ${q.owner}`, detail: meta, query_id: q.query_id, lead_id: q.lead_id });
+    const sent = q.lifecycle.find((s) => s.label === "Quotation Sent")?.at;
+    if (sent) push({ type: "quotation_sent", at: sent, by: q.owner, title: `Quotation sent by ${q.owner}`, detail: `${q.query_id} • ${q.customer}`, query_id: q.query_id, lead_id: q.lead_id });
+    const fup = q.lifecycle.find((s) => s.label === "Follow-up")?.at;
+    if (fup) push({ type: "followup_logged", at: fup, by: q.owner, title: `Follow-up logged by ${q.owner}`, detail: `${q.query_id} • ${q.customer}`, query_id: q.query_id, lead_id: q.lead_id });
+    const closed = q.lifecycle.find((s) => s.label === "Confirmed / Lost")?.at;
+    if (closed && (q.stage === "Confirmed" || q.stage === "Lost")) {
+      push({
+        type: q.stage === "Confirmed" ? "won" : "lost",
+        at: closed, by: q.owner,
+        title: `Query ${q.stage === "Confirmed" ? "confirmed" : "marked lost"} by ${q.owner}`,
+        detail: meta, query_id: q.query_id, lead_id: q.lead_id,
+      });
+    }
+  });
+  tks.filter((t) => t.done).forEach((t) => {
+    push({ type: "task_completed", at: t.due_at, by: t.owner, title: `Task completed by ${t.owner}`, detail: t.title, query_id: t.query_id });
+  });
+  return out.sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 // ---- persistence -----------------------------------------------------------
 const listeners = new Set<() => void>();
 let queries: CrmQuery[] = [];
 let tasks: CrmTask[] = [];
+let employees: Employee[] = [];
+let events: CrmEvent[] = [];
 let inited = false;
 
 function load() {
@@ -169,9 +210,17 @@ function load() {
     const rawT = localStorage.getItem(TASK_KEY);
     tasks = rawT ? (JSON.parse(rawT) as CrmTask[]) : seedTasks(queries);
     if (!rawT) localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+    const rawE = localStorage.getItem(EMP_KEY);
+    employees = rawE ? (JSON.parse(rawE) as Employee[]) : seedEmployees();
+    if (!rawE) localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+    const rawV = localStorage.getItem(EVENT_KEY);
+    events = rawV ? (JSON.parse(rawV) as CrmEvent[]) : seedEvents(queries, tasks);
+    if (!rawV) localStorage.setItem(EVENT_KEY, JSON.stringify(events));
   } catch {
     queries = seedQueries();
     tasks = seedTasks(queries);
+    employees = seedEmployees();
+    events = seedEvents(queries, tasks);
   }
 }
 function emit() { listeners.forEach((l) => l()); }
@@ -179,6 +228,8 @@ function persist() {
   if (!isBrowser()) return;
   localStorage.setItem(KEY, JSON.stringify(queries));
   localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+  localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+  localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
   emit();
 }
 
@@ -190,9 +241,68 @@ export function listCrmTasks(): CrmTask[] {
   if (!inited) load();
   return tasks;
 }
+export function listEmployees(): Employee[] {
+  if (!inited) load();
+  return employees;
+}
+export function listCrmEvents(): CrmEvent[] {
+  if (!inited) load();
+  return events;
+}
 export function getCrmQuery(queryId: string): CrmQuery | undefined {
   return listCrmQueries().find((q) => q.query_id === queryId || q.id === queryId);
 }
+
+// ---- activity log ----------------------------------------------------------
+function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+  events = [{ id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at: e.at ?? iso(new Date()), ...e }, ...events];
+}
+
+export function recordActivity(input: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+  if (!inited) load();
+  logEvent(input);
+  persist();
+}
+
+// ---- employees -------------------------------------------------------------
+export interface EmployeeInput {
+  name: string;
+  role: Employee["role"];
+  email: string;
+  phone?: string;
+  target_monthly?: number;
+  active?: boolean;
+}
+
+export function addEmployee(input: EmployeeInput): Employee {
+  if (!inited) load();
+  const emp: Employee = {
+    id: "emp_" + Date.now(),
+    name: input.name.trim(),
+    role: input.role,
+    email: input.email.trim(),
+    phone: input.phone,
+    target_monthly: input.target_monthly ?? 0,
+    active: input.active ?? true,
+    joined_at: iso(new Date()),
+  };
+  employees = [...employees, emp];
+  persist();
+  return emp;
+}
+
+export function updateEmployee(id: string, patch: Partial<EmployeeInput>) {
+  if (!inited) load();
+  employees = employees.map((e) => (e.id === id ? { ...e, ...patch, name: patch.name?.trim() ?? e.name } : e));
+  persist();
+}
+
+export function removeEmployee(id: string) {
+  if (!inited) load();
+  employees = employees.filter((e) => e.id !== id);
+  persist();
+}
+
 
 export interface NewLeadInput {
   lead_source: string;
