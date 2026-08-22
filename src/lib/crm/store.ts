@@ -1,11 +1,15 @@
 // CRM store — localStorage backed, seeded with realistic sample data so every
 // stat card / chart in the module is derived from real records.
+// This module is THE single source of truth for the CRM: queries, tasks,
+// employees and the activity log all live here.
 import { useSyncExternalStore } from "react";
-import type { ActivityItem, CrmQuery, CrmTask, Executive, Stage } from "./types";
+import type { ActivityItem, CrmEvent, CrmEventType, CrmQuery, CrmTask, Employee, Executive, Stage } from "./types";
 import { DESTINATIONS, LIFECYCLE, MARKETS, STAGES, TRAVEL_TYPES } from "./types";
 
 const KEY = "mp_crm_queries_v1";
 const TASK_KEY = "mp_crm_tasks_v1";
+const EMP_KEY = "mp_crm_employees_v1";
+const EVENT_KEY = "mp_crm_events_v1";
 const isBrowser = () => typeof window !== "undefined";
 
 export const EXECUTIVES: Executive[] = [
@@ -16,6 +20,7 @@ export const EXECUTIVES: Executive[] = [
   { id: "ex5", name: "Aman Singh", role: "Sales Executive", email: "aman@mptourism.in" },
   { id: "ex6", name: "Vikram Rao", role: "Sales Manager", email: "vikram@mptourism.in" },
 ];
+
 
 export const PARTNERS = [
   "ABC Travels", "Globe Tours", "Travel Arc", "India Routes", "Destiny Holidays",
@@ -148,10 +153,51 @@ function seedTasks(list: CrmQuery[]): CrmTask[] {
   });
 }
 
+function seedEmployees(): Employee[] {
+  const base = new Date();
+  return EXECUTIVES.map((e, i) => ({
+    ...e,
+    phone: "+91 98" + String(100000000 + i * 111111).slice(0, 8),
+    target_monthly: e.role === "Sales Manager" ? 0 : 1500000,
+    active: true,
+    joined_at: iso(addDays(base, -365 + i * 20)),
+  }));
+}
+
+/** Build the historical activity log out of the seeded queries + tasks. */
+function seedEvents(list: CrmQuery[], tks: CrmTask[]): CrmEvent[] {
+  const out: CrmEvent[] = [];
+  const push = (e: Omit<CrmEvent, "id">) => out.push({ ...e, id: "ev_" + out.length });
+  list.forEach((q) => {
+    const meta = `${q.lead_id} • ${q.travel_type} • ${q.destination}`;
+    push({ type: "lead_created", at: q.created_at, by: q.owner, title: `Lead created by ${q.owner}`, detail: meta, query_id: q.query_id, lead_id: q.lead_id });
+    push({ type: "lead_assigned", at: q.assigned_on, by: q.owner, title: `Lead assigned to ${q.owner}`, detail: meta, query_id: q.query_id, lead_id: q.lead_id });
+    const sent = q.lifecycle.find((s) => s.label === "Quotation Sent")?.at;
+    if (sent) push({ type: "quotation_sent", at: sent, by: q.owner, title: `Quotation sent by ${q.owner}`, detail: `${q.query_id} • ${q.customer}`, query_id: q.query_id, lead_id: q.lead_id });
+    const fup = q.lifecycle.find((s) => s.label === "Follow-up")?.at;
+    if (fup) push({ type: "followup_logged", at: fup, by: q.owner, title: `Follow-up logged by ${q.owner}`, detail: `${q.query_id} • ${q.customer}`, query_id: q.query_id, lead_id: q.lead_id });
+    const closed = q.lifecycle.find((s) => s.label === "Confirmed / Lost")?.at;
+    if (closed && (q.stage === "Confirmed" || q.stage === "Lost")) {
+      push({
+        type: q.stage === "Confirmed" ? "won" : "lost",
+        at: closed, by: q.owner,
+        title: `Query ${q.stage === "Confirmed" ? "confirmed" : "marked lost"} by ${q.owner}`,
+        detail: meta, query_id: q.query_id, lead_id: q.lead_id,
+      });
+    }
+  });
+  tks.filter((t) => t.done).forEach((t) => {
+    push({ type: "task_completed", at: t.due_at, by: t.owner, title: `Task completed by ${t.owner}`, detail: t.title, query_id: t.query_id });
+  });
+  return out.sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 // ---- persistence -----------------------------------------------------------
 const listeners = new Set<() => void>();
 let queries: CrmQuery[] = [];
 let tasks: CrmTask[] = [];
+let employees: Employee[] = [];
+let events: CrmEvent[] = [];
 let inited = false;
 
 function load() {
@@ -164,9 +210,17 @@ function load() {
     const rawT = localStorage.getItem(TASK_KEY);
     tasks = rawT ? (JSON.parse(rawT) as CrmTask[]) : seedTasks(queries);
     if (!rawT) localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+    const rawE = localStorage.getItem(EMP_KEY);
+    employees = rawE ? (JSON.parse(rawE) as Employee[]) : seedEmployees();
+    if (!rawE) localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+    const rawV = localStorage.getItem(EVENT_KEY);
+    events = rawV ? (JSON.parse(rawV) as CrmEvent[]) : seedEvents(queries, tasks);
+    if (!rawV) localStorage.setItem(EVENT_KEY, JSON.stringify(events));
   } catch {
     queries = seedQueries();
     tasks = seedTasks(queries);
+    employees = seedEmployees();
+    events = seedEvents(queries, tasks);
   }
 }
 function emit() { listeners.forEach((l) => l()); }
@@ -174,6 +228,8 @@ function persist() {
   if (!isBrowser()) return;
   localStorage.setItem(KEY, JSON.stringify(queries));
   localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+  localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+  localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
   emit();
 }
 
@@ -185,9 +241,68 @@ export function listCrmTasks(): CrmTask[] {
   if (!inited) load();
   return tasks;
 }
+export function listEmployees(): Employee[] {
+  if (!inited) load();
+  return employees;
+}
+export function listCrmEvents(): CrmEvent[] {
+  if (!inited) load();
+  return events;
+}
 export function getCrmQuery(queryId: string): CrmQuery | undefined {
   return listCrmQueries().find((q) => q.query_id === queryId || q.id === queryId);
 }
+
+// ---- activity log ----------------------------------------------------------
+function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+  events = [{ id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at: e.at ?? iso(new Date()), ...e }, ...events];
+}
+
+export function recordActivity(input: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+  if (!inited) load();
+  logEvent(input);
+  persist();
+}
+
+// ---- employees -------------------------------------------------------------
+export interface EmployeeInput {
+  name: string;
+  role: Employee["role"];
+  email: string;
+  phone?: string;
+  target_monthly?: number;
+  active?: boolean;
+}
+
+export function addEmployee(input: EmployeeInput): Employee {
+  if (!inited) load();
+  const emp: Employee = {
+    id: "emp_" + Date.now(),
+    name: input.name.trim(),
+    role: input.role,
+    email: input.email.trim(),
+    phone: input.phone,
+    target_monthly: input.target_monthly ?? 0,
+    active: input.active ?? true,
+    joined_at: iso(new Date()),
+  };
+  employees = [...employees, emp];
+  persist();
+  return emp;
+}
+
+export function updateEmployee(id: string, patch: Partial<EmployeeInput>) {
+  if (!inited) load();
+  employees = employees.map((e) => (e.id === id ? { ...e, ...patch, name: patch.name?.trim() ?? e.name } : e));
+  persist();
+}
+
+export function removeEmployee(id: string) {
+  if (!inited) load();
+  employees = employees.filter((e) => e.id !== id);
+  persist();
+}
+
 
 export interface NewLeadInput {
   lead_source: string;
@@ -240,35 +355,113 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     commercials: { cost_price: 0, selling_price: 0, commission_pct: 10 },
   };
   queries = [q, ...queries];
+  logEvent({
+    type: "lead_created", by: input.owner, at: iso(now),
+    title: `Lead created by ${input.owner}`,
+    detail: `${q.lead_id} • ${q.enquiry_type} • ${q.destination}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+  });
+  logEvent({
+    type: "lead_assigned", by: input.owner, at: iso(now),
+    title: `Lead assigned to ${input.owner}`,
+    detail: `${q.lead_id} • ${q.customer}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+  });
+  tasks = [
+    {
+      id: "tk_" + now.getTime(),
+      title: `Review new requirement (${q.query_id})`,
+      query_id: q.query_id,
+      due_at: iso(addDays(now, 1)),
+      owner: input.owner,
+      note: `${q.pax} Pax ${q.enquiry_type}`,
+      done: false,
+    },
+    ...tasks,
+  ];
   persist();
   return { query: q, assigned_to: input.owner };
 }
 
+/** Move a query to a new stage; records the lifecycle step, activity + event. */
+export function setQueryStage(queryId: string, stage: Stage, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const actor = by ?? q.owner;
+    const lifecycleLabel = stage === "Confirmed" || stage === "Lost" ? "Confirmed / Lost" : stage;
+    const lifecycle = q.lifecycle.map((s) => (s.label === lifecycleLabel ? { ...s, at: iso(now) } : s));
+    const activity: ActivityItem = { id: "a_" + now.getTime(), title: `Stage changed to ${stage}`, at: iso(now), by: actor };
+    logEvent({
+      type: stage === "Confirmed" ? "won" : stage === "Lost" ? "lost" : stage === "Quotation Sent" ? "quotation_sent" : "stage_changed",
+      by: actor, at: iso(now),
+      title:
+        stage === "Confirmed" ? `Query confirmed by ${actor}`
+          : stage === "Lost" ? `Query marked lost by ${actor}`
+            : stage === "Quotation Sent" ? `Quotation sent by ${actor}`
+              : `${q.query_id} moved to ${stage} by ${actor}`,
+      detail: `${q.query_id} • ${q.customer} • ${q.destination}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+    });
+    return { ...q, stage, lifecycle, activities: [activity, ...q.activities] };
+  });
+  persist();
+}
+
+/** Log a follow-up against a query (optionally pushing the next due date). */
+export function logFollowup(queryId: string, note: string, nextDue?: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const actor = by ?? q.owner;
+    logEvent({
+      type: "followup_logged", by: actor, at: iso(now),
+      title: `Follow-up logged by ${actor}`,
+      detail: `${q.query_id} • ${note}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+    });
+    return {
+      ...q,
+      followup_due: nextDue ?? q.followup_due,
+      activities: [{ id: "a_" + now.getTime(), title: note || "Follow-up logged", at: iso(now), by: actor }, ...q.activities],
+    };
+  });
+  persist();
+}
+
 export function toggleTask(id: string) {
+  if (!inited) load();
+  const task = tasks.find((t) => t.id === id);
   tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+  if (task && !task.done) {
+    logEvent({
+      type: "task_completed", by: task.owner,
+      title: `Task completed by ${task.owner}`,
+      detail: task.title, query_id: task.query_id,
+    });
+  }
   persist();
 }
 
 function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
+const EMPTY: never[] = [];
+
 export function useCrmQueries(): CrmQuery[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return queries; }, () => []);
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return queries; }, () => EMPTY);
 }
 export function useCrmTasks(): CrmTask[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return tasks; }, () => []);
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return tasks; }, () => EMPTY);
+}
+export function useEmployees(): Employee[] {
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return employees; }, () => EMPTY);
+}
+export function useCrmEvents(): CrmEvent[] {
+  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return events; }, () => EMPTY);
 }
 
 // ---- derived helpers -------------------------------------------------------
 export const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 
-export function teamActivity(list: CrmQuery[]): ActivityItem[] {
-  return list
-    .slice(0, 6)
-    .map((q, i) => ({
-      id: q.id + i,
-      title: `${q.stage === "Confirmed" ? "Query confirmed" : q.stage === "Quotation Sent" ? "Quotation sent" : "Lead assigned"} by ${q.owner}`,
-      at: q.activities[0]?.at ?? q.created_at,
-      by: q.owner,
-      meta: `${q.lead_id} • ${q.travel_type} • ${q.destination}`,
-    }));
-}

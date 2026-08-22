@@ -110,3 +110,33 @@ export interface Executive {
   role: "Sales Executive" | "Sales Manager";
   email: string;
 }
+
+export interface Employee extends Executive {
+  phone?: string;
+  target_monthly?: number;
+  active: boolean;
+  joined_at: string; // ISO
+}
+
+/** Every tracked employee action in the CRM. */
+export type CrmEventType =
+  | "lead_created"
+  | "lead_assigned"
+  | "stage_changed"
+  | "quotation_sent"
+  | "followup_logged"
+  | "task_completed"
+  | "won"
+  | "lost";
+
+export interface CrmEvent {
+  id: string;
+  type: CrmEventType;
+  at: string;          // ISO datetime
+  by: string;          // employee name
+  title: string;
+  detail?: string;
+  query_id?: string;
+  lead_id?: string;
+}
+
