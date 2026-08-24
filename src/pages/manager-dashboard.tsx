@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   Activity,
   AlertCircle,
@@ -18,119 +20,45 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-
-type Executive = {
-  name: string;
-  role: string;
-  initials: string;
-  assigned: number;
-  newToday: number;
-  inProgress: number;
-  quotations: number;
-  completed: number;
-  overdue: number;
-  nurturing: number;
-  conversion: string;
-  revenue: string;
-};
-
-const executives: Executive[] = [
-  {
-    name: "Rahul Sharma",
-    role: "Sales Executive",
-    initials: "RS",
-    assigned: 62,
-    newToday: 12,
-    inProgress: 18,
-    quotations: 11,
-    completed: 9,
-    overdue: 3,
-    nurturing: 21,
-    conversion: "18.7%",
-    revenue: "₹ 14,25,000",
-  },
-  {
-    name: "Priya Singh",
-    role: "Sales Executive",
-    initials: "PS",
-    assigned: 58,
-    newToday: 10,
-    inProgress: 16,
-    quotations: 9,
-    completed: 8,
-    overdue: 2,
-    nurturing: 23,
-    conversion: "17.2%",
-    revenue: "₹ 12,80,000",
-  },
-  {
-    name: "Anjali Verma",
-    role: "Sales Executive",
-    initials: "AV",
-    assigned: 45,
-    newToday: 9,
-    inProgress: 14,
-    quotations: 7,
-    completed: 6,
-    overdue: 4,
-    nurturing: 18,
-    conversion: "15.6%",
-    revenue: "₹ 10,75,000",
-  },
-  {
-    name: "Raina Sharma",
-    role: "Sales Executive",
-    initials: "RS",
-    assigned: 40,
-    newToday: 7,
-    inProgress: 11,
-    quotations: 6,
-    completed: 5,
-    overdue: 4,
-    nurturing: 14,
-    conversion: "13.5%",
-    revenue: "₹ 8,60,000",
-  },
-  {
-    name: "Aman Singh",
-    role: "Sales Executive",
-    initials: "AS",
-    assigned: 33,
-    newToday: 10,
-    inProgress: 9,
-    quotations: 5,
-    completed: 4,
-    overdue: 4,
-    nurturing: 11,
-    conversion: "12.1%",
-    revenue: "₹ 6,95,000",
-  },
-];
-
-const stagePipeline = [
-  { label: "New", value: 128, percent: "21.5%", width: "100%" },
-  { label: "Requirement Review", value: 96, percent: "16.1%", width: "75%" },
-  { label: "Costing", value: 84, percent: "14.1%", width: "66%" },
-  { label: "Quotation Sent", value: 62, percent: "10.4%", width: "48%" },
-  { label: "Follow-up", value: 58, percent: "9.7%", width: "45%" },
-  { label: "Nurturing", value: 72, percent: "12.1%", width: "56%" },
-  { label: "Confirmed", value: 36, percent: "6.0%", width: "28%" },
-  { label: "Lost", value: 22, percent: "3.7%", width: "17%" },
-];
-
-const partners = [
-  ["ABC Travels", "₹ 12,45,000", "23%"],
-  ["Globe Tours", "₹ 9,80,000", "18%"],
-  ["Travel Arc", "₹ 8,60,000", "16%"],
-  ["Destiny Holidays", "₹ 6,75,000", "13%"],
-  ["Explore India", "₹ 5,20,000", "10%"],
-];
+import { useCrmEvents, useEmployees } from "@/lib/crm/store";
+import { useCrmMetrics, type WorkloadRow } from "@/lib/crm/metrics";
+import type { CrmEvent } from "@/lib/crm/types";
 
 const navCardClass =
   "rounded-xl border border-[#173b5e] bg-[#06223c] shadow-[0_8px_24px_rgba(0,0,0,0.18)]";
 
 const smallLabelClass =
   "text-[10px] font-semibold uppercase tracking-[0.02em] text-[#9db1c7]";
+
+const DONUT_COLORS = ["#1767d8", "#f59a05", "#38a94c", "#7042c7", "#1ca6bd", "#d95a8a", "#8ea832"];
+
+const inr = (n: number) => "₹ " + Math.round(n).toLocaleString("en-IN");
+const pct1 = (n: number) => `${n.toFixed(1)}%`;
+const pct2 = (n: number) => `${n.toFixed(2)}%`;
+const hm = (hours: number) => {
+  if (!hours) return "—";
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+};
+const delta = (cur: number, prev: number) => {
+  if (!prev) return { value: cur ? "100%" : "0%", positive: cur >= prev };
+  const d = ((cur - prev) / prev) * 100;
+  return { value: `${Math.abs(d).toFixed(1)}%`, positive: d >= 0 };
+};
+const initialsOf = (name: string) =>
+  name.split(" ").filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+const timeOf = (iso: string) => {
+  const d = new Date(iso);
+  const today = new Date();
+  const same = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: true });
+  if (same) return time;
+  const yest = new Date(today.getTime() - 864e5);
+  if (d.toDateString() === yest.toDateString()) return `Yesterday, ${time}`;
+  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}, ${time}`;
+};
+const BAD_EVENTS: CrmEvent["type"][] = ["lost"];
 
 function Avatar({ initials, index }: { initials: string; index: number }) {
   const classes = [
@@ -176,20 +104,20 @@ function Trend({
 function KpiCard({
   title,
   value,
-  change,
-  yesterday,
+  prev,
   icon: Icon,
   iconClass,
-  negative = false,
+  invert = false,
 }: {
   title: string;
-  value: string;
-  change: string;
-  yesterday: string;
+  value: number;
+  prev: number;
   icon: typeof Users;
   iconClass: string;
-  negative?: boolean;
+  /** true = growth is bad (overdue, follow-ups) */
+  invert?: boolean;
 }) {
+  const d = delta(value, prev);
   return (
     <div className={`${navCardClass} min-w-0 p-3.5`}>
       <div className="flex items-start justify-between gap-2">
@@ -198,7 +126,7 @@ function KpiCard({
             <p className="truncate text-[12px] font-medium text-[#d5e0eb]">
               {title}
             </p>
-            <Trend value={change} positive={!negative} />
+            <Trend value={d.value} positive={invert ? !d.positive : d.positive} />
           </div>
           <div className="mt-1 flex items-end gap-2">
             <p className="text-[27px] font-bold leading-none tracking-tight text-white">
@@ -208,7 +136,7 @@ function KpiCard({
           <p className="mt-2 text-[10px] leading-4 text-[#8ca4bb]">
             vs yesterday
             <br />
-            <span className="text-[#a9bacb]">({yesterday})</span>
+            <span className="text-[#a9bacb]">({prev})</span>
           </p>
         </div>
 
@@ -242,28 +170,41 @@ function PanelHeader({
   );
 }
 
-function DonutChart() {
+function DonutChart({ slices, total }: { slices: { value: number; color: string }[]; total: number }) {
+  const gradient = useMemo(() => {
+    if (!total) return "conic-gradient(#123a5c 0deg 360deg)";
+    let acc = 0;
+    const parts = slices.map((s) => {
+      const start = (acc / total) * 360;
+      acc += s.value;
+      const end = (acc / total) * 360;
+      return `${s.color} ${start}deg ${end}deg`;
+    });
+    return `conic-gradient(${parts.join(", ")})`;
+  }, [slices, total]);
+
   return (
     <div className="relative h-[156px] w-[156px] shrink-0">
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{
-          background:
-            "conic-gradient(#1767d8 0deg 94deg, #f59a05 94deg 182deg, #38a94c 182deg 250deg, #7042c7 250deg 310deg, #1ca6bd 310deg 360deg)",
-        }}
-      />
+      <div className="absolute inset-0 rounded-full" style={{ background: gradient }} />
       <div className="absolute inset-[28px] flex flex-col items-center justify-center rounded-full bg-[#06213a]">
-        <span className="text-[25px] font-bold text-white">238</span>
+        <span className="text-[25px] font-bold text-white">{total}</span>
         <span className="text-[10px] text-[#91a8bd]">Active Leads</span>
       </div>
     </div>
   );
 }
 
-function PipelineBars() {
+function PipelineBars({
+  pipeline,
+  total,
+}: {
+  pipeline: { label: string; value: number; pct: number }[];
+  total: number;
+}) {
+  const max = Math.max(1, ...pipeline.map((s) => s.value));
   return (
     <div className="space-y-2.5 px-4 py-3">
-      {stagePipeline.map((stage, index) => (
+      {pipeline.map((stage) => (
         <div key={stage.label} className="grid grid-cols-[92px_1fr_34px_38px] items-center gap-2">
           <span
             className={`truncate text-[10px] ${
@@ -285,27 +226,92 @@ function PipelineBars() {
                     ? "bg-[#ef4b51]"
                     : "bg-[#2674dc]"
               }`}
-              style={{ width: stage.width }}
+              style={{ width: `${(stage.value / max) * 100}%` }}
             />
           </div>
           <span className="text-right text-[9px] text-[#d9e3ed]">
             {stage.value}
           </span>
           <span className="text-right text-[9px] text-[#9cb0c4]">
-            {stage.percent}
+            {pct1(stage.pct)}
           </span>
         </div>
       ))}
       <div className="mt-2 flex justify-between border-t border-[#173b5e] pt-2 text-[10px]">
         <span className="font-semibold text-white">Total</span>
-        <span className="text-[#d4e0eb]">556</span>
+        <span className="text-[#d4e0eb]">{total}</span>
         <span className="text-[#9cb0c4]">100%</span>
       </div>
     </div>
   );
 }
 
+function exportWeeklyReview(rows: string[][]) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `weekly-review-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function ManagerDashboard() {
+  const m = useCrmMetrics();
+  const employees = useEmployees();
+  const events = useCrmEvents();
+
+  const workload = m.workload;
+  const totals = useMemo(() => {
+    const sum = (pick: (r: WorkloadRow) => number) => workload.reduce((s, r) => s + pick(r), 0);
+    return {
+      assigned: sum((r) => r.assigned),
+      newToday: sum((r) => r.newToday),
+      inProgress: sum((r) => r.inProgress),
+      quotations: sum((r) => r.quotations),
+      completedToday: sum((r) => r.completedToday),
+      overdue: sum((r) => r.overdue),
+      nurturing: sum((r) => r.nurturing),
+      revenue: sum((r) => r.revenue),
+      leadsReceived: sum((r) => r.leadsReceived),
+      leadsAssigned: sum((r) => r.leadsAssigned),
+      quotesSent: sum((r) => r.quotesSentToday),
+      followups: sum((r) => r.followupsDoneToday),
+      tasksClosed: sum((r) => r.tasksClosedToday),
+    };
+  }, [workload]);
+
+  const distribution = useMemo(
+    () =>
+      workload.map((r, i) => ({
+        name: r.employee.name,
+        value: r.assigned,
+        color: DONUT_COLORS[i % DONUT_COLORS.length],
+        share: totals.assigned ? (r.assigned / totals.assigned) * 100 : 0,
+      })),
+    [workload, totals.assigned],
+  );
+
+  const recent = useMemo(() => events.slice(0, 6), [events]);
+  const half = Math.ceil(recent.length / 2);
+
+  const monthly = m.monthly;
+  const monthlyCards: { label: string; value: string; cur: number; prev: number; prevLabel: string }[] = [
+    { label: "Total Leads", value: monthly.totalLeads.toLocaleString("en-IN"), cur: monthly.totalLeads, prev: monthly.prevTotalLeads, prevLabel: monthly.prevLabel },
+    { label: "Quotes Sent", value: monthly.quotesSent.toLocaleString("en-IN"), cur: monthly.quotesSent, prev: monthly.prevQuotesSent, prevLabel: monthly.prevLabel },
+    { label: "Confirmed", value: monthly.confirmed.toLocaleString("en-IN"), cur: monthly.confirmed, prev: monthly.prevConfirmed, prevLabel: monthly.prevLabel },
+    { label: "Lost", value: monthly.lost.toLocaleString("en-IN"), cur: monthly.lost, prev: monthly.prevLost, prevLabel: monthly.prevLabel },
+    { label: "Nurturing", value: monthly.nurturing.toLocaleString("en-IN"), cur: monthly.nurturing, prev: monthly.prevNurturing, prevLabel: monthly.prevLabel },
+    { label: "Conversion Rate", value: pct2(monthly.conversion), cur: monthly.conversion, prev: monthly.prevConversion, prevLabel: monthly.prevLabel },
+  ];
+
+  const weeklyRows = [
+    { label: "Average Response Time", value: hm(m.weekly.avgResponseHours), Icon: Clock3, positive: true },
+    { label: "Average Quotation Turnaround", value: hm(m.weekly.avgQuotationHours), Icon: Clock3, positive: false },
+    { label: "Team Conversion Rate", value: pct2(m.weekly.conversion), Icon: Gauge, positive: m.weekly.conversion >= monthly.prevConversion },
+  ];
+
   return (
     <div className="min-h-full w-full bg-[#03182b] text-white">
       <div className="mx-auto w-full max-w-[1500px] px-3 pb-5 pt-3 sm:px-4 lg:px-5">
@@ -326,56 +332,12 @@ export default function ManagerDashboard() {
 
         {/* KPI cards */}
         <div className="mb-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-6">
-          <KpiCard
-            title="New Leads Today"
-            value="48"
-            change="12%"
-            yesterday="43"
-            icon={Users}
-            iconClass="bg-[#1767d8]"
-          />
-          <KpiCard
-            title="Leads Assigned Today"
-            value="36"
-            change="8%"
-            yesterday="33"
-            icon={Users}
-            iconClass="bg-[#f28a00]"
-          />
-          <KpiCard
-            title="Tasks Completed Today"
-            value="29"
-            change="16%"
-            yesterday="25"
-            icon={CheckCircle2}
-            iconClass="bg-[#21b94d]"
-          />
-          <KpiCard
-            title="Pending Quotations"
-            value="62"
-            change="0%"
-            yesterday="62"
-            icon={FileText}
-            iconClass="bg-[#7627c8]"
-          />
-          <KpiCard
-            title="Follow-ups Due Today"
-            value="41"
-            change="5%"
-            yesterday="39"
-            icon={CalendarDays}
-            iconClass="bg-[#1767d8]"
-            negative
-          />
-          <KpiCard
-            title="Overdue Queries"
-            value="17"
-            change="13%"
-            yesterday="15"
-            icon={CircleAlert}
-            iconClass="bg-[#f3262f]"
-            negative
-          />
+          <KpiCard title="New Leads Today" value={m.newLeadsToday} prev={m.prev.newLeads} icon={Users} iconClass="bg-[#1767d8]" />
+          <KpiCard title="Leads Assigned Today" value={m.leadsAssignedToday} prev={m.prev.assigned} icon={Users} iconClass="bg-[#f28a00]" />
+          <KpiCard title="Tasks Completed Today" value={m.tasksCompletedToday} prev={m.prev.tasksCompleted} icon={CheckCircle2} iconClass="bg-[#21b94d]" />
+          <KpiCard title="Pending Quotations" value={m.pendingQuotations} prev={m.prev.pendingQuotations} icon={FileText} iconClass="bg-[#7627c8]" />
+          <KpiCard title="Follow-ups Due Today" value={m.followupsDueToday} prev={m.prev.followupsDue} icon={CalendarDays} iconClass="bg-[#1767d8]" invert />
+          <KpiCard title="Overdue Queries" value={m.overdueFollowups} prev={m.prev.overdue} icon={CircleAlert} iconClass="bg-[#f3262f]" invert />
         </div>
 
         {/* Main upper row */}
@@ -391,7 +353,18 @@ export default function ManagerDashboard() {
                     View by: Executive
                     <ChevronDown className="h-3 w-3" />
                   </button>
-                  <button className="hidden h-7 items-center gap-1.5 rounded-md border border-[#3a5874] bg-[#082640] px-2.5 text-[10px] text-[#d7e1eb] md:flex">
+                  <button
+                    onClick={() =>
+                      exportWeeklyReview([
+                        ["Executive", "Role", "Assigned", "New Today", "In Progress", "Quotations", "Completed Today", "Overdue", "Nurturing", "Conversion %", "Revenue"],
+                        ...workload.map((r) => [
+                          r.employee.name, r.employee.role, r.assigned, r.newToday, r.inProgress, r.quotations,
+                          r.completedToday, r.overdue, r.nurturing, r.conversion.toFixed(2), r.revenue,
+                        ].map(String)),
+                      ])
+                    }
+                    className="hidden h-7 items-center gap-1.5 rounded-md border border-[#3a5874] bg-[#082640] px-2.5 text-[10px] text-[#d7e1eb] md:flex"
+                  >
                     <Download className="h-3 w-3" />
                     Export
                   </button>
@@ -445,53 +418,58 @@ export default function ManagerDashboard() {
                 </thead>
 
                 <tbody>
-                  {executives.map((person, index) => (
+                  {workload.map((row, index) => (
                     <tr
-                      key={person.name}
+                      key={row.employee.id}
                       className="border-t border-[#173b5e] hover:bg-[#0a2945]"
                     >
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <Avatar initials={person.initials} index={index} />
+                          <Avatar initials={initialsOf(row.employee.name)} index={index} />
                           <div>
                             <div className="font-semibold text-white">
-                              {person.name}
+                              {row.employee.name}
                             </div>
                             <div className="text-[9px] text-[#819ab1]">
-                              {person.role}
+                              {row.employee.role}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="text-center font-semibold">{person.assigned}</td>
-                      <td className="text-center font-semibold">{person.newToday}</td>
-                      <td className="text-center font-semibold">{person.inProgress}</td>
-                      <td className="text-center font-semibold">{person.quotations}</td>
-                      <td className="text-center font-semibold">{person.completed}</td>
-                      <td className="text-center font-semibold text-[#ff525b]">{person.overdue}</td>
-                      <td className="text-center font-semibold">{person.nurturing}</td>
+                      <td className="text-center font-semibold">{row.assigned}</td>
+                      <td className="text-center font-semibold">{row.newToday}</td>
+                      <td className="text-center font-semibold">{row.inProgress}</td>
+                      <td className="text-center font-semibold">{row.quotations}</td>
+                      <td className="text-center font-semibold">{row.completedToday}</td>
+                      <td className="text-center font-semibold text-[#ff525b]">{row.overdue}</td>
+                      <td className="text-center font-semibold">{row.nurturing}</td>
                       <td className="text-center">
-                        <span className="font-semibold text-[#d9e4ee]">{person.conversion}</span>{" "}
-                        <Trend value={["2.3%", "1.8%", "2.1%", "1.4%", "1.0%"][index]} />
+                        <span className="font-semibold text-[#d9e4ee]">{pct1(row.conversion)}</span>
                       </td>
                       <td className="px-2 text-center">
-                        <span className="font-semibold text-[#dce7ef]">{person.revenue}</span>{" "}
-                        <Trend value={["12%", "8%", "10%", "6%", "7%"][index]} />
+                        <span className="font-semibold text-[#dce7ef]">{inr(row.revenue)}</span>
                       </td>
                     </tr>
                   ))}
+                  {workload.length === 0 && (
+                    <tr className="border-t border-[#173b5e]">
+                      <td colSpan={10} className="px-3 py-6 text-center text-[10px] text-[#8ca4bb]">
+                        No employees registered yet. Add them in Users &amp; Roles.
+                      </td>
+                    </tr>
+                  )}
 
                   <tr className="border-t border-[#31526f] bg-[#08243e] font-bold">
                     <td className="px-3 py-2 text-white">Team Total</td>
-                    <td className="text-center">238</td>
-                    <td className="text-center">48</td>
-                    <td className="text-center">68</td>
-                    <td className="text-center">38</td>
-                    <td className="text-center">32</td>
-                    <td className="text-center text-[#ff525b]">17</td>
-                    <td className="text-center">87</td>
-                    <td className="text-center">—</td>
-                    <td className="text-center">₹ 53,35,000</td>
+                    <td className="text-center">{totals.assigned}</td>
+                    <td className="text-center">{totals.newToday}</td>
+                    <td className="text-center">{totals.inProgress}</td>
+                    <td className="text-center">{totals.quotations}</td>
+                    <td className="text-center">{totals.completedToday}</td>
+                    <td className="text-center text-[#ff525b]">{totals.overdue}</td>
+                    <td className="text-center">{totals.nurturing}</td>
+                    <td className="text-center">{pct1(m.weekly.conversion)}</td>
+                    <td className="text-center">{inr(totals.revenue)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -509,29 +487,23 @@ export default function ManagerDashboard() {
             />
 
             <div className="flex min-h-[274px] flex-col items-center justify-center gap-5 px-4 py-4 sm:flex-row">
-              <DonutChart />
+              <DonutChart slices={distribution} total={totals.assigned} />
 
               <div className="w-full max-w-[190px] space-y-3">
-                {[
-                  ["Rahul Sharma", "62", "26%", "#1767d8"],
-                  ["Priya Singh", "58", "24%", "#f59a05"],
-                  ["Anjali Verma", "45", "19%", "#38a94c"],
-                  ["Raina Sharma", "40", "17%", "#7042c7"],
-                  ["Aman Singh", "33", "14%", "#1ca6bd"],
-                ].map(([name, value, percent, color]) => (
+                {distribution.map((d) => (
                   <div
-                    key={name}
+                    key={d.name}
                     className="flex items-center justify-between gap-2 text-[10px]"
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <span
                         className="h-3 w-3 shrink-0 rounded-full"
-                        style={{ backgroundColor: color }}
+                        style={{ backgroundColor: d.color }}
                       />
-                      <span className="truncate text-[#d7e1eb]">{name}</span>
+                      <span className="truncate text-[#d7e1eb]">{d.name}</span>
                     </div>
                     <span className="shrink-0 font-semibold text-white">
-                      {value} <span className="text-[#a6b8c9]">({percent})</span>
+                      {d.value} <span className="text-[#a6b8c9]">({Math.round(d.share)}%)</span>
                     </span>
                   </div>
                 ))}
@@ -541,11 +513,11 @@ export default function ManagerDashboard() {
             <div className="grid grid-cols-2 border-t border-[#173b5e]">
               <div className="px-4 py-3">
                 <p className={smallLabelClass}>Total Active Leads</p>
-                <p className="mt-1 text-[17px] font-bold">238</p>
+                <p className="mt-1 text-[17px] font-bold">{m.activeQueries}</p>
               </div>
               <div className="border-l border-[#173b5e] px-4 py-3">
                 <p className={smallLabelClass}>Avg. Leads / Executive</p>
-                <p className="mt-1 text-[17px] font-bold">47.6</p>
+                <p className="mt-1 text-[17px] font-bold">{m.avgLeadsPerExecutive.toFixed(1)}</p>
               </div>
             </div>
           </section>
@@ -592,16 +564,10 @@ export default function ManagerDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[
-                    ["Rahul Sharma", 12, 10, 4, 8, 9],
-                    ["Priya Singh", 10, 8, 3, 7, 8],
-                    ["Anjali Verma", 9, 7, 3, 6, 6],
-                    ["Raina Sharma", 7, 6, 2, 5, 5],
-                    ["Aman Singh", 10, 5, 2, 4, 5],
-                  ].map((row) => (
-                    <tr key={row[0]} className="border-t border-[#173b5e]">
-                      <td className="px-3 py-2 font-semibold text-[#dce5ee]">{row[0]}</td>
-                      {row.slice(1).map((value, index) => (
+                  {workload.map((r) => (
+                    <tr key={r.employee.id} className="border-t border-[#173b5e]">
+                      <td className="px-3 py-2 font-semibold text-[#dce5ee]">{r.employee.name}</td>
+                      {[r.leadsReceived, r.leadsAssigned, r.quotesSentToday, r.followupsDoneToday, r.tasksClosedToday].map((value, index) => (
                         <td key={index} className="px-1 py-2 text-center text-[#d2deea]">
                           {value}
                         </td>
@@ -610,11 +576,11 @@ export default function ManagerDashboard() {
                   ))}
                   <tr className="border-t border-[#31526f] bg-[#08243e] font-bold">
                     <td className="px-3 py-2">Total</td>
-                    <td className="text-center">48</td>
-                    <td className="text-center">36</td>
-                    <td className="text-center">14</td>
-                    <td className="text-center">30</td>
-                    <td className="text-center">33</td>
+                    <td className="text-center">{totals.leadsReceived}</td>
+                    <td className="text-center">{totals.leadsAssigned}</td>
+                    <td className="text-center">{totals.quotesSent}</td>
+                    <td className="text-center">{totals.followups}</td>
+                    <td className="text-center">{totals.tasksClosed}</td>
                   </tr>
                 </tbody>
               </table>
@@ -626,40 +592,39 @@ export default function ManagerDashboard() {
             <PanelHeader
               icon={BarChart3}
               title="Monthly Performance Overview"
-              right={<span className="text-[10px] text-[#9bb0c3]">(Aug 2026)</span>}
+              right={<span className="text-[10px] text-[#9bb0c3]">({monthly.label})</span>}
             />
             <div className="grid grid-cols-3 gap-2 p-3">
-              {[
-                ["Total Leads", "1,286", "9.3%", true, "vs Jul 26 (1,177)"],
-                ["Quotes Sent", "312", "11.6%", true, "vs Jul 26 (279)"],
-                ["Confirmed", "142", "8.4%", true, "vs Jul 26 (131)"],
-                ["Lost", "48", "2.1%", false, "vs Jul 26 (47)"],
-                ["Nurturing", "254", "7.6%", true, "vs Jul 26 (236)"],
-                ["Conversion Rate", "11.04%", "0.9%", true, "vs Jul 26 (10.14%)"],
-              ].map(([label, value, trend, positive, comparison]) => (
-                <div
-                  key={label as string}
-                  className={`rounded-xl border p-3 ${
-                    label === "Conversion Rate"
-                      ? "border-[#f0c000] bg-[#102c44]"
-                      : "border-[#173b5e] bg-[#082640]"
-                  }`}
-                >
-                  <p className="text-[9px] text-[#b3c1cf]">{label as string}</p>
-                  <p className="mt-1 text-[19px] font-bold leading-none">{value as string}</p>
-                  <div className="mt-2">
-                    <Trend value={`${trend}`} positive={Boolean(positive)} />
+              {monthlyCards.map((card) => {
+                const d = delta(card.cur, card.prev);
+                const positive = card.label === "Lost" ? !d.positive : d.positive;
+                return (
+                  <div
+                    key={card.label}
+                    className={`rounded-xl border p-3 ${
+                      card.label === "Conversion Rate"
+                        ? "border-[#f0c000] bg-[#102c44]"
+                        : "border-[#173b5e] bg-[#082640]"
+                    }`}
+                  >
+                    <p className="text-[9px] text-[#b3c1cf]">{card.label}</p>
+                    <p className="mt-1 text-[19px] font-bold leading-none">{card.value}</p>
+                    <div className="mt-2">
+                      <Trend value={d.value} positive={positive} />
+                    </div>
+                    <p className="mt-1 text-[8px] text-[#829bb0]">
+                      vs {card.prevLabel} ({card.label === "Conversion Rate" ? pct2(card.prev) : card.prev.toLocaleString("en-IN")})
+                    </p>
                   </div>
-                  <p className="mt-1 text-[8px] text-[#829bb0]">{comparison as string}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
           {/* Pipeline */}
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={Target} title="Query Stage Pipeline" />
-            <PipelineBars />
+            <PipelineBars pipeline={m.pipeline} total={m.totalQueries} />
           </section>
 
           {/* Weekly review */}
@@ -669,11 +634,7 @@ export default function ManagerDashboard() {
               title="Weekly Review / Management Summary"
             />
             <div className="space-y-0">
-              {[
-                { label: "Average Response Time", value: "3h 48m", trend: "12%", positive: true, Icon: Clock3 },
-                { label: "Average Quotation Turnaround", value: "28h 32m", trend: "5%", positive: false, Icon: Clock3 },
-                { label: "Team Conversion Rate", value: "11.04%", trend: "0.9%", positive: true, Icon: Gauge },
-              ].map(({ label, value, trend, positive, Icon }) => (
+              {weeklyRows.map(({ label, value, positive, Icon }) => (
                 <div
                   key={label}
                   className="flex items-center gap-2 border-b border-[#173b5e] px-3 py-2.5"
@@ -686,11 +647,10 @@ export default function ManagerDashboard() {
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-white">{value}</p>
-                    <Trend value={trend} positive={positive} />
+                    <Trend value="" positive={positive} />
                   </div>
                 </div>
               ))}
-
 
               <div className="space-y-2 px-3 py-2.5">
                 <div className="flex items-center gap-2">
@@ -699,12 +659,14 @@ export default function ManagerDashboard() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-[9px] text-[#aabccc]">Top Performer of the Week</p>
-                    <p className="text-[10px] font-semibold">Rahul Sharma</p>
+                    <p className="text-[10px] font-semibold">{m.weekly.topPerformer?.employee.name ?? "—"}</p>
                   </div>
                   <div className="text-right text-[8px] text-[#9db1c3]">
                     Highest conversion
                     <br />
-                    <span className="font-bold text-[#57c53e]">18.7%</span>
+                    <span className="font-bold text-[#57c53e]">
+                      {m.weekly.topPerformer ? pct1(m.weekly.topPerformer.conversion) : "—"}
+                    </span>
                   </div>
                 </div>
 
@@ -717,7 +679,7 @@ export default function ManagerDashboard() {
                     <p className="text-[10px] font-semibold">Follow-ups</p>
                   </div>
                   <p className="text-right text-[8px] text-[#e5edf4]">
-                    41 due today | 17 overdue
+                    {m.followupsDueToday} due today | {m.overdueFollowups} overdue
                   </p>
                 </div>
 
@@ -728,7 +690,7 @@ export default function ManagerDashboard() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[9px] text-[#aabccc]">Leads Pending for Action</p>
                   </div>
-                  <p className="text-[13px] font-bold">58</p>
+                  <p className="text-[13px] font-bold">{m.weekly.leadsPendingAction}</p>
                 </div>
               </div>
             </div>
@@ -741,55 +703,41 @@ export default function ManagerDashboard() {
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={Activity} title="Recent Team Activity / Alerts" />
             <div className="grid grid-cols-1 divide-y divide-[#173b5e] md:grid-cols-2 md:divide-x md:divide-y-0">
-              <div>
-                {[
-                  ["Lead assigned to Priya Singh", "Lead L-20876 • Music Group • Europe Tour", "10:15 AM", "red"],
-                  ["Quotation sent by Rahul Sharma", "Q-2081 • Corporate Retreat • Madhya Pradesh", "09:48 AM", "green"],
-                  ["Follow-up overdue for Anjali Verma", "Lead L-20822 • Family Tour • Rajasthan", "09:30 AM", "red"],
-                ].map(([title, detail, time, color]) => (
-                  <div key={title} className="flex gap-2 border-b border-[#173b5e] px-3 py-2.5 last:border-b-0">
-                    <div
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
-                        color === "green" ? "bg-[#20ae47]" : "bg-[#e83840]"
-                      }`}
-                    >
-                      {color === "green" ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-white" />
-                      ) : (
-                        <AlertCircle className="h-3.5 w-3.5 text-white" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold text-white">{title}</p>
-                      <p className="truncate text-[8px] text-[#829ab0]">{detail}</p>
-                    </div>
-                    <span className="shrink-0 text-[8px] text-[#8da4b8]">{time}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                {[
-                  ["Client response received from Raina Sharma", "Lead L-20769 • Guided Temple Trail", "Yesterday, 06:20 PM", "green"],
-                  ["Query confirmed by Aman Singh", "Lead L-20801 • Golden Triangle Tour", "Yesterday, 05:15 PM", "green"],
-                ].map(([title, detail, time, color]) => (
-                  <div key={title} className="flex gap-2 border-b border-[#173b5e] px-3 py-2.5 last:border-b-0">
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#20ae47]">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-white" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold text-white">{title}</p>
-                      <p className="truncate text-[8px] text-[#829ab0]">{detail}</p>
-                    </div>
-                    <span className="shrink-0 text-[8px] text-[#8da4b8]">{time}</span>
-                  </div>
-                ))}
-              </div>
+              {[recent.slice(0, half), recent.slice(half)].map((column, ci) => (
+                <div key={ci}>
+                  {column.map((e) => {
+                    const bad = BAD_EVENTS.includes(e.type);
+                    return (
+                      <div key={e.id} className="flex gap-2 border-b border-[#173b5e] px-3 py-2.5 last:border-b-0">
+                        <div
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
+                            bad ? "bg-[#e83840]" : "bg-[#20ae47]"
+                          }`}
+                        >
+                          {bad ? (
+                            <AlertCircle className="h-3.5 w-3.5 text-white" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-semibold text-white">{e.title}</p>
+                          <p className="truncate text-[8px] text-[#829ab0]">{e.detail ?? e.query_id ?? ""}</p>
+                        </div>
+                        <span className="shrink-0 text-[8px] text-[#8da4b8]">{timeOf(e.at)}</span>
+                      </div>
+                    );
+                  })}
+                  {column.length === 0 && ci === 0 && (
+                    <div className="px-3 py-6 text-center text-[9px] text-[#829ab0]">No activity recorded yet.</div>
+                  )}
+                </div>
+              ))}
             </div>
             <div className="border-t border-[#173b5e] px-4 py-2 text-center">
-              <button className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
+              <Link to="/notifications" className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
                 View all activities →
-              </button>
+              </Link>
             </div>
           </section>
 
@@ -801,30 +749,33 @@ export default function ManagerDashboard() {
               right={<span className="text-[10px] text-[#9db1c3]">by Revenue</span>}
             />
             <div>
-              {partners.map(([name, revenue, share], index) => (
+              {m.partners.map((p, index) => (
                 <div
-                  key={name}
+                  key={p.name}
                   className="flex items-center gap-2 border-b border-[#173b5e] px-3 py-2 last:border-b-0"
                 >
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#102f4b] text-[9px] font-bold text-[#dce6ef]">
                     {index + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[10px] font-medium">
-                    {name}
+                    {p.name}
                   </span>
                   <span className="text-[9px] font-semibold text-[#dce5ed]">
-                    {revenue}
+                    {inr(p.revenue)}
                   </span>
-                  <span className="w-7 text-right text-[9px] text-[#9fb2c4]">
-                    {share}
+                  <span className="w-9 text-right text-[9px] text-[#9fb2c4]">
+                    {Math.round(p.share)}%
                   </span>
                 </div>
               ))}
+              {m.partners.length === 0 && (
+                <div className="px-3 py-6 text-center text-[9px] text-[#829ab0]">No partner revenue yet.</div>
+              )}
             </div>
             <div className="border-t border-[#173b5e] px-4 py-2 text-center">
-              <button className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
+              <Link to="/agents" className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
                 View all partners →
-              </button>
+              </Link>
             </div>
           </section>
 
@@ -832,19 +783,47 @@ export default function ManagerDashboard() {
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={ListChecks} title="Quick Actions" />
             <div className="grid grid-cols-2 gap-2 p-3">
-              <button className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]">
+              <Link
+                to="/query-tracker"
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+              >
                 <Users className="h-5 w-5 text-[#ffbd00]" />
-                Assign Leads
-              </button>
-              <button className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]">
+                Assign Leads ({m.pipeline.find((p) => p.label === "New")?.value ?? 0})
+              </Link>
+              <Link
+                to="/query-tracker"
+                search={{ view: "overdue" }}
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+              >
                 <CalendarDays className="h-5 w-5 text-[#ff4d55]" />
-                Review Overdues
-              </button>
-              <button className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]">
+                Review Overdues ({m.overdueFollowups})
+              </Link>
+              <Link
+                to="/reports"
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+              >
                 <BarChart3 className="h-5 w-5 text-[#74a9d8]" />
-                Team Performance
-              </button>
-              <button className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]">
+                Team Performance ({employees.length})
+              </Link>
+              <button
+                onClick={() =>
+                  exportWeeklyReview([
+                    ["Metric", "Value"],
+                    ["New Leads Today", String(m.newLeadsToday)],
+                    ["Leads Assigned Today", String(m.leadsAssignedToday)],
+                    ["Tasks Completed Today", String(m.tasksCompletedToday)],
+                    ["Pending Quotations", String(m.pendingQuotations)],
+                    ["Follow-ups Due Today", String(m.followupsDueToday)],
+                    ["Overdue Queries", String(m.overdueFollowups)],
+                    ["Average Response Time", hm(m.weekly.avgResponseHours)],
+                    ["Average Quotation Turnaround", hm(m.weekly.avgQuotationHours)],
+                    ["Team Conversion Rate", pct2(m.weekly.conversion)],
+                    ["Leads Pending for Action", String(m.weekly.leadsPendingAction)],
+                    ["Total Pipeline Value", String(m.totalPipelineValue)],
+                  ])
+                }
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+              >
                 <Download className="h-5 w-5 text-[#8caecc]" />
                 Export Weekly Review
               </button>
