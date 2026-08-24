@@ -670,26 +670,27 @@ export default function ManagerDashboard() {
             />
             <div className="space-y-0">
               {[
-                ["Average Response Time", "3h 48m", "12%", true, Clock3],
-                ["Average Quotation Turnaround", "28h 32m", "5%", false, Clock3],
-                ["Team Conversion Rate", "11.04%", "0.9%", true, Gauge],
-              ].map(([label, value, trend, positive, Icon]) => (
+                { label: "Average Response Time", value: "3h 48m", trend: "12%", positive: true, Icon: Clock3 },
+                { label: "Average Quotation Turnaround", value: "28h 32m", trend: "5%", positive: false, Icon: Clock3 },
+                { label: "Team Conversion Rate", value: "11.04%", trend: "0.9%", positive: true, Icon: Gauge },
+              ].map(({ label, value, trend, positive, Icon }) => (
                 <div
-                  key={label as string}
+                  key={label}
                   className="flex items-center gap-2 border-b border-[#173b5e] px-3 py-2.5"
                 >
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#d8a900]">
                     <Icon className="h-3.5 w-3.5 text-[#ffd000]" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] leading-3 text-[#c5d2de]">{label as string}</p>
+                    <p className="text-[9px] leading-3 text-[#c5d2de]">{label}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-bold text-white">{value as string}</p>
-                    <Trend value={`${trend}`} positive={Boolean(positive)} />
+                    <p className="text-[10px] font-bold text-white">{value}</p>
+                    <Trend value={trend} positive={positive} />
                   </div>
                 </div>
               ))}
+
 
               <div className="space-y-2 px-3 py-2.5">
                 <div className="flex items-center gap-2">
