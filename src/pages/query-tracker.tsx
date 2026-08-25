@@ -1,56 +1,72 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Filter, Download, ChevronLeft, ChevronRight } from "lucide-react";
-import { useLeadStore } from "@/lib/leads-store";
-
-const stageColors: Record<string, string> = {
-  New: "bg-blue-100 text-blue-700",
-  "Requirement Review": "bg-purple-100 text-purple-700",
-  Costing: "bg-yellow-100 text-yellow-700",
-  "Quotation Sent": "bg-green-100 text-green-700",
-  Followup: "bg-orange-100 text-orange-700",
-  Nurturing: "bg-gray-100 text-gray-700",
-};
+import { Search, Download } from "lucide-react";
+import { useCrmMetrics, isOpen, sameDay } from "@/lib/crm/metrics";
+import { StageBadge, inr, fmtDate, fmtTime } from "@/components/crm/ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function QueryTracker() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const queries = useLeadStore((state) => state.queries);
+  const [owner, setOwner] = useState("all");
+  const m = useCrmMetrics();
 
-  const filteredQueries = queries.filter(
-    (q) =>
-      q.id.toLowerCase().includes(search.toLowerCase()) ||
-      q.customer.toLowerCase().includes(search.toLowerCase()) ||
-      q.destination.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const s = search.toLowerCase();
+    return m.queries.filter(
+      (q) =>
+        (owner === "all" || q.owner === owner) &&
+        (!s ||
+          q.query_id.toLowerCase().includes(s) ||
+          q.customer.toLowerCase().includes(s) ||
+          q.destination.toLowerCase().includes(s) ||
+          q.owner.toLowerCase().includes(s)),
+    );
+  }, [m.queries, search, owner]);
 
-  const handleRowClick = (queryId: string) => {
-    navigate({
-      to: "/query/$queryId",
-      params: { queryId },
-    });
+  const exportCsv = () => {
+    const rows = [
+      ["Query ID", "Travel Dates", "Destination", "Travel Type", "Customer", "Stage", "Owner", "Value", "Next Action", "Follow-up Due"],
+      ...filtered.map((q) => [
+        q.query_id, `${q.travel_start} → ${q.travel_end}`, q.destination, q.travel_type, q.customer,
+        q.stage, q.owner, String(q.value), q.next_action, q.followup_due,
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `query-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
+  const assigned = filtered.filter(isOpen).length;
+  const sentToday = filtered.filter((q) => q.stage === "Quotation Sent" && sameDay(q.created_at, m.today)).length
+    || m.quotesSentToday;
+  const followupsDue = filtered.filter((q) => isOpen(q) && sameDay(q.followup_due, m.today)).length;
+  const overdue = filtered.filter((q) => isOpen(q) && new Date(q.followup_due).getTime() < m.today.getTime()).length;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Query Tracker</h1>
         <p className="text-sm text-muted-foreground">Track and manage all queries and their progress</p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Assigned Queries</p>
-                <p className="text-2xl font-bold">{queries.length}</p>
+                <p className="text-2xl font-bold">{assigned}</p>
               </div>
               <Badge variant="secondary">Active</Badge>
             </div>
@@ -61,7 +77,7 @@ export default function QueryTracker() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Sent Today</p>
-                <p className="text-2xl font-bold">52</p>
+                <p className="text-2xl font-bold">{sentToday}</p>
               </div>
               <Badge variant="secondary">Quotes</Badge>
             </div>
@@ -72,7 +88,7 @@ export default function QueryTracker() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Follow-ups Due</p>
-                <p className="text-2xl font-bold">36</p>
+                <p className="text-2xl font-bold">{followupsDue}</p>
               </div>
               <Badge variant="secondary">Today</Badge>
             </div>
@@ -83,7 +99,7 @@ export default function QueryTracker() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Overdue</p>
-                <p className="text-2xl font-bold text-red-600">21</p>
+                <p className="text-2xl font-bold text-red-600">{overdue}</p>
               </div>
               <Badge variant="destructive">Action Required</Badge>
             </div>
@@ -96,17 +112,22 @@ export default function QueryTracker() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by Query ID, Customer, or Destination..."
+            placeholder="Search by Query ID, Customer, Destination or Owner..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
-        <Button variant="outline">
-          <Filter className="h-4 w-4 mr-2" />
-          Filter
-        </Button>
-        <Button variant="outline">
+        <Select value={owner} onValueChange={setOwner}>
+          <SelectTrigger className="w-[200px]"><SelectValue placeholder="All owners" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All owners</SelectItem>
+            {m.employees.map((e) => (
+              <SelectItem key={e.id} value={e.name}>{e.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" onClick={exportCsv}>
           <Download className="h-4 w-4 mr-2" />
           Export
         </Button>
@@ -131,31 +152,29 @@ export default function QueryTracker() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredQueries.length === 0 ? (
+              {filtered.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     No queries found. Create a new lead to get started.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredQueries.map((q) => (
+                filtered.slice(0, 100).map((q) => (
                   <TableRow
                     key={q.id}
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
-                    onClick={() => handleRowClick(q.id)}
+                    onClick={() => navigate({ to: "/query/$queryId", params: { queryId: q.query_id } })}
                   >
-                    <TableCell className="font-medium text-blue-600">{q.id}</TableCell>
-                    <TableCell>{q.dates}</TableCell>
+                    <TableCell className="font-medium text-blue-600">{q.query_id}</TableCell>
+                    <TableCell>{fmtDate(q.travel_start)} – {fmtDate(q.travel_end)}</TableCell>
                     <TableCell>{q.destination}</TableCell>
-                    <TableCell>{q.type}</TableCell>
+                    <TableCell>{q.travel_type}</TableCell>
                     <TableCell>{q.customer}</TableCell>
-                    <TableCell>
-                      <Badge className={stageColors[q.stage] || "bg-gray-100"}>{q.stage}</Badge>
-                    </TableCell>
+                    <TableCell><StageBadge stage={q.stage} /></TableCell>
                     <TableCell>{q.owner}</TableCell>
-                    <TableCell className="font-medium">{q.value}</TableCell>
-                    <TableCell>{q.action}</TableCell>
-                    <TableCell>{q.due}</TableCell>
+                    <TableCell className="font-medium">{inr(q.value)}</TableCell>
+                    <TableCell>{q.next_action}</TableCell>
+                    <TableCell>{fmtTime(q.followup_due)}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -164,21 +183,9 @@ export default function QueryTracker() {
         </CardContent>
       </Card>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Showing 1 to {filteredQueries.length} of {queries.length} entries</p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" className="bg-primary text-primary-foreground">
-            1
-          </Button>
-          <Button variant="outline" size="sm">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Showing {Math.min(filtered.length, 100)} of {filtered.length} matching queries ({m.totalQueries} total)
+      </p>
     </div>
   );
 }
