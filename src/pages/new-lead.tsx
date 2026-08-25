@@ -6,68 +6,67 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useLeadStore } from "@/lib/leads-store";
+import { createLead, PARTNERS, useEmployees } from "@/lib/crm/store";
+import { DESTINATIONS, ENQUIRY_TYPES, LEAD_SOURCES, MARKETS, PRIORITIES } from "@/lib/crm/types";
+import { toast } from "sonner";
 
 export default function NewLead() {
   const navigate = useNavigate();
-  const addLead = useLeadStore((state) => state.addLead);
+  const employees = useEmployees();
+  const roster = employees.filter((e) => e.active !== false);
 
-  // Form state
-  const [leadSource, setLeadSource] = useState("website");
-  const [sourcePartner, setSourcePartner] = useState("abc");
-  const [contactPerson, setContactPerson] = useState("Amit Sharma");
-  const [market, setMarket] = useState("domestic");
-  const [destination, setDestination] = useState("mp");
-  const [enquiryType, setEnquiryType] = useState("family");
-  const [travelDates, setTravelDates] = useState("2026-09-12");
+  const [leadSource, setLeadSource] = useState(LEAD_SOURCES[0]);
+  const [sourcePartner, setSourcePartner] = useState(PARTNERS[0]);
+  const [contactPerson, setContactPerson] = useState("");
+  const [market, setMarket] = useState(MARKETS[0]);
+  const [destination, setDestination] = useState(DESTINATIONS[0]);
+  const [enquiryType, setEnquiryType] = useState(ENQUIRY_TYPES[0]);
+  const [travelStart, setTravelStart] = useState("");
+  const [travelEnd, setTravelEnd] = useState("");
   const [numTravellers, setNumTravellers] = useState("4");
-  const [priority, setPriority] = useState("normal");
-  const [remarks, setRemarks] = useState(
-    "5 Nights / 6 Days tour. 4* hotels preferred. Innova Crysta vehicle. Guides with Hindi & English. Entrance fees & activities required."
-  );
+  const [priority, setPriority] = useState("Normal");
+  const [owner, setOwner] = useState(roster[0]?.name ?? "");
+  const [remarks, setRemarks] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Build lead data object
-    const leadData = {
-      leadSource,
-      sourcePartner: sourcePartner === "abc" ? "ABC Travels" : sourcePartner,
-      contactPerson,
-      market: market === "domestic" ? "Domestic - India" : "Inbound - International",
-      destination: destination === "mp" ? "Madhya Pradesh" : destination,
-      enquiryType: enquiryType === "family" ? "Family Tour" : enquiryType,
-      travelDates,
-      numTravellers: parseInt(numTravellers, 10),
+    const assignee = owner || roster[0]?.name;
+    if (!assignee) {
+      toast.error("Add an employee in Users & Roles before creating a lead.");
+      return;
+    }
+    const { query } = createLead({
+      lead_source: leadSource,
+      customer: sourcePartner,
+      contact_person: contactPerson || "—",
+      market,
+      enquiry_type: enquiryType,
+      travel_start: travelStart,
+      travel_end: travelEnd || travelStart,
+      pax: parseInt(numTravellers, 10) || 1,
+      destination,
       priority,
-      remarks,
-    };
-
-    // Add to store
-    addLead(leadData);
-
-    // Navigate to query tracker
+      requirement: remarks,
+      owner: assignee,
+    });
+    toast.success(`${query.query_id} created and assigned to ${assignee}`);
     navigate({ to: "/query-tracker" });
   };
 
   const handleClear = () => {
-    setLeadSource("website");
-    setSourcePartner("abc");
     setContactPerson("");
-    setMarket("domestic");
-    setDestination("mp");
-    setEnquiryType("family");
-    setTravelDates("");
+    setTravelStart("");
+    setTravelEnd("");
     setNumTravellers("");
-    setPriority("normal");
+    setPriority("Normal");
     setRemarks("");
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Create New Lead</h1>
-        <p className="text-sm text-muted-foreground">Capture new lead & basic details to generate a query</p>
+        <p className="text-sm text-muted-foreground">Capture new lead &amp; basic details to generate a query</p>
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -79,10 +78,7 @@ export default function NewLead() {
                 <Select value={leadSource} onValueChange={setLeadSource}>
                   <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="website">Website</SelectItem>
-                    <SelectItem value="partner">Partner</SelectItem>
-                    <SelectItem value="walkin">Walk-in</SelectItem>
-                    <SelectItem value="phone">Phone</SelectItem>
+                    {LEAD_SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -92,9 +88,7 @@ export default function NewLead() {
                 <Select value={sourcePartner} onValueChange={setSourcePartner}>
                   <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="abc">ABC Travels</SelectItem>
-                    <SelectItem value="globe">Globe Tours</SelectItem>
-                    <SelectItem value="india">India Routes</SelectItem>
+                    {PARTNERS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -113,8 +107,7 @@ export default function NewLead() {
                 <Select value={market} onValueChange={setMarket}>
                   <SelectTrigger><SelectValue placeholder="Select market" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="domestic">Domestic - India</SelectItem>
-                    <SelectItem value="inbound">Inbound - International</SelectItem>
+                    {MARKETS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -124,9 +117,7 @@ export default function NewLead() {
                 <Select value={destination} onValueChange={setDestination}>
                   <SelectTrigger><SelectValue placeholder="Select destination" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="mp">Madhya Pradesh</SelectItem>
-                    <SelectItem value="rajasthan">Rajasthan</SelectItem>
-                    <SelectItem value="gujarat">Gujarat</SelectItem>
+                    {DESTINATIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -136,21 +127,19 @@ export default function NewLead() {
                 <Select value={enquiryType} onValueChange={setEnquiryType}>
                   <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="family">Family Tour</SelectItem>
-                    <SelectItem value="group">Group Tour</SelectItem>
-                    <SelectItem value="pilgrimage">Pilgrimage</SelectItem>
-                    <SelectItem value="honeymoon">Honeymoon</SelectItem>
+                    {ENQUIRY_TYPES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2">
-                <Label className="flex items-center gap-1">Travel Dates <span className="text-red-500">*</span></Label>
-                <Input
-                  type="date"
-                  value={travelDates}
-                  onChange={(e) => setTravelDates(e.target.value)}
-                />
+                <Label className="flex items-center gap-1">Travel Start <span className="text-red-500">*</span></Label>
+                <Input type="date" value={travelStart} onChange={(e) => setTravelStart(e.target.value)} required />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Travel End</Label>
+                <Input type="date" value={travelEnd} onChange={(e) => setTravelEnd(e.target.value)} />
               </div>
 
               <div className="space-y-2">
@@ -168,9 +157,19 @@ export default function NewLead() {
                 <Select value={priority} onValueChange={setPriority}>
                   <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
+                    {PRIORITIES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1">Assign To <span className="text-red-500">*</span></Label>
+                <Select value={owner} onValueChange={setOwner}>
+                  <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                  <SelectContent>
+                    {roster.map((e) => (
+                      <SelectItem key={e.id} value={e.name}>{e.name} — {e.role}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -191,7 +190,7 @@ export default function NewLead() {
                 Clear
               </Button>
               <Button type="submit">
-                Generate Lead & Query →
+                Generate Lead &amp; Query →
               </Button>
             </div>
           </CardContent>
