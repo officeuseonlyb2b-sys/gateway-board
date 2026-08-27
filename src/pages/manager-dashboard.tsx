@@ -792,7 +792,6 @@ export default function ManagerDashboard() {
               </Link>
               <Link
                 to="/query-tracker"
-                search={{ view: "overdue" }}
                 className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
               >
                 <CalendarDays className="h-5 w-5 text-[#ff4d55]" />

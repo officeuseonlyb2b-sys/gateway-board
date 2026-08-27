@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { createLead, PARTNERS, useEmployees } from "@/lib/crm/store";
+import { createLead, useEmployees } from "@/lib/crm/store";
+import { useAgents } from "@/lib/wizard/agents-store";
 import { DESTINATIONS, ENQUIRY_TYPES, LEAD_SOURCES, MARKETS, PRIORITIES } from "@/lib/crm/types";
 import { toast } from "sonner";
 
@@ -14,9 +15,13 @@ export default function NewLead() {
   const navigate = useNavigate();
   const employees = useEmployees();
   const roster = employees.filter((e) => e.active !== false);
+  const agents = useAgents();
+  const partners = Array.from(
+    new Set(agents.filter((a) => a.status !== "Inactive").map((a) => a.agency || a.name).filter(Boolean)),
+  ).sort();
 
   const [leadSource, setLeadSource] = useState(LEAD_SOURCES[0]);
-  const [sourcePartner, setSourcePartner] = useState(PARTNERS[0]);
+  const [sourcePartner, setSourcePartner] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [market, setMarket] = useState(MARKETS[0]);
   const [destination, setDestination] = useState(DESTINATIONS[0]);
@@ -37,7 +42,7 @@ export default function NewLead() {
     }
     const { query } = createLead({
       lead_source: leadSource,
-      customer: sourcePartner,
+      customer: sourcePartner || "—",
       contact_person: contactPerson || "—",
       market,
       enquiry_type: enquiryType,
@@ -88,7 +93,9 @@ export default function NewLead() {
                 <Select value={sourcePartner} onValueChange={setSourcePartner}>
                   <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
                   <SelectContent>
-                    {PARTNERS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    {partners.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-muted-foreground">No travel partners yet — add one in Travel Partners.</div>
+                    ) : partners.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
