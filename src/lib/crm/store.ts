@@ -13,35 +13,8 @@ const EMP_KEY = "mp_crm_employees_v1";
 const EVENT_KEY = "mp_crm_events_v1";
 const isBrowser = () => typeof window !== "undefined";
 
-export const EXECUTIVES: Executive[] = [
-  { id: "ex1", name: "Rahul Sharma", role: "Sales Executive", email: "rahul@mptourism.in" },
-  { id: "ex2", name: "Priya Singh", role: "Sales Executive", email: "priya@mptourism.in" },
-  { id: "ex3", name: "Anjali Verma", role: "Sales Executive", email: "anjali@mptourism.in" },
-  { id: "ex4", name: "Raina Sharma", role: "Sales Executive", email: "raina@mptourism.in" },
-  { id: "ex5", name: "Aman Singh", role: "Sales Executive", email: "aman@mptourism.in" },
-  { id: "ex6", name: "Vikram Rao", role: "Sales Manager", email: "vikram@mptourism.in" },
-];
+// ---- helpers ---------------------------------------------------------------
 
-
-export const PARTNERS = [
-  "ABC Travels", "Globe Tours", "Travel Arc", "India Routes", "Destiny Holidays",
-  "Global Voyages", "Holiday Junction", "Explore India", "Heritage Trails", "Sunrise Tours",
-];
-
-const NEXT_ACTIONS = [
-  "Follow-up Call", "Complete Hotel Rates", "Revisit on 25 Aug", "Review Requirement",
-  "Call Client", "Send Quotation", "Share Itinerary", "Confirm Vehicle",
-];
-
-// ---- deterministic pseudo random ------------------------------------------
-function rng(seed: number) {
-  let s = seed;
-  return () => {
-    s = (s * 1664525 + 1013904223) % 4294967296;
-    return s / 4294967296;
-  };
-}
-const pick = <T,>(r: () => number, arr: T[]): T => arr[Math.floor(r() * arr.length) % arr.length];
 
 function iso(d: Date) { return d.toISOString(); }
 function ymd(d: Date) { return d.toISOString().slice(0, 10); }
