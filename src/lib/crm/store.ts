@@ -7,17 +7,16 @@ import type { ActivityItem, CrmEvent, CrmQuery, CrmTask, Employee, Stage } from 
 import { LIFECYCLE } from "./types";
 
 
-const KEY = "mp_crm_queries_v1";
-const TASK_KEY = "mp_crm_tasks_v1";
-const EMP_KEY = "mp_crm_employees_v1";
-const EVENT_KEY = "mp_crm_events_v1";
+const KEY = "mp_crm_queries_v2";
+const TASK_KEY = "mp_crm_tasks_v2";
+const EMP_KEY = "mp_crm_employees_v2";
+const EVENT_KEY = "mp_crm_events_v2";
 const isBrowser = () => typeof window !== "undefined";
 
 // ---- helpers ---------------------------------------------------------------
 
 
 function iso(d: Date) { return d.toISOString(); }
-function ymd(d: Date) { return d.toISOString().slice(0, 10); }
 function addDays(base: Date, n: number) { const d = new Date(base); d.setDate(d.getDate() + n); return d; }
 
 /** Date-coded id, e.g. QRY-2608-0187 */
