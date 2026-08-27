@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedUsersRolesRouteImport } from './routes/_authenticated/users-roles'
 import { Route as AuthenticatedTravelsRouteImport } from './routes/_authenticated/travels'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
@@ -49,6 +50,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedUsersRolesRoute = AuthenticatedUsersRolesRouteImport.update({
+  id: '/users-roles',
+  path: '/users-roles',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedTravelsRoute = AuthenticatedTravelsRouteImport.update({
   id: '/travels',
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/travels': typeof AuthenticatedTravelsRoute
+  '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
@@ -223,6 +230,7 @@ export interface FileRoutesByTo {
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/travels': typeof AuthenticatedTravelsRoute
+  '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
@@ -252,6 +260,7 @@ export interface FileRoutesById {
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/travels': typeof AuthenticatedTravelsRoute
+  '/_authenticated/users-roles': typeof AuthenticatedUsersRolesRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
@@ -281,6 +290,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/travels'
+    | '/users-roles'
     | '/hotels/$id'
     | '/query/$queryId'
     | '/hotels/'
@@ -308,6 +318,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/travels'
+    | '/users-roles'
     | '/hotels/$id'
     | '/query/$queryId'
     | '/hotels'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/_authenticated/reports'
     | '/_authenticated/settings'
     | '/_authenticated/travels'
+    | '/_authenticated/users-roles'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/query/$queryId'
     | '/_authenticated/hotels/'
@@ -369,6 +381,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/users-roles': {
+      id: '/_authenticated/users-roles'
+      path: '/users-roles'
+      fullPath: '/users-roles'
+      preLoaderRoute: typeof AuthenticatedUsersRolesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/travels': {
       id: '/_authenticated/travels'
@@ -555,6 +574,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTravelsRoute: typeof AuthenticatedTravelsRoute
+  AuthenticatedUsersRolesRoute: typeof AuthenticatedUsersRolesRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedQueryQueryIdRoute: typeof AuthenticatedQueryQueryIdRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
@@ -581,6 +601,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTravelsRoute: AuthenticatedTravelsRoute,
+  AuthenticatedUsersRolesRoute: AuthenticatedUsersRolesRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedQueryQueryIdRoute: AuthenticatedQueryQueryIdRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
