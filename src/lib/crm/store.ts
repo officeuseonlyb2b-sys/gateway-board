@@ -1,10 +1,11 @@
-// CRM store — localStorage backed, seeded with realistic sample data so every
-// stat card / chart in the module is derived from real records.
+// CRM store — localStorage backed. NO seeded/sample data: every record comes
+// from real user actions (Employee Register, New Lead, task completion, ...).
 // This module is THE single source of truth for the CRM: queries, tasks,
 // employees and the activity log all live here.
 import { useSyncExternalStore } from "react";
-import type { ActivityItem, CrmEvent, CrmEventType, CrmQuery, CrmTask, Employee, Executive, Stage } from "./types";
-import { DESTINATIONS, LIFECYCLE, MARKETS, STAGES, TRAVEL_TYPES } from "./types";
+import type { ActivityItem, CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
+import { LIFECYCLE } from "./types";
+
 
 const KEY = "mp_crm_queries_v1";
 const TASK_KEY = "mp_crm_tasks_v1";
