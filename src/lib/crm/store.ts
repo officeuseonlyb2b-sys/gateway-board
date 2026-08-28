@@ -210,6 +210,7 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     title: `Lead assigned to ${input.owner}`,
     detail: `${q.lead_id} • ${q.customer}`,
     query_id: q.query_id, lead_id: q.lead_id,
+    assigned_to: input.owner,
   });
   tasks = [
     {
