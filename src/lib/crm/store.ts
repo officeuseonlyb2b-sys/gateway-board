@@ -210,6 +210,7 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     title: `Lead assigned to ${input.owner}`,
     detail: `${q.lead_id} • ${q.customer}`,
     query_id: q.query_id, lead_id: q.lead_id,
+    assigned_to: input.owner,
   });
   tasks = [
     {
@@ -225,6 +226,100 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
   ];
   persist();
   return { query: q, assigned_to: input.owner };
+}
+
+/** Reassign a query to another employee. Records a trackable event. */
+export function reassignQuery(queryId: string, newOwner: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    if (q.owner === newOwner) return q;
+    const actor = by || q.owner || newOwner;
+    const from = q.owner;
+    logEvent({
+      type: "lead_reassigned", by: actor, at: iso(now),
+      title: `${q.query_id} reassigned to ${newOwner}`,
+      detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+      assigned_to: newOwner, assigned_from: from,
+    });
+    return {
+      ...q,
+      owner: newOwner,
+      assigned_on: iso(now),
+      activities: [
+        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}`, at: iso(now), by: actor },
+        ...q.activities,
+      ],
+    };
+  });
+  // open tasks for that query follow the new owner
+  tasks = tasks.map((t) => (t.query_id === queryId && !t.done ? { ...t, owner: newOwner } : t));
+  persist();
+}
+
+export interface NewTaskInput {
+  title: string;
+  query_id: string;
+  due_at: string;
+  owner: string;
+  note?: string;
+}
+
+/** Create a task explicitly assigned to an employee. */
+export function addTask(input: NewTaskInput, by?: string): CrmTask {
+  if (!inited) load();
+  const now = new Date();
+  const actor = by || input.owner;
+  const task: CrmTask = {
+    id: "tk_" + now.getTime() + "_" + Math.random().toString(36).slice(2, 6),
+    title: input.title,
+    query_id: input.query_id,
+    due_at: input.due_at || iso(addDays(now, 1)),
+    owner: input.owner,
+    note: input.note,
+    done: false,
+    assigned_by: actor,
+    assigned_at: iso(now),
+  };
+  tasks = [task, ...tasks];
+  logEvent({
+    type: "task_assigned", by: actor, at: iso(now),
+    title: `Task assigned to ${input.owner}`,
+    detail: `${task.title}${input.query_id ? ` • ${input.query_id}` : ""}`,
+    query_id: input.query_id || undefined,
+    assigned_to: input.owner, task_id: task.id,
+  });
+  persist();
+  return task;
+}
+
+/** Reassign an existing task to another employee. */
+export function reassignTask(id: string, newOwner: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  const task = tasks.find((t) => t.id === id);
+  if (!task || task.owner === newOwner) return;
+  const actor = by || task.owner;
+  tasks = tasks.map((t) => (t.id === id ? { ...t, owner: newOwner, assigned_by: actor, assigned_at: iso(now) } : t));
+  logEvent({
+    type: "task_reassigned", by: actor, at: iso(now),
+    title: `Task reassigned to ${newOwner}`,
+    detail: `${task.title} • From ${task.owner} → ${newOwner}`,
+    query_id: task.query_id || undefined,
+    assigned_to: newOwner, assigned_from: task.owner, task_id: task.id,
+  });
+  persist();
+}
+
+/** Chronological assignment history for a query (oldest first). */
+export function assignmentHistory(queryId: string): CrmEvent[] {
+  if (!inited) load();
+  return events
+    .filter((e) => e.query_id === queryId && (e.type === "lead_assigned" || e.type === "lead_reassigned"))
+    .slice()
+    .sort((a, b) => (a.at < b.at ? -1 : 1));
 }
 
 /** Move a query to a new stage; records the lifecycle step, activity + event. */
