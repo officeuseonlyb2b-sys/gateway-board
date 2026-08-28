@@ -125,7 +125,7 @@ export default function MyTasks() {
         <CardContent>
           <div className="flex gap-3">
             <Button asChild><Link to="/new-lead">New Lead</Link></Button>
-            <Button variant="outline" asChild><Link to="/costing">New Quotation</Link></Button>
+            <Button variant="outline" asChild><Link to="/costing" search={{ id: undefined }}>New Quotation</Link></Button>
             <Button variant="outline" asChild><Link to="/query-tracker">Query Tracker</Link></Button>
             <Button variant="outline" asChild><Link to="/reports">Reports</Link></Button>
           </div>
