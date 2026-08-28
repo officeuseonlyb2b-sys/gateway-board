@@ -58,6 +58,8 @@ export interface CrmTask {
   note?: string;
   owner: string;
   done: boolean;
+  assigned_by?: string;
+  assigned_at?: string;
 }
 
 export interface Commercials {
@@ -122,6 +124,9 @@ export interface Employee extends Executive {
 export type CrmEventType =
   | "lead_created"
   | "lead_assigned"
+  | "lead_reassigned"
+  | "task_assigned"
+  | "task_reassigned"
   | "stage_changed"
   | "quotation_sent"
   | "followup_logged"
@@ -133,10 +138,14 @@ export interface CrmEvent {
   id: string;
   type: CrmEventType;
   at: string;          // ISO datetime
-  by: string;          // employee name
+  by: string;          // who performed the action
   title: string;
   detail?: string;
   query_id?: string;
   lead_id?: string;
+  /** assignment tracking */
+  assigned_to?: string;
+  assigned_from?: string;
+  task_id?: string;
 }
 
