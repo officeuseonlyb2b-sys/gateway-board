@@ -80,7 +80,7 @@ const SECTIONS: Section[] = [
   {
     label: "System",
     items: [
-      { label: "Users & Roles", to: "/users-roles", icon: ShieldCheck, managerOnly: true },
+      { label: "Users & Roles", to: "/users-roles", icon: ShieldCheck },
       { label: "Notifications", to: "/notifications", icon: Bell, badgeKey: "notifications" },
       { label: "Settings", to: "/settings", icon: SettingsIcon },
     ],
