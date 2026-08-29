@@ -6,9 +6,11 @@ import { CheckCircle, Clock, AlertCircle, Users, FileText, ArrowRight } from "lu
 import { Progress } from "@/components/ui/progress";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-mock";
-import { toggleTask, useEmployees } from "@/lib/crm/store";
+import { reassignTask, toggleTask, useEmployees } from "@/lib/crm/store";
 import { usePersonalMetrics } from "@/lib/crm/metrics";
 import { fmtTime, inr } from "@/components/crm/ui";
+import { NewTaskDialog, OwnerSelect } from "@/components/crm/assign";
+import { toast } from "sonner";
 
 export default function MyTasks() {
   const user = useAuth();
