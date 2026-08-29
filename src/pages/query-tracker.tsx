@@ -9,6 +9,7 @@ import { Search, Download } from "lucide-react";
 import { useCrmMetrics, isOpen, sameDay } from "@/lib/crm/metrics";
 import { StageBadge, inr, fmtDate, fmtTime } from "@/components/crm/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AssignLeadsDialog, ReassignQuery } from "@/components/crm/assign";
 
 export default function QueryTracker() {
   const navigate = useNavigate();
@@ -155,7 +156,7 @@ export default function QueryTracker() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                     No queries found. Create a new lead to get started.
                   </TableCell>
                 </TableRow>
@@ -176,6 +177,9 @@ export default function QueryTracker() {
                     <TableCell className="font-medium">{inr(q.value)}</TableCell>
                     <TableCell>{q.next_action}</TableCell>
                     <TableCell>{fmtTime(q.followup_due)}</TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <ReassignQuery queryId={q.query_id} owner={q.owner} className="w-[170px] h-8" />
+                    </TableCell>
                   </TableRow>
                 ))
               )}
