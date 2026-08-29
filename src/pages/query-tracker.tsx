@@ -128,6 +128,7 @@ export default function QueryTracker() {
             ))}
           </SelectContent>
         </Select>
+        <AssignLeadsDialog trigger={<Button variant="outline">Assign Leads</Button>} />
         <Button variant="outline" onClick={exportCsv}>
           <Download className="h-4 w-4 mr-2" />
           Export
