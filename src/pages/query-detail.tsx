@@ -10,9 +10,10 @@ import {
   ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
-import { logFollowup, setQueryStage, useCrmEvents, useCrmQueries } from "@/lib/crm/store";
+import { logFollowup, reassignTask, setQueryStage, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
 import { STAGES, type Stage } from "@/lib/crm/types";
 import { StageBadge, fmtDate, fmtTime, inr } from "@/components/crm/ui";
+import { NewTaskDialog, OwnerSelect, ReassignQuery, useActor } from "@/components/crm/assign";
 
 export default function QueryDetail() {
   const { queryId } = useParams({ from: "/_authenticated/query/$queryId" });
