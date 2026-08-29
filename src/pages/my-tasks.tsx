@@ -6,9 +6,11 @@ import { CheckCircle, Clock, AlertCircle, Users, FileText, ArrowRight } from "lu
 import { Progress } from "@/components/ui/progress";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-mock";
-import { toggleTask, useEmployees } from "@/lib/crm/store";
+import { reassignTask, toggleTask, useEmployees } from "@/lib/crm/store";
 import { usePersonalMetrics } from "@/lib/crm/metrics";
 import { fmtTime, inr } from "@/components/crm/ui";
+import { NewTaskDialog, OwnerSelect } from "@/components/crm/assign";
+import { toast } from "sonner";
 
 export default function MyTasks() {
   const user = useAuth();
@@ -32,9 +34,12 @@ export default function MyTasks() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">My Today's Tasks</CardTitle>
-              <Button variant="link" className="text-sm" asChild>
-                <Link to="/query-tracker">View all tasks <ArrowRight className="h-4 w-4 ml-1" /></Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                <NewTaskDialog trigger={<Button size="sm" variant="outline">Assign Task</Button>} />
+                <Button variant="link" className="text-sm" asChild>
+                  <Link to="/query-tracker">View all tasks <ArrowRight className="h-4 w-4 ml-1" /></Link>
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -59,8 +64,16 @@ export default function MyTasks() {
                       </Badge>
                       {task.note && <span className="text-xs text-muted-foreground">- {task.note}</span>}
                       {overdue && <Badge variant="destructive" className="text-xs">Overdue</Badge>}
+                      {task.assigned_by && task.assigned_by !== task.owner && (
+                        <span className="text-xs text-muted-foreground">Assigned by {task.assigned_by}</span>
+                      )}
                     </div>
                   </div>
+                  <OwnerSelect
+                    className="w-[170px] h-8"
+                    value={task.owner}
+                    onChange={(name) => { reassignTask(task.id, name, owner); toast.success(`Task reassigned to ${name}`); }}
+                  />
                 </div>
               );
             })}

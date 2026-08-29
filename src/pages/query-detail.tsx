@@ -10,19 +10,35 @@ import {
   ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
-import { logFollowup, setQueryStage, useCrmEvents, useCrmQueries } from "@/lib/crm/store";
+import { logFollowup, reassignTask, setQueryStage, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
 import { STAGES, type Stage } from "@/lib/crm/types";
 import { StageBadge, fmtDate, fmtTime, inr } from "@/components/crm/ui";
+import { NewTaskDialog, OwnerSelect, ReassignQuery, useActor } from "@/components/crm/assign";
 
 export default function QueryDetail() {
   const { queryId } = useParams({ from: "/_authenticated/query/$queryId" });
   const queries = useCrmQueries();
   const events = useCrmEvents();
+  const allTasks = useCrmTasks();
+  const actor = useActor();
   const data = queries.find((q) => q.query_id === queryId || q.id === queryId);
 
   const feed = useMemo(
     () => events.filter((e) => e.query_id === data?.query_id).slice(0, 12),
     [events, data?.query_id],
+  );
+
+  const assignHistory = useMemo(
+    () => events
+      .filter((e) => e.query_id === data?.query_id && (e.type === "lead_assigned" || e.type === "lead_reassigned"))
+      .slice()
+      .sort((a, b) => (a.at < b.at ? -1 : 1)),
+    [events, data?.query_id],
+  );
+
+  const queryTasks = useMemo(
+    () => allTasks.filter((t) => t.query_id === data?.query_id),
+    [allTasks, data?.query_id],
   );
 
   if (!data) {
@@ -71,6 +87,8 @@ export default function QueryDetail() {
           >
             Log Follow-up
           </Button>
+          <ReassignQuery queryId={data.query_id} owner={data.owner} className="w-[200px]" />
+          <NewTaskDialog queryId={data.query_id} />
         </div>
       </div>
 
@@ -201,9 +219,56 @@ export default function QueryDetail() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="history" className="mt-6">
+        <TabsContent value="history" className="mt-6 space-y-6">
           <Card>
-            <CardHeader><CardTitle className="text-base">History</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Assignment History</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {assignHistory.length === 0 && (
+                <p className="text-sm text-muted-foreground">No assignment recorded yet.</p>
+              )}
+              {assignHistory.map((e, i) => (
+                <div key={e.id} className="flex items-start gap-3 border-b pb-2 last:border-0">
+                  <Badge variant={i === assignHistory.length - 1 ? "default" : "outline"} className="text-[10px] mt-0.5">
+                    {i === assignHistory.length - 1 ? "Current" : `#${i + 1}`}
+                  </Badge>
+                  <div>
+                    <p className="text-sm">
+                      {e.assigned_from ? `${e.assigned_from} → ` : ""}<span className="font-medium">{e.assigned_to ?? data.owner}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">{fmtTime(e.at)} · assigned by {e.by}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Tasks</CardTitle>
+                <NewTaskDialog queryId={data.query_id} />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {queryTasks.length === 0 && <p className="text-sm text-muted-foreground">No tasks for this query yet.</p>}
+              {queryTasks.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 border-b pb-2 last:border-0">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{t.title}{t.done ? " ✓" : ""}</p>
+                    <p className="text-xs text-muted-foreground">Due {fmtTime(t.due_at)} · Assigned to {t.owner}</p>
+                  </div>
+                  <OwnerSelect
+                    className="w-[180px] h-8"
+                    value={t.owner}
+                    onChange={(name) => { reassignTask(t.id, name, actor); toast.success(`Task reassigned to ${name}`); }}
+                  />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base">Activity Log</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {data.activities.map((a) => (
                 <div key={a.id} className="border-b pb-2 last:border-0">

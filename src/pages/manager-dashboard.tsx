@@ -23,6 +23,7 @@ import {
 import { useCrmEvents, useEmployees } from "@/lib/crm/store";
 import { useCrmMetrics, type WorkloadRow } from "@/lib/crm/metrics";
 import type { CrmEvent } from "@/lib/crm/types";
+import { AssignLeadsDialog, NewTaskDialog } from "@/components/crm/assign";
 
 const navCardClass =
   "rounded-xl border border-[#173b5e] bg-[#06223c] shadow-[0_8px_24px_rgba(0,0,0,0.18)]";
@@ -783,13 +784,28 @@ export default function ManagerDashboard() {
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={ListChecks} title="Quick Actions" />
             <div className="grid grid-cols-2 gap-2 p-3">
-              <Link
-                to="/query-tracker"
-                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
-              >
-                <Users className="h-5 w-5 text-[#ffbd00]" />
-                Assign Leads ({m.pipeline.find((p) => p.label === "New")?.value ?? 0})
-              </Link>
+              <AssignLeadsDialog
+                trigger={
+                  <button
+                    type="button"
+                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                  >
+                    <Users className="h-5 w-5 text-[#ffbd00]" />
+                    Assign Leads ({m.pipeline.find((p) => p.label === "New")?.value ?? 0})
+                  </button>
+                }
+              />
+              <NewTaskDialog
+                trigger={
+                  <button
+                    type="button"
+                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                  >
+                    <ListChecks className="h-5 w-5 text-[#4ad2a2]" />
+                    Assign Task
+                  </button>
+                }
+              />
               <Link
                 to="/query-tracker"
                 className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
