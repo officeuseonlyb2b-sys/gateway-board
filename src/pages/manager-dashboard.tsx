@@ -23,6 +23,7 @@ import {
 import { useCrmEvents, useEmployees } from "@/lib/crm/store";
 import { useCrmMetrics, type WorkloadRow } from "@/lib/crm/metrics";
 import type { CrmEvent } from "@/lib/crm/types";
+import { AssignLeadsDialog, NewTaskDialog } from "@/components/crm/assign";
 
 const navCardClass =
   "rounded-xl border border-[#173b5e] bg-[#06223c] shadow-[0_8px_24px_rgba(0,0,0,0.18)]";
