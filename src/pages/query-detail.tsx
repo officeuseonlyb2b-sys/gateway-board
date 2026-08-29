@@ -19,11 +19,26 @@ export default function QueryDetail() {
   const { queryId } = useParams({ from: "/_authenticated/query/$queryId" });
   const queries = useCrmQueries();
   const events = useCrmEvents();
+  const allTasks = useCrmTasks();
+  const actor = useActor();
   const data = queries.find((q) => q.query_id === queryId || q.id === queryId);
 
   const feed = useMemo(
     () => events.filter((e) => e.query_id === data?.query_id).slice(0, 12),
     [events, data?.query_id],
+  );
+
+  const assignHistory = useMemo(
+    () => events
+      .filter((e) => e.query_id === data?.query_id && (e.type === "lead_assigned" || e.type === "lead_reassigned"))
+      .slice()
+      .sort((a, b) => (a.at < b.at ? -1 : 1)),
+    [events, data?.query_id],
+  );
+
+  const queryTasks = useMemo(
+    () => allTasks.filter((t) => t.query_id === data?.query_id),
+    [allTasks, data?.query_id],
   );
 
   if (!data) {
@@ -72,6 +87,8 @@ export default function QueryDetail() {
           >
             Log Follow-up
           </Button>
+          <ReassignQuery queryId={data.query_id} owner={data.owner} className="w-[200px]" />
+          <NewTaskDialog queryId={data.query_id} />
         </div>
       </div>
 
