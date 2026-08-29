@@ -34,9 +34,12 @@ export default function MyTasks() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">My Today's Tasks</CardTitle>
-              <Button variant="link" className="text-sm" asChild>
-                <Link to="/query-tracker">View all tasks <ArrowRight className="h-4 w-4 ml-1" /></Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                <NewTaskDialog trigger={<Button size="sm" variant="outline">Assign Task</Button>} />
+                <Button variant="link" className="text-sm" asChild>
+                  <Link to="/query-tracker">View all tasks <ArrowRight className="h-4 w-4 ml-1" /></Link>
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
