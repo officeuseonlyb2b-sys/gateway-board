@@ -149,6 +149,7 @@ export default function QueryTracker() {
                 <TableHead>Query Value</TableHead>
                 <TableHead>Next Action</TableHead>
                 <TableHead>Follow-up Due</TableHead>
+                <TableHead>Reassign</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
