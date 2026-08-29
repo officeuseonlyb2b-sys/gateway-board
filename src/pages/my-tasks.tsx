@@ -64,8 +64,16 @@ export default function MyTasks() {
                       </Badge>
                       {task.note && <span className="text-xs text-muted-foreground">- {task.note}</span>}
                       {overdue && <Badge variant="destructive" className="text-xs">Overdue</Badge>}
+                      {task.assigned_by && task.assigned_by !== task.owner && (
+                        <span className="text-xs text-muted-foreground">Assigned by {task.assigned_by}</span>
+                      )}
                     </div>
                   </div>
+                  <OwnerSelect
+                    className="w-[170px] h-8"
+                    value={task.owner}
+                    onChange={(name) => { reassignTask(task.id, name, owner); toast.success(`Task reassigned to ${name}`); }}
+                  />
                 </div>
               );
             })}
