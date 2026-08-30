@@ -73,7 +73,29 @@ export interface CrmMetrics {
   };
   totalPipelineValue: number;
   avgLeadsPerExecutive: number;
+
+  /** Average hours spent in each stage, from real stage-change events. */
+  stageAverages: { stage: Stage; avgHours: number; samples: number }[];
+  stageAveragesByEmployee: Map<string, { stage: Stage; avgHours: number; samples: number }[]>;
+  /** Conversion analytics by lead source and by travel partner. */
+  sourceStats: BucketStat[];
+  partnerStats: BucketStat[];
+  /** Last 8 weeks of team + per-employee performance, from event timestamps. */
+  trends: WeeklyTrend[];
+  /** Live SLA breaches, sorted worst first. */
+  escalations: { query: CrmQuery; overdueHours: number }[];
+  criticalEscalations: { query: CrmQuery; overdueHours: number }[];
 }
+
+export interface BucketStat {
+  name: string; total: number; won: number; lost: number; open: number; value: number; conversion: number;
+}
+
+export interface WeeklyTrend {
+  key: string; label: string; leads: number; won: number; lost: number; conversion: number;
+  byEmployee: Record<string, { leads: number; won: number; lost: number; conversion: number }>;
+}
+
 
 function hoursBetween(a?: string, b?: string) {
   if (!a || !b) return 0;
