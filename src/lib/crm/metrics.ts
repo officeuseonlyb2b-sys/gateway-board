@@ -321,6 +321,13 @@ export function computeMetrics(
     },
     totalPipelineValue: active.reduce((s, q) => s + q.value, 0),
     avgLeadsPerExecutive: workload.length ? active.length / workload.length : 0,
+    stageAverages,
+    stageAveragesByEmployee,
+    sourceStats,
+    partnerStats,
+    trends,
+    escalations,
+    criticalEscalations,
   };
 }
 
@@ -329,8 +336,10 @@ export function useCrmMetrics(): CrmMetrics {
   const tasks = useCrmTasks();
   const employees = useEmployees();
   const events = useCrmEvents();
+  useEffect(() => { startOverdueWatcher(); }, []);
   return useMemo(() => computeMetrics(queries, tasks, employees, events), [queries, tasks, employees, events]);
 }
+
 
 /** Per-employee slice used by the personal dashboard / My Tasks. */
 export function usePersonalMetrics(ownerName: string) {
