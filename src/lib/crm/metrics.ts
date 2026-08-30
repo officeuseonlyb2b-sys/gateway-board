@@ -1,9 +1,10 @@
 // Derived CRM metrics. EVERY number shown anywhere in the CRM comes from here,
 // which in turn reads only from src/lib/crm/store.ts — one source of truth.
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
 import { STAGES } from "./types";
-import { useCrmEvents, useCrmQueries, useCrmTasks, useEmployees } from "./store";
+import { startOverdueWatcher, useCrmEvents, useCrmQueries, useCrmTasks, useEmployees } from "./store";
+
 
 export const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 export const sameDay = (a: string | Date, b: Date) =>
