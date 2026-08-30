@@ -208,6 +208,30 @@ export default function QueryDetail() {
           </div>
 
           <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock3 className="h-4 w-4" /> Time in each stage
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {timeInStage.length === 0 && <p className="text-sm text-muted-foreground">No stage history yet.</p>}
+              {timeInStage.map((row) => {
+                const max = Math.max(...timeInStage.map((r) => r.hours), 1);
+                return (
+                  <div key={row.stage} className="flex items-center gap-3">
+                    <span className="w-40 shrink-0 text-sm">{row.stage}{row.current ? " (current)" : ""}</span>
+                    <Progress value={(row.hours / max) * 100} className="h-2 flex-1" />
+                    <span className={`w-24 text-right text-sm font-medium ${slowest && slowest.stage === row.stage && row.hours > 0 ? "text-amber-500" : ""}`}>
+                      {fmtDur(row.hours)}
+                    </span>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+
+          <Card>
             <CardHeader><CardTitle className="text-base">Latest Activity</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {feed.length === 0 && <p className="text-sm text-muted-foreground">No activity recorded yet.</p>}
