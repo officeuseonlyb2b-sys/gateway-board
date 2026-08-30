@@ -308,16 +308,66 @@ export default function QueryDetail() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base">Activity Log</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-base">Audit Trail ({auditTrail.length})</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    placeholder="Search history…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-8 w-[180px]"
+                  />
+                  <Select value={typeFilter} onValueChange={setTypeFilter}>
+                    <SelectTrigger className="h-8 w-[170px]"><SelectValue placeholder="All events" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All events</SelectItem>
+                      {(Object.keys(EVENT_LABELS) as CrmEventType[]).map((t) => (
+                        <SelectItem key={t} value={t}>{EVENT_LABELS[t]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-[140px]" />
+                  <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-[140px]" />
+                  {(search || fromDate || toDate || typeFilter !== "all") && (
+                    <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setFromDate(""); setToDate(""); setTypeFilter("all"); }}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
             <CardContent className="space-y-3">
-              {data.activities.map((a) => (
-                <div key={a.id} className="border-b pb-2 last:border-0">
-                  <p className="text-sm">{a.title}</p>
-                  <p className="text-xs text-muted-foreground">{fmtTime(a.at)} · {a.by}</p>
+              {auditTrail.length === 0 && <p className="text-sm text-muted-foreground">No events match these filters.</p>}
+              {auditTrail.map((e) => (
+                <div key={e.id} className="flex items-start gap-3 border-b pb-2 last:border-0">
+                  <Badge variant="outline" className="mt-0.5 shrink-0 text-[10px]">{EVENT_LABELS[e.type]}</Badge>
+                  <div className="min-w-0">
+                    <p className="text-sm">{e.title}</p>
+                    {e.from_stage && e.to_stage && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">{e.from_stage}</span> → <span className="font-medium">{e.to_stage}</span>
+                        {typeof e.duration_hours === "number" && (
+                          <span className="text-muted-foreground"> · spent {fmtDur(e.duration_hours)} in {e.from_stage}</span>
+                        )}
+                      </p>
+                    )}
+                    {(e.assigned_to || e.assigned_from) && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">{e.assigned_from ?? "unassigned"}</span> → <span className="font-medium">{e.assigned_to}</span>
+                      </p>
+                    )}
+                    {typeof e.overdue_hours === "number" && (
+                      <p className="text-xs text-red-500">Overdue by {fmtDur(e.overdue_hours)}</p>
+                    )}
+                    {e.detail && <p className="text-xs text-muted-foreground">{e.detail}</p>}
+                    <p className="text-xs text-muted-foreground">{fmtTime(e.at)} · {e.by}</p>
+                  </div>
                 </div>
               ))}
             </CardContent>
           </Card>
+
         </TabsContent>
       </Tabs>
     </div>
