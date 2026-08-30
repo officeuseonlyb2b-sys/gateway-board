@@ -1,17 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare,
+  ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare, Clock3,
 } from "lucide-react";
 import { toast } from "sonner";
-import { logFollowup, reassignTask, setQueryStage, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
-import { STAGES, type Stage } from "@/lib/crm/types";
+import { fmtDur, logFollowup, reassignTask, setQueryStage, stageEnteredAt, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
+import { EVENT_LABELS, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
 import { StageBadge, fmtDate, fmtTime, inr } from "@/components/crm/ui";
 import { NewTaskDialog, OwnerSelect, ReassignQuery, useActor } from "@/components/crm/assign";
 
@@ -23,10 +24,48 @@ export default function QueryDetail() {
   const actor = useActor();
   const data = queries.find((q) => q.query_id === queryId || q.id === queryId);
 
-  const feed = useMemo(
-    () => events.filter((e) => e.query_id === data?.query_id).slice(0, 12),
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [search, setSearch] = useState("");
+
+  const queryEvents = useMemo(
+    () => events.filter((e) => e.query_id === data?.query_id).slice().sort((a, b) => (a.at < b.at ? 1 : -1)),
     [events, data?.query_id],
   );
+
+  const feed = useMemo(() => queryEvents.slice(0, 12), [queryEvents]);
+
+  const auditTrail = useMemo(() => queryEvents.filter((e) => {
+    if (typeFilter !== "all" && e.type !== typeFilter) return false;
+    const t = new Date(e.at).getTime();
+    if (fromDate && t < new Date(fromDate + "T00:00:00").getTime()) return false;
+    if (toDate && t > new Date(toDate + "T23:59:59").getTime()) return false;
+    if (search) {
+      const hay = `${e.title} ${e.detail ?? ""} ${e.by}`.toLowerCase();
+      if (!hay.includes(search.toLowerCase())) return false;
+    }
+    return true;
+  }), [queryEvents, typeFilter, fromDate, toDate, search]);
+
+  const timeInStage = useMemo(() => {
+    if (!data) return [];
+    const map = new Map<string, number>();
+    queryEvents.forEach((e) => {
+      if (e.from_stage && typeof e.duration_hours === "number") {
+        map.set(e.from_stage, (map.get(e.from_stage) ?? 0) + e.duration_hours);
+      }
+    });
+    const enteredAt = stageEnteredAt(data, events);
+    const ongoing = Math.max(0, (Date.now() - new Date(enteredAt).getTime()) / 36e5);
+    const rows = [...map.entries()].map(([stage, hours]) => ({ stage, hours, current: false }));
+    rows.push({ stage: data.stage, hours: (map.get(data.stage) ?? 0) + ongoing, current: true });
+    // dedupe: current stage row replaces any earlier aggregate for that stage
+    const seen = new Set<string>();
+    return rows.reverse().filter((r) => (seen.has(r.stage) ? false : (seen.add(r.stage), true))).reverse();
+  }, [data, queryEvents, events]);
+
+  const slowest = timeInStage.reduce((a, b) => (b.hours > (a?.hours ?? -1) ? b : a), timeInStage[0]);
 
   const assignHistory = useMemo(
     () => events
@@ -40,6 +79,7 @@ export default function QueryDetail() {
     () => allTasks.filter((t) => t.query_id === data?.query_id),
     [allTasks, data?.query_id],
   );
+
 
   if (!data) {
     return (
