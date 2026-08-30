@@ -322,16 +322,27 @@ export function assignmentHistory(queryId: string): CrmEvent[] {
     .sort((a, b) => (a.at < b.at ? -1 : 1));
 }
 
+/** When the query entered its current stage (last stage event, else creation). */
+export function stageEnteredAt(q: CrmQuery, log: CrmEvent[] = events): string {
+  const last = log
+    .filter((e) => e.query_id === q.query_id && e.to_stage)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  return last?.at ?? q.created_at;
+}
+
 /** Move a query to a new stage; records the lifecycle step, activity + event. */
 export function setQueryStage(queryId: string, stage: Stage, by?: string) {
   if (!inited) load();
   const now = new Date();
   queries = queries.map((q) => {
     if (q.query_id !== queryId && q.id !== queryId) return q;
+    if (q.stage === stage) return q;
     const actor = by ?? q.owner;
     const lifecycleLabel = stage === "Confirmed" || stage === "Lost" ? "Confirmed / Lost" : stage;
     const lifecycle = q.lifecycle.map((s) => (s.label === lifecycleLabel ? { ...s, at: iso(now) } : s));
-    const activity: ActivityItem = { id: "a_" + now.getTime(), title: `Stage changed to ${stage}`, at: iso(now), by: actor };
+    const enteredAt = stageEnteredAt(q);
+    const durationHours = Math.max(0, (now.getTime() - new Date(enteredAt).getTime()) / 36e5);
+    const activity: ActivityItem = { id: "a_" + now.getTime(), title: `Stage changed: ${q.stage} → ${stage}`, at: iso(now), by: actor };
     logEvent({
       type: stage === "Confirmed" ? "won" : stage === "Lost" ? "lost" : stage === "Quotation Sent" ? "quotation_sent" : "stage_changed",
       by: actor, at: iso(now),
@@ -340,13 +351,97 @@ export function setQueryStage(queryId: string, stage: Stage, by?: string) {
           : stage === "Lost" ? `Query marked lost by ${actor}`
             : stage === "Quotation Sent" ? `Quotation sent by ${actor}`
               : `${q.query_id} moved to ${stage} by ${actor}`,
-      detail: `${q.query_id} • ${q.customer} • ${q.destination}`,
+      detail: `${q.stage} → ${stage} • spent ${fmtDur(durationHours)} in ${q.stage} • ${q.customer}`,
       query_id: q.query_id, lead_id: q.lead_id,
+      from_stage: q.stage, to_stage: stage, duration_hours: durationHours,
     });
     return { ...q, stage, lifecycle, activities: [activity, ...q.activities] };
   });
   persist();
 }
+
+/** Human readable duration, e.g. "1d 4h" / "2h 15m". */
+export function fmtDur(hours: number): string {
+  if (!isFinite(hours) || hours <= 0) return "0m";
+  const d = Math.floor(hours / 24);
+  const h = Math.floor(hours % 24);
+  const m = Math.round((hours - Math.floor(hours)) * 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
+  return `${m}m`;
+}
+
+/** Free-text note against a query — fully audited. */
+export function addNote(queryId: string, text: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const actor = by ?? q.owner;
+    logEvent({
+      type: "note_added", by: actor, at: iso(now),
+      title: `Note added by ${actor}`, detail: text,
+      query_id: q.query_id, lead_id: q.lead_id,
+    });
+    return { ...q, activities: [{ id: "a_" + now.getTime(), title: text, at: iso(now), by: actor }, ...q.activities] };
+  });
+  persist();
+}
+
+/**
+ * Detect items that have crossed their deadline and log one event each
+ * (deduped by query/task id) so overdue alerts appear the moment they happen.
+ */
+export function sweepOverdue(): number {
+  if (!inited) load();
+  const now = Date.now();
+  const openStages: Stage[] = ["New", "Requirement Review", "Costing", "Quotation Sent", "Follow-up", "Nurturing"];
+  let logged = 0;
+
+  queries.forEach((q) => {
+    if (!openStages.includes(q.stage)) return;
+    const due = new Date(q.followup_due).getTime();
+    if (!due || due >= now) return;
+    const already = events.some((e) => e.type === "followup_overdue" && e.query_id === q.query_id && e.detail?.includes(q.followup_due));
+    if (already) return;
+    logEvent({
+      type: "followup_overdue", by: q.owner || "System", at: iso(new Date()),
+      title: `Follow-up overdue — ${q.query_id}`,
+      detail: `Due ${q.followup_due} • ${q.customer} • owner ${q.owner || "unassigned"}`,
+      query_id: q.query_id, lead_id: q.lead_id,
+      overdue_hours: (now - due) / 36e5,
+    });
+    logged++;
+  });
+
+  tasks.forEach((t) => {
+    if (t.done) return;
+    const due = new Date(t.due_at).getTime();
+    if (!due || due >= now) return;
+    const already = events.some((e) => e.type === "task_overdue" && e.task_id === t.id);
+    if (already) return;
+    logEvent({
+      type: "task_overdue", by: t.owner || "System", at: iso(new Date()),
+      title: `Task overdue — ${t.title}`,
+      detail: `Due ${t.due_at} • owner ${t.owner || "unassigned"}`,
+      query_id: t.query_id || undefined, task_id: t.id,
+      overdue_hours: (now - due) / 36e5,
+    });
+    logged++;
+  });
+
+  if (logged) persist();
+  return logged;
+}
+
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+/** Start the live overdue watcher (idempotent). */
+export function startOverdueWatcher() {
+  if (!isBrowser() || sweepTimer) return;
+  sweepOverdue();
+  sweepTimer = setInterval(sweepOverdue, 60_000);
+}
+
 
 /** Log a follow-up against a query (optionally pushing the next due date). */
 export function logFollowup(queryId: string, note: string, nextDue?: string, by?: string) {

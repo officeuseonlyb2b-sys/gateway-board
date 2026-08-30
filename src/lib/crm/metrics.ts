@@ -1,9 +1,10 @@
 // Derived CRM metrics. EVERY number shown anywhere in the CRM comes from here,
 // which in turn reads only from src/lib/crm/store.ts — one source of truth.
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
 import { STAGES } from "./types";
-import { useCrmEvents, useCrmQueries, useCrmTasks, useEmployees } from "./store";
+import { startOverdueWatcher, useCrmEvents, useCrmQueries, useCrmTasks, useEmployees } from "./store";
+
 
 export const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 export const sameDay = (a: string | Date, b: Date) =>
@@ -73,7 +74,29 @@ export interface CrmMetrics {
   };
   totalPipelineValue: number;
   avgLeadsPerExecutive: number;
+
+  /** Average hours spent in each stage, from real stage-change events. */
+  stageAverages: { stage: Stage; avgHours: number; samples: number }[];
+  stageAveragesByEmployee: Map<string, { stage: Stage; avgHours: number; samples: number }[]>;
+  /** Conversion analytics by lead source and by travel partner. */
+  sourceStats: BucketStat[];
+  partnerStats: BucketStat[];
+  /** Last 8 weeks of team + per-employee performance, from event timestamps. */
+  trends: WeeklyTrend[];
+  /** Live SLA breaches, sorted worst first. */
+  escalations: { query: CrmQuery; overdueHours: number }[];
+  criticalEscalations: { query: CrmQuery; overdueHours: number }[];
 }
+
+export interface BucketStat {
+  name: string; total: number; won: number; lost: number; open: number; value: number; conversion: number;
+}
+
+export interface WeeklyTrend {
+  key: string; label: string; leads: number; won: number; lost: number; conversion: number;
+  byEmployee: Record<string, { leads: number; won: number; lost: number; conversion: number }>;
+}
+
 
 function hoursBetween(a?: string, b?: string) {
   if (!a || !b) return 0;
@@ -161,18 +184,105 @@ export function computeMetrics(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  const respSamples = queries
-    .map((q) => hoursBetween(q.created_at, q.lifecycle.find((s) => s.label === "Requirement Review")?.at))
-    .filter((h) => h > 0);
-  const quoteSamples = queries
-    .map((q) => hoursBetween(q.created_at, q.lifecycle.find((s) => s.label === "Quotation Sent")?.at))
-    .filter((h) => h > 0);
   const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+
+  // ---- stage durations from REAL stage-change events ----
+  const stageEvents = events.filter((e) => e.to_stage && typeof e.duration_hours === "number");
+  const ownerOf = (queryId?: string) => queries.find((q) => q.query_id === queryId)?.owner ?? "";
+
+  const stageAverages = STAGES.map((stage) => {
+    const samples = stageEvents.filter((e) => e.from_stage === stage).map((e) => e.duration_hours!);
+    return { stage, avgHours: avg(samples), samples: samples.length };
+  });
+
+  const stageAveragesByEmployee = new Map<string, { stage: Stage; avgHours: number; samples: number }[]>();
+  roster.forEach((emp) => {
+    stageAveragesByEmployee.set(
+      emp.name,
+      STAGES.map((stage) => {
+        const samples = stageEvents
+          .filter((e) => e.from_stage === stage && ownerOf(e.query_id) === emp.name)
+          .map((e) => e.duration_hours!);
+        return { stage, avgHours: avg(samples), samples: samples.length };
+      }),
+    );
+  });
+
+  // Response time = how long a query sat in "New" before someone moved it on.
+  const respSamples = stageEvents.filter((e) => e.from_stage === "New").map((e) => e.duration_hours!);
+  // Quotation turnaround = lead creation → the quotation_sent event.
+  const quoteSamples = events
+    .filter((e) => e.type === "quotation_sent" && e.query_id)
+    .map((e) => hoursBetween(queries.find((q) => q.query_id === e.query_id)?.created_at, e.at))
+    .filter((h) => h > 0);
+
+  // ---- source / partner conversion analytics ----
+  const bucketStats = (keyOf: (q: CrmQuery) => string) => {
+    const map = new Map<string, { total: number; won: number; lost: number; open: number; value: number }>();
+    queries.forEach((q) => {
+      const key = keyOf(q) || "Unspecified";
+      const row = map.get(key) ?? { total: 0, won: 0, lost: 0, open: 0, value: 0 };
+      row.total++;
+      if (q.stage === "Confirmed") { row.won++; row.value += q.value; }
+      else if (q.stage === "Lost") row.lost++;
+      else row.open++;
+      map.set(key, row);
+    });
+    return [...map.entries()]
+      .map(([name, r]) => ({ name, ...r, conversion: r.total ? (r.won / r.total) * 100 : 0 }))
+      .sort((a, b) => b.total - a.total);
+  };
+  const sourceStats = bucketStats((q) => q.lead_source);
+  const partnerStats = bucketStats((q) => q.customer);
+
+  // ---- weekly employee / team trends from real event timestamps ----
+  const weekStart = (d: Date) => {
+    const x = startOfDay(d);
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // Monday
+    return x;
+  };
+  const weeks: { key: string; label: string; start: Date; end: Date }[] = [];
+  for (let i = 7; i >= 0; i--) {
+    const s = weekStart(new Date(today.getTime() - i * 7 * 864e5));
+    const e = new Date(s.getTime() + 7 * 864e5);
+    weeks.push({ key: s.toISOString().slice(0, 10), label: s.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }), start: s, end: e });
+  }
+  const inRange = (at: string, s: Date, e: Date) => {
+    const t = new Date(at).getTime();
+    return t >= s.getTime() && t < e.getTime();
+  };
+  const trends = weeks.map(({ key, label, start, end }) => {
+    const created = events.filter((e) => e.type === "lead_created" && inRange(e.at, start, end));
+    const won = events.filter((e) => e.type === "won" && inRange(e.at, start, end));
+    const lost = events.filter((e) => e.type === "lost" && inRange(e.at, start, end));
+    const byEmployee: Record<string, { leads: number; won: number; lost: number; conversion: number }> = {};
+    roster.forEach((emp) => {
+      const l = created.filter((e) => ownerOf(e.query_id) === emp.name || e.by === emp.name).length;
+      const w = won.filter((e) => e.by === emp.name || ownerOf(e.query_id) === emp.name).length;
+      const ls = lost.filter((e) => e.by === emp.name || ownerOf(e.query_id) === emp.name).length;
+      byEmployee[emp.name] = { leads: l, won: w, lost: ls, conversion: w + ls ? (w / (w + ls)) * 100 : 0 };
+    });
+    return {
+      key, label,
+      leads: created.length, won: won.length, lost: lost.length,
+      conversion: won.length + lost.length ? (won.length / (won.length + lost.length)) * 100 : 0,
+      byEmployee,
+    };
+  });
+
+  // ---- SLA escalations (live, from current time) ----
+  const nowMs = Date.now();
+  const escalations = queries
+    .filter((q) => isOpen(q) && new Date(q.followup_due).getTime() < nowMs)
+    .map((q) => ({ query: q, overdueHours: (nowMs - new Date(q.followup_due).getTime()) / 36e5 }))
+    .sort((a, b) => b.overdueHours - a.overdueHours);
+  const criticalEscalations = escalations.filter((e) => e.overdueHours > 24);
 
   const closedAll = queries.filter((q) => q.stage === "Confirmed" || q.stage === "Lost").length;
   const conversion = queries.length
     ? (queries.filter((q) => q.stage === "Confirmed").length / queries.length) * 100
     : 0;
+
 
   return {
     queries, tasks, employees: roster, events, today,
@@ -212,6 +322,13 @@ export function computeMetrics(
     },
     totalPipelineValue: active.reduce((s, q) => s + q.value, 0),
     avgLeadsPerExecutive: workload.length ? active.length / workload.length : 0,
+    stageAverages,
+    stageAveragesByEmployee,
+    sourceStats,
+    partnerStats,
+    trends,
+    escalations,
+    criticalEscalations,
   };
 }
 
@@ -220,8 +337,10 @@ export function useCrmMetrics(): CrmMetrics {
   const tasks = useCrmTasks();
   const employees = useEmployees();
   const events = useCrmEvents();
+  useEffect(() => { startOverdueWatcher(); }, []);
   return useMemo(() => computeMetrics(queries, tasks, employees, events), [queries, tasks, employees, events]);
 }
+
 
 /** Per-employee slice used by the personal dashboard / My Tasks. */
 export function usePersonalMetrics(ownerName: string) {

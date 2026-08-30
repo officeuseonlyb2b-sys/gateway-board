@@ -131,6 +131,9 @@ export type CrmEventType =
   | "quotation_sent"
   | "followup_logged"
   | "task_completed"
+  | "note_added"
+  | "followup_overdue"
+  | "task_overdue"
   | "won"
   | "lost";
 
@@ -147,5 +150,29 @@ export interface CrmEvent {
   assigned_to?: string;
   assigned_from?: string;
   task_id?: string;
+  /** stage-change tracking (before / after + how long it sat in from_stage) */
+  from_stage?: Stage;
+  to_stage?: Stage;
+  duration_hours?: number;
+  /** overdue tracking */
+  overdue_hours?: number;
 }
+
+export const EVENT_LABELS: Record<CrmEventType, string> = {
+  lead_created: "Lead created",
+  lead_assigned: "Assigned",
+  lead_reassigned: "Reassigned",
+  task_assigned: "Task added",
+  task_reassigned: "Task reassigned",
+  stage_changed: "Stage changed",
+  quotation_sent: "Quotation sent",
+  followup_logged: "Follow-up logged",
+  task_completed: "Task completed",
+  note_added: "Note added",
+  followup_overdue: "Follow-up overdue",
+  task_overdue: "Task overdue",
+  won: "Marked Won",
+  lost: "Marked Lost",
+};
+
 

@@ -1,17 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare,
+  ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare, Clock3,
 } from "lucide-react";
 import { toast } from "sonner";
-import { logFollowup, reassignTask, setQueryStage, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
-import { STAGES, type Stage } from "@/lib/crm/types";
+import { fmtDur, logFollowup, reassignTask, setQueryStage, stageEnteredAt, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
+import { EVENT_LABELS, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
 import { StageBadge, fmtDate, fmtTime, inr } from "@/components/crm/ui";
 import { NewTaskDialog, OwnerSelect, ReassignQuery, useActor } from "@/components/crm/assign";
 
@@ -23,10 +24,48 @@ export default function QueryDetail() {
   const actor = useActor();
   const data = queries.find((q) => q.query_id === queryId || q.id === queryId);
 
-  const feed = useMemo(
-    () => events.filter((e) => e.query_id === data?.query_id).slice(0, 12),
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [search, setSearch] = useState("");
+
+  const queryEvents = useMemo(
+    () => events.filter((e) => e.query_id === data?.query_id).slice().sort((a, b) => (a.at < b.at ? 1 : -1)),
     [events, data?.query_id],
   );
+
+  const feed = useMemo(() => queryEvents.slice(0, 12), [queryEvents]);
+
+  const auditTrail = useMemo(() => queryEvents.filter((e) => {
+    if (typeFilter !== "all" && e.type !== typeFilter) return false;
+    const t = new Date(e.at).getTime();
+    if (fromDate && t < new Date(fromDate + "T00:00:00").getTime()) return false;
+    if (toDate && t > new Date(toDate + "T23:59:59").getTime()) return false;
+    if (search) {
+      const hay = `${e.title} ${e.detail ?? ""} ${e.by}`.toLowerCase();
+      if (!hay.includes(search.toLowerCase())) return false;
+    }
+    return true;
+  }), [queryEvents, typeFilter, fromDate, toDate, search]);
+
+  const timeInStage = useMemo(() => {
+    if (!data) return [];
+    const map = new Map<string, number>();
+    queryEvents.forEach((e) => {
+      if (e.from_stage && typeof e.duration_hours === "number") {
+        map.set(e.from_stage, (map.get(e.from_stage) ?? 0) + e.duration_hours);
+      }
+    });
+    const enteredAt = stageEnteredAt(data, events);
+    const ongoing = Math.max(0, (Date.now() - new Date(enteredAt).getTime()) / 36e5);
+    const rows = [...map.entries()].map(([stage, hours]) => ({ stage, hours, current: false }));
+    rows.push({ stage: data.stage, hours: (map.get(data.stage) ?? 0) + ongoing, current: true });
+    // dedupe: current stage row replaces any earlier aggregate for that stage
+    const seen = new Set<string>();
+    return rows.reverse().filter((r) => (seen.has(r.stage) ? false : (seen.add(r.stage), true))).reverse();
+  }, [data, queryEvents, events]);
+
+  const slowest = timeInStage.reduce((a, b) => (b.hours > (a?.hours ?? -1) ? b : a), timeInStage[0]);
 
   const assignHistory = useMemo(
     () => events
@@ -40,6 +79,7 @@ export default function QueryDetail() {
     () => allTasks.filter((t) => t.query_id === data?.query_id),
     [allTasks, data?.query_id],
   );
+
 
   if (!data) {
     return (
@@ -168,6 +208,30 @@ export default function QueryDetail() {
           </div>
 
           <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock3 className="h-4 w-4" /> Time in each stage
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {timeInStage.length === 0 && <p className="text-sm text-muted-foreground">No stage history yet.</p>}
+              {timeInStage.map((row) => {
+                const max = Math.max(...timeInStage.map((r) => r.hours), 1);
+                return (
+                  <div key={row.stage} className="flex items-center gap-3">
+                    <span className="w-40 shrink-0 text-sm">{row.stage}{row.current ? " (current)" : ""}</span>
+                    <Progress value={(row.hours / max) * 100} className="h-2 flex-1" />
+                    <span className={`w-24 text-right text-sm font-medium ${slowest && slowest.stage === row.stage && row.hours > 0 ? "text-amber-500" : ""}`}>
+                      {fmtDur(row.hours)}
+                    </span>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+
+          <Card>
             <CardHeader><CardTitle className="text-base">Latest Activity</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {feed.length === 0 && <p className="text-sm text-muted-foreground">No activity recorded yet.</p>}
@@ -268,16 +332,66 @@ export default function QueryDetail() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base">Activity Log</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-base">Audit Trail ({auditTrail.length})</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    placeholder="Search history…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-8 w-[180px]"
+                  />
+                  <Select value={typeFilter} onValueChange={setTypeFilter}>
+                    <SelectTrigger className="h-8 w-[170px]"><SelectValue placeholder="All events" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All events</SelectItem>
+                      {(Object.keys(EVENT_LABELS) as CrmEventType[]).map((t) => (
+                        <SelectItem key={t} value={t}>{EVENT_LABELS[t]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-[140px]" />
+                  <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-[140px]" />
+                  {(search || fromDate || toDate || typeFilter !== "all") && (
+                    <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setFromDate(""); setToDate(""); setTypeFilter("all"); }}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
             <CardContent className="space-y-3">
-              {data.activities.map((a) => (
-                <div key={a.id} className="border-b pb-2 last:border-0">
-                  <p className="text-sm">{a.title}</p>
-                  <p className="text-xs text-muted-foreground">{fmtTime(a.at)} · {a.by}</p>
+              {auditTrail.length === 0 && <p className="text-sm text-muted-foreground">No events match these filters.</p>}
+              {auditTrail.map((e) => (
+                <div key={e.id} className="flex items-start gap-3 border-b pb-2 last:border-0">
+                  <Badge variant="outline" className="mt-0.5 shrink-0 text-[10px]">{EVENT_LABELS[e.type]}</Badge>
+                  <div className="min-w-0">
+                    <p className="text-sm">{e.title}</p>
+                    {e.from_stage && e.to_stage && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">{e.from_stage}</span> → <span className="font-medium">{e.to_stage}</span>
+                        {typeof e.duration_hours === "number" && (
+                          <span className="text-muted-foreground"> · spent {fmtDur(e.duration_hours)} in {e.from_stage}</span>
+                        )}
+                      </p>
+                    )}
+                    {(e.assigned_to || e.assigned_from) && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">{e.assigned_from ?? "unassigned"}</span> → <span className="font-medium">{e.assigned_to}</span>
+                      </p>
+                    )}
+                    {typeof e.overdue_hours === "number" && (
+                      <p className="text-xs text-red-500">Overdue by {fmtDur(e.overdue_hours)}</p>
+                    )}
+                    {e.detail && <p className="text-xs text-muted-foreground">{e.detail}</p>}
+                    <p className="text-xs text-muted-foreground">{fmtTime(e.at)} · {e.by}</p>
+                  </div>
                 </div>
               ))}
             </CardContent>
           </Card>
+
         </TabsContent>
       </Tabs>
     </div>
