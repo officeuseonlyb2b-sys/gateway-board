@@ -262,6 +262,15 @@ export default function ManagerDashboard() {
   const m = useCrmMetrics();
   const employees = useEmployees();
   const events = useCrmEvents();
+  const [stageView, setStageView] = useState<string>("__all");
+
+  const stageRows = useMemo(() => {
+    const rows = stageView === "__all"
+      ? m.stageAverages
+      : m.stageAveragesByEmployee.get(stageView) ?? [];
+    return rows.filter((r) => r.samples > 0);
+  }, [m.stageAverages, m.stageAveragesByEmployee, stageView]);
+
 
   const workload = m.workload;
   const totals = useMemo(() => {
