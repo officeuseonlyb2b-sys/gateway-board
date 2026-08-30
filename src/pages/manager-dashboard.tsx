@@ -707,6 +707,96 @@ export default function ManagerDashboard() {
           </section>
         </div>
 
+        {/* Advanced tracking: stage durations, SLA escalations, source conversion */}
+        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <section className={`${navCardClass} overflow-hidden`}>
+            <PanelHeader icon={Clock3} title="Average Time per Stage" />
+            <div className="px-3 py-2">
+              <select
+                value={stageView}
+                onChange={(e) => setStageView(e.target.value)}
+                className="mb-2 w-full rounded border border-[#173b5e] bg-[#0d2540] px-2 py-1 text-[10px] text-white"
+              >
+                <option value="__all">Whole team</option>
+                {employees.filter((e) => e.active !== false).map((e) => (
+                  <option key={e.id} value={e.name}>{e.name}</option>
+                ))}
+              </select>
+              {stageRows.length === 0 && (
+                <p className="py-3 text-[10px] text-[#c5d2de]">No stage-change history yet.</p>
+              )}
+              {stageRows.map((r) => {
+                const max = Math.max(...stageRows.map((x) => x.avgHours), 1);
+                return (
+                  <div key={r.stage} className="mb-1.5">
+                    <div className="flex justify-between text-[9px] text-[#c5d2de]">
+                      <span>{r.stage}</span>
+                      <span className="font-bold text-white">{fmtDur(r.avgHours)} <span className="text-[#7f97ad]">({r.samples})</span></span>
+                    </div>
+                    <div className="mt-0.5 h-1.5 rounded bg-[#0d2540]">
+                      <div className="h-1.5 rounded bg-[#ffd000]" style={{ width: `${(r.avgHours / max) * 100}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className={`${navCardClass} overflow-hidden`}>
+            <PanelHeader icon={AlertTriangle} title={`SLA Escalations (${m.escalations.length})`} />
+            <div className="px-3 py-2">
+              {m.escalations.length === 0 && (
+                <p className="py-3 text-[10px] text-[#c5d2de]">Nothing overdue right now.</p>
+              )}
+              {m.escalations.slice(0, 8).map(({ query, overdueHours }) => (
+                <Link
+                  key={query.id}
+                  to="/query/$queryId"
+                  params={{ queryId: query.query_id }}
+                  className="flex items-center gap-2 border-b border-[#173b5e] py-1.5 last:border-0"
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${overdueHours > 24 ? "bg-red-500" : "bg-amber-400"}`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[10px] font-semibold text-white">{query.query_id} · {query.customer}</p>
+                    <p className="text-[9px] text-[#c5d2de]">{query.owner || "Unassigned"} · {query.stage}</p>
+                  </div>
+                  <span className={`text-[9px] font-bold ${overdueHours > 24 ? "text-red-400" : "text-amber-300"}`}>
+                    {overdueHours > 24 ? "CRITICAL " : ""}{fmtDur(overdueHours)}
+                  </span>
+                </Link>
+              ))}
+              {m.criticalEscalations.length > 0 && (
+                <p className="pt-2 text-[9px] text-red-400">
+                  {m.criticalEscalations.length} overdue by more than 24 hours.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className={`${navCardClass} overflow-hidden`}>
+            <PanelHeader icon={Target} title="Conversion by Lead Source" />
+            <div className="px-3 py-2">
+              {m.sourceStats.length === 0 && (
+                <p className="py-3 text-[10px] text-[#c5d2de]">No leads yet.</p>
+              )}
+              {m.sourceStats.slice(0, 8).map((s) => (
+                <div key={s.name} className="border-b border-[#173b5e] py-1.5 last:border-0">
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-white">{s.name}</span>
+                    <span className="font-bold text-[#ffd000]">{s.conversion.toFixed(0)}%</span>
+                  </div>
+                  <p className="text-[9px] text-[#c5d2de]">
+                    {s.total} leads · {s.won} won · {s.lost} lost · {s.open} open
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+
         {/* Bottom row */}
         <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1.45fr_0.95fr_0.72fr]">
           {/* Recent activity */}
