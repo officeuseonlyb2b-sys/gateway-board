@@ -3,13 +3,15 @@ import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell, Legend, LineChart, Line,
 } from "recharts";
 import { Download, Printer, Filter } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useDB, HOTEL_CATEGORIES, MEAL_PLANS, type HotelCategory, type MealPlan } from "@/lib/mock-store";
 import { useSavedQuotes } from "@/lib/quotes-store";
+import { useCrmMetrics } from "@/lib/crm/metrics";
+import { useEmployees } from "@/lib/crm/store";
 
 export const Route = createFileRoute("/_authenticated/reports")({
   head: () => ({ meta: [{ title: "Reports — MP Tourism Hub" }] }),
