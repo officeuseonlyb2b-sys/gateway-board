@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_authenticated/reports")({
   component: ReportsPage,
 });
 
-type TabKey = "rates" | "quotes" | "analysis" | "addons";
+type TabKey = "rates" | "quotes" | "analysis" | "addons" | "crm";
 
 function ReportsPage() {
   const [tab, setTab] = useState<TabKey>("rates");
@@ -39,12 +39,14 @@ function ReportsPage() {
         <TabBtn active={tab === "quotes"} onClick={() => setTab("quotes")}>Quotes Summary</TabBtn>
         <TabBtn active={tab === "analysis"} onClick={() => setTab("analysis")}>Rate Analysis</TabBtn>
         <TabBtn active={tab === "addons"} onClick={() => setTab("addons")}>Add-Ons & Extras</TabBtn>
+        <TabBtn active={tab === "crm"} onClick={() => setTab("crm")}>CRM Insights</TabBtn>
       </div>
 
       {tab === "rates" && <HotelRateReport />}
       {tab === "quotes" && <QuotesSummaryReport />}
       {tab === "analysis" && <RateAnalysisReport />}
       {tab === "addons" && <AddonsReport />}
+      {tab === "crm" && <CrmInsightsReport />}
     </div>
   );
 }
