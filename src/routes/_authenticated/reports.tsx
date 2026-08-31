@@ -687,3 +687,127 @@ function fmt(d: string) {
   if (!d) return "";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
+
+/* ─────────── TAB 5: CRM INSIGHTS (8-week trends) ─────────── */
+
+function CrmInsightsReport() {
+  const m = useCrmMetrics();
+  const employees = useEmployees();
+  const [who, setWho] = useState<string>("__team__");
+
+  const data = useMemo(() => {
+    return m.trends.map((w) => {
+      if (who === "__team__") {
+        return { label: w.label, leads: w.leads, won: w.won, lost: w.lost, conversion: Math.round(w.conversion) };
+      }
+      const e = w.byEmployee[who] ?? { leads: 0, won: 0, lost: 0, conversion: 0 };
+      return { label: w.label, leads: e.leads, won: e.won, lost: e.lost, conversion: Math.round(e.conversion) };
+    });
+  }, [m.trends, who]);
+
+  const totals = data.reduce(
+    (s, d) => ({ leads: s.leads + d.leads, won: s.won + d.won, lost: s.lost + d.lost }),
+    { leads: 0, won: 0, lost: 0 },
+  );
+  const overallConv = totals.won + totals.lost ? (totals.won / (totals.won + totals.lost)) * 100 : 0;
+  const hasData = totals.leads + totals.won + totals.lost > 0;
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4 flex flex-wrap items-end gap-4">
+        <div>
+          <div className="section-label mb-2">View</div>
+          <select
+            value={who}
+            onChange={(e) => setWho(e.target.value)}
+            className="px-3 py-2 rounded-md border border-border text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            <option value="__team__">Team-wide</option>
+            {employees.filter((e) => e.active !== false).map((e) => (
+              <option key={e.id} value={e.name}>{e.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-6 text-sm">
+          <Stat label="Leads (8 wks)" value={String(totals.leads)} />
+          <Stat label="Won" value={String(totals.won)} />
+          <Stat label="Lost" value={String(totals.lost)} />
+          <Stat label="Conversion" value={`${overallConv.toFixed(1)}%`} />
+        </div>
+      </Card>
+
+      {!hasData && (
+        <Card className="p-6 text-sm text-muted-foreground">
+          No CRM activity recorded in the last 8 weeks yet — charts will populate as leads are created and closed.
+        </Card>
+      )}
+
+      <Card className="p-4">
+        <div className="section-label mb-3">Leads handled per week</div>
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="leads" name="Leads" fill="#2674dc" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="won" name="Won" fill="#49bf3a" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="lost" name="Lost" fill="#ef4b51" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="section-label mb-3">Conversion rate per week (%)</div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v: any) => `${v}%`} />
+              <Line type="monotone" dataKey="conversion" name="Conversion" stroke="#c9a227" strokeWidth={2} dot />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left px-4 py-2.5 font-semibold">Week of</th>
+              <th className="text-right px-4 py-2.5 font-semibold">Leads</th>
+              <th className="text-right px-4 py-2.5 font-semibold">Won</th>
+              <th className="text-right px-4 py-2.5 font-semibold">Lost</th>
+              <th className="text-right px-4 py-2.5 font-semibold">Conversion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((d) => (
+              <tr key={d.label} className="border-t border-border">
+                <td className="px-4 py-2">{d.label}</td>
+                <td className="px-4 py-2 text-right">{d.leads}</td>
+                <td className="px-4 py-2 text-right">{d.won}</td>
+                <td className="px-4 py-2 text-right">{d.lost}</td>
+                <td className="px-4 py-2 text-right">{d.conversion}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
