@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   BarChart3,
@@ -20,7 +21,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { useCrmEvents, useEmployees } from "@/lib/crm/store";
+import { fmtDur, useCrmEvents, useEmployees } from "@/lib/crm/store";
 import { useCrmMetrics, type WorkloadRow } from "@/lib/crm/metrics";
 import type { CrmEvent } from "@/lib/crm/types";
 import { AssignLeadsDialog, NewTaskDialog } from "@/components/crm/assign";
