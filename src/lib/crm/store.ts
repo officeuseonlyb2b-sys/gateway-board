@@ -98,8 +98,17 @@ export function getCrmQuery(queryId: string): CrmQuery | undefined {
 }
 
 // ---- activity log ----------------------------------------------------------
+/** Event types that should NOT bump "last activity" (system generated). */
+const PASSIVE_EVENTS = new Set(["followup_overdue", "task_overdue", "followup_missed", "lead_viewed"]);
+
 function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
-  events = [{ id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at: e.at ?? iso(new Date()), ...e }, ...events];
+  const at = e.at ?? iso(new Date());
+  events = [{ id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at, ...e }, ...events];
+  if (e.query_id && !PASSIVE_EVENTS.has(e.type)) {
+    queries = queries.map((q) =>
+      q.query_id === e.query_id ? { ...q, last_activity_at: at, last_updated_by: e.by } : q,
+    );
+  }
 }
 
 export function recordActivity(input: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
@@ -107,6 +116,122 @@ export function recordActivity(input: Omit<CrmEvent, "id" | "at"> & { at?: strin
   logEvent(input);
   persist();
 }
+
+/** Generic lead-activity logger used by the timeline quick actions. */
+export function logLeadActivity(
+  queryId: string,
+  type: CrmEvent["type"],
+  opts: { title?: string; detail?: string; by?: string; prev?: string; next?: string } = {},
+) {
+  if (!inited) load();
+  const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
+  const actor = opts.by || q?.owner || "System";
+  logEvent({
+    type,
+    by: actor,
+    title: opts.title ?? `${type.replace(/_/g, " ")} by ${actor}`,
+    detail: opts.detail,
+    query_id: q?.query_id ?? queryId,
+    lead_id: q?.lead_id,
+    prev_value: opts.prev,
+    new_value: opts.next,
+  });
+  persist();
+}
+
+/** Log a call attempt against a lead. */
+export function logCall(queryId: string, connected: boolean, note?: string, by?: string) {
+  const q = getCrmQuery(queryId);
+  const actor = by || q?.owner || "System";
+  logLeadActivity(queryId, connected ? "call_connected" : "call_not_connected", {
+    by: actor,
+    title: connected ? `Call connected by ${actor}` : `Call not connected (${actor})`,
+    detail: note || (q ? `${q.contact_person || q.customer} • ${q.mobile || "no number"}` : undefined),
+  });
+}
+
+/** Change the priority of a lead (audited). */
+export function setQueryPriority(queryId: string, priority: string, by?: string) {
+  if (!inited) load();
+  const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
+  if (!q || q.priority === priority) return;
+  const actor = by || q.owner || "System";
+  queries = queries.map((x) => (x.id === q.id ? { ...x, priority } : x));
+  logEvent({
+    type: "priority_changed", by: actor,
+    title: `Priority changed by ${actor}`,
+    detail: `${q.priority || "—"} → ${priority} • ${q.customer}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+    prev_value: q.priority, new_value: priority,
+  });
+  persist();
+}
+
+/** Schedule (or reschedule) the next follow-up for a lead. */
+export function scheduleFollowup(queryId: string, dueISO: string, note?: string, by?: string) {
+  if (!inited) load();
+  const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
+  if (!q) return;
+  const actor = by || q.owner || "System";
+  const prev = q.followup_due;
+  queries = queries.map((x) =>
+    x.id === q.id ? { ...x, followup_due: dueISO, followup_note: note ?? x.followup_note, followup_done_at: undefined } : x,
+  );
+  logEvent({
+    type: "followup_created", by: actor,
+    title: `Follow-up added by ${actor}`,
+    detail: `${note ? note + " • " : ""}Scheduled for ${new Date(dueISO).toLocaleString("en-GB")}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+    prev_value: prev, new_value: dueISO,
+  });
+  persist();
+}
+
+/** Mark the current follow-up as completed, optionally scheduling the next one. */
+export function completeFollowup(queryId: string, note?: string, nextDue?: string, by?: string) {
+  if (!inited) load();
+  const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
+  if (!q) return;
+  const actor = by || q.owner || "System";
+  const now = new Date();
+  queries = queries.map((x) =>
+    x.id === q.id
+      ? {
+        ...x,
+        followup_done_at: iso(now),
+        followup_due: nextDue ?? x.followup_due,
+        activities: [{ id: "a_" + now.getTime(), title: note || "Follow-up completed", at: iso(now), by: actor }, ...x.activities],
+      }
+      : x,
+  );
+  logEvent({
+    type: "followup_completed", by: actor, at: iso(now),
+    title: `Follow-up completed by ${actor}`,
+    detail: `${q.query_id}${note ? " • " + note : ""}`,
+    query_id: q.query_id, lead_id: q.lead_id,
+  });
+  if (nextDue) {
+    logEvent({
+      type: "followup_created", by: actor, at: iso(now),
+      title: `Next follow-up added by ${actor}`,
+      detail: `Scheduled for ${new Date(nextDue).toLocaleString("en-GB")}`,
+      query_id: q.query_id, lead_id: q.lead_id, new_value: nextDue,
+    });
+  }
+  persist();
+}
+
+/** Lead age in hours since creation. */
+export function leadAgeHours(q: CrmQuery): number {
+  return Math.max(0, (Date.now() - new Date(q.created_at).getTime()) / 36e5);
+}
+
+/** Hours since the last real activity on the lead (falls back to creation). */
+export function inactiveHours(q: CrmQuery): number {
+  const at = q.last_activity_at || q.assigned_on || q.created_at;
+  return Math.max(0, (Date.now() - new Date(at).getTime()) / 36e5);
+}
+
 
 // ---- employees -------------------------------------------------------------
 export interface EmployeeInput {
@@ -173,6 +298,10 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     lead_id: codeId("LD", now, seq + 50),
     created_at: iso(now),
     assigned_on: iso(now),
+    assigned_by: input.owner,
+    last_updated_by: input.owner,
+    last_activity_at: iso(now),
+
     lead_source: input.lead_source,
     customer: input.customer,
     contact_person: input.contact_person,
@@ -229,7 +358,7 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
 }
 
 /** Reassign a query to another employee. Records a trackable event. */
-export function reassignQuery(queryId: string, newOwner: string, by?: string) {
+export function reassignQuery(queryId: string, newOwner: string, by?: string, reason?: string) {
   if (!inited) load();
   const now = new Date();
   queries = queries.map((q) => {
@@ -240,19 +369,24 @@ export function reassignQuery(queryId: string, newOwner: string, by?: string) {
     logEvent({
       type: "lead_reassigned", by: actor, at: iso(now),
       title: `${q.query_id} reassigned to ${newOwner}`,
-      detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}`,
+      detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}${reason ? ` • Reason: ${reason}` : ""}`,
       query_id: q.query_id, lead_id: q.lead_id,
-      assigned_to: newOwner, assigned_from: from,
+      assigned_to: newOwner, assigned_from: from, assign_reason: reason,
+      prev_value: from, new_value: newOwner,
     });
     return {
       ...q,
       owner: newOwner,
       assigned_on: iso(now),
+      assigned_by: actor,
+      last_updated_by: actor,
+      last_activity_at: iso(now),
       activities: [
-        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}`, at: iso(now), by: actor },
+        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}${reason ? ` — ${reason}` : ""}`, at: iso(now), by: actor },
         ...q.activities,
       ],
     };
+
   });
   // open tasks for that query follow the new owner
   tasks = tasks.map((t) => (t.query_id === queryId && !t.done ? { ...t, owner: newOwner } : t));
@@ -265,6 +399,7 @@ export interface NewTaskInput {
   due_at: string;
   owner: string;
   note?: string;
+  priority?: string;
 }
 
 /** Create a task explicitly assigned to an employee. */
@@ -279,9 +414,11 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
     due_at: input.due_at || iso(addDays(now, 1)),
     owner: input.owner,
     note: input.note,
+    priority: input.priority ?? "Medium",
     done: false,
     assigned_by: actor,
     assigned_at: iso(now),
+
   };
   tasks = [task, ...tasks];
   logEvent({
@@ -468,16 +605,18 @@ export function logFollowup(queryId: string, note: string, nextDue?: string, by?
 export function toggleTask(id: string) {
   if (!inited) load();
   const task = tasks.find((t) => t.id === id);
-  tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+  const now = iso(new Date());
+  tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done, completed_at: t.done ? undefined : now } : t));
   if (task && !task.done) {
     logEvent({
-      type: "task_completed", by: task.owner,
+      type: "task_completed", by: task.owner, at: now,
       title: `Task completed by ${task.owner}`,
-      detail: task.title, query_id: task.query_id,
+      detail: task.title, query_id: task.query_id, task_id: task.id,
     });
   }
   persist();
 }
+
 
 function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
