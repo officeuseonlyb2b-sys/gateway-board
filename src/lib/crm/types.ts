@@ -104,7 +104,15 @@ export interface CrmQuery {
   lifecycle: LifecycleStep[];
   activities: ActivityItem[];
   commercials: Commercials;
+
+  // --- ownership / tracking (optional so existing records keep working) ---
+  assigned_by?: string;
+  last_updated_by?: string;
+  last_activity_at?: string;
+  followup_note?: string;
+  followup_done_at?: string;
 }
+
 
 export interface Executive {
   id: string;
