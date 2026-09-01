@@ -60,7 +60,10 @@ export interface CrmTask {
   done: boolean;
   assigned_by?: string;
   assigned_at?: string;
+  priority?: string;
+  completed_at?: string;
 }
+
 
 export interface Commercials {
   cost_price: number;
