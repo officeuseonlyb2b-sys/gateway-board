@@ -605,16 +605,18 @@ export function logFollowup(queryId: string, note: string, nextDue?: string, by?
 export function toggleTask(id: string) {
   if (!inited) load();
   const task = tasks.find((t) => t.id === id);
-  tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+  const now = iso(new Date());
+  tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done, completed_at: t.done ? undefined : now } : t));
   if (task && !task.done) {
     logEvent({
-      type: "task_completed", by: task.owner,
+      type: "task_completed", by: task.owner, at: now,
       title: `Task completed by ${task.owner}`,
-      detail: task.title, query_id: task.query_id,
+      detail: task.title, query_id: task.query_id, task_id: task.id,
     });
   }
   persist();
 }
+
 
 function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
