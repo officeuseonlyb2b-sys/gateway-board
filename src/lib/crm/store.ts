@@ -298,6 +298,10 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     lead_id: codeId("LD", now, seq + 50),
     created_at: iso(now),
     assigned_on: iso(now),
+    assigned_by: input.owner,
+    last_updated_by: input.owner,
+    last_activity_at: iso(now),
+
     lead_source: input.lead_source,
     customer: input.customer,
     contact_person: input.contact_person,
