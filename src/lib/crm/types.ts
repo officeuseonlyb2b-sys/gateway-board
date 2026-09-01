@@ -135,7 +135,22 @@ export type CrmEventType =
   | "followup_overdue"
   | "task_overdue"
   | "won"
-  | "lost";
+  | "lost"
+  // --- advanced lead tracking ---
+  | "lead_viewed"
+  | "call_made"
+  | "call_connected"
+  | "call_not_connected"
+  | "whatsapp_sent"
+  | "email_sent"
+  | "followup_created"
+  | "followup_completed"
+  | "followup_missed"
+  | "quotation_started"
+  | "quotation_updated"
+  | "customer_replied"
+  | "negotiation_started"
+  | "priority_changed";
 
 export interface CrmEvent {
   id: string;
@@ -149,7 +164,11 @@ export interface CrmEvent {
   /** assignment tracking */
   assigned_to?: string;
   assigned_from?: string;
+  assign_reason?: string;
   task_id?: string;
+  /** generic previous → new value tracking (status, priority, owner, …) */
+  prev_value?: string;
+  new_value?: string;
   /** stage-change tracking (before / after + how long it sat in from_stage) */
   from_stage?: Stage;
   to_stage?: Stage;
@@ -173,6 +192,30 @@ export const EVENT_LABELS: Record<CrmEventType, string> = {
   task_overdue: "Task overdue",
   won: "Marked Won",
   lost: "Marked Lost",
+  lead_viewed: "Lead viewed",
+  call_made: "Call made",
+  call_connected: "Call connected",
+  call_not_connected: "Call not connected",
+  whatsapp_sent: "WhatsApp sent",
+  email_sent: "Email sent",
+  followup_created: "Follow-up added",
+  followup_completed: "Follow-up completed",
+  followup_missed: "Follow-up missed",
+  quotation_started: "Quotation started",
+  quotation_updated: "Quotation updated",
+  customer_replied: "Customer replied",
+  negotiation_started: "Negotiation started",
+  priority_changed: "Priority changed",
 };
+
+/** Activity event types that count as "the employee worked this lead". */
+export const CONTACT_EVENTS: CrmEventType[] = [
+  "call_made", "call_connected", "call_not_connected", "whatsapp_sent", "email_sent",
+  "followup_logged", "followup_completed", "customer_replied", "negotiation_started",
+];
+
+export const LEAD_PRIORITIES = ["Low", "Medium", "High", "Urgent"] as const;
+export type LeadPriority = (typeof LEAD_PRIORITIES)[number];
+
 
 
