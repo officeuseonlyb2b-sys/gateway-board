@@ -399,6 +399,7 @@ export interface NewTaskInput {
   due_at: string;
   owner: string;
   note?: string;
+  priority?: string;
 }
 
 /** Create a task explicitly assigned to an employee. */
@@ -413,9 +414,11 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
     due_at: input.due_at || iso(addDays(now, 1)),
     owner: input.owner,
     note: input.note,
+    priority: input.priority ?? "Medium",
     done: false,
     assigned_by: actor,
     assigned_at: iso(now),
+
   };
   tasks = [task, ...tasks];
   logEvent({
