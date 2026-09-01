@@ -358,7 +358,7 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
 }
 
 /** Reassign a query to another employee. Records a trackable event. */
-export function reassignQuery(queryId: string, newOwner: string, by?: string) {
+export function reassignQuery(queryId: string, newOwner: string, by?: string, reason?: string) {
   if (!inited) load();
   const now = new Date();
   queries = queries.map((q) => {
@@ -369,19 +369,24 @@ export function reassignQuery(queryId: string, newOwner: string, by?: string) {
     logEvent({
       type: "lead_reassigned", by: actor, at: iso(now),
       title: `${q.query_id} reassigned to ${newOwner}`,
-      detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}`,
+      detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}${reason ? ` • Reason: ${reason}` : ""}`,
       query_id: q.query_id, lead_id: q.lead_id,
-      assigned_to: newOwner, assigned_from: from,
+      assigned_to: newOwner, assigned_from: from, assign_reason: reason,
+      prev_value: from, new_value: newOwner,
     });
     return {
       ...q,
       owner: newOwner,
       assigned_on: iso(now),
+      assigned_by: actor,
+      last_updated_by: actor,
+      last_activity_at: iso(now),
       activities: [
-        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}`, at: iso(now), by: actor },
+        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}${reason ? ` — ${reason}` : ""}`, at: iso(now), by: actor },
         ...q.activities,
       ],
     };
+
   });
   // open tasks for that query follow the new owner
   tasks = tasks.map((t) => (t.query_id === queryId && !t.done ? { ...t, owner: newOwner } : t));
