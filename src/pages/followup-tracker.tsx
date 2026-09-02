@@ -84,10 +84,10 @@ export default function FollowupTracker() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Due Today" value={buckets.dueToday.length} icon={CalendarClock} />
-        <StatCard label="Overdue" value={buckets.overdue.length} icon={AlarmClock} />
-        <StatCard label="Upcoming" value={buckets.upcoming.length} icon={CalendarClock} />
-        <StatCard label="Completed Today" value={buckets.completed.length} icon={CheckCircle2} />
+        <StatCard label="Due Today" value={buckets.dueToday.length} icon={<CalendarClock className="h-5 w-5" />} />
+        <StatCard label="Overdue" value={buckets.overdue.length} icon={<AlarmClock className="h-5 w-5" />} />
+        <StatCard label="Upcoming" value={buckets.upcoming.length} icon={<CalendarClock className="h-5 w-5" />} />
+        <StatCard label="Completed Today" value={buckets.completed.length} icon={<CheckCircle2 className="h-5 w-5" />} />
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -101,7 +101,7 @@ export default function FollowupTracker() {
         </Select>
       </div>
 
-      <Panel title="Follow-ups" icon={CalendarClock}>
+      <Panel title="Follow-ups" icon={<CalendarClock className="h-4 w-4" />}>
         <Tabs defaultValue="today">
           <TabsList>
             <TabsTrigger value="today">Due Today ({buckets.dueToday.length})</TabsTrigger>
