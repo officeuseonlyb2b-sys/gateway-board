@@ -40,19 +40,53 @@ export function OwnerSelect({
   );
 }
 
-/** Inline reassign control for a single query. */
+/** Inline reassign control for a single query — captures a reason. */
 export function ReassignQuery({ queryId, owner, className }: { queryId: string; owner: string; className?: string }) {
   const actor = useActor();
+  const employees = useEmployees().filter((e) => e.active !== false);
+  const [pending, setPending] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  if (employees.length === 0) {
+    return <p className={`text-xs text-muted-foreground ${className ?? ""}`}>No employees available. Please add employees in Users &amp; Roles.</p>;
+  }
+
   return (
-    <OwnerSelect
-      className={className}
-      value={owner}
-      placeholder="Unassigned"
-      onChange={(name) => {
-        reassignQuery(queryId, name, actor);
-        toast.success(`${queryId} reassigned to ${name}`);
-      }}
-    />
+    <>
+      <OwnerSelect
+        className={className}
+        value={owner}
+        placeholder="Unassigned"
+        onChange={(name) => { if (name !== owner) setPending(name); }}
+      />
+      <Dialog open={!!pending} onOpenChange={(o) => { if (!o) { setPending(null); setReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reassign lead</DialogTitle>
+            <DialogDescription>
+              {owner ? `Transfer from ${owner} to ${pending}.` : `Assign to ${pending}.`} The previous owner and this reason are kept in the lead history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Reason for reassignment</Label>
+            <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Owner on leave / workload balancing" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setPending(null); setReason(""); }}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!pending) return;
+                reassignQuery(queryId, pending, actor, reason.trim() || undefined);
+                toast.success(`${queryId} reassigned to ${pending}`);
+                setPending(null); setReason("");
+              }}
+            >
+              Reassign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -64,15 +98,23 @@ export function NewTaskDialog({ queryId, trigger }: { queryId?: string; trigger?
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
-  const [due, setDue] = useState(() => new Date(Date.now() + 864e5).toISOString().slice(0, 16));
+  const [due, setDue] = useState(() => {
+    const d = new Date(Date.now() + 864e5);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  });
   const [owner, setOwner] = useState("");
+  const [priority, setPriority] = useState("Medium");
   const [query, setQuery] = useState(queryId ?? "");
 
   const submit = () => {
+    if (employees.length === 0) { toast.error("No employees available. Please add employees in Users & Roles."); return; }
     if (!title.trim()) { toast.error("Add a task title."); return; }
     if (!owner) { toast.error("Choose who this task is assigned to."); return; }
-    addTask({ title: title.trim(), query_id: query, due_at: new Date(due).toISOString(), owner, note: note.trim() || undefined }, actor);
-    toast.success(`Task assigned to ${owner}`);
+    const task = addTask(
+      { title: title.trim(), query_id: query, due_at: new Date(due).toISOString(), owner, note: note.trim() || undefined, priority },
+      actor,
+    );
+    toast.success(`Task assigned to ${owner}`, { description: task.title });
     setTitle(""); setNote(""); setOpen(false);
   };
 
@@ -84,37 +126,52 @@ export function NewTaskDialog({ queryId, trigger }: { queryId?: string; trigger?
           <DialogTitle>Create task</DialogTitle>
           <DialogDescription>Assign a task to a specific employee — it appears on their My Tasks.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Title</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Send revised quotation" />
-          </div>
-          {!queryId && (
+        {employees.length === 0 ? (
+          <p className="text-sm text-destructive">No employees available. Please add employees in Users &amp; Roles.</p>
+        ) : (
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Linked Query</Label>
-              <Select value={query || undefined} onValueChange={setQuery}>
-                <SelectTrigger><SelectValue placeholder="Select query (optional)" /></SelectTrigger>
+              <Label>Title</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Send revised quotation" />
+            </div>
+            {!queryId && (
+              <div className="space-y-2">
+                <Label>Linked Lead / Query</Label>
+                <Select value={query || undefined} onValueChange={setQuery}>
+                  <SelectTrigger><SelectValue placeholder="Select query (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    {queries.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-muted-foreground">No leads yet.</div>
+                    ) : queries.map((q) => <SelectItem key={q.id} value={q.query_id}>{q.query_id} — {q.customer}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Due</Label>
+                <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Assign To</Label>
+                <OwnerSelect value={owner} onChange={setOwner} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select value={priority} onValueChange={setPriority}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {queries.map((q) => <SelectItem key={q.id} value={q.query_id}>{q.query_id} — {q.customer}</SelectItem>)}
+                  {LEAD_PRIORITIES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-          )}
-          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Due</Label>
-              <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Assign To</Label>
-              <OwnerSelect value={owner} onChange={setOwner} />
+              <Label>Note</Label>
+              <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
           </div>
-          <div className="space-y-2">
-            <Label>Note</Label>
-            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-        </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={employees.length === 0}>Create &amp; Assign</Button>
@@ -123,6 +180,7 @@ export function NewTaskDialog({ queryId, trigger }: { queryId?: string; trigger?
     </Dialog>
   );
 }
+
 
 /** Bulk lead assignment used by the Manager Dashboard quick action. */
 export function AssignLeadsDialog({ trigger }: { trigger: React.ReactNode }) {
