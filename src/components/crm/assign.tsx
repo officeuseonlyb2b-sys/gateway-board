@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { addTask, reassignQuery, useCrmQueries, useEmployees } from "@/lib/crm/store";
+import { LEAD_PRIORITIES } from "@/lib/crm/types";
 import { useAuth } from "@/lib/auth-mock";
 
 /** Name of the person performing the action (falls back to first employee). */
