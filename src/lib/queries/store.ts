@@ -141,3 +141,165 @@ export function useQueries(): QueryRecord[] {
 export function useWonQueries(): QueryRecord[] {
   return useQueries().filter((q) => q.final_status === "WIN");
 }
+
+/* ------------------------------------------------------------------ */
+/* Query Management — unlimited activity log + automation              */
+/* ------------------------------------------------------------------ */
+
+import type { QueryActivity, QueryActivityType, FinalLeadStatus } from "./types";
+
+const aid = () => "a_" + Math.random().toString(36).slice(2, 10);
+
+function patchRecord(id: string, fn: (q: QueryRecord) => QueryRecord) {
+  const list = read();
+  const idx = list.findIndex((q) => q.id === id);
+  if (idx < 0) return;
+  list[idx] = { ...fn(list[idx]), updated_at: new Date().toISOString() };
+  writeAll(list);
+}
+
+export function getQuery(id: string): QueryRecord | undefined {
+  return read().find((q) => q.id === id || q.query_no === id);
+}
+
+export function activitiesOf(q: QueryRecord): QueryActivity[] {
+  return [...(q.activities || [])].sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/** Append an activity. Never overwrites history. */
+export function logActivity(
+  id: string,
+  input: { type: QueryActivityType; note?: string; by?: string; due_at?: string },
+): void {
+  const entry: QueryActivity = {
+    id: aid(),
+    type: input.type,
+    at: new Date().toISOString(),
+    by: input.by || "Me",
+    note: input.note || "",
+    due_at: input.due_at || undefined,
+    done: input.due_at ? false : undefined,
+  };
+  patchRecord(id, (q) => ({ ...q, activities: [...(q.activities || []), entry] }));
+
+  // Automation: quotation sent -> follow-up in 3 days for the query owner.
+  if (input.type === "quotation_sent") {
+    const due = new Date(Date.now() + 3 * 86400000).toISOString();
+    const rec = getQuery(id);
+    scheduleFollowUp(id, due, "Auto follow-up after quotation", rec?.travel_advisor || input.by || "Me");
+  }
+}
+
+/** Schedule an unlimited follow-up (activity with a due date). */
+export function scheduleFollowUp(id: string, dueISO: string, note = "", by = "Me"): void {
+  const entry: QueryActivity = {
+    id: aid(), type: "followup", at: new Date().toISOString(), by, note, due_at: dueISO, done: false,
+  };
+  patchRecord(id, (q) => ({ ...q, activities: [...(q.activities || []), entry] }));
+}
+
+export function completeFollowUp(id: string, activityId: string, note = ""): void {
+  const now = new Date().toISOString();
+  patchRecord(id, (q) => ({
+    ...q,
+    activities: (q.activities || []).map((a) =>
+      a.id === activityId ? { ...a, done: true, done_at: now, note: note || a.note } : a,
+    ),
+  }));
+}
+
+function closePendingFollowUps(q: QueryRecord): QueryRecord {
+  const now = new Date().toISOString();
+  return {
+    ...q,
+    activities: (q.activities || []).map((a) =>
+      a.type === "followup" && !a.done ? { ...a, done: true, done_at: now } : a,
+    ),
+    follow_ups: (q.follow_ups || []).map((f) => ({ ...f, done: true })),
+  };
+}
+
+/** Workflow: New -> Working -> Nurturing -> Won / Lost. */
+export function setQueryStatus(
+  id: string,
+  status: FinalLeadStatus,
+  opts: { by?: string; lossReason?: string } = {},
+): void {
+  const now = new Date().toISOString();
+  const by = opts.by || "Me";
+  patchRecord(id, (prev) => {
+    const change: QueryActivity = {
+      id: aid(), type: "status_change", at: now, by,
+      note: `${prev.final_status} → ${status}${opts.lossReason ? ` — ${opts.lossReason}` : ""}`,
+    };
+    let next: QueryRecord = {
+      ...prev,
+      final_status: status,
+      status_new: status === "New",
+      status_working: status === "Working",
+      status_nurturing: status === "Nurturing",
+      loss_reason: status === "LOST" ? (opts.lossReason || prev.loss_reason || "Not specified") : prev.loss_reason,
+      won_at: status === "WIN" ? (prev.won_at || now) : undefined,
+      activities: [...(prev.activities || []), change],
+    };
+    if (status === "WIN" || status === "LOST") next = closePendingFollowUps(next);
+    return next;
+  });
+  const rec = getQuery(id);
+  if (rec && status === "WIN") notifyWin(rec);
+}
+
+/** Fire reminders + manager escalation for activity-based follow-ups. */
+export function checkQueryAutomation(): void {
+  if (!isBrowser()) return;
+  const list = read();
+  const now = Date.now();
+  let changed = false;
+  const updated = list.map((q) => {
+    if (q.final_status === "WIN" || q.final_status === "LOST") return q;
+    let rec = q;
+    const acts = (q.activities || []).map((a) => {
+      if (a.type !== "followup" || a.done || a.notified || !a.due_at) return a;
+      const t = new Date(a.due_at).getTime();
+      if (isNaN(t) || t > now) return a;
+      changed = true;
+      addNotification({
+        kind: "warning",
+        category: "query_followup",
+        title: `Follow-up overdue — ${q.query_no}`,
+        message: `${q.contact_person || q.query_source_name || "Query"}${a.note ? ` — ${a.note}` : ""}`,
+        href: "/queries/follow-up-desk",
+      });
+      return { ...a, notified: true };
+    });
+    rec = { ...q, activities: acts };
+    // 48h+ overdue => manager escalation (once)
+    const worstOverdue = acts
+      .filter((a) => a.type === "followup" && !a.done && a.due_at)
+      .reduce((m, a) => Math.max(m, now - new Date(a.due_at!).getTime()), 0);
+    if (!rec.escalated_at && worstOverdue >= 48 * 3600_000) {
+      changed = true;
+      rec = { ...rec, escalated_at: new Date().toISOString() };
+      addNotification({
+        kind: "error",
+        category: "query_followup",
+        title: `Escalation — ${q.query_no}`,
+        message: `Follow-up overdue 48+ hours. Advisor: ${q.travel_advisor || "Unassigned"}.`,
+        href: "/queries/follow-up-desk",
+      });
+    }
+    return rec;
+  });
+  if (changed) writeAll(updated);
+}
+
+export function startQueryAutomationTimer(intervalMs = 60_000): () => void {
+  if (!isBrowser()) return () => {};
+  checkQueryAutomation();
+  const t = setInterval(checkQueryAutomation, intervalMs);
+  return () => clearInterval(t);
+}
+
+export function useQueryRecord(idOrNo: string): QueryRecord | undefined {
+  return useQueries().find((q) => q.id === idOrNo || q.query_no === idOrNo);
+}
