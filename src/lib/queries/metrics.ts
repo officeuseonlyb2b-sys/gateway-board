@@ -1,3 +1,9 @@
+<<<<<<< Updated upstream
+=======
+
+
+
+>>>>>>> Stashed changes
 // Central metrics for the Query Management module.
 // Every Query screen reads from this single derived layer.
 import { useMemo } from "react";
