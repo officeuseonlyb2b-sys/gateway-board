@@ -130,10 +130,20 @@ export interface QueryRecord {
   final_status: FinalLeadStatus;
   remarks: string;
 
+  // --- Query Management extensions (optional so older records keep working) ---
+  /** Unlimited activity log (calls, emails, notes, follow-ups, status changes). */
+  activities?: QueryActivity[];
+  /** Free-text next action shown in the tracker. */
+  next_action?: string;
+  costing_basis?: string;
+  loss_reason?: string;
+  escalated_at?: string;
+
   created_at: string;
   updated_at: string;
   won_at?: string;
 }
+
 
 export type QueryInput = Omit<QueryRecord, "id" | "serial" | "query_no" | "created_at" | "updated_at">;
 
