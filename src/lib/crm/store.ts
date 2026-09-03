@@ -1,3 +1,4 @@
+// src/lib/crm/store.ts
 // CRM store — localStorage backed. NO seeded/sample data: every record comes
 // from real user actions (Employee Register, New Lead, task completion, ...).
 // This module is THE single source of truth for the CRM: queries, tasks,
@@ -350,6 +351,7 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
       owner: input.owner,
       note: `${q.pax} Pax ${q.enquiry_type}`,
       done: false,
+      updates: [], // ✅ NEW: initialise updates array
     },
     ...tasks,
   ];
@@ -418,7 +420,7 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
     done: false,
     assigned_by: actor,
     assigned_at: iso(now),
-
+    updates: [], // ✅ NEW: initialise empty updates array
   };
   tasks = [task, ...tasks];
   logEvent({
@@ -430,6 +432,34 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
   });
   persist();
   return task;
+}
+
+// ✅ NEW: Add a progress update to a task
+export function addTaskUpdate(taskId: string, text: string, by?: string) {
+  if (!inited) load();
+  const now = new Date();
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+  const actor = by || task.owner || "System";
+  const update = {
+    timestamp: iso(now),
+    text: text.trim(),
+    by: actor,
+  };
+  tasks = tasks.map(t =>
+    t.id === taskId
+      ? { ...t, updates: [...(t.updates || []), update] }
+      : t
+  );
+  // Also log to event stream for admin audit
+  logEvent({
+    type: "task_updated", by: actor, at: iso(now),
+    title: `Progress update on task: ${task.title}`,
+    detail: text,
+    task_id: taskId,
+    query_id: task.query_id,
+  });
+  persist();
 }
 
 /** Reassign an existing task to another employee. */
@@ -637,4 +667,3 @@ export function useCrmEvents(): CrmEvent[] {
 
 // ---- derived helpers -------------------------------------------------------
 export const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-

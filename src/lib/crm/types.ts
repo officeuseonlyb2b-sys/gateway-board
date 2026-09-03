@@ -1,3 +1,4 @@
+// src/lib/crm/types.ts
 // CRM / Query Tracking data model (leads, queries, tasks, activities).
 
 export type Stage =
@@ -62,8 +63,13 @@ export interface CrmTask {
   assigned_at?: string;
   priority?: string;
   completed_at?: string;
+  // NEW: daily progress updates
+  updates?: {
+    timestamp: string;
+    text: string;
+    by?: string;
+  }[];
 }
-
 
 export interface Commercials {
   cost_price: number;
@@ -116,7 +122,6 @@ export interface CrmQuery {
   followup_done_at?: string;
 }
 
-
 export interface Executive {
   id: string;
   name: string;
@@ -161,7 +166,9 @@ export type CrmEventType =
   | "quotation_updated"
   | "customer_replied"
   | "negotiation_started"
-  | "priority_changed";
+  | "priority_changed"
+  // NEW: progress update on a task
+  | "task_updated";
 
 export interface CrmEvent {
   id: string;
@@ -217,6 +224,7 @@ export const EVENT_LABELS: Record<CrmEventType, string> = {
   customer_replied: "Customer replied",
   negotiation_started: "Negotiation started",
   priority_changed: "Priority changed",
+  task_updated: "Task updated", // NEW
 };
 
 /** Activity event types that count as "the employee worked this lead". */
@@ -227,6 +235,3 @@ export const CONTACT_EVENTS: CrmEventType[] = [
 
 export const LEAD_PRIORITIES = ["Low", "Medium", "High", "Urgent"] as const;
 export type LeadPriority = (typeof LEAD_PRIORITIES)[number];
-
-
-
