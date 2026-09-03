@@ -182,5 +182,9 @@ export function blankQuery(): QueryInput {
     follow_ups: [emptyFollowUp(), emptyFollowUp(), emptyFollowUp(), emptyFollowUp(), emptyFollowUp(), emptyFollowUp()],
     final_status: "New",
     remarks: "",
+    activities: [],
+    next_action: "",
+    costing_basis: COSTING_BASIS[0],
   };
+
 }
