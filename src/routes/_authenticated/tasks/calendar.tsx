@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { CalendarDays } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { useTasks } from "@/lib/crm/store";
+import { useCrmTasks } from "@/lib/crm/store";
 
 export const Route = createFileRoute("/_authenticated/tasks/calendar")({
   head: () => ({
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/_authenticated/tasks/calendar")({
 });
 
 function TaskCalendar() {
-  const tasks = useTasks();
+  const tasks = useCrmTasks();
 
   const days = useMemo(() => {
     const map = new Map<string, typeof tasks>();
