@@ -34,6 +34,7 @@ import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
 import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authenticated/activities'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
+import { Route as AuthenticatedTasksAllRouteImport } from './routes/_authenticated/tasks/all'
 import { Route as AuthenticatedQueryQueryIdRouteImport } from './routes/_authenticated/query/$queryId'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
 
@@ -167,6 +168,11 @@ const AuthenticatedHotelsIndexRoute =
     path: '/hotels/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedTasksAllRoute = AuthenticatedTasksAllRouteImport.update({
+  id: '/tasks/all',
+  path: '/tasks/all',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedQueryQueryIdRoute =
   AuthenticatedQueryQueryIdRouteImport.update({
     id: '/query/$queryId',
@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
+  '/tasks/all': typeof AuthenticatedTasksAllRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -233,6 +240,7 @@ export interface FileRoutesByTo {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
+  '/tasks/all': typeof AuthenticatedTasksAllRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesById {
@@ -263,6 +271,7 @@ export interface FileRoutesById {
   '/_authenticated/users-roles': typeof AuthenticatedUsersRolesRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
+  '/_authenticated/tasks/all': typeof AuthenticatedTasksAllRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRouteTypes {
@@ -293,6 +302,7 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/hotels/$id'
     | '/query/$queryId'
+    | '/tasks/all'
     | '/hotels/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -321,6 +331,7 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/hotels/$id'
     | '/query/$queryId'
+    | '/tasks/all'
     | '/hotels'
   id:
     | '__root__'
@@ -350,6 +361,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users-roles'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/query/$queryId'
+    | '/_authenticated/tasks/all'
     | '/_authenticated/hotels/'
   fileRoutesById: FileRoutesById
 }
@@ -536,6 +548,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHotelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tasks/all': {
+      id: '/_authenticated/tasks/all'
+      path: '/tasks/all'
+      fullPath: '/tasks/all'
+      preLoaderRoute: typeof AuthenticatedTasksAllRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/query/$queryId': {
       id: '/_authenticated/query/$queryId'
       path: '/query/$queryId'
@@ -577,6 +596,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsersRolesRoute: typeof AuthenticatedUsersRolesRoute
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedQueryQueryIdRoute: typeof AuthenticatedQueryQueryIdRoute
+  AuthenticatedTasksAllRoute: typeof AuthenticatedTasksAllRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
 }
 
@@ -604,6 +624,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsersRolesRoute: AuthenticatedUsersRolesRoute,
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedQueryQueryIdRoute: AuthenticatedQueryQueryIdRoute,
+  AuthenticatedTasksAllRoute: AuthenticatedTasksAllRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
 }
 
