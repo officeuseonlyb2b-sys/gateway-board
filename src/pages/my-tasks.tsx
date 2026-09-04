@@ -200,10 +200,6 @@ export default function MyTasks() {
                 Assign New Task
               </Button>
             }
-            onAssign={(taskData) => {
-              addTask(taskData, owner);
-              toast.success("Task assigned successfully");
-            }}
           />
         </div>
       </div>
@@ -623,10 +619,6 @@ export default function MyTasks() {
                   New Task
                 </Button>
               }
-              onAssign={(taskData) => {
-                addTask(taskData, owner);
-                toast.success("Task assigned successfully");
-              }}
             />
 
             {/* Actual route */}

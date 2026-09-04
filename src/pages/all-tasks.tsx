@@ -256,12 +256,6 @@ export default function AllTasks() {
                   New Task
                 </Button>
               }
-              onAssign={(taskData) => {
-                addTask(taskData, owner);
-                toast.success(
-                  "Task assigned successfully"
-                );
-              }}
             />
 
             <Button
