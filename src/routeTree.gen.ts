@@ -34,6 +34,7 @@ import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
 import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authenticated/activities'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
+import { Route as AuthenticatedTasksCalendarRouteImport } from './routes/_authenticated/tasks/calendar'
 import { Route as AuthenticatedTasksAllRouteImport } from './routes/_authenticated/tasks/all'
 import { Route as AuthenticatedQueryQueryIdRouteImport } from './routes/_authenticated/query/$queryId'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
@@ -168,6 +169,12 @@ const AuthenticatedHotelsIndexRoute =
     path: '/hotels/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedTasksCalendarRoute =
+  AuthenticatedTasksCalendarRouteImport.update({
+    id: '/tasks/calendar',
+    path: '/tasks/calendar',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedTasksAllRoute = AuthenticatedTasksAllRouteImport.update({
   id: '/tasks/all',
   path: '/tasks/all',
@@ -212,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/tasks/all': typeof AuthenticatedTasksAllRoute
+  '/tasks/calendar': typeof AuthenticatedTasksCalendarRoute
   '/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -241,6 +249,7 @@ export interface FileRoutesByTo {
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/tasks/all': typeof AuthenticatedTasksAllRoute
+  '/tasks/calendar': typeof AuthenticatedTasksCalendarRoute
   '/hotels': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRoutesById {
@@ -272,6 +281,7 @@ export interface FileRoutesById {
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/query/$queryId': typeof AuthenticatedQueryQueryIdRoute
   '/_authenticated/tasks/all': typeof AuthenticatedTasksAllRoute
+  '/_authenticated/tasks/calendar': typeof AuthenticatedTasksCalendarRoute
   '/_authenticated/hotels/': typeof AuthenticatedHotelsIndexRoute
 }
 export interface FileRouteTypes {
@@ -303,6 +313,7 @@ export interface FileRouteTypes {
     | '/hotels/$id'
     | '/query/$queryId'
     | '/tasks/all'
+    | '/tasks/calendar'
     | '/hotels/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -332,6 +343,7 @@ export interface FileRouteTypes {
     | '/hotels/$id'
     | '/query/$queryId'
     | '/tasks/all'
+    | '/tasks/calendar'
     | '/hotels'
   id:
     | '__root__'
@@ -362,6 +374,7 @@ export interface FileRouteTypes {
     | '/_authenticated/hotels/$id'
     | '/_authenticated/query/$queryId'
     | '/_authenticated/tasks/all'
+    | '/_authenticated/tasks/calendar'
     | '/_authenticated/hotels/'
   fileRoutesById: FileRoutesById
 }
@@ -548,6 +561,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHotelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tasks/calendar': {
+      id: '/_authenticated/tasks/calendar'
+      path: '/tasks/calendar'
+      fullPath: '/tasks/calendar'
+      preLoaderRoute: typeof AuthenticatedTasksCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/tasks/all': {
       id: '/_authenticated/tasks/all'
       path: '/tasks/all'
@@ -597,6 +617,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedHotelsIdRoute: typeof AuthenticatedHotelsIdRoute
   AuthenticatedQueryQueryIdRoute: typeof AuthenticatedQueryQueryIdRoute
   AuthenticatedTasksAllRoute: typeof AuthenticatedTasksAllRoute
+  AuthenticatedTasksCalendarRoute: typeof AuthenticatedTasksCalendarRoute
   AuthenticatedHotelsIndexRoute: typeof AuthenticatedHotelsIndexRoute
 }
 
@@ -625,6 +646,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedHotelsIdRoute: AuthenticatedHotelsIdRoute,
   AuthenticatedQueryQueryIdRoute: AuthenticatedQueryQueryIdRoute,
   AuthenticatedTasksAllRoute: AuthenticatedTasksAllRoute,
+  AuthenticatedTasksCalendarRoute: AuthenticatedTasksCalendarRoute,
   AuthenticatedHotelsIndexRoute: AuthenticatedHotelsIndexRoute,
 }
 
