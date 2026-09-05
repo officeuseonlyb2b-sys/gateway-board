@@ -26,13 +26,14 @@ import { useCrmMetrics, type WorkloadRow } from "@/lib/crm/metrics";
 import type { CrmEvent } from "@/lib/crm/types";
 import { AssignLeadsDialog, NewTaskDialog } from "@/components/crm/assign";
 
+// Updated Clean Theme (White/Slate + Teal Accents + Decorative Circles)
 const navCardClass =
-  "rounded-xl border border-[#173b5e] bg-[#06223c] shadow-[0_8px_24px_rgba(0,0,0,0.18)]";
+  "rounded-2xl bg-white border border-slate-200 shadow-sm";
 
 const smallLabelClass =
-  "text-[10px] font-semibold uppercase tracking-[0.02em] text-[#9db1c7]";
+  "text-[10px] font-semibold uppercase tracking-[0.02em] text-slate-500";
 
-const DONUT_COLORS = ["#1767d8", "#f59a05", "#38a94c", "#7042c7", "#1ca6bd", "#d95a8a", "#8ea832"];
+const DONUT_COLORS = ["#0d9488", "#f59e0b", "#38a94c", "#7042c7", "#1ca6bd", "#d95a8a", "#8ea832"];
 
 const inr = (n: number) => "₹ " + Math.round(n).toLocaleString("en-IN");
 const pct1 = (n: number) => `${n.toFixed(1)}%`;
@@ -64,11 +65,11 @@ const BAD_EVENTS: CrmEvent["type"][] = ["lost"];
 
 function Avatar({ initials, index }: { initials: string; index: number }) {
   const classes = [
-    "bg-[#a58b65]",
-    "bg-[#b56e5f]",
-    "bg-[#5d9a68]",
-    "bg-[#6f5a9f]",
-    "bg-[#4d7698]",
+    "bg-teal-600",
+    "bg-amber-500",
+    "bg-emerald-600",
+    "bg-purple-600",
+    "bg-blue-600",
   ];
 
   return (
@@ -90,7 +91,7 @@ function Trend({
   return (
     <span
       className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${
-        positive ? "text-[#58c83f]" : "text-[#ff5a63]"
+        positive ? "text-emerald-600" : "text-red-600"
       }`}
     >
       {positive ? (
@@ -103,51 +104,49 @@ function Trend({
   );
 }
 
+// ✅ EXACT MATCH KPI Card (Query Performance Centre Style)
 function KpiCard({
   title,
   value,
   prev,
-  icon: Icon,
+  icon: Icon, // Icon is accepted but not rendered to match Query Performance Centre exactly
   iconClass,
   invert = false,
+  accentColor, // Color for decorative circle
 }: {
   title: string;
   value: number;
   prev: number;
   icon: typeof Users;
   iconClass: string;
-  /** true = growth is bad (overdue, follow-ups) */
   invert?: boolean;
+  accentColor: string; // e.g., "bg-teal-100/60"
 }) {
   const d = delta(value, prev);
   return (
-    <div className={`${navCardClass} min-w-0 p-3.5`}>
-      <div className="flex items-start justify-between gap-2">
+    <div className={`relative overflow-hidden rounded-2xl bg-white border border-slate-200 shadow-sm p-5 min-w-0`}>
+      {/* Decorative Circle */}
+      <div className={`absolute -top-8 -right-8 h-24 w-24 rounded-full ${accentColor}`}></div>
+      
+      <div className="flex items-start justify-between gap-2 relative z-10">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="truncate text-[12px] font-medium text-[#d5e0eb]">
-              {title}
-            </p>
-            <Trend value={d.value} positive={invert ? !d.positive : d.positive} />
-          </div>
-          <div className="mt-1 flex items-end gap-2">
-            <p className="text-[27px] font-bold leading-none tracking-tight text-white">
-              {value}
-            </p>
-          </div>
-          <p className="mt-2 text-[10px] leading-4 text-[#8ca4bb]">
-            vs yesterday
-            <br />
-            <span className="text-[#a9bacb]">({prev})</span>
+          <p className="text-sm font-semibold text-slate-800 leading-tight">
+            {title}
           </p>
         </div>
-
-        <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconClass}`}
-        >
-          <Icon className="h-6 w-6 text-white" strokeWidth={2} />
-        </div>
+        {/* Tiny Trend indicator (kept clean, no big icons) */}
+        <Trend value={d.value} positive={invert ? !d.positive : d.positive} />
       </div>
+
+      <div className="relative z-10 mt-3">
+        <p className="text-3xl font-bold leading-none tracking-tight text-slate-900">
+          {value}
+        </p>
+      </div>
+
+      <p className="relative z-10 mt-2 text-xs text-slate-500">
+        vs yesterday <span className="text-slate-400">({prev})</span>
+      </p>
     </div>
   );
 }
@@ -162,10 +161,10 @@ function PanelHeader({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-[#173b5e] px-4 py-2.5">
+    <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
-        <Icon className="h-4 w-4 shrink-0 text-[#d6e3ee]" />
-        <h2 className="truncate text-[14px] font-bold text-white">{title}</h2>
+        <Icon className="h-4 w-4 shrink-0 text-teal-600" />
+        <h2 className="truncate text-[14px] font-bold text-slate-900">{title}</h2>
       </div>
       {right}
     </div>
@@ -174,7 +173,7 @@ function PanelHeader({
 
 function DonutChart({ slices, total }: { slices: { value: number; color: string }[]; total: number }) {
   const gradient = useMemo(() => {
-    if (!total) return "conic-gradient(#123a5c 0deg 360deg)";
+    if (!total) return "conic-gradient(#e2e8f0 0deg 360deg)";
     let acc = 0;
     const parts = slices.map((s) => {
       const start = (acc / total) * 360;
@@ -188,9 +187,9 @@ function DonutChart({ slices, total }: { slices: { value: number; color: string 
   return (
     <div className="relative h-[156px] w-[156px] shrink-0">
       <div className="absolute inset-0 rounded-full" style={{ background: gradient }} />
-      <div className="absolute inset-[28px] flex flex-col items-center justify-center rounded-full bg-[#06213a]">
-        <span className="text-[25px] font-bold text-white">{total}</span>
-        <span className="text-[10px] text-[#91a8bd]">Active Leads</span>
+      <div className="absolute inset-[28px] flex flex-col items-center justify-center rounded-full bg-white shadow-inner">
+        <span className="text-[25px] font-bold text-slate-900">{total}</span>
+        <span className="text-[10px] text-slate-500">Active Leads</span>
       </div>
     </div>
   );
@@ -211,38 +210,38 @@ function PipelineBars({
           <span
             className={`truncate text-[10px] ${
               stage.label === "Confirmed"
-                ? "text-[#5fd34b]"
+                ? "text-emerald-600"
                 : stage.label === "Lost"
-                  ? "text-[#ff6268]"
-                  : "text-[#c7d4e1]"
+                  ? "text-red-600"
+                  : "text-slate-700"
             }`}
           >
             {stage.label}
           </span>
-          <div className="h-2 overflow-hidden bg-transparent">
+          <div className="h-2 overflow-hidden bg-slate-100 rounded-full">
             <div
-              className={`h-full rounded-r-sm ${
+              className={`h-full rounded-full ${
                 stage.label === "Confirmed"
-                  ? "bg-[#49bf3a]"
+                  ? "bg-emerald-500"
                   : stage.label === "Lost"
-                    ? "bg-[#ef4b51]"
-                    : "bg-[#2674dc]"
+                    ? "bg-red-500"
+                    : "bg-teal-600"
               }`}
               style={{ width: `${(stage.value / max) * 100}%` }}
             />
           </div>
-          <span className="text-right text-[9px] text-[#d9e3ed]">
+          <span className="text-right text-[9px] text-slate-700">
             {stage.value}
           </span>
-          <span className="text-right text-[9px] text-[#9cb0c4]">
+          <span className="text-right text-[9px] text-slate-500">
             {pct1(stage.pct)}
           </span>
         </div>
       ))}
-      <div className="mt-2 flex justify-between border-t border-[#173b5e] pt-2 text-[10px]">
-        <span className="font-semibold text-white">Total</span>
-        <span className="text-[#d4e0eb]">{total}</span>
-        <span className="text-[#9cb0c4]">100%</span>
+      <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 text-[10px]">
+        <span className="font-semibold text-slate-900">Total</span>
+        <span className="text-slate-700">{total}</span>
+        <span className="text-slate-500">100%</span>
       </div>
     </div>
   );
@@ -324,35 +323,35 @@ export default function ManagerDashboard() {
   ];
 
   return (
-    <div className="min-h-full w-full bg-[#03182b] text-white">
-      <div className="mx-auto w-full max-w-[1500px] px-3 pb-5 pt-3 sm:px-4 lg:px-5">
+    <div className="min-h-full w-full bg-slate-50 text-slate-900">
+      <div className="mx-auto w-full max-w-[1500px] px-4 pb-6 pt-4 lg:px-6">
         {/* Page heading */}
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-[21px] font-bold tracking-tight text-white sm:text-[23px]">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 Manager Dashboard — Sales &amp; Queries
               </h1>
-              <TrendingUp className="h-5 w-5 text-[#ffd000]" />
+              <TrendingUp className="h-5 w-5 text-teal-600" />
             </div>
-            <p className="mt-0.5 text-[11px] text-[#91a8bd]">
+            <p className="mt-1 text-sm text-slate-500">
               360° team performance, assignments, and weekly review overview.
             </p>
           </div>
         </div>
 
-        {/* KPI cards */}
-        <div className="mb-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-6">
-          <KpiCard title="New Leads Today" value={m.newLeadsToday} prev={m.prev.newLeads} icon={Users} iconClass="bg-[#1767d8]" />
-          <KpiCard title="Leads Assigned Today" value={m.leadsAssignedToday} prev={m.prev.assigned} icon={Users} iconClass="bg-[#f28a00]" />
-          <KpiCard title="Tasks Completed Today" value={m.tasksCompletedToday} prev={m.prev.tasksCompleted} icon={CheckCircle2} iconClass="bg-[#21b94d]" />
-          <KpiCard title="Pending Quotations" value={m.pendingQuotations} prev={m.prev.pendingQuotations} icon={FileText} iconClass="bg-[#7627c8]" />
-          <KpiCard title="Follow-ups Due Today" value={m.followupsDueToday} prev={m.prev.followupsDue} icon={CalendarDays} iconClass="bg-[#1767d8]" invert />
-          <KpiCard title="Overdue Queries" value={m.overdueFollowups} prev={m.prev.overdue} icon={CircleAlert} iconClass="bg-[#f3262f]" invert />
+        {/* KPI cards (EXACT MATCH: White bg, decorative circles, no icons) */}
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <KpiCard title="New Leads Today" value={m.newLeadsToday} prev={m.prev.newLeads} icon={Users} iconClass="" accentColor="bg-teal-100/60" />
+          <KpiCard title="Leads Assigned Today" value={m.leadsAssignedToday} prev={m.prev.assigned} icon={Users} iconClass="" accentColor="bg-yellow-100/70" />
+          <KpiCard title="Tasks Completed Today" value={m.tasksCompletedToday} prev={m.prev.tasksCompleted} icon={CheckCircle2} iconClass="" accentColor="bg-emerald-100/70" />
+          <KpiCard title="Pending Quotations" value={m.pendingQuotations} prev={m.prev.pendingQuotations} icon={FileText} iconClass="" accentColor="bg-blue-100/60" />
+          <KpiCard title="Follow-ups Due Today" value={m.followupsDueToday} prev={m.prev.followupsDue} icon={CalendarDays} iconClass="" accentColor="bg-purple-100/60" invert />
+          <KpiCard title="Overdue Queries" value={m.overdueFollowups} prev={m.prev.overdue} icon={CircleAlert} iconClass="" accentColor="bg-pink-200/30" invert />
         </div>
 
         {/* Main upper row */}
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2.05fr)_minmax(330px,1fr)]">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(330px,1fr)]">
           {/* Team workload */}
           <section className={`${navCardClass} min-w-0 overflow-hidden`}>
             <PanelHeader
@@ -360,7 +359,7 @@ export default function ManagerDashboard() {
               title="Team Workload / Executive Performance"
               right={
                 <div className="flex items-center gap-2">
-                  <button className="hidden h-7 items-center gap-2 rounded-md border border-[#3a5874] bg-[#082640] px-2.5 text-[10px] text-[#d7e1eb] sm:flex">
+                  <button className="hidden h-7 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 sm:flex">
                     View by: Executive
                     <ChevronDown className="h-3 w-3" />
                   </button>
@@ -374,7 +373,7 @@ export default function ManagerDashboard() {
                         ].map(String)),
                       ])
                     }
-                    className="hidden h-7 items-center gap-1.5 rounded-md border border-[#3a5874] bg-[#082640] px-2.5 text-[10px] text-[#d7e1eb] md:flex"
+                    className="hidden h-7 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 md:flex"
                   >
                     <Download className="h-3 w-3" />
                     Export
@@ -386,38 +385,38 @@ export default function ManagerDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] border-collapse text-[10px]">
                 <thead>
-                  <tr className="bg-[#08233d] text-[#d2dce7]">
-                    <th className="border-r border-[#173b5e] px-3 py-2 text-left font-medium">
+                  <tr className="bg-slate-50 text-slate-600">
+                    <th className="border-r border-slate-200 px-3 py-2 text-left font-medium">
                       Executive
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Assigned
                       <br />
                       Leads
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       New Today
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       In Progress
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Quotations
                       <br />
                       Sent
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Completed
                       <br />
                       Today
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Overdue
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Nurturing
                     </th>
-                    <th className="border-r border-[#173b5e] px-2 py-2 text-center font-medium">
+                    <th className="border-r border-slate-200 px-2 py-2 text-center font-medium">
                       Monthly
                       <br />
                       Conversion %
@@ -432,55 +431,55 @@ export default function ManagerDashboard() {
                   {workload.map((row, index) => (
                     <tr
                       key={row.employee.id}
-                      className="border-t border-[#173b5e] hover:bg-[#0a2945]"
+                      className="border-t border-slate-100 hover:bg-slate-50"
                     >
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <Avatar initials={initialsOf(row.employee.name)} index={index} />
                           <div>
-                            <div className="font-semibold text-white">
+                            <div className="font-semibold text-slate-900">
                               {row.employee.name}
                             </div>
-                            <div className="text-[9px] text-[#819ab1]">
+                            <div className="text-[9px] text-slate-500">
                               {row.employee.role}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="text-center font-semibold">{row.assigned}</td>
-                      <td className="text-center font-semibold">{row.newToday}</td>
-                      <td className="text-center font-semibold">{row.inProgress}</td>
-                      <td className="text-center font-semibold">{row.quotations}</td>
-                      <td className="text-center font-semibold">{row.completedToday}</td>
-                      <td className="text-center font-semibold text-[#ff525b]">{row.overdue}</td>
-                      <td className="text-center font-semibold">{row.nurturing}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.assigned}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.newToday}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.inProgress}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.quotations}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.completedToday}</td>
+                      <td className="text-center font-semibold text-red-600">{row.overdue}</td>
+                      <td className="text-center font-semibold text-slate-700">{row.nurturing}</td>
                       <td className="text-center">
-                        <span className="font-semibold text-[#d9e4ee]">{pct1(row.conversion)}</span>
+                        <span className="font-semibold text-slate-700">{pct1(row.conversion)}</span>
                       </td>
                       <td className="px-2 text-center">
-                        <span className="font-semibold text-[#dce7ef]">{inr(row.revenue)}</span>
+                        <span className="font-semibold text-slate-900">{inr(row.revenue)}</span>
                       </td>
                     </tr>
                   ))}
                   {workload.length === 0 && (
-                    <tr className="border-t border-[#173b5e]">
-                      <td colSpan={10} className="px-3 py-6 text-center text-[10px] text-[#8ca4bb]">
+                    <tr className="border-t border-slate-100">
+                      <td colSpan={10} className="px-3 py-6 text-center text-[10px] text-slate-500">
                         No employees registered yet. Add them in Users &amp; Roles.
                       </td>
                     </tr>
                   )}
 
-                  <tr className="border-t border-[#31526f] bg-[#08243e] font-bold">
-                    <td className="px-3 py-2 text-white">Team Total</td>
-                    <td className="text-center">{totals.assigned}</td>
-                    <td className="text-center">{totals.newToday}</td>
-                    <td className="text-center">{totals.inProgress}</td>
-                    <td className="text-center">{totals.quotations}</td>
-                    <td className="text-center">{totals.completedToday}</td>
-                    <td className="text-center text-[#ff525b]">{totals.overdue}</td>
-                    <td className="text-center">{totals.nurturing}</td>
-                    <td className="text-center">{pct1(m.weekly.conversion)}</td>
-                    <td className="text-center">{inr(totals.revenue)}</td>
+                  <tr className="border-t border-slate-200 bg-slate-50 font-bold">
+                    <td className="px-3 py-2 text-slate-900">Team Total</td>
+                    <td className="text-center text-slate-900">{totals.assigned}</td>
+                    <td className="text-center text-slate-900">{totals.newToday}</td>
+                    <td className="text-center text-slate-900">{totals.inProgress}</td>
+                    <td className="text-center text-slate-900">{totals.quotations}</td>
+                    <td className="text-center text-slate-900">{totals.completedToday}</td>
+                    <td className="text-center text-red-600">{totals.overdue}</td>
+                    <td className="text-center text-slate-900">{totals.nurturing}</td>
+                    <td className="text-center text-slate-900">{pct1(m.weekly.conversion)}</td>
+                    <td className="text-center text-slate-900">{inr(totals.revenue)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -493,7 +492,7 @@ export default function ManagerDashboard() {
               icon={Users}
               title="Lead Distribution / Assignment"
               right={
-                <span className="text-[10px] text-[#8199ae]">Active Leads</span>
+                <span className="text-[10px] text-slate-500">Active Leads</span>
               }
             />
 
@@ -511,31 +510,31 @@ export default function ManagerDashboard() {
                         className="h-3 w-3 shrink-0 rounded-full"
                         style={{ backgroundColor: d.color }}
                       />
-                      <span className="truncate text-[#d7e1eb]">{d.name}</span>
+                      <span className="truncate text-slate-700">{d.name}</span>
                     </div>
-                    <span className="shrink-0 font-semibold text-white">
-                      {d.value} <span className="text-[#a6b8c9]">({Math.round(d.share)}%)</span>
+                    <span className="shrink-0 font-semibold text-slate-900">
+                      {d.value} <span className="text-slate-500">({Math.round(d.share)}%)</span>
                     </span>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 border-t border-[#173b5e]">
+            <div className="grid grid-cols-2 border-t border-slate-200">
               <div className="px-4 py-3">
                 <p className={smallLabelClass}>Total Active Leads</p>
-                <p className="mt-1 text-[17px] font-bold">{m.activeQueries}</p>
+                <p className="mt-1 text-[17px] font-bold text-slate-900">{m.activeQueries}</p>
               </div>
-              <div className="border-l border-[#173b5e] px-4 py-3">
+              <div className="border-l border-slate-200 px-4 py-3">
                 <p className={smallLabelClass}>Avg. Leads / Executive</p>
-                <p className="mt-1 text-[17px] font-bold">{m.avgLeadsPerExecutive.toFixed(1)}</p>
+                <p className="mt-1 text-[17px] font-bold text-slate-900">{m.avgLeadsPerExecutive.toFixed(1)}</p>
               </div>
             </div>
           </section>
         </div>
 
         {/* Middle row */}
-        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1.02fr_1.02fr_1.15fr_1.05fr]">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.02fr_1.02fr_1.15fr_1.05fr]">
           {/* Daily snapshot */}
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader
@@ -545,7 +544,7 @@ export default function ManagerDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[430px] border-collapse text-[9px]">
                 <thead>
-                  <tr className="bg-[#08233d] text-[#9db0c2]">
+                  <tr className="bg-slate-50 text-slate-500">
                     <th className="px-3 py-2 text-left font-medium">Executive</th>
                     <th className="px-1 py-2 text-center font-medium">
                       Leads
@@ -576,22 +575,22 @@ export default function ManagerDashboard() {
                 </thead>
                 <tbody>
                   {workload.map((r) => (
-                    <tr key={r.employee.id} className="border-t border-[#173b5e]">
-                      <td className="px-3 py-2 font-semibold text-[#dce5ee]">{r.employee.name}</td>
+                    <tr key={r.employee.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-semibold text-slate-700">{r.employee.name}</td>
                       {[r.leadsReceived, r.leadsAssigned, r.quotesSentToday, r.followupsDoneToday, r.tasksClosedToday].map((value, index) => (
-                        <td key={index} className="px-1 py-2 text-center text-[#d2deea]">
+                        <td key={index} className="px-1 py-2 text-center text-slate-700">
                           {value}
                         </td>
                       ))}
                     </tr>
                   ))}
-                  <tr className="border-t border-[#31526f] bg-[#08243e] font-bold">
-                    <td className="px-3 py-2">Total</td>
-                    <td className="text-center">{totals.leadsReceived}</td>
-                    <td className="text-center">{totals.leadsAssigned}</td>
-                    <td className="text-center">{totals.quotesSent}</td>
-                    <td className="text-center">{totals.followups}</td>
-                    <td className="text-center">{totals.tasksClosed}</td>
+                  <tr className="border-t border-slate-200 bg-slate-50 font-bold">
+                    <td className="px-3 py-2 text-slate-900">Total</td>
+                    <td className="text-center text-slate-900">{totals.leadsReceived}</td>
+                    <td className="text-center text-slate-900">{totals.leadsAssigned}</td>
+                    <td className="text-center text-slate-900">{totals.quotesSent}</td>
+                    <td className="text-center text-slate-900">{totals.followups}</td>
+                    <td className="text-center text-slate-900">{totals.tasksClosed}</td>
                   </tr>
                 </tbody>
               </table>
@@ -603,7 +602,7 @@ export default function ManagerDashboard() {
             <PanelHeader
               icon={BarChart3}
               title="Monthly Performance Overview"
-              right={<span className="text-[10px] text-[#9bb0c3]">({monthly.label})</span>}
+              right={<span className="text-[10px] text-slate-500">({monthly.label})</span>}
             />
             <div className="grid grid-cols-3 gap-2 p-3">
               {monthlyCards.map((card) => {
@@ -614,16 +613,16 @@ export default function ManagerDashboard() {
                     key={card.label}
                     className={`rounded-xl border p-3 ${
                       card.label === "Conversion Rate"
-                        ? "border-[#f0c000] bg-[#102c44]"
-                        : "border-[#173b5e] bg-[#082640]"
+                        ? "border-teal-200 bg-teal-50"
+                        : "border-slate-200 bg-white"
                     }`}
                   >
-                    <p className="text-[9px] text-[#b3c1cf]">{card.label}</p>
-                    <p className="mt-1 text-[19px] font-bold leading-none">{card.value}</p>
+                    <p className="text-[9px] text-slate-500">{card.label}</p>
+                    <p className="mt-1 text-[19px] font-bold leading-none text-slate-900">{card.value}</p>
                     <div className="mt-2">
                       <Trend value={d.value} positive={positive} />
                     </div>
-                    <p className="mt-1 text-[8px] text-[#829bb0]">
+                    <p className="mt-1 text-[8px] text-slate-500">
                       vs {card.prevLabel} ({card.label === "Conversion Rate" ? pct2(card.prev) : card.prev.toLocaleString("en-IN")})
                     </p>
                   </div>
@@ -648,16 +647,16 @@ export default function ManagerDashboard() {
               {weeklyRows.map(({ label, value, positive, Icon }) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 border-b border-[#173b5e] px-3 py-2.5"
+                  className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5"
                 >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#d8a900]">
-                    <Icon className="h-3.5 w-3.5 text-[#ffd000]" />
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-teal-200 bg-teal-50">
+                    <Icon className="h-3.5 w-3.5 text-teal-600" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] leading-3 text-[#c5d2de]">{label}</p>
+                    <p className="text-[9px] leading-3 text-slate-500">{label}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-bold text-white">{value}</p>
+                    <p className="text-[10px] font-bold text-slate-900">{value}</p>
                     <Trend value="" positive={positive} />
                   </div>
                 </div>
@@ -665,43 +664,43 @@ export default function ManagerDashboard() {
 
               <div className="space-y-2 px-3 py-2.5">
                 <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#f0a400]">
-                    <TrendingUp className="h-3.5 w-3.5 text-[#ffbf00]" />
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-teal-200 bg-teal-50">
+                    <TrendingUp className="h-3.5 w-3.5 text-teal-600" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] text-[#aabccc]">Top Performer of the Week</p>
-                    <p className="text-[10px] font-semibold">{m.weekly.topPerformer?.employee.name ?? "—"}</p>
+                    <p className="text-[9px] text-slate-500">Top Performer of the Week</p>
+                    <p className="text-[10px] font-semibold text-slate-900">{m.weekly.topPerformer?.employee.name ?? "—"}</p>
                   </div>
-                  <div className="text-right text-[8px] text-[#9db1c3]">
+                  <div className="text-right text-[8px] text-slate-500">
                     Highest conversion
                     <br />
-                    <span className="font-bold text-[#57c53e]">
+                    <span className="font-bold text-emerald-600">
                       {m.weekly.topPerformer ? pct1(m.weekly.topPerformer.conversion) : "—"}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#ef4048]">
-                    <CircleAlert className="h-3.5 w-3.5 text-[#ff525b]" />
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50">
+                    <CircleAlert className="h-3.5 w-3.5 text-red-600" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] text-[#aabccc]">Biggest Bottleneck</p>
-                    <p className="text-[10px] font-semibold">Follow-ups</p>
+                    <p className="text-[9px] text-slate-500">Biggest Bottleneck</p>
+                    <p className="text-[10px] font-semibold text-slate-900">Follow-ups</p>
                   </div>
-                  <p className="text-right text-[8px] text-[#e5edf4]">
+                  <p className="text-right text-[8px] text-slate-500">
                     {m.followupsDueToday} due today | {m.overdueFollowups} overdue
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#ef4048]">
-                    <AlertCircle className="h-3.5 w-3.5 text-[#ff525b]" />
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50">
+                    <AlertCircle className="h-3.5 w-3.5 text-red-600" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] text-[#aabccc]">Leads Pending for Action</p>
+                    <p className="text-[9px] text-slate-500">Leads Pending for Action</p>
                   </div>
-                  <p className="text-[13px] font-bold">{m.weekly.leadsPendingAction}</p>
+                  <p className="text-[13px] font-bold text-slate-900">{m.weekly.leadsPendingAction}</p>
                 </div>
               </div>
             </div>
@@ -709,14 +708,14 @@ export default function ManagerDashboard() {
         </div>
 
         {/* Advanced tracking: stage durations, SLA escalations, source conversion */}
-        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={Clock3} title="Average Time per Stage" />
             <div className="px-3 py-2">
               <select
                 value={stageView}
                 onChange={(e) => setStageView(e.target.value)}
-                className="mb-2 w-full rounded border border-[#173b5e] bg-[#0d2540] px-2 py-1 text-[10px] text-white"
+                className="mb-2 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700"
               >
                 <option value="__all">Whole team</option>
                 {employees.filter((e) => e.active !== false).map((e) => (
@@ -724,18 +723,18 @@ export default function ManagerDashboard() {
                 ))}
               </select>
               {stageRows.length === 0 && (
-                <p className="py-3 text-[10px] text-[#c5d2de]">No stage-change history yet.</p>
+                <p className="py-3 text-[10px] text-slate-500">No stage-change history yet.</p>
               )}
               {stageRows.map((r) => {
                 const max = Math.max(...stageRows.map((x) => x.avgHours), 1);
                 return (
                   <div key={r.stage} className="mb-1.5">
-                    <div className="flex justify-between text-[9px] text-[#c5d2de]">
+                    <div className="flex justify-between text-[9px] text-slate-500">
                       <span>{r.stage}</span>
-                      <span className="font-bold text-white">{fmtDur(r.avgHours)} <span className="text-[#7f97ad]">({r.samples})</span></span>
+                      <span className="font-bold text-slate-900">{fmtDur(r.avgHours)} <span className="text-slate-400">({r.samples})</span></span>
                     </div>
-                    <div className="mt-0.5 h-1.5 rounded bg-[#0d2540]">
-                      <div className="h-1.5 rounded bg-[#ffd000]" style={{ width: `${(r.avgHours / max) * 100}%` }} />
+                    <div className="mt-0.5 h-1.5 rounded bg-slate-100">
+                      <div className="h-1.5 rounded bg-teal-600" style={{ width: `${(r.avgHours / max) * 100}%` }} />
                     </div>
                   </div>
                 );
@@ -747,29 +746,29 @@ export default function ManagerDashboard() {
             <PanelHeader icon={AlertTriangle} title={`SLA Escalations (${m.escalations.length})`} />
             <div className="px-3 py-2">
               {m.escalations.length === 0 && (
-                <p className="py-3 text-[10px] text-[#c5d2de]">Nothing overdue right now.</p>
+                <p className="py-3 text-[10px] text-slate-500">Nothing overdue right now.</p>
               )}
               {m.escalations.slice(0, 8).map(({ query, overdueHours }) => (
                 <Link
                   key={query.id}
                   to="/query/$queryId"
                   params={{ queryId: query.query_id }}
-                  className="flex items-center gap-2 border-b border-[#173b5e] py-1.5 last:border-0"
+                  className="flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0"
                 >
                   <span
                     className={`h-1.5 w-1.5 shrink-0 rounded-full ${overdueHours > 24 ? "bg-red-500" : "bg-amber-400"}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[10px] font-semibold text-white">{query.query_id} · {query.customer}</p>
-                    <p className="text-[9px] text-[#c5d2de]">{query.owner || "Unassigned"} · {query.stage}</p>
+                    <p className="truncate text-[10px] font-semibold text-slate-900">{query.query_id} · {query.customer}</p>
+                    <p className="text-[9px] text-slate-500">{query.owner || "Unassigned"} · {query.stage}</p>
                   </div>
-                  <span className={`text-[9px] font-bold ${overdueHours > 24 ? "text-red-400" : "text-amber-300"}`}>
+                  <span className={`text-[9px] font-bold ${overdueHours > 24 ? "text-red-600" : "text-amber-600"}`}>
                     {overdueHours > 24 ? "CRITICAL " : ""}{fmtDur(overdueHours)}
                   </span>
                 </Link>
               ))}
               {m.criticalEscalations.length > 0 && (
-                <p className="pt-2 text-[9px] text-red-400">
+                <p className="pt-2 text-[9px] text-red-600">
                   {m.criticalEscalations.length} overdue by more than 24 hours.
                 </p>
               )}
@@ -780,15 +779,15 @@ export default function ManagerDashboard() {
             <PanelHeader icon={Target} title="Conversion by Lead Source" />
             <div className="px-3 py-2">
               {m.sourceStats.length === 0 && (
-                <p className="py-3 text-[10px] text-[#c5d2de]">No leads yet.</p>
+                <p className="py-3 text-[10px] text-slate-500">No leads yet.</p>
               )}
               {m.sourceStats.slice(0, 8).map((s) => (
-                <div key={s.name} className="border-b border-[#173b5e] py-1.5 last:border-0">
+                <div key={s.name} className="border-b border-slate-100 py-1.5 last:border-0">
                   <div className="flex justify-between text-[10px]">
-                    <span className="text-white">{s.name}</span>
-                    <span className="font-bold text-[#ffd000]">{s.conversion.toFixed(0)}%</span>
+                    <span className="text-slate-700">{s.name}</span>
+                    <span className="font-bold text-teal-600">{s.conversion.toFixed(0)}%</span>
                   </div>
-                  <p className="text-[9px] text-[#c5d2de]">
+                  <p className="text-[9px] text-slate-500">
                     {s.total} leads · {s.won} won · {s.lost} lost · {s.open} open
                   </p>
                 </div>
@@ -799,44 +798,44 @@ export default function ManagerDashboard() {
 
 
         {/* Bottom row */}
-        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1.45fr_0.95fr_0.72fr]">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.95fr_0.72fr]">
           {/* Recent activity */}
           <section className={`${navCardClass} overflow-hidden`}>
             <PanelHeader icon={Activity} title="Recent Team Activity / Alerts" />
-            <div className="grid grid-cols-1 divide-y divide-[#173b5e] md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div className="grid grid-cols-1 divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0">
               {[recent.slice(0, half), recent.slice(half)].map((column, ci) => (
                 <div key={ci}>
                   {column.map((e) => {
                     const bad = BAD_EVENTS.includes(e.type);
                     return (
-                      <div key={e.id} className="flex gap-2 border-b border-[#173b5e] px-3 py-2.5 last:border-b-0">
+                      <div key={e.id} className="flex gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0">
                         <div
                           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
-                            bad ? "bg-[#e83840]" : "bg-[#20ae47]"
+                            bad ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-600"
                           }`}
                         >
                           {bad ? (
-                            <AlertCircle className="h-3.5 w-3.5 text-white" />
+                            <AlertCircle className="h-3.5 w-3.5" />
                           ) : (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                            <CheckCircle2 className="h-3.5 w-3.5" />
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-semibold text-white">{e.title}</p>
-                          <p className="truncate text-[8px] text-[#829ab0]">{e.detail ?? e.query_id ?? ""}</p>
+                          <p className="text-[10px] font-semibold text-slate-900">{e.title}</p>
+                          <p className="truncate text-[8px] text-slate-500">{e.detail ?? e.query_id ?? ""}</p>
                         </div>
-                        <span className="shrink-0 text-[8px] text-[#8da4b8]">{timeOf(e.at)}</span>
+                        <span className="shrink-0 text-[8px] text-slate-500">{timeOf(e.at)}</span>
                       </div>
                     );
                   })}
                   {column.length === 0 && ci === 0 && (
-                    <div className="px-3 py-6 text-center text-[9px] text-[#829ab0]">No activity recorded yet.</div>
+                    <div className="px-3 py-6 text-center text-[9px] text-slate-500">No activity recorded yet.</div>
                   )}
                 </div>
               ))}
             </div>
-            <div className="border-t border-[#173b5e] px-4 py-2 text-center">
-              <Link to="/notifications" className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
+            <div className="border-t border-slate-200 px-4 py-2 text-center">
+              <Link to="/notifications" className="text-[10px] font-medium text-teal-600 hover:text-teal-700">
                 View all activities →
               </Link>
             </div>
@@ -847,34 +846,34 @@ export default function ManagerDashboard() {
             <PanelHeader
               icon={Users}
               title="Top Travel Partners"
-              right={<span className="text-[10px] text-[#9db1c3]">by Revenue</span>}
+              right={<span className="text-[10px] text-slate-500">by Revenue</span>}
             />
             <div>
               {m.partners.map((p, index) => (
                 <div
                   key={p.name}
-                  className="flex items-center gap-2 border-b border-[#173b5e] px-3 py-2 last:border-b-0"
+                  className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0"
                 >
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#102f4b] text-[9px] font-bold text-[#dce6ef]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-teal-50 text-[9px] font-bold text-teal-700">
                     {index + 1}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[10px] font-medium">
+                  <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-700">
                     {p.name}
                   </span>
-                  <span className="text-[9px] font-semibold text-[#dce5ed]">
+                  <span className="text-[9px] font-semibold text-slate-900">
                     {inr(p.revenue)}
                   </span>
-                  <span className="w-9 text-right text-[9px] text-[#9fb2c4]">
+                  <span className="w-9 text-right text-[9px] text-slate-500">
                     {Math.round(p.share)}%
                   </span>
                 </div>
               ))}
               {m.partners.length === 0 && (
-                <div className="px-3 py-6 text-center text-[9px] text-[#829ab0]">No partner revenue yet.</div>
+                <div className="px-3 py-6 text-center text-[9px] text-slate-500">No partner revenue yet.</div>
               )}
             </div>
-            <div className="border-t border-[#173b5e] px-4 py-2 text-center">
-              <Link to="/agents" className="text-[10px] font-medium text-[#59a8ff] hover:text-white">
+            <div className="border-t border-slate-200 px-4 py-2 text-center">
+              <Link to="/agents" className="text-[10px] font-medium text-teal-600 hover:text-teal-700">
                 View all partners →
               </Link>
             </div>
@@ -888,9 +887,9 @@ export default function ManagerDashboard() {
                 trigger={
                   <button
                     type="button"
-                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50"
                   >
-                    <Users className="h-5 w-5 text-[#ffbd00]" />
+                    <Users className="h-5 w-5 text-teal-600" />
                     Assign Leads ({m.pipeline.find((p) => p.label === "New")?.value ?? 0})
                   </button>
                 }
@@ -899,25 +898,25 @@ export default function ManagerDashboard() {
                 trigger={
                   <button
                     type="button"
-                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                    className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50"
                   >
-                    <ListChecks className="h-5 w-5 text-[#4ad2a2]" />
+                    <ListChecks className="h-5 w-5 text-emerald-600" />
                     Assign Task
                   </button>
                 }
               />
               <Link
                 to="/query-tracker"
-                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-700 transition hover:border-red-300 hover:bg-red-50"
               >
-                <CalendarDays className="h-5 w-5 text-[#ff4d55]" />
+                <CalendarDays className="h-5 w-5 text-red-600" />
                 Review Overdues ({m.overdueFollowups})
               </Link>
               <Link
                 to="/reports"
-                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
               >
-                <BarChart3 className="h-5 w-5 text-[#74a9d8]" />
+                <BarChart3 className="h-5 w-5 text-blue-600" />
                 Team Performance ({employees.length})
               </Link>
               <button
@@ -937,9 +936,9 @@ export default function ManagerDashboard() {
                     ["Total Pipeline Value", String(m.totalPipelineValue)],
                   ])
                 }
-                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-[#244864] bg-[#092945] text-[9px] font-medium text-[#dce6ef] transition hover:border-[#d4aa00] hover:bg-[#0d3150]"
+                className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50"
               >
-                <Download className="h-5 w-5 text-[#8caecc]" />
+                <Download className="h-5 w-5 text-slate-600" />
                 Export Weekly Review
               </button>
             </div>
