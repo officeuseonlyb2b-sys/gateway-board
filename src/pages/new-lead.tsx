@@ -7,17 +7,86 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 
-// Assuming these exist or can be expanded in your types file
-const LEAD_SOURCES = ["Online", "Referral", "Walk-in", "Agent"];
-const MARKETS = ["India", "USA", "UK", "UAE"];
-const QUERY_TYPES = ["Leisure", "Corporate", "MICE"];
-const QUERY_FORS = ["New Booking", "Update Booking", "Enquiry"];
-const SOURCE_TYPES = ["Partner", "Direct", "Agent"];
-const CONVERSATION_MEDIUMS = ["Email", "Phone", "WhatsApp"];
-const COSTING_BASIS = ["Per Person", "Net", "Gross"];
-const TRAVEL_ADVISORS = ["John Doe", "Jane Smith", "Alex Johnson"]; // Placeholder
-const HOTEL_CATEGORIES = ["3 Star", "4 Star", "5 Star", "Boutique"];
-const PROGRAMMES = ["Golden Triangle", "Beach Honeymoon", "Heritage Tour"];
+// Exact data extracted from screenshots
+const LEAD_SOURCES = ["B2B", "B2C", "B2B2B"];
+
+const MARKETS = [
+  "Domestic - North",
+  "Domestic - South",
+  "Domestic - West",
+  "Domestic - East",
+  "Inbound - French",
+  "Inbound - Spanish",
+  "Inbound - German",
+  "Inbound - USA",
+  "Inbound - UK",
+  "Inbound - Middle East",
+  "Inbound - Far East",
+  "Inbound - Asia Pacific",
+  "Inbound - Russia",
+];
+
+const QUERY_TYPES = [
+  "Regular Tour Package - FIT",
+  "Regular Tour Package - GIT",
+  "Women's Exclusive",
+  "Senior Citizen Exclusive",
+  "School Group",
+  "College Group",
+  "Business Travel",
+  "MICE",
+  "SIC - Departure",
+  "Fixed Group Departure",
+  "Group Join-In",
+  "Kitchen Group",
+  "Customized",
+];
+
+const QUERY_FORS = [
+  "Package",
+  "Hotels Only",
+  "Transport Only",
+  "Assistance Only",
+  "Guides Only",
+  "Hotels + Guides",
+  "Hotels + Assistance",
+  "Hotels + Guides + Assistance",
+  "Transport + Guides",
+  "Transport + Assistance",
+  "Transport + Guides + Assistance",
+  "Activities",
+  "Other Services",
+  "Hotels + Guides + Transport",
+];
+
+const SOURCE_TYPES = ["Partner", "Direct", "Agent"]; 
+const CONVERSATION_MEDIUMS = ["Email", "WhatsApp"];
+
+const COSTING_BASIS = [
+  "FIT",
+  "GIT",
+  "Fixed Group Departure",
+  "Group Join-In",
+  "SIC Departure",
+  "Customised / Component",
+];
+
+const TRAVEL_ADVISORS = ["John Doe", "Jane Smith", "Alex Johnson"]; 
+
+const HOTEL_CATEGORIES = [
+  "Budget",
+  "Excellent Budget",
+  "3 Star",
+  "3 Star Deluxe",
+  "4 Star",
+  "4 Star Superior",
+  "5 Star",
+  "5 Star Deluxe",
+  "Luxury / Experiential",
+  "Homestays",
+];
+
+const PROGRAMMES = ["Golden Triangle", "Beach Honeymoon", "Heritage Tour"]; 
 
 export default function NewQuery() {
   const navigate = useNavigate();
@@ -133,7 +202,11 @@ export default function NewQuery() {
                   <Label className="flex items-center gap-1">Query for <span className="text-red-500">*</span></Label>
                   <Select value={queryFor} onValueChange={setQueryFor}>
                     <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>{QUERY_FORS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {QUERY_FORS.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
