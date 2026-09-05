@@ -14,6 +14,111 @@ export type Database = {
   }
   public: {
     Tables: {
+      crm_employees: {
+        Row: {
+          created_at: string
+          data: Json
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      crm_events: {
+        Row: {
+          at: string | null
+          created_at: string
+          data: Json
+          id: string
+          query_id: string | null
+        }
+        Insert: {
+          at?: string | null
+          created_at?: string
+          data: Json
+          id: string
+          query_id?: string | null
+        }
+        Update: {
+          at?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          query_id?: string | null
+        }
+        Relationships: []
+      }
+      crm_queries: {
+        Row: {
+          created_at: string
+          data: Json
+          id: string
+          owner: string | null
+          query_id: string | null
+          stage: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          id: string
+          owner?: string | null
+          query_id?: string | null
+          stage?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          id?: string
+          owner?: string | null
+          query_id?: string | null
+          stage?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      crm_tasks: {
+        Row: {
+          created_at: string
+          data: Json
+          done: boolean
+          id: string
+          owner: string | null
+          query_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          done?: boolean
+          id: string
+          owner?: string | null
+          query_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          done?: boolean
+          id?: string
+          owner?: string | null
+          query_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       destination_cities: {
         Row: {
           created_at: string
