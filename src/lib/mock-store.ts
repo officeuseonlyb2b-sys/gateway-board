@@ -823,9 +823,22 @@ function load(): DB {
   return _db;
 }
 
+/** Listeners notified after every local write so the cloud sync can push. */
+const persistHooks = new Set<(d: DB) => void>();
+let suppressPush = false;
+
+export function onMastersPersist(cb: (d: DB) => void): () => void {
+  persistHooks.add(cb);
+  return () => persistHooks.delete(cb);
+}
+
 function persist() {
   if (typeof window === "undefined" || !_db) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(_db));
+  if (!suppressPush) {
+    const snapshot = _db;
+    persistHooks.forEach((h) => h(snapshot));
+  }
 }
 
 function emit() {
@@ -836,6 +849,17 @@ function emit() {
 
 export const db = {
   get(): DB { return load(); },
+  /** Replace the whole store with cloud state (no push back to the cloud). */
+  hydrateAll(next: DB) {
+    suppressPush = true;
+    try {
+      _db = { ...next };
+      persist();
+    } finally {
+      suppressPush = false;
+    }
+    emit();
+  },
   subscribe(fn: () => void) {
     listeners.add(fn);
     return () => listeners.delete(fn);
