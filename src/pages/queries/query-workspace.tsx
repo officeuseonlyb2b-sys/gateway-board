@@ -23,7 +23,10 @@ import {
   Clock,
   AlertCircle,
   ChevronRight,
-  Database
+  Database,
+  PhoneCall,
+  CalendarDays,
+  BadgeCheck
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -243,67 +246,67 @@ export default function QueryWorkspace() {
   };
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8">
-      {/* TOP HEADER */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-        <div>
+    <div className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8 bg-slate-50 min-h-screen rounded-xl">
+      {/* TOP HEADER with Gradient Background */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 bg-gradient-to-r from-[#043b3a] via-[#0a5c59] to-[#098f8b] rounded-2xl p-6 shadow-lg relative overflow-hidden">
+        <div className="relative z-10">
           <div className="flex items-center gap-3">
-            <span className="text-sm font-bold text-blue-600">{mockQueryDetails.id}</span>
-            <Badge variant="outline" className={`px-2 py-0 ${stageBadgeClass(status)}`}>{status}</Badge>
+            <span className="text-sm font-bold text-teal-200">{mockQueryDetails.id}</span>
+            <Badge variant="outline" className={`px-2 py-0 ${stageBadgeClass(status)} bg-white/90`}>{status}</Badge>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 mt-1">{mockQueryDetails.customer}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-3xl font-bold text-white mt-1">{mockQueryDetails.customer}</h1>
+          <p className="text-sm text-teal-100 mt-1">
             Received 20 Jun 2026 • Owned by {mockQueryDetails.owner}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={() => setIsLogModalOpen(true)}>
+        <div className="flex items-center gap-3 relative z-10 self-start">
+          <Button className="bg-white hover:bg-slate-100 text-teal-700" onClick={() => setIsLogModalOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add Action
           </Button>
           
-          <Button variant="outline" className="border-slate-200 text-slate-700 hover:bg-slate-50" onClick={() => setIsStatusModalOpen(true)}>
+          <Button variant="outline" className="bg-transparent border-white/30 text-white hover:bg-white/10 hover:text-white" onClick={() => setIsStatusModalOpen(true)}>
             Update Status
           </Button>
 
-          <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/queries/query-tracker" })}>
-            <X className="h-5 w-5 text-slate-400" />
+          <Button variant="ghost" size="icon" className="text-white/70 hover:text-white hover:bg-white/10" onClick={() => navigate({ to: "/queries/query-tracker" })}>
+            <X className="h-5 w-5" />
           </Button>
         </div>
       </div>
 
       {/* INFO BAR */}
-      <div className="flex flex-wrap items-center gap-6 text-sm text-slate-600">
+      <div className="flex flex-wrap items-center gap-6 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
         <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-slate-400" />
-          <span>{mockQueryDetails.pax} Pax</span>
+          <div className="bg-blue-50 p-1.5 rounded-md text-blue-600"><Users className="h-4 w-4" /></div>
+          <span className="font-semibold text-slate-800">{mockQueryDetails.pax} Pax</span>
         </div>
         <div className="flex items-center gap-2">
-          <MapPin className="h-4 w-4 text-slate-400" />
-          <span>{mockQueryDetails.destination}</span>
+          <div className="bg-purple-50 p-1.5 rounded-md text-purple-600"><MapPin className="h-4 w-4" /></div>
+          <span className="font-semibold text-slate-800">{mockQueryDetails.destination}</span>
         </div>
         <div className="flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-slate-400" />
-          <span>{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</span>
+          <div className="bg-amber-50 p-1.5 rounded-md text-amber-600"><CalendarClock className="h-4 w-4" /></div>
+          <span className="font-semibold text-slate-800">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Briefcase className="h-4 w-4 text-slate-400" />
-          <span>{mockQueryDetails.enquiry_type}</span>
+          <div className="bg-cyan-50 p-1.5 rounded-md text-cyan-600"><Briefcase className="h-4 w-4" /></div>
+          <span className="font-semibold text-slate-800">{mockQueryDetails.enquiry_type}</span>
         </div>
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-teal-600" />
-          <span>{status}</span>
+          <div className="bg-teal-50 p-1.5 rounded-md text-teal-600"><CheckCircle2 className="h-4 w-4" /></div>
+          <span className="font-semibold text-slate-800">{status}</span>
         </div>
       </div>
 
       {/* TABS */}
-      <div className="flex gap-6 border-b border-slate-200 overflow-x-auto pb-0">
+      <div className="flex gap-2 border-b border-slate-200 overflow-x-auto pb-0 bg-white rounded-t-xl px-4 pt-2">
         {TABS.map((item) => (
           <button
             key={item}
             onClick={() => setTab(item)}
-            className={`whitespace-nowrap pb-3 text-sm font-medium transition-colors ${
-              tab === item ? "border-b-2 border-teal-600 text-teal-700" : "text-slate-500 hover:text-slate-700"
+            className={`whitespace-nowrap pb-3 px-3 text-sm font-medium transition-all duration-200 ${
+              tab === item ? "border-b-2 border-teal-600 text-teal-700 bg-teal-50/50 rounded-t-md" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-t-md"
             }`}
           >
             {item}
@@ -321,48 +324,48 @@ export default function QueryWorkspace() {
             <div className="xl:col-span-2 space-y-6">
               
               {/* Query Overview Card */}
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
-                  <h2 className="text-lg font-bold text-slate-900">Query Overview</h2>
+                  <h2 className="text-lg font-bold text-slate-900 mb-1">Query Overview</h2>
                   <p className="text-xs text-muted-foreground mb-6">The main facts, current stage and immediate action</p>
 
                   <div className="grid grid-cols-2 gap-6">
                     <div className="space-y-6">
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Travel partner</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.customer}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.customer}</p>
                       </div>
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Contact person</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.contact_person}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.contact_person}</p>
                       </div>
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Mobile / Email</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.mobile}</p>
-                        <p className="text-xs text-muted-foreground break-all">{mockQueryDetails.email}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.mobile}</p>
+                        <p className="text-xs text-slate-500 break-all">{mockQueryDetails.email}</p>
                       </div>
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Market / Source</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.market} • {mockQueryDetails.lead_source}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.market} • {mockQueryDetails.lead_source}</p>
                       </div>
                     </div>
 
                     <div className="space-y-6">
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Travel dates</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</p>
                       </div>
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Traveller range</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{mockQueryDetails.pax} pax</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.pax} pax</p>
                       </div>
-                      <div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Current stage</p>
                         <Badge variant="outline" className={`mt-1 px-2 py-0 ${stageBadgeClass(status)}`}>{status}</Badge>
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Next action</p>
-                        <p className="mt-1 text-sm font-semibold text-red-600">08 Aug 2026 • Overdue</p>
+                      <div className="bg-red-50 p-3 rounded-lg border border-red-100">
+                        <p className="text-xs font-semibold text-red-500 uppercase">Next action</p>
+                        <p className="mt-1 text-sm font-bold text-red-600">08 Aug 2026 • Overdue</p>
                       </div>
                     </div>
                   </div>
@@ -370,22 +373,28 @@ export default function QueryWorkspace() {
               </Card>
 
               {/* Program Snapshot Card */}
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Program Snapshot</h3>
                   <p className="text-xs text-muted-foreground mb-4">Selected programme and routing</p>
                   
-                  <div className="bg-teal-50/50 border border-teal-100 rounded-lg p-4">
-                    <p className="text-xs font-bold text-teal-700 mb-2">{PROGRAM_SNAPSHOT.code}</p>
+                  <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-xs font-bold text-teal-700 tracking-wider">{PROGRAM_SNAPSHOT.code}</p>
+                      <div className="bg-teal-600 text-white p-1 rounded-md"><Sparkles className="h-4 w-4" /></div>
+                    </div>
                     <h4 className="text-xl font-bold text-slate-900">{PROGRAM_SNAPSHOT.name}</h4>
                     <p className="text-sm text-slate-600 mt-1">{PROGRAM_SNAPSHOT.routing}</p>
-                    <p className="text-xs text-slate-500 mt-3">{PROGRAM_SNAPSHOT.type}</p>
+                    <div className="mt-3 pt-3 border-t border-teal-200 flex justify-between items-center">
+                      <p className="text-xs font-semibold text-teal-800">{PROGRAM_SNAPSHOT.type}</p>
+                      <Badge variant="outline" className="bg-white text-teal-700 border-teal-300">Active</Badge>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Latest Activity Card */}
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Latest Activity</h3>
                   <p className="text-xs text-muted-foreground mb-6">Most recent movements on this query</p>
@@ -394,7 +403,7 @@ export default function QueryWorkspace() {
                     {ACTIVITY_LOG.map((event, idx) => (
                       <div key={event.id} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color}`}></div>
+                          <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color} ring-4 ring-white`}></div>
                           {idx !== ACTIVITY_LOG.length - 1 && (
                             <div className="w-px flex-1 bg-slate-200"></div>
                           )}
@@ -405,14 +414,14 @@ export default function QueryWorkspace() {
                               <p className="font-semibold text-slate-900 text-sm">{event.title}</p>
                               <p className="text-xs text-slate-500 mt-0.5">{event.sub}</p>
                             </div>
-                            <p className="text-xs text-slate-500 whitespace-nowrap">{event.date}</p>
+                            <div className="bg-slate-100 px-2 py-1 rounded-md text-xs font-medium text-slate-600 whitespace-nowrap">{event.date}</div>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <Button variant="outline" className="w-full border-slate-200 text-slate-700 hover:bg-slate-50">
+                  <Button variant="outline" className="w-full border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-teal-500 hover:text-teal-600 transition-colors">
                     View all 5 activities <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </CardContent>
@@ -424,7 +433,7 @@ export default function QueryWorkspace() {
             <div className="space-y-6">
               
               {/* Lifecycle Progress Card */}
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h2 className="text-lg font-bold text-slate-900">Lifecycle Progress</h2>
                   <p className="text-xs text-muted-foreground mb-6">{status} • 5 recorded activities</p>
@@ -445,7 +454,7 @@ export default function QueryWorkspace() {
                       return (
                         <div key={stage} className="flex gap-4">
                           <div className="flex flex-col items-center">
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
                               {isReached ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
                             </div>
                             {idx < STAGES.filter(s => s !== "Confirmed" && s !== "Lost").length - 1 && (
@@ -473,7 +482,7 @@ export default function QueryWorkspace() {
               </Card>
 
               {/* Commercial Snapshot Card */}
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Commercial Snapshot</h3>
                   <p className="text-xs text-muted-foreground mb-6">Bottom-line to top-line opportunity</p>
@@ -484,7 +493,7 @@ export default function QueryWorkspace() {
                       <p className="text-xl font-bold text-teal-700">{formatMoney(COMMERCIAL_SNAPSHOT.bottomLine)}</p>
                       <p className="text-[10px] text-slate-500 mt-1">{COMMERCIAL_SNAPSHOT.pax} pax • {COMMERCIAL_SNAPSHOT.hotel}</p>
                     </div>
-                    <div className="text-slate-300">→</div>
+                    <div className="text-slate-300 text-xl font-bold">→</div>
                     <div className="text-right">
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Top Line</p>
                       <p className="text-xl font-bold text-slate-900">{formatMoney(COMMERCIAL_SNAPSHOT.topLine)}</p>
@@ -502,17 +511,17 @@ export default function QueryWorkspace() {
               </Card>
 
               {/* Follow-ups / Next Step Card (Red Highlight) */}
-              <Card className="border-slate-200">
+              <Card className="border-red-200 shadow-md shadow-red-100 hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Follow-ups / Next Step</h3>
                   <p className="text-xs text-muted-foreground mb-4">The next accountable action</p>
                   
-                  <div className="bg-[#FDF1F1] border border-[#F3D4D4] rounded-lg p-4">
+                  <div className="bg-gradient-to-r from-[#FDF1F1] to-red-50 border border-[#F3D4D4] rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-xs font-bold text-red-700 uppercase flex items-center gap-1">
                         <AlertCircle className="h-3 w-3" /> Action Overdue
                       </p>
-                      <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white" onClick={() => setIsLogModalOpen(true)}>
+                      <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm" onClick={() => setIsLogModalOpen(true)}>
                         <Plus className="h-3 w-3 mr-1" /> Add Action
                       </Button>
                     </div>
@@ -529,7 +538,7 @@ export default function QueryWorkspace() {
         {/* ================= OTHER TABS (Fully Functional) ================= */}
         {tab === "Program Info" && (
           <div className="space-y-6">
-            <Card className="border-slate-200">
+            <Card className="border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <p className="text-xs font-bold text-teal-700 uppercase mb-2">Program Information</p>
                 <div className="flex items-start justify-between">
@@ -543,24 +552,24 @@ export default function QueryWorkspace() {
             </Card>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Programme identity</h3>
                   <p className="text-xs text-muted-foreground mb-4">Catalogue classification</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme code</p>
                       <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.code}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme name</p>
                       <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.name}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme type</p>
                       <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.type.split("·")[0]}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme region</p>
                       <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.type.split("·")[1]}</p>
                     </div>
@@ -568,24 +577,24 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
 
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Travel framework</h3>
                   <p className="text-xs text-muted-foreground mb-4">Dates, duration and journey</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Travel dates</p>
                       <p className="text-sm font-bold text-slate-900">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Duration</p>
                       <p className="text-sm font-bold text-slate-900">5 Days</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Start city</p>
                       <p className="text-sm font-bold text-slate-900">Gwalior</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">End city</p>
                       <p className="text-sm font-bold text-slate-900">Gwalior</p>
                     </div>
@@ -598,7 +607,7 @@ export default function QueryWorkspace() {
         
         {tab === "Commercials" && (
           <div className="space-y-6">
-            <Card className="bg-slate-50 border-slate-200">
+            <Card className="bg-gradient-to-r from-slate-50 to-white border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <div className="flex justify-between items-center">
                   <div>
@@ -607,7 +616,7 @@ export default function QueryWorkspace() {
                     <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
                   </div>
                   
-                  <Button variant="outline" size="sm" onClick={() => setIsCostingModalOpen(true)} className="border-teal-600 text-teal-700 hover:bg-teal-50">
+                  <Button variant="outline" size="sm" onClick={() => setIsCostingModalOpen(true)} className="border-teal-600 text-teal-700 hover:bg-teal-50 shadow-sm">
                     Edit Costing
                   </Button>
 
@@ -621,33 +630,33 @@ export default function QueryWorkspace() {
             </Card>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Bottom-line scenario</h3>
                   <p className="text-xs text-muted-foreground mb-4">Lowest qualifying quotation</p>
-                  <div className="border-2 border-teal-600 rounded-lg p-4 bg-teal-50/20">
+                  <div className="border-2 border-teal-600 rounded-lg p-4 bg-teal-50/20 shadow-sm">
                     <p className="text-xs font-bold text-teal-700 uppercase">Entry Scenario</p>
                     <p className="text-2xl font-bold text-teal-700 mt-2">{formatMoney(Number(bottomLine))}</p>
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Top-line scenario</h3>
                   <p className="text-xs text-muted-foreground mb-4">Highest qualifying quotation</p>
-                  <div className="border-2 border-slate-300 rounded-lg p-4 bg-slate-50/20">
+                  <div className="border-2 border-slate-300 rounded-lg p-4 bg-slate-50/20 shadow-sm">
                     <p className="text-xs font-bold text-slate-600 uppercase">Maximum Scenario</p>
                     <p className="text-2xl font-bold text-slate-900 mt-2">{formatMoney(Number(topLine))}</p>
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
-                      <div className="bg-white rounded p-2"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
+                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
                     </div>
                   </div>
                 </CardContent>
@@ -655,34 +664,34 @@ export default function QueryWorkspace() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-               <Card className="border-slate-200">
+               <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Hotel categories quoted</h3>
                   <p className="text-xs text-muted-foreground mb-4">1 category included in the commercial range</p>
                   <div className="flex gap-2">
-                    <Badge className="bg-teal-50 text-teal-700 border-teal-200 px-3 py-1">{hotelCategory}</Badge>
+                    <Badge className="bg-teal-50 text-teal-700 border-teal-200 px-3 py-1 shadow-sm">{hotelCategory}</Badge>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Commercial classification</h3>
                   <p className="text-xs text-muted-foreground mb-4">How this query has been costed</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Costing basis</p>
                       <p className="text-sm font-bold text-slate-900">FIT</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Requirement</p>
                       <p className="text-sm font-bold text-slate-900">Package</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Traveller range</p>
                       <p className="text-sm font-bold text-slate-900">{costingPax} to {costingPax} pax</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Value range</p>
                       <p className="text-sm font-bold text-slate-900">{formatMoney(Number(bottomLine))}</p>
                     </div>
@@ -695,23 +704,23 @@ export default function QueryWorkspace() {
         
         {tab === "Itinerary & Costings" && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <div>
                 <p className="text-xs font-bold text-teal-700 uppercase">Version Control</p>
                 <h2 className="text-2xl font-bold text-slate-900">Itineraries & Costings</h2>
                 <p className="text-sm text-slate-500">Every generated version stays available for review, editing and download.</p>
               </div>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white">+ New Version</Button>
+              <Button className="bg-teal-600 hover:bg-teal-700 text-white shadow-md">+ New Version</Button>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Itinerary versions</h3>
                   <p className="text-xs text-muted-foreground mb-4">Programme documents shared or prepared</p>
                   <div className="space-y-4">
-                    <div className="flex gap-4 border rounded-lg p-4">
-                      <div className="bg-blue-50 p-3 rounded"><FileText className="h-6 w-6 text-blue-600" /></div>
+                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                      <div className="bg-blue-100 p-3 rounded-lg text-blue-600"><FileText className="h-6 w-6" /></div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <p className="font-bold">Itinerary V2</p>
@@ -720,21 +729,21 @@ export default function QueryWorkspace() {
                         <p className="text-xs text-slate-500 mt-1">{PROGRAM_SNAPSHOT.name} - latest working route</p>
                         <p className="text-[10px] text-slate-400 mt-2">Prepared 06 Aug 2026 - Chhaya Prajapati</p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 self-center">
                         <Button variant="outline" size="sm">View</Button>
                         <Button variant="outline" size="sm">Edit</Button>
                         <Button variant="outline" size="sm">Download</Button>
                       </div>
                     </div>
                     
-                    <div className="flex gap-4 border rounded-lg p-4 opacity-60">
-                      <div className="bg-blue-50 p-3 rounded"><FileText className="h-6 w-6 text-blue-600" /></div>
+                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity">
+                      <div className="bg-blue-50 p-3 rounded-lg text-blue-600"><FileText className="h-6 w-6" /></div>
                       <div className="flex-1">
                         <p className="font-bold">Itinerary V1</p>
                         <p className="text-xs text-slate-500 mt-1">Initial requirement and routing draft</p>
                         <p className="text-[10px] text-slate-400 mt-2">Prepared 20 Jun 2026 - Chhaya Prajapati</p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 self-center">
                         <Button variant="outline" size="sm">View</Button>
                         <Button variant="outline" size="sm">Edit</Button>
                         <Button variant="outline" size="sm">Download</Button>
@@ -744,13 +753,13 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
 
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Costing versions</h3>
                   <p className="text-xs text-muted-foreground mb-4">Scenario calculations and quotation history</p>
                   <div className="space-y-4">
-                    <div className="flex gap-4 border rounded-lg p-4">
-                      <div className="bg-teal-50 p-3 rounded"><TrendingUp className="h-6 w-6 text-teal-600" /></div>
+                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                      <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <p className="font-bold">Costing V2</p>
@@ -759,21 +768,21 @@ export default function QueryWorkspace() {
                         <p className="text-xs text-slate-500 mt-1">{formatMoney(Number(bottomLine))} • FIT</p>
                         <p className="text-[10px] text-slate-400 mt-2">Prepared 06 Aug 2026 - Chhaya Prajapati</p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 self-center">
                         <Button variant="outline" size="sm">View</Button>
                         <Button variant="outline" size="sm">Edit</Button>
                         <Button variant="outline" size="sm">Download</Button>
                       </div>
                     </div>
 
-                    <div className="flex gap-4 border rounded-lg p-4 opacity-60">
-                      <div className="bg-teal-50 p-3 rounded"><TrendingUp className="h-6 w-6 text-teal-600" /></div>
+                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity">
+                      <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
                       <div className="flex-1">
                         <p className="font-bold">Costing V1</p>
                         <p className="text-xs text-slate-500 mt-1">Initial 9 pax costing scenario</p>
                         <p className="text-[10px] text-slate-400 mt-2">Prepared 20 Jun 2026 - Chhaya Prajapati</p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 self-center">
                         <Button variant="outline" size="sm">View</Button>
                         <Button variant="outline" size="sm">Edit</Button>
                         <Button variant="outline" size="sm">Download</Button>
@@ -788,7 +797,7 @@ export default function QueryWorkspace() {
 
         {tab === "Lifecycle Progress" && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-            <Card className="xl:col-span-2 border-slate-200">
+            <Card className="xl:col-span-2 border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start mb-6">
                   <div>
@@ -796,7 +805,7 @@ export default function QueryWorkspace() {
                     <h2 className="text-2xl font-bold text-slate-900">Lifecycle Progress</h2>
                     <p className="text-sm text-slate-500">From generation and assignment through costing, follow-up and the final outcome.</p>
                   </div>
-                  <Badge variant="outline" className={`${stageBadgeClass(status)}`}>{status}</Badge>
+                  <Badge variant="outline" className={`${stageBadgeClass(status)} shadow-sm`}>{status}</Badge>
                 </div>
 
                 <p className="text-xs font-semibold text-slate-500 mb-6">Current stage: {status}</p>
@@ -809,7 +818,7 @@ export default function QueryWorkspace() {
                     return (
                       <div key={stage} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-full ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                          <div className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
                             {isReached ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
                           </div>
                           <div className={`w-px flex-1 min-h-[50px] ${isReached && idx < 4 ? "bg-teal-600" : "bg-slate-200"}`}></div>
@@ -834,31 +843,31 @@ export default function QueryWorkspace() {
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200">
+            <Card className="border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <h3 className="font-bold text-slate-900 mb-4">Lifecycle summary</h3>
                 <p className="text-xs text-muted-foreground mb-6">Key accountability signals</p>
                 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 rounded-lg p-3">
+                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase">Owner</p>
                     <p className="text-sm font-bold text-slate-900">{mockQueryDetails.owner}</p>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-3">
+                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase">Days in pipeline</p>
                     <p className="text-sm font-bold text-slate-900">5</p>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-3">
+                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase">Follow-ups</p>
                     <p className="text-sm font-bold text-slate-900">2</p>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-3">
+                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase">Outcome</p>
                     <p className="text-sm font-bold text-slate-900">{status}</p>
                   </div>
                 </div>
 
-                <div className="mt-4 bg-teal-50 rounded-lg p-4">
+                <div className="mt-4 bg-teal-50 rounded-lg p-4 border border-teal-100">
                   <p className="text-[10px] font-bold text-teal-700 uppercase">Next control point</p>
                   <p className="font-bold text-slate-900 mt-1">08 Aug 2026</p>
                   <p className="text-xs text-slate-500 mt-1">Action is overdue.</p>
@@ -870,7 +879,7 @@ export default function QueryWorkspace() {
 
         {tab === "Latest Activity" && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <div>
                 <p className="text-xs font-bold text-teal-700 uppercase">Audit Trail</p>
                 <h2 className="text-2xl font-bold text-slate-900">Latest Activity</h2>
@@ -879,7 +888,7 @@ export default function QueryWorkspace() {
               <Button variant="outline" className="border-teal-600 text-teal-700 hover:bg-teal-50" onClick={() => setIsLogModalOpen(true)}>+ Log Activity</Button>
             </div>
 
-            <Card className="border-slate-200">
+            <Card className="border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <h3 className="font-bold text-slate-900">Complete activity history</h3>
                 <p className="text-xs text-muted-foreground mb-6">{ACTIVITY_LOG.length} recorded events</p>
@@ -887,11 +896,11 @@ export default function QueryWorkspace() {
                 <div className="space-y-6">
                   {ACTIVITY_LOG.map((event) => (
                     <div key={event.id} className="flex gap-4">
-                      <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color}`}></div>
+                      <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color} ring-4 ring-white shadow-sm`}></div>
                       <div className="flex-1 border-b border-slate-100 pb-4">
                         <div className="flex justify-between">
                           <p className="font-semibold text-slate-900">{event.title}</p>
-                          <p className="text-xs text-slate-500">{event.date}</p>
+                          <div className="bg-slate-100 px-2 py-1 rounded-md text-xs font-medium text-slate-600">{event.date}</div>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">{event.sub}</p>
                       </div>
@@ -905,74 +914,77 @@ export default function QueryWorkspace() {
 
         {tab === "Follow-ups / Next Steps" && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <div>
                 <p className="text-xs font-bold text-teal-700 uppercase">Action Desk</p>
                 <h2 className="text-2xl font-bold text-slate-900">Follow-ups / Next Steps</h2>
                 <p className="text-sm text-slate-500">Make the next commitment, due date and conversation history explicit.</p>
               </div>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={() => setIsLogModalOpen(true)}>+ Add Follow-up</Button>
+              <Button className="bg-teal-600 hover:bg-teal-700 text-white shadow-md" onClick={() => setIsLogModalOpen(true)}>+ Add Follow-up</Button>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-              <Card className="xl:col-span-2 border-slate-200">
+              <Card className="xl:col-span-2 border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900 mb-4">Next action</h3>
                   <p className="text-xs text-muted-foreground mb-4">The next accountable client touchpoint</p>
                   
-                  <div className="bg-[#043b3a] rounded-lg p-6 text-white">
+                  <div className="bg-gradient-to-r from-[#043b3a] to-[#0a5c59] rounded-lg p-6 text-white shadow-lg">
                     <p className="text-xs font-bold opacity-70 uppercase">Due Date</p>
                     <p className="text-3xl font-bold mt-2">08 Aug 2026</p>
                     <p className="text-sm opacity-80 mt-2">Owner: {mockQueryDetails.owner} • Email</p>
-                    <Button className="mt-4 bg-white text-[#043b3a] hover:bg-slate-100" onClick={() => setIsLogModalOpen(true)}>
+                    <Button className="mt-4 bg-white text-[#043b3a] hover:bg-slate-100 shadow-md" onClick={() => setIsLogModalOpen(true)}>
                       Log outcome & schedule next
                     </Button>
                   </div>
 
-                  <div className="mt-6 space-y-3">
+                  <div className="mt-6 space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
                     <Textarea
                       value={followupNote}
                       onChange={(e) => setFollowupNote(e.target.value)}
                       placeholder="What was discussed or sent?"
                     />
-                    <Input
-                      type="date"
-                      value={nextDate}
-                      onChange={(e) => setNextDate(e.target.value)}
-                      placeholder="Next action date"
-                    />
-                    <Button onClick={handleLogFollowup} disabled={!nextDate} className="bg-teal-600 hover:bg-teal-700">
-                      <CalendarClock className="mr-2 h-4 w-4" /> Schedule Follow-up
-                    </Button>
+                    <div className="flex gap-2">
+                      <Input
+                        type="date"
+                        value={nextDate}
+                        onChange={(e) => setNextDate(e.target.value)}
+                        placeholder="Next action date"
+                        className="bg-white"
+                      />
+                      <Button onClick={handleLogFollowup} disabled={!nextDate} className="bg-teal-600 hover:bg-teal-700">
+                        <CalendarClock className="mr-2 h-4 w-4" /> Schedule
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-slate-200">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900 mb-4">Follow-up health</h3>
                   <p className="text-xs text-muted-foreground mb-6">Cadence and query position</p>
                   
                   <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Total Follow-ups</p>
                       <p className="text-sm font-bold text-slate-900">2</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Last Contact</p>
                       <p className="text-sm font-bold text-slate-900">06 Aug 2026</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Current Stage</p>
                       <p className="text-sm font-bold text-slate-900">{status}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-3">
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Advisor</p>
                       <p className="text-sm font-bold text-slate-900">{mockQueryDetails.owner}</p>
                     </div>
                   </div>
 
-                  <div className="mt-4 bg-red-50 rounded-lg p-4">
+                  <div className="mt-4 bg-gradient-to-r from-red-50 to-[#FDF1F1] rounded-lg p-4 border border-red-200 shadow-sm shadow-red-100">
                     <p className="text-[10px] font-bold text-red-700 uppercase">Next control point</p>
                     <p className="font-bold text-slate-900 mt-1">08 Aug 2026</p>
                     <p className="text-xs text-slate-500 mt-1">Action overdue.</p>
@@ -981,15 +993,15 @@ export default function QueryWorkspace() {
               </Card>
             </div>
 
-            <Card className="border-slate-200">
+            <Card className="border-slate-200 shadow-md">
               <CardContent className="p-6">
                 <h3 className="font-bold text-slate-900 mb-4">Follow-up history</h3>
                 <p className="text-xs text-muted-foreground mb-6">Every recorded contact date</p>
-                <div className="flex gap-4">
-                  <div className="h-8 w-8 bg-amber-50 rounded-full flex items-center justify-center">
-                    <MessageSquare className="h-4 w-4 text-amber-600" />
+                <div className="flex gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                  <div className="h-10 w-10 bg-amber-100 rounded-full flex items-center justify-center text-amber-600">
+                    <PhoneCall className="h-5 w-5" />
                   </div>
-                  <div className="flex-1 border-b border-slate-100 pb-4">
+                  <div className="flex-1 border-b border-slate-200 pb-4">
                     <div className="flex justify-between">
                       <p className="font-semibold text-slate-900">Follow-up 2</p>
                       <p className="text-xs text-slate-500">06 Aug 2026</p>
