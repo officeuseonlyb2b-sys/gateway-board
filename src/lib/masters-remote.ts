@@ -18,6 +18,13 @@ let myRev = "";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: DB | null = null;
 let channel: ReturnType<typeof supabase.channel> | null = null;
+const onInitialPull: (() => void)[] = [];
+
+/** Runs cb once the shared master record has been adopted (or created). */
+export function afterMastersReady(cb: () => void) {
+  if (ready) cb();
+  else onInitialPull.push(cb);
+}
 
 const newRev = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -88,7 +95,11 @@ export function startMastersSync(): () => void {
   if (started) return () => {};
   started = true;
 
-  void pullMasters();
+  const initial = pullMasters();
+  void initial.then(() => {
+    onInitialPull.forEach((cb) => cb());
+    onInitialPull.length = 0;
+  });
 
   const offPersist = onMastersPersist((d) => schedulePush(d));
 
