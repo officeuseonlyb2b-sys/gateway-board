@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_master_state: {
+        Row: {
+          created_at: string
+          data: Json
+          id: string
+          rev: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          id: string
+          rev?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          id?: string
+          rev?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       crm_employees: {
         Row: {
           created_at: string

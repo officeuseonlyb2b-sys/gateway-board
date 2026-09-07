@@ -180,7 +180,7 @@ function ActivitiesPage() {
                         </TableCell>
                         <TableCell className="text-xs">
                           {a.slab_pricing_type === "slab" ? (
-                            a.pricing_slabs?.filter(s => s.type === 'indian').length > 0 ? (
+                            (a.pricing_slabs?.filter(s => s.type === 'indian').length ?? 0) > 0 ? (
                               <span className="text-green-600">Slabs available</span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
@@ -191,7 +191,7 @@ function ActivitiesPage() {
                         </TableCell>
                         <TableCell className="text-xs">
                           {a.slab_pricing_type === "slab" ? (
-                            a.pricing_slabs?.filter(s => s.type === 'foreign').length > 0 ? (
+                            (a.pricing_slabs?.filter(s => s.type === 'foreign').length ?? 0) > 0 ? (
                               <span className="text-blue-600">Slabs available</span>
                             ) : (
                               <span className="text-muted-foreground">—</span>

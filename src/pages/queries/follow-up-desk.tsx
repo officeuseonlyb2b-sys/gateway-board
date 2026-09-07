@@ -272,8 +272,8 @@ export default function FollowUpDesk() {
             <div className="space-y-2 lg:col-span-3">
               <Label className="text-xs text-slate-500">SORT PRIORITY BY</Label>
               <div className="rounded-lg border bg-slate-50 p-3 flex items-center gap-3">
-                <Select value={sortPriority} onValueChange={setSortPriority} className="flex-1">
-                  <SelectTrigger className="border-0 bg-transparent shadow-none"><SelectValue /></SelectTrigger>
+                <Select value={sortPriority} onValueChange={setSortPriority}>
+                  <SelectTrigger className="flex-1 border-0 bg-transparent shadow-none"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Smart priority (recommended)">Smart priority (recommended)</SelectItem>
                   </SelectContent>

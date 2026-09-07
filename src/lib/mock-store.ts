@@ -267,11 +267,14 @@ export interface ActivityDestination {
 }
 export type ActivityPricingType = "per_person" | "total_fixed" | "per_vehicle";
 export type ActivitySlabPricing = "per_person" | "total" | "slab";
+export type TravelerType = "indian" | "foreign" | "student";
 export interface ActivitySlab {
   id: string;
   from_pax: number;
   to_pax: number;
   price: number;
+  /** Which traveler category this slab prices. Defaults to "indian". */
+  type?: TravelerType;
 }
 export interface Activity {
   id: string;
@@ -289,6 +292,10 @@ export interface Activity {
   group_rate_15_to_20?: number;
   per_person_indian?: number;
   per_person_inbound?: number;
+  /** Traveler-type flat prices (per person). */
+  indian_price?: number;
+  foreign_price?: number;
+  student_price?: number;
   misc_rate?: number;
   // v3.0 slab-based pricing
   slab_pricing_type?: ActivitySlabPricing;
@@ -816,9 +823,22 @@ function load(): DB {
   return _db;
 }
 
+/** Listeners notified after every local write so the cloud sync can push. */
+const persistHooks = new Set<(d: DB) => void>();
+let suppressPush = false;
+
+export function onMastersPersist(cb: (d: DB) => void): () => void {
+  persistHooks.add(cb);
+  return () => persistHooks.delete(cb);
+}
+
 function persist() {
   if (typeof window === "undefined" || !_db) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(_db));
+  if (!suppressPush) {
+    const snapshot = _db;
+    persistHooks.forEach((h) => h(snapshot));
+  }
 }
 
 function emit() {
@@ -829,6 +849,17 @@ function emit() {
 
 export const db = {
   get(): DB { return load(); },
+  /** Replace the whole store with cloud state (no push back to the cloud). */
+  hydrateAll(next: DB) {
+    suppressPush = true;
+    try {
+      _db = { ...next };
+      persist();
+    } finally {
+      suppressPush = false;
+    }
+    emit();
+  },
   subscribe(fn: () => void) {
     listeners.add(fn);
     return () => listeners.delete(fn);
