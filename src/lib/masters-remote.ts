@@ -36,7 +36,7 @@ async function pushNow(next: DB) {
   const { error } = await supabase.from("app_master_state").upsert(
     {
       id: ROW_ID,
-      data: next as unknown as Record<string, unknown>,
+      data: JSON.parse(JSON.stringify(next)),
       rev,
       updated_by: userData.user?.id ?? null,
       updated_at: new Date().toISOString(),

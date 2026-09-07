@@ -7,6 +7,7 @@ import { auth, useAuth } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
 import { startDestinationsSync } from "@/lib/destinations-remote";
+import { startMastersSync } from "@/lib/masters-remote";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -32,11 +33,16 @@ function AuthenticatedLayout() {
     checkExpiringRatesOnce(db.get().rate_plans);
   }, [user]);
 
-  // Shared Destinations master data: initial pull + realtime subscription.
+  // Shared master data (hotels, rates, guides, entrances, activities, meals,
+  // transport, other services): cloud record + realtime, account-based.
   useEffect(() => {
     if (!user) return;
-    const stop = startDestinationsSync();
-    return stop;
+    const stopMasters = startMastersSync();
+    const stopDestinations = startDestinationsSync();
+    return () => {
+      stopDestinations();
+      stopMasters();
+    };
   }, [user]);
 
   if (!user) return null;
