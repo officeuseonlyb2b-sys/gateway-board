@@ -292,6 +292,10 @@ export interface Activity {
   group_rate_15_to_20?: number;
   per_person_indian?: number;
   per_person_inbound?: number;
+  /** Traveler-type flat prices (per person). */
+  indian_price?: number;
+  foreign_price?: number;
+  student_price?: number;
   misc_rate?: number;
   // v3.0 slab-based pricing
   slab_pricing_type?: ActivitySlabPricing;
