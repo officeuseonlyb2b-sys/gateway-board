@@ -267,11 +267,14 @@ export interface ActivityDestination {
 }
 export type ActivityPricingType = "per_person" | "total_fixed" | "per_vehicle";
 export type ActivitySlabPricing = "per_person" | "total" | "slab";
+export type TravelerType = "indian" | "foreign" | "student";
 export interface ActivitySlab {
   id: string;
   from_pax: number;
   to_pax: number;
   price: number;
+  /** Which traveler category this slab prices. Defaults to "indian". */
+  type?: TravelerType;
 }
 export interface Activity {
   id: string;

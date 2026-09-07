@@ -40,6 +40,7 @@ import { Route as AuthenticatedQueryQueryIdRouteImport } from './routes/_authent
 import { Route as AuthenticatedQueriesWorkflowFieldsRouteImport } from './routes/_authenticated/queries/workflow-fields'
 import { Route as AuthenticatedQueriesQueryTrackerRouteImport } from './routes/_authenticated/queries/query-tracker'
 import { Route as AuthenticatedQueriesPipelineBoardRouteImport } from './routes/_authenticated/queries/pipeline-board'
+import { Route as AuthenticatedQueriesFollowUpDeskRouteImport } from './routes/_authenticated/queries/follow-up-desk'
 import { Route as AuthenticatedQueriesDashboardRouteImport } from './routes/_authenticated/queries/dashboard'
 import { Route as AuthenticatedQueriesAnalyticsRouteImport } from './routes/_authenticated/queries/analytics'
 import { Route as AuthenticatedQueriesIdRouteImport } from './routes/_authenticated/queries/$id'
@@ -210,6 +211,12 @@ const AuthenticatedQueriesPipelineBoardRoute =
     path: '/queries/pipeline-board',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedQueriesFollowUpDeskRoute =
+  AuthenticatedQueriesFollowUpDeskRouteImport.update({
+    id: '/queries/follow-up-desk',
+    path: '/queries/follow-up-desk',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedQueriesDashboardRoute =
   AuthenticatedQueriesDashboardRouteImport.update({
     id: '/queries/dashboard',
@@ -261,6 +268,7 @@ export interface FileRoutesByFullPath {
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
   '/queries/analytics': typeof AuthenticatedQueriesAnalyticsRoute
   '/queries/dashboard': typeof AuthenticatedQueriesDashboardRoute
+  '/queries/follow-up-desk': typeof AuthenticatedQueriesFollowUpDeskRoute
   '/queries/pipeline-board': typeof AuthenticatedQueriesPipelineBoardRoute
   '/queries/query-tracker': typeof AuthenticatedQueriesQueryTrackerRoute
   '/queries/workflow-fields': typeof AuthenticatedQueriesWorkflowFieldsRoute
@@ -297,6 +305,7 @@ export interface FileRoutesByTo {
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
   '/queries/analytics': typeof AuthenticatedQueriesAnalyticsRoute
   '/queries/dashboard': typeof AuthenticatedQueriesDashboardRoute
+  '/queries/follow-up-desk': typeof AuthenticatedQueriesFollowUpDeskRoute
   '/queries/pipeline-board': typeof AuthenticatedQueriesPipelineBoardRoute
   '/queries/query-tracker': typeof AuthenticatedQueriesQueryTrackerRoute
   '/queries/workflow-fields': typeof AuthenticatedQueriesWorkflowFieldsRoute
@@ -335,6 +344,7 @@ export interface FileRoutesById {
   '/_authenticated/queries/$id': typeof AuthenticatedQueriesIdRoute
   '/_authenticated/queries/analytics': typeof AuthenticatedQueriesAnalyticsRoute
   '/_authenticated/queries/dashboard': typeof AuthenticatedQueriesDashboardRoute
+  '/_authenticated/queries/follow-up-desk': typeof AuthenticatedQueriesFollowUpDeskRoute
   '/_authenticated/queries/pipeline-board': typeof AuthenticatedQueriesPipelineBoardRoute
   '/_authenticated/queries/query-tracker': typeof AuthenticatedQueriesQueryTrackerRoute
   '/_authenticated/queries/workflow-fields': typeof AuthenticatedQueriesWorkflowFieldsRoute
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
     | '/queries/$id'
     | '/queries/analytics'
     | '/queries/dashboard'
+    | '/queries/follow-up-desk'
     | '/queries/pipeline-board'
     | '/queries/query-tracker'
     | '/queries/workflow-fields'
@@ -409,6 +420,7 @@ export interface FileRouteTypes {
     | '/queries/$id'
     | '/queries/analytics'
     | '/queries/dashboard'
+    | '/queries/follow-up-desk'
     | '/queries/pipeline-board'
     | '/queries/query-tracker'
     | '/queries/workflow-fields'
@@ -446,6 +458,7 @@ export interface FileRouteTypes {
     | '/_authenticated/queries/$id'
     | '/_authenticated/queries/analytics'
     | '/_authenticated/queries/dashboard'
+    | '/_authenticated/queries/follow-up-desk'
     | '/_authenticated/queries/pipeline-board'
     | '/_authenticated/queries/query-tracker'
     | '/_authenticated/queries/workflow-fields'
@@ -680,6 +693,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedQueriesPipelineBoardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/queries/follow-up-desk': {
+      id: '/_authenticated/queries/follow-up-desk'
+      path: '/queries/follow-up-desk'
+      fullPath: '/queries/follow-up-desk'
+      preLoaderRoute: typeof AuthenticatedQueriesFollowUpDeskRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/queries/dashboard': {
       id: '/_authenticated/queries/dashboard'
       path: '/queries/dashboard'
@@ -737,6 +757,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedQueriesIdRoute: typeof AuthenticatedQueriesIdRoute
   AuthenticatedQueriesAnalyticsRoute: typeof AuthenticatedQueriesAnalyticsRoute
   AuthenticatedQueriesDashboardRoute: typeof AuthenticatedQueriesDashboardRoute
+  AuthenticatedQueriesFollowUpDeskRoute: typeof AuthenticatedQueriesFollowUpDeskRoute
   AuthenticatedQueriesPipelineBoardRoute: typeof AuthenticatedQueriesPipelineBoardRoute
   AuthenticatedQueriesQueryTrackerRoute: typeof AuthenticatedQueriesQueryTrackerRoute
   AuthenticatedQueriesWorkflowFieldsRoute: typeof AuthenticatedQueriesWorkflowFieldsRoute
@@ -772,6 +793,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedQueriesIdRoute: AuthenticatedQueriesIdRoute,
   AuthenticatedQueriesAnalyticsRoute: AuthenticatedQueriesAnalyticsRoute,
   AuthenticatedQueriesDashboardRoute: AuthenticatedQueriesDashboardRoute,
+  AuthenticatedQueriesFollowUpDeskRoute: AuthenticatedQueriesFollowUpDeskRoute,
   AuthenticatedQueriesPipelineBoardRoute:
     AuthenticatedQueriesPipelineBoardRoute,
   AuthenticatedQueriesQueryTrackerRoute: AuthenticatedQueriesQueryTrackerRoute,
