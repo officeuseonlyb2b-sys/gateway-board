@@ -243,6 +243,7 @@ function ActDialog({
   const [pricingType, setPricingType] = useState<ActivitySlabPricing>("per_person");
   const [indianPrice, setIndianPrice] = useState(0);
   const [foreignPrice, setForeignPrice] = useState(0);
+  const [studentPrice, setStudentPrice] = useState(0);
   const [indianSlabs, setIndianSlabs] = useState<ActivitySlab[]>([]);
   const [foreignSlabs, setForeignSlabs] = useState<ActivitySlab[]>([]);
   const [active, setActive] = useState(true);
@@ -263,6 +264,7 @@ function ActDialog({
     } else {
       setIndianPrice(editing?.indian_price ?? 0);
       setForeignPrice(editing?.foreign_price ?? 0);
+      setStudentPrice(editing?.student_price ?? 0);
       setIndianSlabs([newSlab('indian')]);
       setForeignSlabs([newSlab('foreign')]);
     }
@@ -349,6 +351,7 @@ function ActDialog({
       indianPriceVal = indianPrice;
       foreignPriceVal = foreignPrice;
     }
+    const studentPriceVal = isSlab ? 0 : studentPrice;
 
     const payload = {
       destination_id: destId,
@@ -358,6 +361,7 @@ function ActDialog({
       price: indianPriceVal, // Keep for backward compatibility
       indian_price: indianPriceVal,
       foreign_price: foreignPriceVal,
+      student_price: studentPriceVal,
       unit_label: "Per Person",
       is_active: active,
       slab_pricing_type: (isSlab ? "slab" : "per_person") as ActivitySlabPricing,
@@ -407,7 +411,7 @@ function ActDialog({
           </div>
 
           {!isSlab ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="border rounded-md p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-green-600" />
@@ -436,6 +440,22 @@ function ActDialog({
                     min={0} 
                     value={foreignPrice}
                     onChange={(e) => setForeignPrice(+e.target.value || 0)} 
+                    placeholder="₹ 0"
+                  />
+                </div>
+              </div>
+              <div className="border rounded-md p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-amber-600" />
+                  <Label className="font-medium">Student Tourist Price</Label>
+                </div>
+                <div>
+                  <Label className="text-[11px]">Price Per Person (₹)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={studentPrice}
+                    onChange={(e) => setStudentPrice(+e.target.value || 0)}
                     placeholder="₹ 0"
                   />
                 </div>

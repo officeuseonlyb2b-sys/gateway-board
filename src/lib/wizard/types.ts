@@ -259,6 +259,9 @@ export interface QuoteDraft {
   pax_min?: number;
   pax_max?: number;
 
+  /** Traveler category driving Activities / Entrance-fee pricing. */
+  traveler_type?: import("@/lib/mock-store").TravelerType;
+
   categories: string[];      // legacy — no UI, retained for saved-quote fidelity
   departure_city: string;
 
@@ -369,6 +372,7 @@ export const emptyDraft = (): QuoteDraft => ({
   children: [],
   pax_min: 1,
   pax_max: 40,
+  traveler_type: "indian",
   categories: [],
   departure_city: "",
   travel_modes: [],

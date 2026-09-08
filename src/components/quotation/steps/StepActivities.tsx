@@ -1,11 +1,11 @@
 // Step 11 — Activities. Day-per-row table with inline city + activity checkboxes.
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
-import { useDB } from "@/lib/mock-store";
+import { useDB, activityFlatPrice, activitySlabsFor } from "@/lib/mock-store";
 import { effectivePaxForPricing, landMarkup, landGst } from "@/lib/wizard/calc";
 import {
   uid,
@@ -16,6 +16,7 @@ import {
 
 export function Step11({ draft, set }: StepProps) {
   const d = useDB();
+  const traveler = draft.traveler_type ?? "indian";
   const pax = effectivePaxForPricing(draft);
   // Land Part markup & GST — same treatment as Guide / Entrances / Misc.
   const mkPct = landMarkup(draft);
@@ -86,16 +87,11 @@ export function Step11({ draft, set }: StepProps) {
     /*
      * No slabs available.
      */
-    if (
-      !a.pricing_slabs ||
-      a.pricing_slabs.length === 0
-    ) {
+    const slabsForTraveler = activitySlabsFor(a, traveler);
+
+    if (slabsForTraveler.length === 0) {
       return {
-        rate:
-          a.per_person_indian ??
-          a.per_person_inbound ??
-          a.price ??
-          0,
+        rate: activityFlatPrice(a, traveler),
 
         slab: null as
           | null
@@ -112,7 +108,7 @@ export function Step11({ draft, set }: StepProps) {
     /*
      * Sort slabs by pax range.
      */
-    const sorted = [...a.pricing_slabs].sort(
+    const sorted = [...slabsForTraveler].sort(
       (x, y) => x.from_pax - y.from_pax
     );
 
@@ -196,6 +192,24 @@ export function Step11({ draft, set }: StepProps) {
       ],
     });
   };
+
+  // Re-price selected activities when the traveler type (or pax) changes.
+  useEffect(() => {
+    let dirty = false;
+    const next = draft.activities.map((l) => {
+      if (!l.activity_id) return l;
+      const a = d.activities.find((x) => x.id === l.activity_id);
+      if (!a) return l;
+      const { rate, isSlab } = slabRate(a);
+      const mode: "per_person" | "slab" = isSlab ? "slab" : "per_person";
+      const qty = mode === "slab" ? 1 : pax || 1;
+      if (l.rate === rate && l.pricing_mode === mode && l.qty === qty) return l;
+      dirty = true;
+      return { ...l, rate, pricing_mode: mode, qty };
+    });
+    if (dirty) set({ activities: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [traveler, pax, d.activities]);
 
   /*
    * Per-day rows:
