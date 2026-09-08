@@ -9,7 +9,11 @@ import { uid, dayAllCities, type CityRef, type StepProps } from "../shared";
 
 export function Step12({ draft, set }: StepProps) {
   const d = useDB();
+  const traveler = draft.traveler_type ?? "indian";
   const totalPaxCount = effectivePaxForPricing(draft);
+  // Only the selected traveler category is charged.
+  const paxFor = (t: "indian" | "foreign" | "student") =>
+    traveler === t ? totalPaxCount : 0;
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   const findLine = (siteId: string, day: number) =>
@@ -28,11 +32,11 @@ export function Step12({ draft, set }: StepProps) {
           {
             id: uid(),
             site_id: s.id,
-            indian_pax: totalPaxCount,
+            indian_pax: paxFor("indian"),
             indian_rate: s.indian_rate,
-            foreign_pax: totalPaxCount,
+            foreign_pax: paxFor("foreign"),
             foreign_rate: s.foreigner_rate,
-            student_pax: totalPaxCount,
+            student_pax: paxFor("student"),
             student_rate: s.student_rate ?? 0,
             from_routing_days: [day],
           },
@@ -62,23 +66,23 @@ export function Step12({ draft, set }: StepProps) {
         patched.student_rate = sr;
         dirty = true;
       }
-      if (patched.indian_pax !== totalPaxCount) {
-        patched.indian_pax = totalPaxCount;
+      if (patched.indian_pax !== paxFor("indian")) {
+        patched.indian_pax = paxFor("indian");
         dirty = true;
       }
-      if (patched.foreign_pax !== totalPaxCount) {
-        patched.foreign_pax = totalPaxCount;
+      if (patched.foreign_pax !== paxFor("foreign")) {
+        patched.foreign_pax = paxFor("foreign");
         dirty = true;
       }
-      if ((patched.student_pax ?? 0) !== totalPaxCount) {
-        patched.student_pax = totalPaxCount;
+      if ((patched.student_pax ?? 0) !== paxFor("student")) {
+        patched.student_pax = paxFor("student");
         dirty = true;
       }
       return patched;
     });
     if (dirty) set({ entrances: next });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalPaxCount, d.entrance_sites]);
+  }, [totalPaxCount, traveler, d.entrance_sites]);
 
   type DayRow = { city: CityRef; site: typeof d.entrance_sites[number] };
 
