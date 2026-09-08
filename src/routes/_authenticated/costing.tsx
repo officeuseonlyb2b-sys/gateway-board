@@ -1617,6 +1617,24 @@ function StepPaxType({ draft, set }: StepProps) {
         ))}
         <div className="pt-2 border-t text-sm font-semibold">Total Pax: {totPax}</div>
 
+        <div className="pt-2 border-t space-y-2">
+          <div className="text-sm font-semibold">Traveler Type <span className="text-destructive">*</span></div>
+          <Select
+            value={draft.traveler_type ?? "indian"}
+            onValueChange={(v) => set({ traveler_type: v as "indian" | "foreign" | "student" })}
+          >
+            <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="indian">Indian</SelectItem>
+              <SelectItem value="foreign">Foreign</SelectItem>
+              <SelectItem value="student">Student</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Activities and entrance fees are priced using this category.
+          </p>
+        </div>
+
         <div className="pt-2 border-t space-y-3">
           <Label className="text-xs">Pax Range (pricing slab override)</Label>
           <div className="flex items-center gap-3">
