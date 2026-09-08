@@ -343,6 +343,25 @@ export function guideRateForPax(g: Guide, pax: number, language?: GuideLanguage)
   if (pax >= 15 && g.rate_15_plus != null) return g.rate_15_plus;
   return g.rate_per_day;
 }
+/** Flat per-person price for a traveler category (with sensible fallbacks). */
+export function activityFlatPrice(a: Activity, t: TravelerType = "indian"): number {
+  const byType =
+    t === "foreign" ? (a.foreign_price ?? a.per_person_inbound)
+    : t === "student" ? a.student_price
+    : (a.indian_price ?? a.per_person_indian);
+  return byType ?? a.indian_price ?? a.per_person_indian ?? a.price ?? 0;
+}
+
+/** Pricing slabs belonging to a traveler category (falls back to Indian). */
+export function activitySlabsFor(a: Activity, t: TravelerType = "indian"): ActivitySlab[] {
+  const all = a.pricing_slabs ?? [];
+  if (all.length === 0) return [];
+  const typed = all.filter((s) => (s.type ?? "indian") === t);
+  if (typed.length) return typed;
+  const indian = all.filter((s) => (s.type ?? "indian") === "indian");
+  return indian.length ? indian : all;
+}
+
 export function activityRateForPax(a: Activity, pax: number): number {
   const slabs = a.pricing_slabs ?? [];
   // Flat "Per Person" mode — one price × actual pax, no slab lookup at all.
