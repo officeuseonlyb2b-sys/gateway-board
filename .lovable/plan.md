@@ -1,47 +1,30 @@
-## Plan — 10 additive fixes to the New Quotation flow
+## Plan — Live Query Persistence and Query-Linked Costings
 
-I'll implement each item as a focused edit, preserving all existing calculations, drafts, and step wiring.
+### Phase 1: Fix live query saving first
+- Replace the browser-only CRM source of truth with the existing shared database tables for queries, tasks, employees, and activity history.
+- Keep the current instant on-screen updates, but load authoritative records after sign-in and synchronize changes between sessions and devices.
+- Surface failed writes instead of showing a false success message.
+- Connect the existing Create New Query form to the database without changing its layout.
+- Publish and test on the deployed URL: create one identifiable test query, then confirm it appears in Query Tracker, Follow-up Desk, Pipeline Board, and Query Dashboard.
 
-### 1. Step 12 Guide — checkbox toggle + reporting by pax + language filter
-- `StepGuide.tsx`: fix `toggleTourSelection` so unchecking clears the disabled key + line reliably (bug is auto-sync re-adding the line — respect `guide_tour_disabled_by_day` in `ensureGuideLine`, already done, but the row-level state derivation is stale; force checkbox to use disabledKeys as the source of truth and skip the auto-sync when disabled).
-- Add per-pax-category reporting cost row: `guide_reporting_indian / _foreigner / _student` (new optional fields in `QuoteDraft`). Render as a second Reporting sub-row grouped per language column, or as a compact 3-cell input group per language. Include in `totalForLang`.
-- Make "Filter language" hide non-matching language columns and their subtotals/reporting/totals when a specific language is picked.
+### Phase 2: Connect existing entry points
+- Route Query Tracker’s Create Query and Follow-up Desk’s New Query buttons to the same existing Create New Query form used by the sidebar.
+- Remove no duplicate forms and make no visual changes.
 
-### 2. Hotel form — Hotel Type dropdown
-- `types` in `mock-store.ts`: add `hotel_type?: HotelType` on `Hotel` with the 9 listed enum values.
-- `HotelFormDialog.tsx`: add a required Select right after Category. Persist on save. Backfill undefined as blank.
+### Phase 3: Link a costing to its query
+- Add an optional query identity to quotation drafts and saved quotes.
+- Make “+ New Version” on the query detail page open New Quotation for that query.
+- Safely prefill only known values: customer/partner details, pax breakdown, dates, destination/program hint, FIT/GIT basis, and traveler type.
+- Preserve independent New Quotation behavior when no query is supplied.
+- Show the linked query number and name in the existing quotation heading throughout all ten steps.
 
-### 3. Season Label preset dropdown with auto date ranges
-- `SeasonFormDialog.tsx`: replace the free-text season label input with a Select of {Summer, Winter, Wildlife, Wildlife Buffer}. On change, set validity_start / validity_end using the fixed month-day rules relative to the currently displayed year (or open-ended: use current year for start, roll year for Winter). Fields remain editable.
+### Phase 4: Save costing versions back to the query
+- Store each completed linked quote as a new immutable version; mark the newest one CURRENT while retaining earlier versions.
+- Populate the existing Costing versions list from saved data and wire its existing actions where supported.
+- Update the query’s commercial values and mark the Costing lifecycle stage complete after a successful quote save.
+- Publish again and test the complete deployed workflow from query creation through versioned costing.
 
-### 4. Split Festive Supplements from Remarks / Blackout
-- `HotelRatesEditor.tsx` (or SeasonFormDialog wherever they live): wrap each into its own titled Card block with spacing between them.
-
-### 5. Blackout Dates — date-range picker at end of hotel form + multiple ranges
-- Add `blackout_ranges: { id, from, to }[]` on `Hotel`.
-- Move the control out of the per-season block into `HotelFormDialog.tsx` at the very end after "Add Another Room Category". Multi-row list with From/To pickers + Add/Remove buttons using the shadcn Calendar Popover pattern.
-
-### 6. Festive Supplements — date-based trigger
-- Extend festive supplement schema with `date_from?, date_to?` (per supplement) in the rate plan.
-- `SeasonFormDialog.tsx`/rates editor: add two date-range pickers to X'mas & New Year rows.
-- `src/lib/wizard/calc.ts`: when computing a night's cost, if the night date falls in any configured festive range, add that supplement (per person or per room per its mode) on top of the base rate for that night.
-
-### 7. Transport per-vehicle Day-wise vs Total toggle
-- Extend `TransportLine` with `rate_mode: 'daywise' | 'total'` and `total_rate?: number`.
-- `StepTransport.tsx`: add a small toggle per vehicle row/card. When "Total", collapse day rows to a single rate input.
-- `calc.ts` transport total: if `rate_mode==='total'`, use `total_rate * units`; else existing day-wise sum.
-
-### 8. Bug: Step 15 Accommodation Options resetting on navigation
-- Root-cause inside `StepHotels.tsx`: local `useState` initialized from draft on mount that never re-syncs when the component remounts after step navigation, OR a `useEffect` overwriting draft.hotel_options with a fresh default array whenever `draft.hotel_options.length===0` at first render. Fix by seeding from `draft.hotel_options` and only initializing when truly empty; ensure every mutation writes through `set({ hotel_options })`. Verify no `useEffect` clears selections on `pax`/`routing` changes.
-
-### 9. Category fallback — next-lower categories, sorted by price desc
-- In hotel option "no hotels" branch of `StepHotels.tsx`: order categories `["5 Star","4 Star","3 Star","Budget",...]`, take those at or below the selected tier, filter hotels by city, sort by best-available rate desc, show in a labeled fallback list.
-
-### 10. Pax Range selector alongside Adults/SS/Children
-- Add `pax_range?: '1-5' | '6-14' | '15+'` (align with existing tier boundaries used across guide/activities/misc) to `QuoteDraft`.
-- Step 1/Pax step: add a `Select` next to counters. When set, `calc.ts` helpers (`guideRateForPax`, activity slab, misc slab, transport already per-day) read from `draft.pax_range` override rather than `totalPax(draft)`. Provide `effectivePaxTier(draft)` helper used everywhere so nothing else needs changes.
-
-### Technical notes
-- Storage version bumped only if schema requires migration; new optional fields don't need a bump (existing drafts keep working).
-- No route or shell changes. No changes to existing GST / markup logic.
-- After each item I'll re-run tsgo and spot-check the affected step visually via the dev preview.
+### Technical details
+- Reuse the existing database schema and authenticated access policies; no database migration is expected for Phase 1.
+- Quote/query linkage will be additive optional data inside the existing JSON records, avoiding calculation changes and preserving old records.
+- The costing formulas, wizard steps, fields, layout, and visual styling remain unchanged.
