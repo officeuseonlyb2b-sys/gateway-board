@@ -8,6 +8,7 @@ import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
 import { startDestinationsSync } from "@/lib/destinations-remote";
 import { startMastersSync, afterMastersReady } from "@/lib/masters-remote";
+import { startCrmSync } from "@/lib/crm/crm-remote";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -38,6 +39,7 @@ function AuthenticatedLayout() {
   useEffect(() => {
     if (!user) return;
     const stopMasters = startMastersSync();
+    const stopCrm = startCrmSync();
     let stopDestinations: (() => void) | null = null;
     // Destinations reconcile only after the shared master data is in place,
     // so a local-only cache can never delete cloud tours (or their pricing).
@@ -46,6 +48,7 @@ function AuthenticatedLayout() {
     });
     return () => {
       stopDestinations?.();
+      stopCrm();
       stopMasters();
     };
   }, [user]);

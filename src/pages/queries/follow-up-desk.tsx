@@ -128,7 +128,7 @@ export default function FollowUpDesk() {
         </div>
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="text-slate-600 font-normal">FY 2026-27</Badge>
-          <Button className="bg-teal-600 hover:bg-teal-700 text-white">
+          <Button onClick={() => navigate({ to: "/new-lead" })} className="bg-teal-600 hover:bg-teal-700 text-white">
             + New Query
           </Button>
         </div>

@@ -108,7 +108,7 @@ export default function QueryTracker() {
           <h1 className="mt-1 text-3xl font-bold text-slate-900">All Queries</h1>
           <p className="mt-1 text-sm text-muted-foreground">334 populated queries from the FY 2026-27 tracker.</p>
         </div>
-        <Button className="bg-teal-600 hover:bg-teal-700 text-white">
+        <Button onClick={createQuery} className="bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="mr-2 h-4 w-4" /> Create Query
         </Button>
       </div>
