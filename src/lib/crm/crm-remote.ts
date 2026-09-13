@@ -6,6 +6,7 @@ import {
   type CrmSnapshot,
 } from "./store";
 import type { CrmEvent, CrmQuery, CrmTask, Employee } from "./types";
+import type { Json } from "@/integrations/supabase/types";
 
 type CloudRow = { id: string; data: unknown };
 
@@ -17,6 +18,7 @@ let pullTimer: ReturnType<typeof setTimeout> | null = null;
 let channel: ReturnType<typeof supabase.channel> | null = null;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
 
 function mergeById<T extends { id: string }>(remote: T[], local: T[]): T[] {
   const merged = new Map(remote.map((item) => [item.id, item]));
@@ -51,22 +53,22 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
   const operations = [
     snapshot.queries.length
       ? supabase.from("crm_queries").upsert(snapshot.queries.map((q) => ({
-        id: q.id, query_id: q.query_id, owner: q.owner, stage: q.stage, data: clone(q),
+        id: q.id, query_id: q.query_id, owner: q.owner, stage: q.stage, data: asJson(q),
       })), { onConflict: "id" })
       : Promise.resolve({ error: null }),
     snapshot.tasks.length
       ? supabase.from("crm_tasks").upsert(snapshot.tasks.map((task) => ({
-        id: task.id, query_id: task.query_id || null, owner: task.owner, done: task.done, data: clone(task),
+        id: task.id, query_id: task.query_id || null, owner: task.owner, done: task.done, data: asJson(task),
       })), { onConflict: "id" })
       : Promise.resolve({ error: null }),
     snapshot.employees.length
       ? supabase.from("crm_employees").upsert(snapshot.employees.map((employee) => ({
-        id: employee.id, data: clone(employee),
+        id: employee.id, data: asJson(employee),
       })), { onConflict: "id" })
       : Promise.resolve({ error: null }),
     snapshot.events.length
       ? supabase.from("crm_events").upsert(snapshot.events.map((event) => ({
-        id: event.id, query_id: event.query_id ?? null, at: event.at, data: clone(event),
+        id: event.id, query_id: event.query_id ?? null, at: event.at, data: asJson(event),
       })), { onConflict: "id" })
       : Promise.resolve({ error: null }),
   ];
