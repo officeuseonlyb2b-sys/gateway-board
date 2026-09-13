@@ -1,8 +1,6 @@
 // src/lib/crm/store.ts
-// CRM store — localStorage backed. NO seeded/sample data: every record comes
-// from real user actions (Employee Register, New Lead, task completion, ...).
-// This module is THE single source of truth for the CRM: queries, tasks,
-// employees and the activity log all live here.
+// CRM store — immediate local cache synchronized to the shared database by
+// crm-remote.ts. No seeded/sample data: every record comes from user actions.
 import { useSyncExternalStore } from "react";
 import type { ActivityItem, CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
 import { LIFECYCLE } from "./types";
@@ -43,6 +41,7 @@ function buildLifecycle(stage: Stage, created: Date): { label: string; at?: stri
 
 // ---- persistence -----------------------------------------------------------
 const listeners = new Set<() => void>();
+const persistListeners = new Set<(snapshot: CrmSnapshot) => void>();
 let queries: CrmQuery[] = [];
 let tasks: CrmTask[] = [];
 let employees: Employee[] = [];
@@ -69,6 +68,38 @@ function load() {
 }
 
 function emit() { listeners.forEach((l) => l()); }
+export interface CrmSnapshot {
+  queries: CrmQuery[];
+  tasks: CrmTask[];
+  employees: Employee[];
+  events: CrmEvent[];
+}
+
+export function getCrmSnapshot(): CrmSnapshot {
+  if (!inited) load();
+  return { queries, tasks, employees, events };
+}
+
+export function hydrateCrm(snapshot: CrmSnapshot) {
+  inited = true;
+  queries = snapshot.queries;
+  tasks = snapshot.tasks;
+  employees = snapshot.employees;
+  events = snapshot.events;
+  if (isBrowser()) {
+    localStorage.setItem(KEY, JSON.stringify(queries));
+    localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+    localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+    localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+  }
+  emit();
+}
+
+export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
+  persistListeners.add(listener);
+  return () => persistListeners.delete(listener);
+}
+
 function persist() {
   if (!isBrowser()) return;
   localStorage.setItem(KEY, JSON.stringify(queries));
@@ -76,6 +107,8 @@ function persist() {
   localStorage.setItem(EMP_KEY, JSON.stringify(employees));
   localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
   emit();
+  const snapshot = getCrmSnapshot();
+  persistListeners.forEach((listener) => listener(snapshot));
 }
 
 export function listCrmQueries(): CrmQuery[] {

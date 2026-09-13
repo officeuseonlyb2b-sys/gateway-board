@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { createLead } from "@/lib/crm/store";
+import { pushCrmSnapshotNow } from "@/lib/crm/crm-remote";
 
 // Exact data extracted from screenshots
 const LEAD_SOURCES = ["B2B", "B2C", "B2B2B"];
@@ -121,11 +123,31 @@ export default function NewQuery() {
   const [topLineRate, setTopLineRate] = useState("");
   const [interestedProgramme, setInterestedProgramme] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Add your query creation logic here
-    toast.success("Query created successfully");
-    navigate({ to: "/query-tracker" });
+    const pax = Math.max(1, Number(maxPax || minPax || 1));
+    try {
+      createLead({
+        lead_source: marketSource || sourceType || "Direct",
+        customer: sourcePartner || contactPerson || "Direct Guest",
+        contact_person: contactPerson,
+        market: marketRegion,
+        enquiry_type: queryType || costingBasis || "Customized",
+        travel_start: tourStartDate,
+        travel_end: tourEndDate,
+        pax,
+        destination: interestedProgramme || tourStartCity || queryBaseCity || tourEndCity,
+        priority: "Normal",
+        requirement: queryFor,
+        owner: travelAdvisor || "Unassigned",
+      });
+      await pushCrmSnapshotNow();
+      toast.success("Query created successfully");
+      navigate({ to: "/query-tracker" });
+    } catch (error) {
+      console.error("Query creation failed", error);
+      toast.error("Query could not be saved. Please try again.");
+    }
   };
 
   const handleClear = () => {
