@@ -144,7 +144,7 @@ export default function NewQuery() {
         email: emailId,
         adults: pax,
         children: 0,
-        traveler_type: marketRegion.toLowerCase().includes("inbound") ? "foreigner" :
+        traveler_type: marketRegion.toLowerCase().includes("inbound") ? "foreign" :
           queryType.toLowerCase().includes("school") || queryType.toLowerCase().includes("college") ? "student" : "indian",
         travel_type: costingBasis || queryType,
         cost_price: Number(bottomLineRate) || 0,

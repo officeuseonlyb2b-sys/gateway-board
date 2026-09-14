@@ -124,7 +124,7 @@ export interface CrmQuery {
   costing_versions?: CostingVersion[];
 
   /** Pricing audience used when a linked quotation is pre-filled. */
-  traveler_type?: "indian" | "foreigner" | "student";
+  traveler_type?: "indian" | "foreign" | "student";
 
   // --- ownership / tracking (optional so existing records keep working) ---
   assigned_by?: string;

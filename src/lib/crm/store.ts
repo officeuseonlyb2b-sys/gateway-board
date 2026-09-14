@@ -324,7 +324,7 @@ export interface NewLeadInput {
   email?: string;
   adults?: number;
   children?: number;
-  traveler_type?: "indian" | "foreigner" | "student";
+  traveler_type?: "indian" | "foreign" | "student";
   travel_type?: string;
   cost_price?: number;
   selling_price?: number;

@@ -72,7 +72,7 @@ import { StepMeals } from "@/components/quotation/steps/StepMeals";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
-  validateSearch: (s: Record<string, unknown>) => ({
+  validateSearch: (s: Record<string, unknown>): { id?: string; queryId?: string } => ({
     id: typeof s.id === "string" ? s.id : undefined,
     queryId: typeof s.queryId === "string" ? s.queryId : undefined,
   }),
@@ -182,7 +182,7 @@ function WizardPage() {
           program_name: query.destination,
           adults: query.adults || query.pax || next.adults,
           children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
-          traveler_type: query.traveler_type ?? (/inbound/i.test(query.market) ? "foreigner" : "indian"),
+          traveler_type: query.traveler_type ?? (/inbound/i.test(query.market) ? "foreign" : "indian"),
         });
         setInitialized(true);
         return;
