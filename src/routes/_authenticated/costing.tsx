@@ -48,6 +48,8 @@ import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { nextQuoteNumber, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { buildSavedQuote as buildSavedQuoteFromDraft } from "@/lib/wizard/build-saved-quote";
+import { getCrmQuery, saveQueryCosting } from "@/lib/crm/store";
+import { pushCrmSnapshotNow } from "@/lib/crm/crm-remote";
 
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
@@ -70,7 +72,10 @@ import { StepMeals } from "@/components/quotation/steps/StepMeals";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
-  validateSearch: (s: Record<string, unknown>) => ({ id: typeof s.id === "string" ? s.id : undefined }),
+  validateSearch: (s: Record<string, unknown>) => ({
+    id: typeof s.id === "string" ? s.id : undefined,
+    queryId: typeof s.queryId === "string" ? s.queryId : undefined,
+  }),
   component: WizardPage,
 });
 
@@ -149,6 +154,40 @@ function WizardPage() {
   useEffect(() => {
     if (initialized) return;
     migrateLegacyDraft();
+    if (search.queryId) {
+      const query = getCrmQuery(search.queryId);
+      if (query) {
+        const next = emptyDraft();
+        const start = query.travel_start ? new Date(query.travel_start) : null;
+        const end = query.travel_end ? new Date(query.travel_end) : null;
+        const nights = start && end && Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())
+          ? Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000))
+          : next.nights;
+        const isB2B = /b2b|partner|agent/i.test(`${query.lead_source} ${query.market}`);
+        const isGroup = /git|group/i.test(`${query.enquiry_type} ${query.travel_type}`);
+        writeDraft({
+          ...next,
+          linked_query_id: query.query_id,
+          linked_query_name: query.customer,
+          query_type: isB2B ? "B2B" : "B2C",
+          tour_type: isGroup ? "GIT" : "FIT",
+          agent: isB2B
+            ? { name: query.contact_person, agency: query.customer, phone: query.mobile, email: query.email }
+            : next.agent,
+          guest: !isB2B
+            ? { name: query.contact_person || query.customer, phone: query.mobile, email: query.email, city: "" }
+            : next.guest,
+          start_date: query.travel_start || next.start_date,
+          nights,
+          program_name: query.destination,
+          adults: query.adults || query.pax || next.adults,
+          children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
+          traveler_type: query.traveler_type ?? (/inbound/i.test(query.market) ? "foreigner" : "indian"),
+        });
+        setInitialized(true);
+        return;
+      }
+    }
     if (search.id) {
       const rec = getDraft(search.id);
       if (rec) {
@@ -162,7 +201,7 @@ function WizardPage() {
     if (existing) setShowBanner(true);
     else initDraft();
     setInitialized(true);
-  }, [initialized, search.id, draft]);
+  }, [initialized, search.id, search.queryId, draft]);
 
   useEffect(() => {
     if (!draft) return;
@@ -259,6 +298,11 @@ function WizardPage() {
               <p className="text-sm text-muted-foreground">
                 Step {step} of {TOTAL_STEPS} — {STEPS[step - 1].label}
               </p>
+              {draft.linked_query_id && (
+                <p className="text-sm font-medium text-primary">
+                  {draft.linked_query_id} · {draft.linked_query_name || "Linked query"}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -269,9 +313,20 @@ function WizardPage() {
             }}>
               <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
             </Button>
-            <Button size="sm" onClick={() => {
+            <Button size="sm" onClick={async () => {
               const q = buildSavedQuoteFromDraft(draft, dbData, user?.name || "Unknown");
+              const draftId = persistToDrafts(draft, { silent: true });
               persistQuote(q);
+              if (draft.linked_query_id) {
+                saveQueryCosting(draft.linked_query_id, q, draftId, user?.name || "Unknown");
+                try {
+                  await pushCrmSnapshotNow();
+                } catch (error) {
+                  console.error("Linked costing save failed", error);
+                  toast.error("Quote saved locally, but could not be added to the query.");
+                  return;
+                }
+              }
               toast.success(`Quote ${q.quote_number} saved to Saved Quotes.`);
               addNotification({
                 kind: "success", category: "quote_saved",

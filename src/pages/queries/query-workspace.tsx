@@ -147,6 +147,7 @@ export default function QueryWorkspace() {
     () => m.queries.find((item) => item.id === queryId || item.query_id === queryId),
     [m.queries, queryId],
   );
+  const costingVersions = [...(query?.costing_versions ?? [])].sort((a, b) => b.version - a.version);
 
   const [tab, setTab] = useState<Tab>("Overview");
   const [note, setNote] = useState("");
@@ -710,7 +711,10 @@ export default function QueryWorkspace() {
                 <h2 className="text-2xl font-bold text-slate-900">Itineraries & Costings</h2>
                 <p className="text-sm text-slate-500">Every generated version stays available for review, editing and download.</p>
               </div>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white shadow-md">+ New Version</Button>
+              <Button
+                onClick={() => navigate({ to: "/costing", search: { queryId: query?.query_id || mockQueryDetails.id } })}
+                className="bg-teal-600 hover:bg-teal-700 text-white shadow-md"
+              >+ New Version</Button>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
@@ -758,36 +762,23 @@ export default function QueryWorkspace() {
                   <h3 className="font-bold text-slate-900">Costing versions</h3>
                   <p className="text-xs text-muted-foreground mb-4">Scenario calculations and quotation history</p>
                   <div className="space-y-4">
-                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                      <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold">Costing V2</p>
-                          <Badge className="bg-teal-100 text-teal-700 border-0">CURRENT</Badge>
+                    {costingVersions.length === 0 && <p className="text-sm text-muted-foreground">No costing versions saved yet.</p>}
+                    {costingVersions.map((item, index) => (
+                      <div key={`${item.version}-${item.saved_at}`} className={`flex gap-4 border border-slate-200 rounded-lg p-4 ${index === 0 ? "bg-slate-50/50" : "opacity-60 hover:opacity-100"}`}>
+                        <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold">Costing V{item.version}</p>
+                            {index === 0 && <Badge className="bg-teal-100 text-teal-700 border-0">CURRENT</Badge>}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">{formatMoney(Math.max(item.quote.totals.grand_sgl, item.quote.totals.grand_dbl, item.quote.totals.grand_trp))} • {item.quote.quote_number}</p>
+                          <p className="text-[10px] text-slate-400 mt-2">Prepared {new Date(item.saved_at).toLocaleDateString("en-IN")} - {item.saved_by}</p>
                         </div>
-                        <p className="text-xs text-slate-500 mt-1">{formatMoney(Number(bottomLine))} • FIT</p>
-                        <p className="text-[10px] text-slate-400 mt-2">Prepared 06 Aug 2026 - Chhaya Prajapati</p>
+                        <div className="flex gap-2 self-center">
+                          {item.draft_id && <Button variant="outline" size="sm" onClick={() => navigate({ to: "/costing", search: { id: item.draft_id } })}>Edit</Button>}
+                        </div>
                       </div>
-                      <div className="flex gap-2 self-center">
-                        <Button variant="outline" size="sm">View</Button>
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm">Download</Button>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity">
-                      <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
-                      <div className="flex-1">
-                        <p className="font-bold">Costing V1</p>
-                        <p className="text-xs text-slate-500 mt-1">Initial 9 pax costing scenario</p>
-                        <p className="text-[10px] text-slate-400 mt-2">Prepared 20 Jun 2026 - Chhaya Prajapati</p>
-                      </div>
-                      <div className="flex gap-2 self-center">
-                        <Button variant="outline" size="sm">View</Button>
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm">Download</Button>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
