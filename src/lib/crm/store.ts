@@ -320,6 +320,14 @@ export interface NewLeadInput {
   priority: string;
   requirement: string;
   owner: string;
+  mobile?: string;
+  email?: string;
+  adults?: number;
+  children?: number;
+  traveler_type?: "indian" | "foreign" | "student";
+  travel_type?: string;
+  cost_price?: number;
+  selling_price?: number;
 }
 
 export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to: string } {
@@ -339,19 +347,19 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     lead_source: input.lead_source,
     customer: input.customer,
     contact_person: input.contact_person,
-    mobile: "",
-    email: "",
+    mobile: input.mobile ?? "",
+    email: input.email ?? "",
     market: input.market,
     priority: input.priority,
     requirement: input.requirement,
     enquiry_type: input.enquiry_type,
-    travel_type: "Family Tour",
+    travel_type: input.travel_type ?? "Family Tour",
     destination: input.destination,
     travel_start: input.travel_start,
     travel_end: input.travel_end,
     pax: input.pax,
-    adults: input.pax,
-    children: 0,
+    adults: input.adults ?? input.pax,
+    children: input.children ?? 0,
     stage: "New",
     owner: input.owner,
     value: 0,
@@ -359,7 +367,12 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     followup_due: iso(addDays(now, 1)),
     lifecycle: buildLifecycle("New", now),
     activities: [{ id: "a1", title: "Lead created", at: iso(now), by: input.owner }],
-    commercials: { cost_price: 0, selling_price: 0, commission_pct: 10 },
+    commercials: {
+      cost_price: input.cost_price ?? 0,
+      selling_price: input.selling_price ?? 0,
+      commission_pct: 10,
+    },
+    ...(input.traveler_type ? { traveler_type: input.traveler_type } : {}),
   };
   queries = [q, ...queries];
   logEvent({
@@ -556,6 +569,42 @@ export function setQueryStage(queryId: string, stage: Stage, by?: string) {
       from_stage: q.stage, to_stage: stage, duration_hours: durationHours,
     });
     return { ...q, stage, lifecycle, activities: [activity, ...q.activities] };
+  });
+  persist();
+}
+
+export function saveQueryCosting(
+  queryId: string,
+  quote: import("@/lib/quotes-store").SavedQuote,
+  draftId: string | undefined,
+  by: string,
+) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const previous = q.costing_versions ?? [];
+    const version = previous.reduce((max, item) => Math.max(max, item.version), 0) + 1;
+    const sellingPrice = Math.max(quote.totals.grand_sgl, quote.totals.grand_dbl, quote.totals.grand_trp);
+    const costPrice = Math.max(quote.totals.room_net_sgl, quote.totals.room_net_dbl, quote.totals.room_net_trp)
+      + quote.totals.addons_total;
+    return {
+      ...q,
+      stage: q.stage === "New" || q.stage === "Requirement Review" ? "Costing" : q.stage,
+      value: sellingPrice,
+      commercials: { ...q.commercials, cost_price: costPrice, selling_price: sellingPrice },
+      lifecycle: q.lifecycle.map((item) =>
+        item.label === "Costing" && !item.at ? { ...item, at: iso(now) } : item,
+      ),
+      costing_versions: [
+        ...previous,
+        { version, saved_at: quote.saved_at, saved_by: by, draft_id: draftId, quote: { ...quote, version } },
+      ],
+      activities: [
+        { id: `a_${now.getTime()}`, title: `Costing V${version} saved`, at: iso(now), by },
+        ...q.activities,
+      ],
+    };
   });
   persist();
 }
