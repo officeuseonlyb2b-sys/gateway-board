@@ -91,6 +91,8 @@ export interface SavedScenario {
 }
 export interface SavedQuote {
   id: string;
+  query_id?: string;
+  version?: number;
   quote_number: string;
   saved_at: string;
   saved_by: string;

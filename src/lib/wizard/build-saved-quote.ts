@@ -87,6 +87,7 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
 
   const q: SavedQuote = {
     id: uid(),
+    query_id: draft.linked_query_id,
     quote_number: nextQuoteNumber(),
     saved_at: new Date().toISOString(),
     saved_by: savedBy,

@@ -140,6 +140,15 @@ export default function NewQuery() {
         priority: "Normal",
         requirement: queryFor,
         owner: travelAdvisor || "Unassigned",
+        mobile: contactNumber,
+        email: emailId,
+        adults: pax,
+        children: 0,
+        traveler_type: marketRegion.toLowerCase().includes("inbound") ? "foreigner" :
+          queryType.toLowerCase().includes("school") || queryType.toLowerCase().includes("college") ? "student" : "indian",
+        travel_type: costingBasis || queryType,
+        cost_price: Number(bottomLineRate) || 0,
+        selling_price: Number(topLineRate) || 0,
       });
       await pushCrmSnapshotNow();
       toast.success("Query created successfully");

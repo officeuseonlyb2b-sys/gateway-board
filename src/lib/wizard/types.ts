@@ -235,6 +235,8 @@ export interface CostingSelection {
 
 export interface QuoteDraft {
   step: number;
+  linked_query_id?: string;
+  linked_query_name?: string;
   query_type: QueryType | null;
   tour_type?: TourType;
   agent: AgentInfo;
@@ -355,6 +357,8 @@ export interface GroupRoomMix {
 
 export const emptyDraft = (): QuoteDraft => ({
   step: 1,
+  linked_query_id: undefined,
+  linked_query_name: undefined,
   query_type: null,
   tour_type: undefined,
   agent: { name: "", agency: "", phone: "", email: "" },

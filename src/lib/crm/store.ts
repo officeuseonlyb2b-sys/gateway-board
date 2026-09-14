@@ -573,6 +573,42 @@ export function setQueryStage(queryId: string, stage: Stage, by?: string) {
   persist();
 }
 
+export function saveQueryCosting(
+  queryId: string,
+  quote: import("@/lib/quotes-store").SavedQuote,
+  draftId: string | undefined,
+  by: string,
+) {
+  if (!inited) load();
+  const now = new Date();
+  queries = queries.map((q) => {
+    if (q.query_id !== queryId && q.id !== queryId) return q;
+    const previous = q.costing_versions ?? [];
+    const version = previous.reduce((max, item) => Math.max(max, item.version), 0) + 1;
+    const sellingPrice = Math.max(quote.totals.grand_sgl, quote.totals.grand_dbl, quote.totals.grand_trp);
+    const costPrice = Math.max(quote.totals.room_net_sgl, quote.totals.room_net_dbl, quote.totals.room_net_trp)
+      + quote.totals.addons_total;
+    return {
+      ...q,
+      stage: q.stage === "New" || q.stage === "Requirement Review" ? "Costing" : q.stage,
+      value: sellingPrice,
+      commercials: { ...q.commercials, cost_price: costPrice, selling_price: sellingPrice },
+      lifecycle: q.lifecycle.map((item) =>
+        item.label === "Costing" && !item.at ? { ...item, at: iso(now) } : item,
+      ),
+      costing_versions: [
+        ...previous,
+        { version, saved_at: quote.saved_at, saved_by: by, draft_id: draftId, quote: { ...quote, version } },
+      ],
+      activities: [
+        { id: `a_${now.getTime()}`, title: `Costing V${version} saved`, at: iso(now), by },
+        ...q.activities,
+      ],
+    };
+  });
+  persist();
+}
+
 /** Human readable duration, e.g. "1d 4h" / "2h 15m". */
 export function fmtDur(hours: number): string {
   if (!isFinite(hours) || hours <= 0) return "0m";
