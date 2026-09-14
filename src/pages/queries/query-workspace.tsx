@@ -176,28 +176,27 @@ export default function QueryWorkspace() {
   const [ratePerPerson, setRatePerPerson] = useState("33333");
   const [hotelCategory, setHotelCategory] = useState("5 Star");
 
-  // Mock logic to simulate the query's status from screenshots
-  const status: Stage = "Nurturing";
+  const status: Stage = query?.stage ?? "New";
   const currentActor = query?.owner || "Chhaya Prajapati";
   const activities = useMemo(() => ACTIVITY_LOG, []); // Mocking activity log for UI accuracy
 
-  const mockQueryDetails = {
-    id: "EMP26-27EMP0131",
-    customer: "FlyHigh FlySafe",
-    travelStart: "01 Oct 2026",
-    travelEnd: "05 Oct 2026",
-    pax: 9,
-    destination: "North MP",
-    enquiry_type: "FIT",
-    owner: "Chhaya Prajapati",
-    contact_person: "Anushka",
-    mobile: "9741424302",
-    email: "fly@flyhighflysafe.com",
-    market: "B2B",
-    lead_source: "Agent",
-  };
+  const mockQueryDetails = query ? {
+    id: query.query_id,
+    customer: query.customer,
+    travelStart: query.travel_start,
+    travelEnd: query.travel_end,
+    pax: query.pax,
+    destination: query.destination,
+    enquiry_type: query.enquiry_type,
+    owner: query.owner,
+    contact_person: query.contact_person,
+    mobile: query.mobile,
+    email: query.email,
+    market: query.market,
+    lead_source: query.lead_source,
+  } : null;
 
-  if (!query && !mockQueryDetails) {
+  if (!query || !mockQueryDetails) {
     return (
       <div className="mx-auto max-w-4xl p-8">
         <Card>
@@ -712,7 +711,7 @@ export default function QueryWorkspace() {
                 <p className="text-sm text-slate-500">Every generated version stays available for review, editing and download.</p>
               </div>
               <Button
-                onClick={() => navigate({ to: "/costing", search: { queryId: query?.query_id || mockQueryDetails.id } })}
+                onClick={() => navigate({ to: "/costing", search: { queryId: query.query_id } })}
                 className="bg-teal-600 hover:bg-teal-700 text-white shadow-md"
               >+ New Version</Button>
             </div>
