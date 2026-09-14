@@ -212,6 +212,9 @@ export default function QueryWorkspace() {
     );
   }
 
+  const currentBottomLine = query.commercials.cost_price || Number(bottomLine);
+  const currentTopLine = query.commercials.selling_price || Number(topLine);
+
   const handleLogFollowup = () => {
     if (!logOutcome) return;
     
@@ -490,13 +493,13 @@ export default function QueryWorkspace() {
                   <div className="flex justify-between items-center mb-2">
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Bottom Line</p>
-                      <p className="text-xl font-bold text-teal-700">{formatMoney(COMMERCIAL_SNAPSHOT.bottomLine)}</p>
+                      <p className="text-xl font-bold text-teal-700">{formatMoney(currentBottomLine)}</p>
                       <p className="text-[10px] text-slate-500 mt-1">{COMMERCIAL_SNAPSHOT.pax} pax • {COMMERCIAL_SNAPSHOT.hotel}</p>
                     </div>
                     <div className="text-slate-300 text-xl font-bold">→</div>
                     <div className="text-right">
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Top Line</p>
-                      <p className="text-xl font-bold text-slate-900">{formatMoney(COMMERCIAL_SNAPSHOT.topLine)}</p>
+                      <p className="text-xl font-bold text-slate-900">{formatMoney(currentTopLine)}</p>
                       <p className="text-[10px] text-slate-500 mt-1">{COMMERCIAL_SNAPSHOT.pax} pax • {COMMERCIAL_SNAPSHOT.hotel}</p>
                     </div>
                   </div>
@@ -612,7 +615,7 @@ export default function QueryWorkspace() {
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase">Bottom-line Query Value</p>
-                    <p className="text-2xl font-bold text-teal-700 mt-1">{formatMoney(Number(bottomLine))}</p>
+                    <p className="text-2xl font-bold text-teal-700 mt-1">{formatMoney(currentBottomLine)}</p>
                     <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
                   </div>
                   
@@ -622,7 +625,7 @@ export default function QueryWorkspace() {
 
                   <div className="text-right">
                     <p className="text-xs font-semibold text-slate-500 uppercase">Top-line Query Value</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatMoney(Number(topLine))}</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatMoney(currentTopLine)}</p>
                     <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
                   </div>
                 </div>
@@ -636,7 +639,7 @@ export default function QueryWorkspace() {
                   <p className="text-xs text-muted-foreground mb-4">Lowest qualifying quotation</p>
                   <div className="border-2 border-teal-600 rounded-lg p-4 bg-teal-50/20 shadow-sm">
                     <p className="text-xs font-bold text-teal-700 uppercase">Entry Scenario</p>
-                    <p className="text-2xl font-bold text-teal-700 mt-2">{formatMoney(Number(bottomLine))}</p>
+                    <p className="text-2xl font-bold text-teal-700 mt-2">{formatMoney(currentBottomLine)}</p>
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
                       <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
                       <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
@@ -652,7 +655,7 @@ export default function QueryWorkspace() {
                   <p className="text-xs text-muted-foreground mb-4">Highest qualifying quotation</p>
                   <div className="border-2 border-slate-300 rounded-lg p-4 bg-slate-50/20 shadow-sm">
                     <p className="text-xs font-bold text-slate-600 uppercase">Maximum Scenario</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-2">{formatMoney(Number(topLine))}</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-2">{formatMoney(currentTopLine)}</p>
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
                       <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
                       <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
@@ -693,7 +696,7 @@ export default function QueryWorkspace() {
                     </div>
                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Value range</p>
-                      <p className="text-sm font-bold text-slate-900">{formatMoney(Number(bottomLine))}</p>
+                      <p className="text-sm font-bold text-slate-900">{formatMoney(currentBottomLine)}</p>
                     </div>
                   </div>
                 </CardContent>
