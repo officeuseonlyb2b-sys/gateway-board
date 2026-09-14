@@ -77,6 +77,14 @@ export interface Commercials {
   commission_pct: number;
 }
 
+export interface CostingVersion {
+  version: number;
+  saved_at: string;
+  saved_by: string;
+  draft_id?: string;
+  quote: import("@/lib/quotes-store").SavedQuote;
+}
+
 export interface CrmQuery {
   id: string;
   query_id: string;
@@ -113,6 +121,10 @@ export interface CrmQuery {
   lifecycle: LifecycleStep[];
   activities: ActivityItem[];
   commercials: Commercials;
+  costing_versions?: CostingVersion[];
+
+  /** Pricing audience used when a linked quotation is pre-filled. */
+  traveler_type?: "indian" | "foreigner" | "student";
 
   // --- ownership / tracking (optional so existing records keep working) ---
   assigned_by?: string;
