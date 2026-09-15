@@ -80,7 +80,7 @@ export const Route = createFileRoute("/_authenticated/costing")({
 });
 
 // ============================================================
-// Step definitions — Room Allocation now lives inside Hotels → 15 steps
+// Step definitions
 // ============================================================
 const TOTAL_STEPS = 10;
 const STEPS: { n: number; label: string; subs?: string[] }[] = [
@@ -150,6 +150,7 @@ function WizardPage() {
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [savingQuote, setSavingQuote] = useState(false);
 
   useEffect(() => {
     if (initialized) return;
@@ -269,6 +270,88 @@ function WizardPage() {
     go(step - 1, prevSubs > 0 ? prevSubs - 1 : 0);
   };
 
+  // ------------------------------------------------------------
+  // CENTRALISED SAVE QUOTE — saves to local store AND linked query
+  // ------------------------------------------------------------
+  const handleSaveQuote = async (opts?: { silent?: boolean }) => {
+    if (savingQuote) return;
+    setSavingQuote(true);
+    try {
+      // 1) Build the final quote object from the draft
+      const q = buildSavedQuoteFromDraft(draft, dbData, user?.name || "Unknown");
+
+      // 2) Persist the wizard draft
+      const draftId = persistToDrafts(draft, { silent: true });
+
+      // 3) Save to local Saved Quotes store (always)
+      persistQuote(q);
+
+      // 4) If linked to a CRM query, save the costing into the query
+      let linkedToQuery = false;
+      let crmPushFailed = false;
+
+      if (draft.linked_query_id) {
+        try {
+          await Promise.resolve(
+            saveQueryCosting(
+              draft.linked_query_id,
+              q,
+              draftId,
+              user?.name || "Unknown",
+            ),
+          );
+          linkedToQuery = true;
+        } catch (error) {
+          console.error("Failed to attach costing to linked query:", error);
+        }
+
+        // Push CRM snapshot (non-blocking for the success path)
+        try {
+          await pushCrmSnapshotNow();
+        } catch (error) {
+          console.error("CRM snapshot push failed:", error);
+          crmPushFailed = true;
+        }
+      }
+
+      // 5) Feedback to user
+      if (!opts?.silent) {
+        if (draft.linked_query_id && linkedToQuery && !crmPushFailed) {
+          toast.success(
+            `Quote ${q.quote_number} saved to Saved Quotes & attached to ${draft.linked_query_id}.`,
+          );
+        } else if (draft.linked_query_id && linkedToQuery && crmPushFailed) {
+          toast.success(
+            `Quote ${q.quote_number} saved & attached to ${draft.linked_query_id}. (CRM sync pending)`,
+          );
+        } else if (draft.linked_query_id && !linkedToQuery) {
+          toast.warning(
+            `Quote ${q.quote_number} saved to Saved Quotes, but could not be attached to the query.`,
+          );
+        } else {
+          toast.success(`Quote ${q.quote_number} saved to Saved Quotes.`);
+        }
+      }
+
+      addNotification({
+        kind: "success", category: "quote_saved",
+        title: `Quote ${q.quote_number} saved`,
+        message: `${q.tour_title} · ${q.total_nights}N${draft.linked_query_id ? ` · Linked to ${draft.linked_query_id}` : ""}`,
+        href: "/quotes",
+      });
+
+      return q;
+    } catch (error) {
+      console.error("Save quote failed:", error);
+      if (!opts?.silent) {
+        toast.error("Failed to save quote. Please try again.");
+      }
+      return null;
+    } finally {
+      setSavingQuote(false);
+    }
+  };
+
 
   return (
     <div className="min-h-full bg-muted/20">
@@ -313,29 +396,13 @@ function WizardPage() {
             }}>
               <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
             </Button>
-            <Button size="sm" onClick={async () => {
-              const q = buildSavedQuoteFromDraft(draft, dbData, user?.name || "Unknown");
-              const draftId = persistToDrafts(draft, { silent: true });
-              persistQuote(q);
-              if (draft.linked_query_id) {
-                saveQueryCosting(draft.linked_query_id, q, draftId, user?.name || "Unknown");
-                try {
-                  await pushCrmSnapshotNow();
-                } catch (error) {
-                  console.error("Linked costing save failed", error);
-                  toast.error("Quote saved locally, but could not be added to the query.");
-                  return;
-                }
-              }
-              toast.success(`Quote ${q.quote_number} saved to Saved Quotes.`);
-              addNotification({
-                kind: "success", category: "quote_saved",
-                title: `Quote ${q.quote_number} saved`,
-                message: `${q.tour_title} · ${q.total_nights}N`,
-                href: "/quotes",
-              });
-            }}>
-              <FileText className="h-3.5 w-3.5 mr-1.5" /> Save Quote
+            <Button
+              size="sm"
+              disabled={savingQuote}
+              onClick={() => handleSaveQuote()}
+            >
+              <FileText className="h-3.5 w-3.5 mr-1.5" />
+              {savingQuote ? "Saving…" : "Save Quote"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => {
 
@@ -441,7 +508,7 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
 }
 
 // ============================================================
-// Validation — updated step numbers (step 5 = Routing, step 12 = Hotels)
+// Validation
 // ============================================================
 function validate(d: QuoteDraft, step: number): boolean {
   switch (step) {
@@ -464,12 +531,12 @@ function validate(d: QuoteDraft, step: number): boolean {
       return !!d.start_date;
     }
     case 4: return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
-    case 5: { // Routing
+    case 5: {
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    case 7: { // Accommodation Part — Hotels
+    case 7: {
       const overnightCities = d.routing.filter((r) => r.overnight && r.city_id).map((r) => r.city_id);
       if (overnightCities.length === 0) return true;
       const A = d.hotel_options.find((o) => o.key === "A");
@@ -481,7 +548,7 @@ function validate(d: QuoteDraft, step: number): boolean {
 }
 
 // ============================================================
-// Step router — maps slot → component (renumbered)
+// Step router
 // ============================================================
 function StepContent({ draft, set, sub, setSub }: {
   draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void; sub: number; setSub: (n: number) => void;
@@ -496,21 +563,21 @@ function StepContent({ draft, set, sub, setSub }: {
       case 2: return <Step2 draft={draft} set={set} />;
       case 3: return <StepTripBasics draft={draft} set={set} />;
       case 4: return <Step4 draft={draft} set={set} />;
-      case 5: return <Step9 draft={draft} set={set} />;          // Routing
-      case 6: {                                                  // Land Part
+      case 5: return <Step9 draft={draft} set={set} />;
+      case 6: {
         switch (sub) {
-          case 0: return <Step11 draft={draft} set={set} />;      // Activities
-          case 1: return <Step13 draft={draft} set={set} />;      // Guide
-          case 2: return <Step12 draft={draft} set={set} />;      // Entrances
-          case 3: return <Step14 draft={draft} set={set} />;      // Misc
-          default: return <Step10 draft={draft} set={set} />;     // Transport
+          case 0: return <Step11 draft={draft} set={set} />;
+          case 1: return <Step13 draft={draft} set={set} />;
+          case 2: return <Step12 draft={draft} set={set} />;
+          case 3: return <Step14 draft={draft} set={set} />;
+          default: return <Step10 draft={draft} set={set} />;
         }
       }
-      case 7:                                                     // Accommodation Part
+      case 7:
         return sub === 1 ? <StepMeals draft={draft} set={set} /> : <Step15 draft={draft} set={set} />;
-      case 8: return <Step16 draft={draft} set={set} />;          // Costing
-      case 9: return <Step17 draft={draft} set={set} />;          // Final
-      case 10: return <Step18 draft={draft} set={set} />;         // Optionals
+      case 8: return <Step16 draft={draft} set={set} />;
+      case 9: return <Step17 draft={draft} set={set} />;
+      case 10: return <Step18 draft={draft} set={set} />;
       default: return null;
     }
   })();
@@ -724,15 +791,12 @@ function Step2({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// STEP 4 — Program (updated with Program Name & Category)
-// ============================================================
-// STEP 4 — Program (updated with Program Name & Category and Beautiful Preview)
+// STEP 4 — Program
 // ============================================================
 function Step4({ draft, set }: StepProps) {
   const programs = usePrograms();
   const db = useDB();
 
-  // Find the currently selected program for the preview
   const selectedProgram = programs.find((p) => p.id === draft.program_id);
 
   const applyProgram = (id: string) => {
@@ -778,7 +842,6 @@ function Step4({ draft, set }: StepProps) {
       <h2 className="text-lg font-semibold">Program Selection</h2>
 
       <RadioGroup value={draft.program_mode} onValueChange={(v) => set({ program_mode: v as "existing" | "new" })}>
-        {/* ---- Existing Program ---- */}
         <div className="flex items-start gap-3 p-4 border rounded-lg relative">
           <RadioGroupItem value="existing" id="pm-e" className="mt-1" />
           <div className="flex-1">
@@ -792,7 +855,6 @@ function Step4({ draft, set }: StepProps) {
                   </SelectContent>
                 </Select>
 
-                {/* 🔥 ATTRACTIVE & BEAUTIFUL PROGRAM PREVIEW */}
                 {selectedProgram && (
                   <Card className="border-accent/20 shadow-md overflow-hidden mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="p-4 border-b bg-muted/5 flex flex-wrap items-center justify-between gap-3">
@@ -820,7 +882,6 @@ function Step4({ draft, set }: StepProps) {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
-                      {/* Itinerary */}
                       <div className="space-y-2">
                         <div className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1 flex items-center gap-2">
                           <FileText className="h-3.5 w-3.5" /> Day-by-Day Itinerary
@@ -844,7 +905,6 @@ function Step4({ draft, set }: StepProps) {
                         </div>
                       </div>
 
-                      {/* Inclusions & Exclusions */}
                       <div className="space-y-3">
                         <div>
                           <div className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1 flex items-center gap-2">
@@ -889,7 +949,6 @@ function Step4({ draft, set }: StepProps) {
           </div>
         </div>
 
-        {/* ---- New Custom Program ---- */}
         <div className="flex items-start gap-3 p-4 border rounded-lg">
           <RadioGroupItem value="new" id="pm-n" className="mt-1" />
           <div className="flex-1">
@@ -939,7 +998,7 @@ function Step4({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// STEP 5 — Routing (was Step9) – unchanged, but included here
+// STEP 5 — Routing
 // ============================================================
 function Step9({ draft, set }: StepProps) {
   const d = useDB();
@@ -1261,7 +1320,7 @@ function Step9({ draft, set }: StepProps) {
   );
 }
 
-// Per-day transport details panel – unchanged
+// Per-day transport details panel
 function DayTransportPanel({
   mode, details, onChange, defaultFrom, defaultTo, defaultDate,
 }: {
@@ -1340,7 +1399,6 @@ function DayTransportPanel({
     );
   }
 
-  // Helicopter / Boat / Walk / Custom
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <F label="From"><Input className={cls} value={details.from_city ?? defaultFrom ?? ""} onChange={(e) => onChange({ from_city: e.target.value })} /></F>
@@ -1355,17 +1413,14 @@ function DayTransportPanel({
 }
 
 // ============================================================
-// STEP 6–15 are imported from separate files; we include them here
-// (already imported as Step10, Step11, etc.)
-// ============================================================
-
-// ============================================================
-// STEP 18 — Optionals + Actions (unchanged)
+// STEP 18 — Optionals + Actions
 // ============================================================
 function Step18({ draft, set }: StepProps) {
   const d = useDB();
   const user = useAuth();
+  const search = Route.useSearch();
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const routingCities = new Set(draft.routing.map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name).filter(Boolean) as string[]);
   const suggActs = d.activities.filter((a) => {
@@ -1384,7 +1439,74 @@ function Step18({ draft, set }: StepProps) {
     return buildSavedQuoteFromDraft(draft, d, user?.name || "Unknown");
   }
 
+  // ------------------------------------------------------------
+  // STEP 18 — Save handler that saves to local quotes AND the
+  // linked CRM query (same logic as header Save Quote button).
+  // ------------------------------------------------------------
+  const handleSaveQuoteFromFinal = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const q = buildSavedQuote();
 
+      // 1) Persist wizard draft id (needed for attaching to query)
+      const draftId = upsertDraft(draft, undefined, draft.program_name || undefined);
+
+      // 2) Save to local Saved Quotes store
+      persistQuote(q);
+
+      // 3) Attach to linked query if there is one
+      let linkedToQuery = false;
+      let crmPushFailed = false;
+      const linkedQueryId = draft.linked_query_id || search.queryId;
+
+      if (linkedQueryId) {
+        try {
+          await Promise.resolve(
+            saveQueryCosting(linkedQueryId, q, draftId, user?.name || "Unknown"),
+          );
+          linkedToQuery = true;
+        } catch (error) {
+          console.error("Failed to attach costing to query:", error);
+        }
+
+        try {
+          await pushCrmSnapshotNow();
+        } catch (error) {
+          console.error("CRM snapshot push failed:", error);
+          crmPushFailed = true;
+        }
+      }
+
+      // 4) Feedback
+      if (linkedQueryId && linkedToQuery && !crmPushFailed) {
+        toast.success(`Quote ${q.quote_number} saved & attached to ${linkedQueryId}.`);
+      } else if (linkedQueryId && linkedToQuery && crmPushFailed) {
+        toast.success(`Quote ${q.quote_number} saved & attached to ${linkedQueryId}. (CRM sync pending)`);
+      } else if (linkedQueryId && !linkedToQuery) {
+        toast.warning(`Quote ${q.quote_number} saved to Saved Quotes, but could not attach to query.`);
+      } else {
+        toast.success(`Quote ${q.quote_number} saved.`);
+      }
+
+      addNotification({
+        kind: "success", category: "quote_saved",
+        title: `Quote ${q.quote_number} saved`,
+        message: `${q.tour_title} · ${q.total_nights}N · ${q.cities.join(" → ")}${linkedQueryId ? ` · ${linkedQueryId}` : ""}`,
+        href: "/quotes",
+      });
+
+      // 5) Clear the wizard once safely saved
+      clearDraft();
+      setActiveWizard(null);
+      setSavedQuote(q);
+    } catch (error) {
+      console.error("Save quote failed:", error);
+      toast.error("Failed to save quote. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1441,21 +1563,8 @@ function Step18({ draft, set }: StepProps) {
       <Card className="p-4 bg-primary/5 border-primary/20">
         <div className="section-label mb-3">Final Actions</div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => {
-            const q = buildSavedQuote();
-            persistQuote(q);
-            clearDraft();
-            setActiveWizard(null);
-            toast.success(`Quote ${q.quote_number} saved.`);
-            addNotification({
-              kind: "success", category: "quote_saved",
-              title: `Quote ${q.quote_number} saved`,
-              message: `${q.tour_title} · ${q.total_nights}N · ${q.cities.join(" → ")}`,
-              href: "/quotes",
-            });
-            setSavedQuote(q);
-          }}>
-            <Save className="h-4 w-4 mr-1.5" /> Save Quote
+          <Button onClick={handleSaveQuoteFromFinal} disabled={saving}>
+            <Save className="h-4 w-4 mr-1.5" /> {saving ? "Saving…" : "Save Quote"}
           </Button>
           <Button variant="outline" onClick={() => setSavedQuote(buildSavedQuote())}>
             <FileDown className="h-4 w-4 mr-1.5" /> Generate Quote PDF
@@ -1538,7 +1647,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
 }
 
 // ============================================================
-// NEW STEP 3 — Pax + Tour Type (StepTripBasics and sub-steps)
+// STEP 3 — Pax + Tour Type
 // ============================================================
 function StepTripBasics({ draft, set }: StepProps) {
   return (
@@ -1551,7 +1660,6 @@ function StepTripBasics({ draft, set }: StepProps) {
   );
 }
 
-// Fixed StepPaxType with local state for min/max and mutual exclusivity
 function StepPaxType({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
   const totPax = draft.adults + draft.ss + draft.children.length;
@@ -1583,7 +1691,6 @@ function StepPaxType({ draft, set }: StepProps) {
     );
   }
 
-  // B2B / B2C – custom range override with local state
   const currentOverride = draft.pax_range;
   const isAuto = currentOverride === "auto" || !currentOverride;
 
@@ -1740,7 +1847,7 @@ function StepPaxType({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// StepDeparture (Brochure restricted list)
+// StepDeparture
 // ============================================================
 function StepDeparture({ draft, set }: StepProps) {
   if (draft.query_type === "Brochure") {
@@ -1821,7 +1928,7 @@ function CityCombobox({ value, onChange }: { value: string; onChange: (v: string
 }
 
 // ============================================================
-// StepTravel – Mode of Travel
+// StepTravel
 // ============================================================
 function StepTravel({ draft, set }: StepProps) {
   const toggle = (id: string) => {
@@ -1960,7 +2067,7 @@ function StepTravel({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// StepDuration – Duration
+// StepDuration
 // ============================================================
 function StepDuration({ draft, set }: StepProps) {
   const isBrochure = draft.query_type === "Brochure";
@@ -2025,7 +2132,7 @@ function StepDuration({ draft, set }: StepProps) {
 }
 
 // ============================================================
-// Helper: PaxRow with disabled prop
+// Helper: PaxRow
 // ============================================================
 function PaxRow({ label, value, onChange, disabled = false }: {
   label: string;
@@ -2048,8 +2155,3 @@ function PaxRow({ label, value, onChange, disabled = false }: {
     </div>
   );
 }
-
-// ============================================================
-// Note: Step10, Step11, Step12, Step13, Step14, Step15, Step16, Step17
-// are imported from separate files and used in StepContent.
-// ============================================================

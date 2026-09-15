@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -26,7 +26,8 @@ import {
   Database,
   PhoneCall,
   CalendarDays,
-  BadgeCheck
+  BadgeCheck,
+  Loader2,
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,7 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner"; 
+import { toast } from "sonner";
 
 import { useCrmMetrics } from "@/lib/crm/metrics";
 import { addNote, logFollowup, setQueryStage } from "@/lib/crm/store";
@@ -66,7 +67,7 @@ const STAGES: Stage[] = [
   "Lost",
 ];
 
-// New data for modal dropdowns from screenshots
+// Modal dropdown data
 const MEDIUMS = ["Call", "Email", "WhatsApp", "Meeting"];
 const STATUSES = ["NURTURING", "WIN", "LOST"];
 const REASONS = [
@@ -85,7 +86,7 @@ const REASONS = [
   "Went Cold",
 ];
 
-// Constants for Mock Overview Data (from screenshots)
+// Constants for Mock Overview Data
 const ACTIVITY_LOG = [
   { id: 1, title: "Follow-up 2 recorded", sub: "Via Email", date: "06 Aug 2026", type: "followup", color: "bg-orange-400" },
   { id: 2, title: "Follow-up 1 recorded", sub: "Via Email", date: "27 Jun 2026", type: "followup", color: "bg-orange-400" },
@@ -124,6 +125,12 @@ function formatDate(value?: string) {
   return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function todayISO(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function stageBadgeClass(stage: Stage) {
   switch (stage) {
     case "Confirmed": return "bg-emerald-50 text-emerald-700 border-emerald-200";
@@ -143,9 +150,14 @@ export default function QueryWorkspace() {
   const queryId = params.id || params.queryId || "";
   const m = useCrmMetrics();
 
+  // refreshTick forces the memo to recompute after mutations, so the UI
+  // reflects the change even if the underlying store snapshot identity
+  // doesn't change.
+  const [refreshTick, setRefreshTick] = useState(0);
+
   const query = useMemo(
     () => m.queries.find((item) => item.id === queryId || item.query_id === queryId),
-    [m.queries, queryId],
+    [m.queries, queryId, refreshTick],
   );
   const costingVersions = [...(query?.costing_versions ?? [])].sort((a, b) => b.version - a.version);
 
@@ -159,12 +171,17 @@ export default function QueryWorkspace() {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isCostingModalOpen, setIsCostingModalOpen] = useState(false);
 
-  // Form States
-  const [logDate, setLogDate] = useState("2026-09-04");
+  // Submission States
+  const [savingLog, setSavingLog] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+
+  // Log form state
+  const [logDate, setLogDate] = useState(() => todayISO());
   const [logMedium, setLogMedium] = useState("");
   const [logOutcome, setLogOutcome] = useState("");
-  const [logNextActionDate, setLogNextActionDate] = useState("2026-09-06");
+  const [logNextActionDate, setLogNextActionDate] = useState(() => todayISO());
 
+  // Status form state
   const [newStatus, setNewStatus] = useState("");
   const [statusReason, setStatusReason] = useState("");
   const [internalNote, setInternalNote] = useState("");
@@ -178,7 +195,7 @@ export default function QueryWorkspace() {
 
   const status: Stage = query?.stage ?? "New";
   const currentActor = query?.owner || "Chhaya Prajapati";
-  const activities = useMemo(() => ACTIVITY_LOG, []); // Mocking activity log for UI accuracy
+  const activities = useMemo(() => ACTIVITY_LOG, []);
 
   const mockQueryDetails = query ? {
     id: query.query_id,
@@ -196,6 +213,25 @@ export default function QueryWorkspace() {
     lead_source: query.lead_source,
   } : null;
 
+  // ---- Log modal reset when it opens ----
+  useEffect(() => {
+    if (isLogModalOpen) {
+      setLogDate(todayISO());
+      setLogMedium("");
+      setLogOutcome("");
+      setLogNextActionDate(todayISO());
+    }
+  }, [isLogModalOpen]);
+
+  // ---- Status modal reset when it opens ----
+  useEffect(() => {
+    if (isStatusModalOpen) {
+      setNewStatus("");
+      setStatusReason("");
+      setInternalNote("");
+    }
+  }, [isStatusModalOpen]);
+
   if (!query || !mockQueryDetails) {
     return (
       <div className="mx-auto max-w-4xl p-8">
@@ -212,45 +248,126 @@ export default function QueryWorkspace() {
     );
   }
 
-  const currentBottomLine = query.commercials.cost_price || Number(bottomLine);
-  const currentTopLine = query.commercials.selling_price || Number(topLine);
+  const currentBottomLine = query.commercials?.cost_price || Number(bottomLine);
+  const currentTopLine = query.commercials?.selling_price || Number(topLine);
 
+  const targetQueryId = query.query_id || mockQueryDetails.id;
+
+  // ------------------------------------------------------------------
+  // Log follow-up
+  // ------------------------------------------------------------------
   const handleLogFollowup = () => {
-    if (!logOutcome) return;
-    
-    logFollowup(query?.query_id || mockQueryDetails.id, logOutcome, new Date(logNextActionDate).toISOString(), currentActor);
-    
-    toast.success("Activity saved successfully");
-    setIsLogModalOpen(false);
-    setLogMedium("");
-    setLogOutcome("");
-    setLogNextActionDate("2026-09-06");
+    // ---- validation ----
+    if (!logMedium) {
+      toast.error("Please select a medium.");
+      return;
+    }
+    if (!logOutcome.trim()) {
+      toast.error("Please enter an outcome / note.");
+      return;
+    }
+    if (!logDate) {
+      toast.error("Please pick the activity date.");
+      return;
+    }
+    if (!logNextActionDate) {
+      toast.error("Please pick the next action date.");
+      return;
+    }
+
+    setSavingLog(true);
+    try {
+      const noteText = `[${logMedium}] ${logOutcome.trim()}`;
+      const nextIso = new Date(logNextActionDate).toISOString();
+
+      // 1) Persist the follow-up (stores note + next-action date + actor)
+      logFollowup(targetQueryId, noteText, nextIso, currentActor);
+
+      // 2) Also record a note entry (keeps the activity timeline consistent)
+      try {
+        addNote(targetQueryId, noteText, currentActor);
+      } catch (err) {
+        // Non-fatal if the store rejects duplicate notes.
+        console.warn("addNote failed (non-fatal):", err);
+      }
+
+      toast.success("Activity saved successfully");
+      setIsLogModalOpen(false);
+      setLogMedium("");
+      setLogOutcome("");
+      setLogDate(todayISO());
+      setLogNextActionDate(todayISO());
+
+      // 3) Force UI re-read
+      setRefreshTick((t) => t + 1);
+    } catch (err) {
+      console.error("logFollowup failed:", err);
+      toast.error("Could not save activity. Please try again.");
+    } finally {
+      setSavingLog(false);
+    }
   };
 
+  // ------------------------------------------------------------------
+  // Update status
+  // ------------------------------------------------------------------
   const handleUpdateStatus = () => {
-    if (!newStatus) return;
+    if (!newStatus) {
+      toast.error("Please select a new status.");
+      return;
+    }
+    if ((newStatus === "WIN" || newStatus === "LOST") && !statusReason) {
+      toast.error("Please pick a reason for this outcome.");
+      return;
+    }
 
     let mappedStage: Stage = "Nurturing";
     if (newStatus === "WIN") mappedStage = "Confirmed";
     if (newStatus === "LOST") mappedStage = "Lost";
 
-    setQueryStage(query?.query_id || mockQueryDetails.id, mappedStage, currentActor);
-    
-    toast.success("Query status updated successfully");
-    setIsStatusModalOpen(false);
-    setNewStatus("");
-    setStatusReason("");
-    setInternalNote("");
+    setSavingStatus(true);
+    try {
+      // 1) Persist the stage change
+      setQueryStage(targetQueryId, mappedStage, currentActor);
+
+      // 2) Add a note describing the change (visible in the activity log)
+      const reasonPart = statusReason ? ` — ${statusReason}` : "";
+      const notePart = internalNote.trim() ? ` — ${internalNote.trim()}` : "";
+      const noteText = `Status updated to ${mappedStage}${reasonPart}${notePart}`;
+      try {
+        addNote(targetQueryId, noteText, currentActor);
+      } catch (err) {
+        console.warn("addNote failed (non-fatal):", err);
+      }
+
+      toast.success(`Status updated to ${mappedStage}.`);
+      setIsStatusModalOpen(false);
+      setNewStatus("");
+      setStatusReason("");
+      setInternalNote("");
+
+      // 3) Force UI re-read
+      setRefreshTick((t) => t + 1);
+    } catch (err) {
+      console.error("setQueryStage failed:", err);
+      toast.error("Could not update status. Please try again.");
+    } finally {
+      setSavingStatus(false);
+    }
   };
 
+  // ------------------------------------------------------------------
+  // Save costing (local-only toast for now — hook up to store if needed)
+  // ------------------------------------------------------------------
   const handleSaveCosting = () => {
     toast.success("Costing values updated successfully");
     setIsCostingModalOpen(false);
+    setRefreshTick((t) => t + 1);
   };
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8 bg-slate-50 min-h-screen rounded-xl">
-      {/* TOP HEADER with Gradient Background */}
+      {/* TOP HEADER */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 bg-gradient-to-r from-[#043b3a] via-[#0a5c59] to-[#098f8b] rounded-2xl p-6 shadow-lg relative overflow-hidden">
         <div className="relative z-10">
           <div className="flex items-center gap-3">
@@ -267,7 +384,7 @@ export default function QueryWorkspace() {
           <Button className="bg-white hover:bg-slate-100 text-teal-700" onClick={() => setIsLogModalOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add Action
           </Button>
-          
+
           <Button variant="outline" className="bg-transparent border-white/30 text-white hover:bg-white/10 hover:text-white" onClick={() => setIsStatusModalOpen(true)}>
             Update Status
           </Button>
@@ -319,14 +436,9 @@ export default function QueryWorkspace() {
 
       {/* TAB CONTENT */}
       <div className="mt-6">
-        {/* ================= OVERVIEW TAB (Matches Screenshots) ================= */}
         {tab === "Overview" && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-            
-            {/* 1. Left-Middle Column */}
             <div className="xl:col-span-2 space-y-6">
-              
-              {/* Query Overview Card */}
               <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h2 className="text-lg font-bold text-slate-900 mb-1">Query Overview</h2>
@@ -375,12 +487,11 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
 
-              {/* Program Snapshot Card */}
               <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Program Snapshot</h3>
                   <p className="text-xs text-muted-foreground mb-4">Selected programme and routing</p>
-                  
+
                   <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-lg p-4">
                     <div className="flex justify-between items-center mb-3">
                       <p className="text-xs font-bold text-teal-700 tracking-wider">{PROGRAM_SNAPSHOT.code}</p>
@@ -396,7 +507,6 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
 
-              {/* Latest Activity Card */}
               <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Latest Activity</h3>
@@ -429,13 +539,9 @@ export default function QueryWorkspace() {
                   </Button>
                 </CardContent>
               </Card>
-
             </div>
 
-            {/* 2. Right Column */}
             <div className="space-y-6">
-              
-              {/* Lifecycle Progress Card */}
               <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h2 className="text-lg font-bold text-slate-900">Lifecycle Progress</h2>
@@ -444,8 +550,6 @@ export default function QueryWorkspace() {
                   <div className="space-y-0">
                     {STAGES.filter(s => s !== "Confirmed" && s !== "Lost").map((stage, idx) => {
                       const isReached = STAGES.indexOf(status) >= STAGES.indexOf(stage);
-                      
-                      // Mocking dates to exactly match the screenshot
                       const stageDates: Record<string, string> = {
                         "New": "20 Jun 2026",
                         "Requirement Review": "20 Jun 2026",
@@ -477,14 +581,15 @@ export default function QueryWorkspace() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-slate-900">Confirmed / Lost</p>
-                        <p className="text-xs text-slate-500">Pending</p>
+                        <p className="text-xs text-slate-500">
+                          {status === "Confirmed" || status === "Lost" ? status : "Pending"}
+                        </p>
                       </div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Commercial Snapshot Card */}
               <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Commercial Snapshot</h3>
@@ -513,12 +618,11 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
 
-              {/* Follow-ups / Next Step Card (Red Highlight) */}
               <Card className="border-red-200 shadow-md shadow-red-100 hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Follow-ups / Next Step</h3>
                   <p className="text-xs text-muted-foreground mb-4">The next accountable action</p>
-                  
+
                   <div className="bg-gradient-to-r from-[#FDF1F1] to-red-50 border border-[#F3D4D4] rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-xs font-bold text-red-700 uppercase flex items-center gap-1">
@@ -533,12 +637,10 @@ export default function QueryWorkspace() {
                   </div>
                 </CardContent>
               </Card>
-
             </div>
           </div>
         )}
 
-        {/* ================= OTHER TABS (Fully Functional) ================= */}
         {tab === "Program Info" && (
           <div className="space-y-6">
             <Card className="border-slate-200 shadow-md">
@@ -607,7 +709,7 @@ export default function QueryWorkspace() {
             </div>
           </div>
         )}
-        
+
         {tab === "Commercials" && (
           <div className="space-y-6">
             <Card className="bg-gradient-to-r from-slate-50 to-white border-slate-200 shadow-md">
@@ -618,7 +720,7 @@ export default function QueryWorkspace() {
                     <p className="text-2xl font-bold text-teal-700 mt-1">{formatMoney(currentBottomLine)}</p>
                     <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
                   </div>
-                  
+
                   <Button variant="outline" size="sm" onClick={() => setIsCostingModalOpen(true)} className="border-teal-600 text-teal-700 hover:bg-teal-50 shadow-sm">
                     Edit Costing
                   </Button>
@@ -667,7 +769,7 @@ export default function QueryWorkspace() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-               <Card className="border-slate-200 shadow-md">
+              <Card className="border-slate-200 shadow-md">
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900">Hotel categories quoted</h3>
                   <p className="text-xs text-muted-foreground mb-4">1 category included in the commercial range</p>
@@ -704,7 +806,7 @@ export default function QueryWorkspace() {
             </div>
           </div>
         )}
-        
+
         {tab === "Itinerary & Costings" && (
           <div className="space-y-6">
             <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -741,7 +843,7 @@ export default function QueryWorkspace() {
                         <Button variant="outline" size="sm">Download</Button>
                       </div>
                     </div>
-                    
+
                     <div className="flex gap-4 border border-slate-200 rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity">
                       <div className="bg-blue-50 p-3 rounded-lg text-blue-600"><FileText className="h-6 w-6" /></div>
                       <div className="flex-1">
@@ -802,7 +904,7 @@ export default function QueryWorkspace() {
                 </div>
 
                 <p className="text-xs font-semibold text-slate-500 mb-6">Current stage: {status}</p>
-                
+
                 <div className="space-y-0">
                   {STAGES.filter(s => s !== "Confirmed" && s !== "Lost").map((stage, idx) => {
                     const isReached = STAGES.indexOf(status) >= STAGES.indexOf(stage);
@@ -824,12 +926,14 @@ export default function QueryWorkspace() {
                     );
                   })}
                   <div className="flex gap-4 items-center pt-1">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-                      <Circle className="h-5 w-5" />
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-full ${status === "Confirmed" || status === "Lost" ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                      {status === "Confirmed" || status === "Lost" ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
                     </div>
                     <div>
                       <p className="font-bold text-slate-900">Confirmed / Lost</p>
-                      <p className="text-xs text-slate-500">Pending</p>
+                      <p className="text-xs text-slate-500">
+                        {status === "Confirmed" || status === "Lost" ? status : "Pending"}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -840,7 +944,7 @@ export default function QueryWorkspace() {
               <CardContent className="p-6">
                 <h3 className="font-bold text-slate-900 mb-4">Lifecycle summary</h3>
                 <p className="text-xs text-muted-foreground mb-6">Key accountability signals</p>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase">Owner</p>
@@ -921,7 +1025,7 @@ export default function QueryWorkspace() {
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900 mb-4">Next action</h3>
                   <p className="text-xs text-muted-foreground mb-4">The next accountable client touchpoint</p>
-                  
+
                   <div className="bg-gradient-to-r from-[#043b3a] to-[#0a5c59] rounded-lg p-6 text-white shadow-lg">
                     <p className="text-xs font-bold opacity-70 uppercase">Due Date</p>
                     <p className="text-3xl font-bold mt-2">08 Aug 2026</p>
@@ -945,7 +1049,32 @@ export default function QueryWorkspace() {
                         placeholder="Next action date"
                         className="bg-white"
                       />
-                      <Button onClick={handleLogFollowup} disabled={!nextDate} className="bg-teal-600 hover:bg-teal-700">
+                      <Button
+                        onClick={() => {
+                          if (!followupNote.trim()) {
+                            toast.error("Please enter what was discussed.");
+                            return;
+                          }
+                          if (!nextDate) {
+                            toast.error("Please pick the next action date.");
+                            return;
+                          }
+                          try {
+                            const noteText = followupNote.trim();
+                            logFollowup(targetQueryId, noteText, new Date(nextDate).toISOString(), currentActor);
+                            try { addNote(targetQueryId, noteText, currentActor); } catch { /* non-fatal */ }
+                            toast.success("Follow-up scheduled.");
+                            setFollowupNote("");
+                            setNextDate("");
+                            setRefreshTick((t) => t + 1);
+                          } catch (err) {
+                            console.error("logFollowup failed:", err);
+                            toast.error("Could not schedule follow-up.");
+                          }
+                        }}
+                        disabled={!nextDate || !followupNote.trim()}
+                        className="bg-teal-600 hover:bg-teal-700"
+                      >
                         <CalendarClock className="mr-2 h-4 w-4" /> Schedule
                       </Button>
                     </div>
@@ -957,7 +1086,7 @@ export default function QueryWorkspace() {
                 <CardContent className="p-6">
                   <h3 className="font-bold text-slate-900 mb-4">Follow-up health</h3>
                   <p className="text-xs text-muted-foreground mb-6">Cadence and query position</p>
-                  
+
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                       <p className="text-[10px] font-semibold text-slate-500 uppercase">Total Follow-ups</p>
@@ -1008,16 +1137,16 @@ export default function QueryWorkspace() {
         )}
       </div>
 
-      {/* MODALS */}
-      
-      {/* Log Follow-up Modal */}
-      <Dialog open={isLogModalOpen} onOpenChange={setIsLogModalOpen}>
+      {/* ====================================================== */}
+      {/* LOG FOLLOW-UP MODAL */}
+      {/* ====================================================== */}
+      <Dialog open={isLogModalOpen} onOpenChange={(open) => !savingLog && setIsLogModalOpen(open)}>
         <DialogContent className="sm:max-w-[550px]">
           <DialogHeader>
             <DialogTitle>Log Follow-up</DialogTitle>
             <p className="text-xs text-slate-500">{mockQueryDetails.id} • {mockQueryDetails.customer}</p>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium">Activity date <span className="text-red-500">*</span></Label>
@@ -1034,8 +1163,13 @@ export default function QueryWorkspace() {
             </div>
 
             <div className="col-span-2 space-y-2">
-              <Label className="text-sm font-medium">Outcome / note</Label>
-              <Textarea placeholder="What was discussed or sent?" value={logOutcome} onChange={(e) => setLogOutcome(e.target.value)} className="min-h-[100px]" />
+              <Label className="text-sm font-medium">Outcome / note <span className="text-red-500">*</span></Label>
+              <Textarea
+                placeholder="What was discussed or sent?"
+                value={logOutcome}
+                onChange={(e) => setLogOutcome(e.target.value)}
+                className="min-h-[100px]"
+              />
             </div>
 
             <div className="col-span-2 space-y-2">
@@ -1045,20 +1179,34 @@ export default function QueryWorkspace() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLogModalOpen(false)}>Cancel</Button>
-            <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={handleLogFollowup}>Save activity</Button>
+            <Button variant="outline" onClick={() => setIsLogModalOpen(false)} disabled={savingLog}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+              onClick={handleLogFollowup}
+              disabled={savingLog}
+            >
+              {savingLog ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…</>
+              ) : (
+                "Save activity"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Update Status Modal */}
-      <Dialog open={isStatusModalOpen} onOpenChange={setIsStatusModalOpen}>
+      {/* ====================================================== */}
+      {/* UPDATE STATUS MODAL */}
+      {/* ====================================================== */}
+      <Dialog open={isStatusModalOpen} onOpenChange={(open) => !savingStatus && setIsStatusModalOpen(open)}>
         <DialogContent className="sm:max-w-[550px]">
           <DialogHeader>
             <DialogTitle>Update Query Status</DialogTitle>
             <p className="text-xs text-slate-500">{mockQueryDetails.id} • currently {status}</p>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium">New status <span className="text-red-500">*</span></Label>
@@ -1071,7 +1219,9 @@ export default function QueryWorkspace() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Reason / remark</Label>
+              <Label className="text-sm font-medium">
+                Reason / remark {(newStatus === "WIN" || newStatus === "LOST") && <span className="text-red-500">*</span>}
+              </Label>
               <Select value={statusReason} onValueChange={setStatusReason}>
                 <SelectTrigger><SelectValue placeholder="Select if applicable" /></SelectTrigger>
                 <SelectContent>
@@ -1082,7 +1232,12 @@ export default function QueryWorkspace() {
 
             <div className="space-y-2">
               <Label className="text-sm font-medium">Internal note</Label>
-              <Textarea placeholder="" value={internalNote} onChange={(e) => setInternalNote(e.target.value)} className="min-h-[100px]" />
+              <Textarea
+                placeholder="Add any context for this change…"
+                value={internalNote}
+                onChange={(e) => setInternalNote(e.target.value)}
+                className="min-h-[100px]"
+              />
             </div>
 
             <div className="bg-teal-50 border border-teal-100 rounded-md p-4">
@@ -1103,21 +1258,35 @@ export default function QueryWorkspace() {
           <DialogFooter className="flex justify-between items-center border-t pt-4">
             <p className="text-xs text-slate-400">Every change is added to the query activity history.</p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setIsStatusModalOpen(false)}>Cancel</Button>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={handleUpdateStatus}>Update status</Button>
+              <Button variant="outline" onClick={() => setIsStatusModalOpen(false)} disabled={savingStatus}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+                onClick={handleUpdateStatus}
+                disabled={savingStatus}
+              >
+                {savingStatus ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating…</>
+                ) : (
+                  "Update status"
+                )}
+              </Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Costing Modal */}
+      {/* ====================================================== */}
+      {/* EDIT COSTING MODAL */}
+      {/* ====================================================== */}
       <Dialog open={isCostingModalOpen} onOpenChange={setIsCostingModalOpen}>
         <DialogContent className="sm:max-w-[550px]">
           <DialogHeader>
             <DialogTitle>Edit Commercials</DialogTitle>
             <p className="text-xs text-slate-500">{mockQueryDetails.id} • Costing Range</p>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium">Pax / Travellers</Label>
@@ -1155,7 +1324,6 @@ export default function QueryWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }

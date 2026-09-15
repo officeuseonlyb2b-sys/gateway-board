@@ -11,7 +11,7 @@ export type CwbMode = "amount" | "rule";
 
 // Preset season names + fixed month/day ranges. `year` is used to build a full
 // ISO date for the currently-being-edited season; both fields remain editable.
-export const SEASON_PRESETS = ["Summer", "Winter", "Wildlife", "Wildlife Buffer"] as const;
+ const SEASON_PRESETS = ["Summer", "Winter", "Wildlife", "Wildlife Buffer"] as const;
 export type SeasonPreset = typeof SEASON_PRESETS[number];
 
 export function seasonPresetRange(preset: SeasonPreset, year = new Date().getFullYear()): { from: string; to: string } {
@@ -75,52 +75,201 @@ export const emptyRoom = (): RoomBlock => ({ id: rid(), name: "", seasons: [empt
 
 const s = (v: unknown) => (v == null ? "" : String(v));
 
+/**
+ * Read a RatePlan property safely, including the legacy/camelCase names that
+ * may exist in records created by older imports/versions of the app.
+ *
+ * This is intentionally read-only. It does not change the DB schema or the
+ * way rates are saved; it only makes Edit correctly hydrate existing values.
+ */
+function readPlanField(plan: RatePlan, ...keys: string[]): unknown {
+  const record = plan as unknown as Record<string, unknown>;
+
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null) return value;
+  }
+
+  return undefined;
+}
+
+function normalizeMealPlan(value: unknown): string {
+  return s(value).trim().toUpperCase().replace(/\\s+/g, "");
+}
+
+function readMealPlan(plan: RatePlan): string {
+  return normalizeMealPlan(
+    readPlanField(plan, "meal_plan", "mealPlan", "mealplan", "plan")
+  );
+}
+
+function readRate(plan: RatePlan | undefined, ...keys: string[]): string {
+  if (!plan) return "";
+  return s(readPlanField(plan, ...keys));
+}
+
 // Hydrate rooms + rate plans (from DB) into editor state, grouping rate plans
 // per (room, validity_start, validity_end, season_label) into one SeasonBlock.
 export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): RoomBlock[] {
   return rooms.map((r) => {
-    const roomPlans = plans.filter((p) => p.room_category_id === r.id);
+    const roomPlans = plans.filter((p) => {
+      const roomId = readPlanField(p, "room_category_id", "roomCategoryId");
+      return roomId === r.id;
+    });
+
     const groups = new Map<string, RatePlan[]>();
+
     for (const p of roomPlans) {
-      const key = `${p.validity_start}|${p.validity_end}|${p.season_label}`;
+      const validityStart = s(
+        readPlanField(p, "validity_start", "validityStart", "valid_from", "validFrom")
+      );
+      const validityEnd = s(
+        readPlanField(p, "validity_end", "validityEnd", "valid_to", "validTo")
+      );
+      const seasonLabel = s(
+        readPlanField(p, "season_label", "seasonLabel", "season")
+      );
+
+      const key = `${validityStart}|${validityEnd}|${seasonLabel}`;
+
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(p);
     }
+
     const seasons: SeasonBlock[] = [];
+
     for (const grp of groups.values()) {
-      const cp = grp.find((p) => p.meal_plan === "CP");
-      const map = grp.find((p) => p.meal_plan === "MAP");
-      const ap = grp.find((p) => p.meal_plan === "AP");
+      const cp = grp.find((p) => readMealPlan(p) === "CP");
+      const map = grp.find((p) => readMealPlan(p) === "MAP");
+      const ap = grp.find((p) => readMealPlan(p) === "AP");
       const base = grp[0];
+
+      const validityStart = s(
+        readPlanField(base, "validity_start", "validityStart", "valid_from", "validFrom")
+      );
+      const validityEnd = s(
+        readPlanField(base, "validity_end", "validityEnd", "valid_to", "validTo")
+      );
+      const seasonLabel = s(
+        readPlanField(base, "season_label", "seasonLabel", "season")
+      );
+
+      const cpQuad = readRate(cp, "quad_rate", "quadRate", "quad", "quad_room_rate");
+      const mapQuad = readRate(map, "quad_rate", "quadRate", "quad", "quad_room_rate");
+      const apQuad = readRate(ap, "quad_rate", "quadRate", "quad", "quad_room_rate");
+
       seasons.push({
-        season_label: base.season_label ?? "",
-        validity_start: base.validity_start,
-        validity_end: base.validity_end,
-        cp_single: s(cp?.single_rate), cp_double: s(cp?.double_rate),
-        map_single: s(map?.single_rate), map_double: s(map?.double_rate),
-        ap_single: s(ap?.single_rate), ap_double: s(ap?.double_rate),
-        has_quad: !!(cp?.quad_rate || map?.quad_rate || ap?.quad_rate),
-        cp_quad: s(cp?.quad_rate ?? ""), map_quad: s(map?.quad_rate ?? ""), ap_quad: s(ap?.quad_rate ?? ""),
-        extra_bed: s(base.extra_bed_rate),
-        cwb_mode: base.cwb_rule_text ? "rule" : "amount",
-        cwb_amount: s(base.cwb_rate ?? ""),
-        cwb_rule: base.cwb_rule_text ?? "",
-        lunch: s(base.lunch_rate ?? ""),
-        dinner: s(base.dinner_rate ?? ""),
-        extra_breakfast: s(base.extra_breakfast_rate ?? ""),
-        xmas: s(base.xmas_supplement ?? ""),
-        xmas_type: base.xmas_supplement_type ?? "per_person",
-        xmas_date_from: base.xmas_date_from ?? "",
-        xmas_date_to: base.xmas_date_to ?? "",
-        newyear: s(base.newyear_supplement ?? ""),
-        newyear_type: base.newyear_supplement_type ?? "per_person",
-        newyear_date_from: base.newyear_date_from ?? "",
-        newyear_date_to: base.newyear_date_to ?? "",
-        remarks: base.remarks ?? "",
-        include_in_quote: base.include_in_quote !== false,
+        season_label: seasonLabel,
+        validity_start: validityStart,
+        validity_end: validityEnd,
+
+        // IMPORTANT: keep the stored values exactly as strings so inputs show
+        // the existing CP / MAP / AP rates when Edit is opened.
+        cp_single: readRate(cp, "single_rate", "singleRate", "single", "sgl_rate", "sglRate"),
+        cp_double: readRate(cp, "double_rate", "doubleRate", "double", "dbl_rate", "dblRate"),
+        map_single: readRate(map, "single_rate", "singleRate", "single", "sgl_rate", "sglRate"),
+        map_double: readRate(map, "double_rate", "doubleRate", "double", "dbl_rate", "dblRate"),
+        ap_single: readRate(ap, "single_rate", "singleRate", "single", "sgl_rate", "sglRate"),
+        ap_double: readRate(ap, "double_rate", "doubleRate", "double", "dbl_rate", "dblRate"),
+
+        has_quad: [cpQuad, mapQuad, apQuad].some((v) => v !== ""),
+        cp_quad: cpQuad,
+        map_quad: mapQuad,
+        ap_quad: apQuad,
+
+        extra_bed: readRate(
+          base,
+          "extra_bed_rate",
+          "extraBedRate",
+          "extra_bed",
+          "extraBed"
+        ),
+
+        cwb_mode:
+          readRate(base, "cwb_rule_text", "cwbRuleText", "cwb_rule", "cwbRule")
+            ? "rule"
+            : "amount",
+
+        cwb_amount: readRate(base, "cwb_rate", "cwbRate", "cwb_amount", "cwbAmount"),
+        cwb_rule: readRate(base, "cwb_rule_text", "cwbRuleText", "cwb_rule", "cwbRule"),
+
+        lunch: readRate(base, "lunch_rate", "lunchRate", "lunch"),
+        dinner: readRate(base, "dinner_rate", "dinnerRate", "dinner"),
+        extra_breakfast: readRate(
+          base,
+          "extra_breakfast_rate",
+          "extraBreakfastRate",
+          "extra_breakfast",
+          "extraBreakfast"
+        ),
+
+        xmas: readRate(base, "xmas_supplement", "xmasSupplement", "xmas"),
+        xmas_type:
+          (readPlanField(
+            base,
+            "xmas_supplement_type",
+            "xmasSupplementType",
+            "xmas_type",
+            "xmasType"
+          ) as SupplementType) ?? "per_person",
+        xmas_date_from: s(
+          readPlanField(
+            base,
+            "xmas_date_from",
+            "xmasDateFrom"
+          )
+        ),
+        xmas_date_to: s(
+          readPlanField(
+            base,
+            "xmas_date_to",
+            "xmasDateTo"
+          )
+        ),
+
+        newyear: readRate(
+          base,
+          "newyear_supplement",
+          "newYearSupplement",
+          "newyearSupplement",
+          "newyear"
+        ),
+        newyear_type:
+          (readPlanField(
+            base,
+            "newyear_supplement_type",
+            "newYearSupplementType",
+            "newyearSupplementType",
+            "newyear_type",
+            "newyearType"
+          ) as SupplementType) ?? "per_person",
+        newyear_date_from: s(
+          readPlanField(
+            base,
+            "newyear_date_from",
+            "newYearDateFrom"
+          )
+        ),
+        newyear_date_to: s(
+          readPlanField(
+            base,
+            "newyear_date_to",
+            "newYearDateTo"
+          )
+        ),
+
+        remarks: s(readPlanField(base, "remarks", "note", "notes")),
+
+        include_in_quote:
+          readPlanField(base, "include_in_quote", "includeInQuote") !== false,
       });
     }
-    return { id: r.id, name: r.name, seasons: seasons.length ? seasons : [emptySeason()] };
+
+    return {
+      id: r.id,
+      name: r.name,
+      seasons: seasons.length ? seasons : [emptySeason()],
+    };
   });
 }
 
