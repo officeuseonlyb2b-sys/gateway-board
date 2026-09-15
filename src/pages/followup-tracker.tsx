@@ -34,7 +34,7 @@ function FollowupTable({ rows, empty }: { rows: CrmQuery[]; empty: string }) {
           {rows.map((q) => (
             <tr key={q.id} className="hover:bg-muted/40">
               <td className="px-3 py-2 font-medium">
-                <Link to="/query/$queryId" params={{ queryId: q.query_id }} className="text-primary hover:underline">
+                <Link to="/queries/$id" params={{ id: q.query_id }} className="text-primary hover:underline">
                   {q.query_id}
                 </Link>
               </td>

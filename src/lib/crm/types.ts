@@ -63,6 +63,17 @@ export interface CrmTask {
   assigned_at?: string;
   priority?: string;
   completed_at?: string;
+  owner_user_id?: string;
+  item_kind?: "task" | "followup";
+  followup_type?: FollowupType;
+  purpose?: string;
+  status?: "pending" | "completed" | "cancelled";
+  outcome?: FollowupOutcome;
+  completed_by?: string;
+  cancelled_at?: string;
+  cancelled_reason?: string;
+  next_followup_at?: string;
+  dedupe_key?: string;
   // NEW: daily progress updates
   updates?: {
     timestamp: string;
@@ -132,7 +143,38 @@ export interface CrmQuery {
   last_activity_at?: string;
   followup_note?: string;
   followup_done_at?: string;
+  owner_user_id?: string;
+  sub_stage?: QuerySubStage;
+  next_action_due?: string;
+  lost_reason?: string;
+  reopened_at?: string;
+  escalated_at?: string;
 }
+
+export const QUERY_SUB_STAGES = [
+  "Unassigned", "First Contact", "Requirement Pending", "Requirement Complete",
+  "Costing In Progress", "Quotation Ready", "Quotation Sent", "Awaiting Response",
+  "Callback Requested", "Negotiation", "Waiting for Approval", "Won", "Lost",
+] as const;
+export type QuerySubStage = (typeof QUERY_SUB_STAGES)[number];
+
+export const FOLLOWUP_TYPES = [
+  "Customer Call", "WhatsApp", "Email", "Quotation Follow-up", "Payment Follow-up",
+  "Requirement Follow-up", "Internal Follow-up", "Other",
+] as const;
+export type FollowupType = (typeof FOLLOWUP_TYPES)[number];
+
+export const FOLLOWUP_OUTCOMES = [
+  "Connected", "No Answer", "Callback Requested", "Interested", "Not Interested",
+  "Price Issue", "Date Issue", "Hotel Issue", "Waiting for Family", "Waiting for Approval",
+  "Quotation Requested", "Negotiation", "Won", "Lost", "Other",
+] as const;
+export type FollowupOutcome = (typeof FOLLOWUP_OUTCOMES)[number];
+
+export const LOST_REASONS = [
+  "Price Too High", "Competitor", "No Response", "Travel Date Issue", "Customer Cancelled",
+  "Destination Changed", "No Budget", "Other",
+] as const;
 
 export interface Executive {
   id: string;
@@ -179,6 +221,12 @@ export type CrmEventType =
   | "customer_replied"
   | "negotiation_started"
   | "priority_changed"
+  | "sub_stage_changed"
+  | "requirement_updated"
+  | "quotation_created"
+  | "quotation_revised"
+  | "reopened"
+  | "manager_escalated"
   // NEW: progress update on a task
   | "task_updated";
 
@@ -205,6 +253,9 @@ export interface CrmEvent {
   duration_hours?: number;
   /** overdue tracking */
   overdue_hours?: number;
+  dedupe_key?: string;
+  outcome?: FollowupOutcome;
+  reason?: string;
 }
 
 export const EVENT_LABELS: Record<CrmEventType, string> = {
@@ -236,6 +287,12 @@ export const EVENT_LABELS: Record<CrmEventType, string> = {
   customer_replied: "Customer replied",
   negotiation_started: "Negotiation started",
   priority_changed: "Priority changed",
+  sub_stage_changed: "Sub-stage changed",
+  requirement_updated: "Requirement updated",
+  quotation_created: "Quotation created",
+  quotation_revised: "Quotation revised",
+  reopened: "Reopened",
+  manager_escalated: "Manager escalated",
   task_updated: "Task updated", // NEW
 };
 
@@ -243,6 +300,14 @@ export const EVENT_LABELS: Record<CrmEventType, string> = {
 export const CONTACT_EVENTS: CrmEventType[] = [
   "call_made", "call_connected", "call_not_connected", "whatsapp_sent", "email_sent",
   "followup_logged", "followup_completed", "customer_replied", "negotiation_started",
+];
+
+export const MEANINGFUL_EVENTS: CrmEventType[] = [
+  "call_made", "call_connected", "call_not_connected", "whatsapp_sent", "email_sent",
+  "customer_replied", "requirement_updated", "quotation_started", "quotation_created",
+  "quotation_updated", "quotation_revised", "quotation_sent", "followup_logged",
+  "followup_completed", "task_completed", "stage_changed", "sub_stage_changed",
+  "priority_changed", "won", "lost", "reopened", "negotiation_started",
 ];
 
 export const LEAD_PRIORITIES = ["Low", "Medium", "High", "Urgent"] as const;
