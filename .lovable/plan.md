@@ -10,6 +10,8 @@ The audit also found production gaps that explain the disconnected workflow:
 - New Lead creates the shared CRM query, assignment events, and first task, but not a durable notification.
 - Follow-up state is only partly structured and is split between query fields and tasks.
 - Notifications and saved quotes are browser-local; notification links do not consistently open the canonical Query Detail.
+- Costing has two save paths without idempotency, so one editing session can create duplicate quotes/versions; reopening linked costing starts a fresh draft instead of resuming safely.
+- “Quotation Sent” events are supported by the CRM but no live quote action triggers them, and the Query Detail commercial editor currently saves only a toast.
 - CRM synchronization uploads whole snapshots, allowing stale clients to overwrite newer row data.
 - Query numbers are client-generated from array length, so concurrent creation can collide.
 - Query Detail and dashboard screens still contain hardcoded or mock sections and disconnected controls.
@@ -65,6 +67,7 @@ The audit also found production gaps that explain the disconnected workflow:
 - Preserve every existing costing formula, step, field, and visual layout.
 - Keep linked query identity and safe prefill throughout the existing quotation flow.
 - On linked save/revision, persist the quote and immutable costing version, update commercials/lifecycle, and append costing/quotation events.
+- Make both existing save entry points call one idempotent save operation, and resume an existing linked draft when appropriate.
 - Add explicit quotation-created, revised, sent, and opened-from-query actions using the existing quote and CRM stores.
 - When a quotation is marked sent, schedule exactly one “Quotation follow-up” for three days later unless an equivalent open follow-up already exists.
 
