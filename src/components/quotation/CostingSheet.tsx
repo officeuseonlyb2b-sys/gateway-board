@@ -432,10 +432,10 @@ const td =
   "p-1.5 text-right tabular-nums whitespace-nowrap";
 
 /**
- * Existing calculation used by all NON-ACTIVITY categories.
+ * Existing calculation used by all NON-ACTIVITY and NON-ENTRANCE categories.
  *
  * DO NOT change this because Activity & Experiences
- * has its own calculation below.
+ * and Monument Entrances have their own calculation below.
  */
 function applyMarkupAndGst(
   base: number,
@@ -460,9 +460,9 @@ function applyMarkupAndGst(
 }
 
 /**
- * ACTIVITY & EXPERIENCES ONLY
+ * ACTIVITY & EXPERIENCES + MONUMENT ENTRANCES
  *
- * The activity amount is a GROUP TOTAL.
+ * The activity / entrance amount is a GROUP TOTAL.
  *
  * Example:
  *
@@ -489,7 +489,7 @@ function applyMarkupAndGst(
  * ₹2,482 + ₹124
  * = ₹2,606
  *
- * This function is used ONLY for Activities.
+ * This function is used ONLY for Activities and Entrances.
  */
 function applyActivityMarkupAndGst(
   baseTotal: number,
@@ -521,8 +521,8 @@ function applyActivityMarkupAndGst(
     basePlusMarkup + gstAmt;
 
   /*
-   * The actual activity total remains unchanged.
-   * We do NOT multiply the activity total by pax.
+   * The actual activity / entrance total remains unchanged.
+   * We do NOT multiply the total by pax.
    */
   return {
     baseTotal,
@@ -678,6 +678,21 @@ function pickActivitySlab<
  * It is NOT divided by pax in the activity list.
  */
 function getActivityDisplayAmount(
+  opt: SheetOption,
+): number {
+  return opt.amount;
+}
+
+/**
+ * Entrance amount shown in the entrance column.
+ *
+ * Entrance is treated as a TOTAL amount (same as Activity).
+ *
+ * Therefore:
+ * ₹600 stays ₹600.
+ * It is NOT divided by pax in the entrance list.
+ */
+function getEntranceDisplayAmount(
   opt: SheetOption,
 ): number {
   return opt.amount;
@@ -881,7 +896,6 @@ function OptionCell({
   };
 
   const perPersonBuckets: Bucket[] = [
-    "entrances",
     "misc",
   ];
 
@@ -895,15 +909,18 @@ function OptionCell({
       <div className="space-y-1">
         {opts.map((o) => {
           /*
-           * ACTIVITY:
+           * ACTIVITY & ENTRANCES:
            * Always show the TOTAL amount.
            *
-           * Entrances/Misc:
+           * Misc:
            * Keep existing per-person behavior.
            */
           const displayAmount =
-            bucket === "activities"
-              ? getActivityDisplayAmount(o)
+            bucket === "activities" ||
+            bucket === "entrances"
+              ? bucket === "activities"
+                ? getActivityDisplayAmount(o)
+                : getEntranceDisplayAmount(o)
               : showPerPerson
                 ? getPerPersonAmount(
                     o,
@@ -1423,10 +1440,14 @@ function LandPartBlock({
                       <div className="space-y-1">
                         {r.entrance_opts.map(
                           (o) => {
-                            const perPerson =
-                              getPerPersonAmount(
+                            /*
+                             * ENTRANCES:
+                             * Show the TOTAL amount (same as Activities).
+                             * Do NOT divide by pax.
+                             */
+                            const displayAmount =
+                              getEntranceDisplayAmount(
                                 o,
-                                pax,
                               );
 
                             return (
@@ -1463,7 +1484,7 @@ function LandPartBlock({
                                   }`}
                                 >
                                   {inr(
-                                    perPerson,
+                                    displayAmount,
                                   )}
                                 </span>
                               </label>
@@ -1556,6 +1577,12 @@ function LandPartBlock({
             const activityGstTotal = (land.activities_total + activityMarkupTotal) * (pct.gst / 100);
             const activityTotalFinal = land.activities_total + activityMarkupTotal + activityGstTotal;
             const activityPerPerson = activityTotalFinal / pax;
+
+            // ===== FIXED: Entrance total markup and GST on total, not per-person =====
+            const entranceMarkupTotal = land.entrances_total * (pct.mk / 100);
+            const entranceGstTotal = (land.entrances_total + entranceMarkupTotal) * (pct.gst / 100);
+            const entranceTotalFinal = land.entrances_total + entranceMarkupTotal + entranceGstTotal;
+            const entrancePerPerson = entranceTotalFinal / pax;
 
             const renderVehicleCells =
               (values: number[], empty = false) => (
@@ -1651,13 +1678,12 @@ function LandPartBlock({
                     )}
                   </td>
 
+                  {/* ENTRANCE MARKUP TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      land.entrances_total *
-                        (pct.mk /
-                          100),
+                      entranceMarkupTotal,
                     )}
                   </td>
 
@@ -1706,18 +1732,12 @@ function LandPartBlock({
                     )}
                   </td>
 
+                  {/* ENTRANCE GST TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      (
-                        land.entrances_total *
-                        (1 +
-                          pct.mk /
-                            100)
-                      ) *
-                        (pct.gst /
-                          100),
+                      entranceGstTotal,
                     )}
                   </td>
 
@@ -1772,15 +1792,13 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  <td className={td}>
-                    {inr(
-                      land.entrances_total *
-                        (1 + pct.mk / 100) *
-                        (1 + pct.gst / 100),
-                    )}
+                  {/* ENTRANCE TOTAL FINAL */}
+                  <td className={`${td} font-semibold`}>
+                    {inr(entranceTotalFinal)}
                   </td>
 
-                  <td className={td}>
+                  {/* ACTIVITY TOTAL FINAL */}
+                  <td className={`${td} font-semibold`}>
                     {inr(activityTotalFinal)}
                   </td>
 
@@ -1820,23 +1838,12 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  <td
-                    className={td}
-                  >
-                    {inr(
-                      (
-                        land.entrances_total *
-                        (1 +
-                          pct.mk /
-                            100) *
-                        (1 +
-                          pct.gst /
-                            100)
-                      ) / pax,
-                    )}
+                  {/* ENTRANCE PER PERSON */}
+                  <td className={`${td} font-bold`}>
+                    {inr(entrancePerPerson)}
                   </td>
 
-                  {/* FINAL ACTIVITY PER PERSON */}
+                  {/* ACTIVITY PER PERSON */}
                   <td
                     className={`${td} font-bold`}
                   >
@@ -3124,7 +3131,6 @@ function RateSheetBlock({
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const selectable = !!(
-
     set &&
     draft &&
     optionKey
@@ -3223,13 +3229,23 @@ function RateSheetBlock({
   };
 
   const landPerPerson = {
+    /*
+     * Entrances are now treated as a GROUP TOTAL
+     * (same as Activities).
+     *
+     * The pre-computed value here uses the overall
+     * pax and is kept for backwards compatibility.
+     * Each rate-sheet row recomputes entrances
+     * using its own pax via
+     * `getEntrancesPerPersonForPax`.
+     */
     entrances:
-      applyMarkupAndGst(
+      applyActivityMarkupAndGst(
         land.entrances_total,
         landPct.mk,
         landPct.gst,
         pax,
-      ).per_person,
+      ).finalPerPerson,
 
     /*
      * Activity is calculated dynamically
@@ -3298,16 +3314,23 @@ function RateSheetBlock({
       const activities = getActivitiesPerPersonForPax(
         land, db, r.pax, landPct,
       );
+      /*
+       * Entrances: recompute per row using its own pax.
+       * Same pattern as Activities.
+       */
+      const entrances = getEntrancesPerPersonForPax(
+        land, r.pax, landPct,
+      );
       const common =
         r.transport + r.guide + r.escort +
-        landPerPerson.entrances + activities + landPerPerson.misc;
+        entrances + activities + landPerPerson.misc;
       return {
         vehicle: g.vehicle,
         pax: r.pax,
         transport: r.transport,
         guide: r.guide,
         escort: r.escort,
-        entrances: landPerPerson.entrances,
+        entrances,
         activities,
         misc: landPerPerson.misc,
         single: r.single,
@@ -3698,6 +3721,78 @@ function getActivitiesPerPersonForPax(
   );
 }
 
+/**
+ * ENTRANCE RATE SHEET
+ *
+ * Same pattern as Activities:
+ *
+ * Entrance Total (group total)
+ * ÷ Pax
+ * = rounded Entrance Per Person
+ *
+ * Then:
+ * + Markup
+ * + GST
+ *
+ * Example for 7 pax:
+ * ₹4,200 / 7 = ₹600
+ * Markup 10% = ₹60
+ * GST 5% = ₹33
+ * Final = ₹693
+ */
+function getEntrancesPerPersonForPax(
+  land: LandPartSheet,
+  pax: number,
+  landPct: {
+    mk: number;
+    gst: number;
+  },
+): number {
+  const safePax =
+    Math.max(
+      1,
+      Math.round(pax),
+    );
+
+  /*
+   * Sum of checked entrance amounts.
+   * Each entrance amount is a GROUP TOTAL.
+   */
+  const total =
+    land.rows.reduce(
+      (sum, row) =>
+        sum +
+        row.entrance_opts.reduce(
+          (
+            rowSum,
+            option,
+          ) => {
+            if (!option.checked) {
+              return rowSum;
+            }
+            return (
+              rowSum +
+              option.amount
+            );
+          },
+          0,
+        ),
+      0,
+    );
+
+  const entranceCalc =
+    applyActivityMarkupAndGst(
+      total,
+      landPct.mk,
+      landPct.gst,
+      safePax,
+    );
+
+  return (
+    entranceCalc.finalPerPerson
+  );
+}
+
 function FragmentGroup({
   group: g,
   land,
@@ -3783,11 +3878,24 @@ function FragmentGroup({
             landPct,
           );
 
+        /*
+         * ENTRANCE:
+         *
+         * Same pattern as Activities — recompute
+         * using the exact pax of this row.
+         */
+        const entrancesPerPerson =
+          getEntrancesPerPersonForPax(
+            land,
+            r.pax,
+            landPct,
+          );
+
         const commonLandPerPerson =
           r.transport +
           r.guide +
           r.escort +
-          landPerPerson.entrances +
+          entrancesPerPerson +
           activitiesPerPerson +
           landPerPerson.misc;
 
@@ -3863,9 +3971,12 @@ function FragmentGroup({
               )}
             </td>
 
-            <td className={td}>
+            {/* ENTRANCE FINAL PER PERSON */}
+            <td
+              className={`${td} font-semibold`}
+            >
               {inr(
-                landPerPerson.entrances,
+                entrancesPerPerson,
               )}
             </td>
 
