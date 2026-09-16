@@ -1,10 +1,11 @@
 // Wizard mock stores for agents & saved programs (localStorage-backed).
 import { useSyncExternalStore } from "react";
 
-export type AgentStatus = "Active" | "Inactive";
+export type AgentStatus = "Active" | "Inactive" | "Prospect" | "Dormant";
 
 export interface Agent {
   id: string;
+  agent_code?: string;
   // Basic
   name: string;
   agency: string;
@@ -32,6 +33,10 @@ export interface Agent {
   whatsapp?: string;
   notes?: string;
   internal_remarks?: string;
+  relationship_owner?: string;
+  designation?: string;
+  gender?: string;
+  specializations?: string[];
   // Status
   status?: AgentStatus;
   // Audit
@@ -68,57 +73,115 @@ let programCache: SavedProgram[] = [];
 let aInit = false;
 let pInit = false;
 
-function nowIso() { return new Date().toISOString(); }
+function nowIso() {
+  return new Date().toISOString();
+}
 
 function seedAgents(): Agent[] {
-  const now = nowIso();
-  return [
-    { id: "ag1", name: "Rahul Verma", agency: "SkyWings Travels", contact_person: "Rahul Verma", phone: "+91 98100 12345", email: "rahul@skywings.in", city: "Delhi", state: "Delhi", country: "India", status: "Active", created_at: now, updated_at: now },
-    { id: "ag2", name: "Sneha Kapoor", agency: "Heritage Trails", contact_person: "Sneha Kapoor", phone: "+91 98800 55600", email: "sneha@heritagetrails.in", city: "Mumbai", state: "Maharashtra", country: "India", status: "Active", created_at: now, updated_at: now },
-    { id: "ag3", name: "Vikram Rao", agency: "Golden Path Holidays", contact_person: "Vikram Rao", phone: "+91 97400 90011", email: "vikram@goldenpath.in", city: "Bengaluru", state: "Karnataka", country: "India", status: "Active", created_at: now, updated_at: now },
-  ];
+  return [];
 }
 function seedPrograms(): SavedProgram[] {
-  const defaultInclusions = ["Accommodation on twin sharing", "Daily breakfast", "All transfers & sightseeing by AC vehicle", "All applicable taxes"];
-  const defaultExclusions = ["Airfare / train fare unless specified", "Lunch & dinner unless specified", "Personal expenses (laundry, tips, phone calls)", "Anything not mentioned in inclusions"];
+  const defaultInclusions = [
+    "Accommodation on twin sharing",
+    "Daily breakfast",
+    "All transfers & sightseeing by AC vehicle",
+    "All applicable taxes",
+  ];
+  const defaultExclusions = [
+    "Airfare / train fare unless specified",
+    "Lunch & dinner unless specified",
+    "Personal expenses (laundry, tips, phone calls)",
+    "Anything not mentioned in inclusions",
+  ];
   return [
     {
-      id: "pg1", name: "Classic Golden Triangle", nights: 5, categories: ["Heritage", "Cultural"],
-      departure_city: "Bhopal", travel_modes: ["car"],
+      id: "pg1",
+      name: "Classic Golden Triangle",
+      nights: 5,
+      categories: ["Heritage", "Cultural"],
+      departure_city: "Bhopal",
+      travel_modes: ["car"],
       routing: [
-        { day: 1, overnight_city: "Bhopal", program_text: "Arrival at Bhopal, check-in, evening city tour." },
-        { day: 2, overnight_city: "Khajuraho", program_text: "Bhopal to Khajuraho via Sanchi Stupa." },
-        { day: 3, overnight_city: "Khajuraho", program_text: "Khajuraho temples — Western & Eastern groups." },
-        { day: 4, overnight_city: "Orchha", program_text: "Khajuraho to Orchha, Orchha fort visit." },
-        { day: 5, overnight_city: "Bhopal", program_text: "Orchha to Bhopal, en-route sightseeing." },
+        {
+          day: 1,
+          overnight_city: "Bhopal",
+          program_text: "Arrival at Bhopal, check-in, evening city tour.",
+        },
+        {
+          day: 2,
+          overnight_city: "Khajuraho",
+          program_text: "Bhopal to Khajuraho via Sanchi Stupa.",
+        },
+        {
+          day: 3,
+          overnight_city: "Khajuraho",
+          program_text: "Khajuraho temples — Western & Eastern groups.",
+        },
+        {
+          day: 4,
+          overnight_city: "Orchha",
+          program_text: "Khajuraho to Orchha, Orchha fort visit.",
+        },
+        {
+          day: 5,
+          overnight_city: "Bhopal",
+          program_text: "Orchha to Bhopal, en-route sightseeing.",
+        },
         { day: 6, overnight_city: null, program_text: "Departure from Bhopal." },
       ],
-      inclusions: defaultInclusions, exclusions: defaultExclusions,
+      inclusions: defaultInclusions,
+      exclusions: defaultExclusions,
     },
     {
-      id: "pg2", name: "MP Wildlife Circuit", nights: 6, categories: ["Wildlife", "Heritage"],
-      departure_city: "Bhopal", travel_modes: ["car"],
+      id: "pg2",
+      name: "MP Wildlife Circuit",
+      nights: 6,
+      categories: ["Wildlife", "Heritage"],
+      departure_city: "Bhopal",
+      travel_modes: ["car"],
       routing: [
-        { day: 1, overnight_city: "Bhopal", program_text: "Arrival at Bhopal, check-in, city tour." },
+        {
+          day: 1,
+          overnight_city: "Bhopal",
+          program_text: "Arrival at Bhopal, check-in, city tour.",
+        },
         { day: 2, overnight_city: "Indore", program_text: "Bhopal to Indore via Sanchi Stupa." },
         { day: 3, overnight_city: "Khajuraho", program_text: "Indore to Khajuraho, temple visit." },
-        { day: 4, overnight_city: "Gwalior", program_text: "Khajuraho temples morning, drive to Gwalior." },
-        { day: 5, overnight_city: "Ujjain", program_text: "Gwalior Fort, Jai Vilas Palace, drive to Ujjain." },
-        { day: 6, overnight_city: "Jabalpur", program_text: "Mahakaleshwar temple, drive to Jabalpur." },
+        {
+          day: 4,
+          overnight_city: "Gwalior",
+          program_text: "Khajuraho temples morning, drive to Gwalior.",
+        },
+        {
+          day: 5,
+          overnight_city: "Ujjain",
+          program_text: "Gwalior Fort, Jai Vilas Palace, drive to Ujjain.",
+        },
+        {
+          day: 6,
+          overnight_city: "Jabalpur",
+          program_text: "Mahakaleshwar temple, drive to Jabalpur.",
+        },
         { day: 7, overnight_city: null, program_text: "Marble Rocks, Dhuandhar Falls, departure." },
       ],
-      inclusions: defaultInclusions, exclusions: defaultExclusions,
+      inclusions: defaultInclusions,
+      exclusions: defaultExclusions,
     },
     {
-      id: "pg3", name: "Khajuraho Heritage Escape", nights: 3, categories: ["Heritage"],
-      departure_city: "Bhopal", travel_modes: ["car"],
+      id: "pg3",
+      name: "Khajuraho Heritage Escape",
+      nights: 3,
+      categories: ["Heritage"],
+      departure_city: "Bhopal",
+      travel_modes: ["car"],
       routing: [
         { day: 1, overnight_city: "Bhopal", program_text: "Arrival at Bhopal, check-in." },
         { day: 2, overnight_city: "Khajuraho", program_text: "Bhopal to Khajuraho." },
         { day: 3, overnight_city: "Orchha", program_text: "Khajuraho temples, drive to Orchha." },
         { day: 4, overnight_city: null, program_text: "Orchha sightseeing, departure." },
       ],
-      inclusions: defaultInclusions, exclusions: defaultExclusions,
+      inclusions: defaultInclusions,
+      exclusions: defaultExclusions,
     },
   ];
 }
@@ -138,7 +201,9 @@ function readAgents(): Agent[] {
         ...a,
       }));
     }
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   const s = seedAgents();
   localStorage.setItem(AGENTS_KEY, JSON.stringify(s));
   return s;
@@ -151,7 +216,9 @@ function readPrograms(): SavedProgram[] {
       const parsed = JSON.parse(raw) as SavedProgram[];
       if (parsed.length > 0 && parsed[0].routing && parsed[0].routing.length > 0) return parsed;
     }
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   const s = seedPrograms();
   localStorage.setItem(PROGRAMS_KEY, JSON.stringify(s));
   return s;
@@ -173,8 +240,14 @@ export function addProgram(p: Omit<SavedProgram, "id">): SavedProgram {
   return np;
 }
 
-function refreshA() { agentCache = readAgents(); aInit = true; }
-function refreshP() { programCache = readPrograms(); pInit = true; }
+function refreshA() {
+  agentCache = readAgents();
+  aInit = true;
+}
+function refreshP() {
+  programCache = readPrograms();
+  pInit = true;
+}
 
 const norm = (s?: string) => (s || "").trim().toLowerCase();
 
@@ -195,21 +268,25 @@ export function findDuplicateAgent(
 
 export function addAgent(a: Omit<Agent, "id" | "created_at" | "updated_at">): Agent {
   const now = nowIso();
+  const list = readAgents();
   const ag: Agent = {
     status: "Active",
     country: "India",
+    agent_code: `AGT-${String(list.length + 1).padStart(6, "0")}`,
     ...a,
     id: "ag_" + Math.random().toString(36).slice(2, 8),
     created_at: now,
     updated_at: now,
   };
-  const list = readAgents();
   list.push(ag);
   persistAgents(list);
   return ag;
 }
 
-export function updateAgent(id: string, patch: Partial<Omit<Agent, "id" | "created_at">>): Agent | undefined {
+export function updateAgent(
+  id: string,
+  patch: Partial<Omit<Agent, "id" | "created_at">>,
+): Agent | undefined {
   const list = readAgents();
   const idx = list.findIndex((a) => a.id === id);
   if (idx < 0) return undefined;
@@ -229,15 +306,27 @@ export function getAgent(id: string): Agent | undefined {
 
 export function useAgents(): Agent[] {
   return useSyncExternalStore(
-    (cb) => { agentListeners.add(cb); return () => agentListeners.delete(cb); },
-    () => { if (!aInit) refreshA(); return agentCache; },
+    (cb) => {
+      agentListeners.add(cb);
+      return () => agentListeners.delete(cb);
+    },
+    () => {
+      if (!aInit) refreshA();
+      return agentCache;
+    },
     () => [],
   );
 }
 export function usePrograms(): SavedProgram[] {
   return useSyncExternalStore(
-    (cb) => { programListeners.add(cb); return () => programListeners.delete(cb); },
-    () => { if (!pInit) refreshP(); return programCache; },
+    (cb) => {
+      programListeners.add(cb);
+      return () => programListeners.delete(cb);
+    },
+    () => {
+      if (!pInit) refreshP();
+      return programCache;
+    },
     () => [],
   );
 }

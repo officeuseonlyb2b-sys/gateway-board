@@ -67,8 +67,8 @@ export default function DailyActivity() {
                   {a.queries.slice(0, 3).map((q) => (
                     <Link
                       key={q.id}
-                      to="/queries/$id"
-                      params={{ id: q.query_id }}
+                      to="/query/$queryId"
+                      params={{ queryId: q.query_id }}
                       className="block text-[11px] underline underline-offset-2 truncate"
                     >
                       {q.query_id} — {q.customer}
@@ -158,7 +158,7 @@ export default function DailyActivity() {
                   <ul className="space-y-1">
                     {rows.slice(0, 6).map((q) => (
                       <li key={q.id} className="flex items-center gap-2 text-sm">
-                        <Link to="/queries/$id" params={{ id: q.query_id }} className="text-primary hover:underline">
+                        <Link to="/query/$queryId" params={{ queryId: q.query_id }} className="text-primary hover:underline">
                           {q.query_id}
                         </Link>
                         <span className="truncate text-muted-foreground">{q.customer}</span>
@@ -187,7 +187,7 @@ export default function DailyActivity() {
                     <span className="font-medium">{EVENT_LABELS[e.type] ?? e.type}</span>
                     <span className="text-xs text-muted-foreground">{fmtTime(e.at)} • {e.by}</span>
                     {e.query_id && (
-                      <Link to="/queries/$id" params={{ id: e.query_id }} className="ml-auto text-xs text-primary hover:underline">
+                      <Link to="/query/$queryId" params={{ queryId: e.query_id }} className="ml-auto text-xs text-primary hover:underline">
                         {e.query_id}
                       </Link>
                     )}

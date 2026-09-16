@@ -1,5 +1,5 @@
 import { Bell, CheckCheck, AlertTriangle, Info, CheckCircle2, XCircle } from "lucide-react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -18,7 +18,6 @@ function iconFor(kind: NotifKind) {
 }
 
 export function NotificationsDropdown() {
-  const navigate = useNavigate();
   const list = useNotifications();
   const unread = list.filter((n) => !n.read).length;
   const preview = list.slice(0, 8);
@@ -56,11 +55,7 @@ export function NotificationsDropdown() {
           ) : preview.map((n) => (
             <button
               key={n.id}
-              onClick={() => {
-                markRead(n.id);
-                if (n.query_id) navigate({ to: "/queries/$id", params: { id: n.query_id } });
-                else if (n.href) window.location.assign(n.href);
-              }}
+              onClick={() => markRead(n.id)}
               className={cn(
                 "w-full text-left px-3 py-2.5 border-b last:border-0 hover:bg-muted/40 flex items-start gap-2.5",
                 !n.read && "bg-accent/5",

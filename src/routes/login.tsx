@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Mail, Lock, Loader2, Hotel } from "lucide-react";
 import { toast } from "sonner";
 import { auth, useAuth } from "@/lib/auth-mock";
+import { dashboardPathForEmail } from "@/lib/crm/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,7 +25,7 @@ function LoginPage() {
   const router = useRouterState();
 
   useEffect(() => {
-    if (user) navigate({ to: "/dashboard" });
+    if (user) navigate({ to: dashboardPathForEmail(user.email) });
   }, [user, navigate, router.location.pathname]);
 
   const [email, setEmail] = useState("");
@@ -49,7 +50,7 @@ function LoginPage() {
         return;
       }
       toast.success("Account created.");
-      navigate({ to: "/dashboard" });
+      navigate({ to: dashboardPathForEmail(auth.current()?.email) });
       return;
     }
     const res = await auth.signIn(email, password);
@@ -59,7 +60,7 @@ function LoginPage() {
       return;
     }
     toast.success(`Welcome back, ${res.user.name.split(" ")[0]}!`);
-    navigate({ to: "/dashboard" });
+    navigate({ to: dashboardPathForEmail(auth.current()?.email) });
   }
 
   return (
@@ -120,7 +121,9 @@ function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold tracking-tight">{mode === "signup" ? "Create your account" : "Sign in to your account"}</h2>
+            <h2 className="text-2xl font-bold tracking-tight">
+              {mode === "signup" ? "Create your account" : "Sign in to your account"}
+            </h2>
             <p className="text-sm text-muted-foreground">
               Enter your credentials to access the operations dashboard.
             </p>
@@ -131,9 +134,12 @@ function LoginPage() {
               <div className="space-y-2">
                 <Label htmlFor="fullName">Full name</Label>
                 <Input
-                  id="fullName" required value={fullName}
+                  id="fullName"
+                  required
+                  value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Aarav Sharma" className="h-11"
+                  placeholder="Aarav Sharma"
+                  className="h-11"
                 />
               </div>
             )}
@@ -143,9 +149,14 @@ function LoginPage() {
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="email" type="email" required autoComplete="email"
-                  value={email} onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@mptourism.in" className="pl-9 h-11"
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@mptourism.in"
+                  className="pl-9 h-11"
                 />
               </div>
             </div>
@@ -164,9 +175,14 @@ function LoginPage() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="password" type="password" required autoComplete="current-password"
-                  value={password} onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" className="pl-9 h-11"
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="pl-9 h-11"
                 />
               </div>
             </div>
@@ -181,14 +197,22 @@ function LoginPage() {
             {mode === "signin" ? (
               <>
                 New admin?{" "}
-                <button type="button" className="text-primary hover:underline font-medium" onClick={() => setMode("signup")}>
+                <button
+                  type="button"
+                  className="text-primary hover:underline font-medium"
+                  onClick={() => setMode("signup")}
+                >
                   Create an account
                 </button>
               </>
             ) : (
               <>
                 Already have an account?{" "}
-                <button type="button" className="text-primary hover:underline font-medium" onClick={() => setMode("signin")}>
+                <button
+                  type="button"
+                  className="text-primary hover:underline font-medium"
+                  onClick={() => setMode("signin")}
+                >
                   Sign in
                 </button>
               </>

@@ -26,6 +26,13 @@ import {
   ClipboardList,
   KanbanSquare,
   ClipboardCheck,
+  CalendarCheck2,
+  Handshake,
+  Boxes,
+  TrendingUp,
+  Database,
+  BriefcaseBusiness,
+  RadioTower,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -34,7 +41,8 @@ import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
 import { useDraftCount } from "@/lib/drafts-store";
 import { useUnreadCount } from "@/lib/notifications-store";
-import { useIsManager } from "@/lib/crm/role";
+import { useAccessProfile } from "@/lib/crm/access";
+import type { AppRole } from "@/lib/crm/types";
 
 interface Item {
   label: string;
@@ -43,13 +51,34 @@ interface Item {
   disabled?: boolean;
   badgeKey?: "drafts" | "notifications";
   managerOnly?: boolean;
+  roles?: AppRole[];
 }
 
 interface Section {
   label: string;
   items: Item[];
   managerOnly?: boolean;
+  roles?: AppRole[];
 }
+
+const SALES_ROLES: AppRole[] = [
+  "Sales Executive",
+  "Assistant Manager",
+  "Sales Manager",
+  "Sales Head",
+  "Unit Head",
+  "Administrator",
+  "Owner / Director",
+];
+const MANAGEMENT_ROLES: AppRole[] = [
+  "Assistant Manager",
+  "Sales Manager",
+  "Sales Head",
+  "Unit Head",
+  "Administrator",
+  "Owner / Director",
+];
+const MASTER_ROLES: AppRole[] = ["Unit Head", "Administrator", "Owner / Director"];
 
 const SECTIONS: Section[] = [
   // =========================================================
@@ -71,14 +100,27 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Sales & Queries",
+    roles: SALES_ROLES,
     items: [
       {
-        label: "Manager Dashboard",
-        to: "/manager-dashboard",
-        icon: Gauge,
+        label: "My Sales Desk",
+        to: "/queries/my-sales-desk",
+        icon: BriefcaseBusiness,
       },
       {
-        label: "Query Dashboard",
+        label: "Sales Control Tower",
+        to: "/queries/sales-control-tower",
+        icon: RadioTower,
+        roles: MANAGEMENT_ROLES,
+      },
+      {
+        label: "Assignment Desk",
+        to: "/queries/assignment-desk",
+        icon: Gauge,
+        roles: ["Sales Manager", "Sales Head", "Unit Head", "Administrator", "Owner / Director"],
+      },
+      {
+        label: "Query Health Dashboard",
         to: "/queries/dashboard",
         icon: LayoutDashboard,
       },
@@ -103,9 +145,27 @@ const SECTIONS: Section[] = [
         icon: ClipboardCheck,
       },
       {
+        label: "My Day",
+        to: "/my-tasks",
+        icon: CalendarCheck2,
+      },
+      {
         label: "Analytics",
         to: "/queries/analytics",
         icon: BarChart2,
+        roles: MANAGEMENT_ROLES,
+      },
+      {
+        label: "Performance Review",
+        to: "/queries/performance",
+        icon: TrendingUp,
+        roles: SALES_ROLES,
+      },
+      {
+        label: "Data Readiness",
+        to: "/data-readiness",
+        icon: Database,
+        roles: MANAGEMENT_ROLES,
       },
     ],
   },
@@ -115,6 +175,7 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Product",
+    roles: ["Product Executive", ...MASTER_ROLES],
     items: [
       {
         label: "Destinations & Tours",
@@ -139,6 +200,7 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Contracting",
+    roles: ["Contracting Executive", ...MASTER_ROLES],
     items: [
       {
         label: "Hotels",
@@ -158,6 +220,7 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Vendor Management",
+    roles: ["Vendor Executive", ...MASTER_ROLES],
     items: [
       {
         label: "Transport",
@@ -187,12 +250,14 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Partner Management",
+    roles: SALES_ROLES,
     items: [
       {
-        label: "Travel Partners",
+        label: "B2B Agents",
         to: "/agents",
         icon: Users,
       },
+      { label: "B2C Clients", to: "/clients", icon: Handshake },
     ],
   },
 
@@ -201,6 +266,7 @@ const SECTIONS: Section[] = [
   // =========================================================
   {
     label: "Quotations",
+    roles: SALES_ROLES,
     items: [
       {
         label: "New Quotation",
@@ -227,12 +293,26 @@ const SECTIONS: Section[] = [
   {
     label: "Analytics",
     managerOnly: true,
+    roles: MANAGEMENT_ROLES,
     items: [
       {
         label: "Reports & Insights",
         to: "/reports",
         icon: BarChart2,
         managerOnly: true,
+      },
+    ],
+  },
+
+  {
+    label: "Operations Handoff",
+    roles: ["Operations Executive", ...MANAGEMENT_ROLES],
+    items: [
+      {
+        label: "Won Query Intake",
+        to: "/operations-handoffs",
+        icon: Boxes,
+        roles: ["Operations Executive", ...MANAGEMENT_ROLES],
       },
     ],
   },
@@ -244,9 +324,10 @@ const SECTIONS: Section[] = [
     label: "System",
     items: [
       {
-        label: "Users & Roles",
-        to: "/users-roles",
+        label: "Team & Access",
+        to: "/team-access",
         icon: ShieldCheck,
+        roles: ["Unit Head", "Administrator", "Owner / Director"],
       },
       {
         label: "Notifications",
@@ -258,6 +339,7 @@ const SECTIONS: Section[] = [
         label: "Settings",
         to: "/settings",
         icon: SettingsIcon,
+        roles: ["Administrator", "Owner / Director"],
       },
     ],
   },
@@ -273,7 +355,7 @@ export function AppSidebar() {
   const brand = useBranding();
   const draftCount = useDraftCount();
   const unread = useUnreadCount();
-  const isManager = useIsManager();
+  const { role: currentRole, canManageTeam: isManager } = useAccessProfile();
 
   const badgeFor = (key?: Item["badgeKey"]) => {
     if (key === "drafts") {
@@ -328,9 +410,7 @@ export function AppSidebar() {
           />
         ) : (
           <div className="h-9 w-9 rounded-lg border-2 border-accent flex items-center justify-center shrink-0">
-            <span className="text-accent font-bold text-sm">
-              MP
-            </span>
+            <span className="text-accent font-bold text-sm">MP</span>
           </div>
         )}
 
@@ -372,11 +452,12 @@ export function AppSidebar() {
       >
         {SECTIONS.filter(
           (section) =>
-            !section.managerOnly || isManager,
+            (!section.managerOnly || isManager) &&
+            (!section.roles || section.roles.includes(currentRole)),
         ).map((section) => {
           const items = section.items.filter(
             (item) =>
-              !item.managerOnly || isManager,
+              (!item.managerOnly || isManager) && (!item.roles || item.roles.includes(currentRole)),
           );
 
           if (!items.length) {
@@ -384,10 +465,7 @@ export function AppSidebar() {
           }
 
           return (
-            <div
-              key={section.label}
-              className="mb-3"
-            >
+            <div key={section.label} className="mb-3">
               {/* SECTION TITLE */}
               {!collapsed && (
                 <div
@@ -396,9 +474,7 @@ export function AppSidebar() {
                     "text-[10px] font-semibold uppercase tracking-wider",
                     "text-accent/80",
 
-                    section.label ===
-                      "Sales & Queries" &&
-                      "text-accent",
+                    section.label === "Sales & Queries" && "text-accent",
                   )}
                 >
                   {section.label}
@@ -412,14 +488,9 @@ export function AppSidebar() {
 
                   const active =
                     Boolean(item.to) &&
-                    (pathname === item.to ||
-                      pathname.startsWith(
-                        `${item.to}/`,
-                      ));
+                    (pathname === item.to || pathname.startsWith(`${item.to}/`));
 
-                  const badge = badgeFor(
-                    item.badgeKey,
-                  );
+                  const badge = badgeFor(item.badgeKey);
 
                   const content = (
                     <>
@@ -432,18 +503,12 @@ export function AppSidebar() {
                       <Icon
                         className={cn(
                           "h-[18px] w-[18px] shrink-0",
-                          active
-                            ? "text-accent"
-                            : "text-sidebar-foreground/70",
+                          active ? "text-accent" : "text-sidebar-foreground/70",
                         )}
                       />
 
                       {/* Label */}
-                      {!collapsed && (
-                        <span className="truncate flex-1">
-                          {item.label}
-                        </span>
-                      )}
+                      {!collapsed && <span className="truncate flex-1">{item.label}</span>}
 
                       {/* Badge */}
                       {badge > 0 && (
@@ -459,9 +524,7 @@ export function AppSidebar() {
                               : "h-4 min-w-4 px-1.5",
                           )}
                         >
-                          {badge > 99
-                            ? "99+"
-                            : badge}
+                          {badge > 99 ? "99+" : badge}
                         </span>
                       )}
                     </>
@@ -473,31 +536,22 @@ export function AppSidebar() {
                     "text-sm font-medium",
                     "transition-colors",
 
-                    collapsed &&
-                      "justify-center px-2",
+                    collapsed && "justify-center px-2",
 
                     active
                       ? "bg-sidebar-accent/60 text-accent"
                       : "text-sidebar-foreground/80 hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground",
 
-                    item.disabled &&
-                      "opacity-40 cursor-not-allowed",
+                    item.disabled && "opacity-40 cursor-not-allowed",
                   );
 
                   // Disabled / non-link
-                  if (
-                    item.disabled ||
-                    !item.to
-                  ) {
+                  if (item.disabled || !item.to) {
                     return (
                       <div
                         key={item.label}
                         className={base}
-                        title={
-                          collapsed
-                            ? item.label
-                            : undefined
-                        }
+                        title={collapsed ? item.label : undefined}
                       >
                         {content}
                       </div>
@@ -510,11 +564,7 @@ export function AppSidebar() {
                       key={item.label}
                       to={item.to}
                       className={base}
-                      title={
-                        collapsed
-                          ? item.label
-                          : undefined
-                      }
+                      title={collapsed ? item.label : undefined}
                     >
                       {content}
                     </Link>
@@ -550,27 +600,18 @@ export function AppSidebar() {
             "hover:bg-sidebar-accent",
             "hover:text-sidebar-accent-foreground",
             "transition-colors",
-            collapsed &&
-              "justify-center px-2",
+            collapsed && "justify-center px-2",
           )}
-          title={
-            collapsed ? "Logout" : undefined
-          }
+          title={collapsed ? "Logout" : undefined}
         >
           <LogOut className="h-[18px] w-[18px] shrink-0" />
 
-          {!collapsed && (
-            <span>Logout</span>
-          )}
+          {!collapsed && <span>Logout</span>}
         </button>
 
         {/* COLLAPSE / EXPAND */}
         <button
-          onClick={() =>
-            setCollapsed(
-              (current) => !current,
-            )
-          }
+          onClick={() => setCollapsed((current) => !current)}
           className={cn(
             "w-full flex items-center gap-3",
             "px-3 py-2 rounded-md",
@@ -579,14 +620,9 @@ export function AppSidebar() {
             "hover:bg-sidebar-accent",
             "hover:text-sidebar-accent-foreground",
             "transition-colors",
-            collapsed &&
-              "justify-center px-2",
+            collapsed && "justify-center px-2",
           )}
-          title={
-            collapsed
-              ? "Expand sidebar"
-              : "Collapse sidebar"
-          }
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? (
             <ChevronRight className="h-[18px] w-[18px] shrink-0" />
@@ -594,9 +630,7 @@ export function AppSidebar() {
             <ChevronLeft className="h-[18px] w-[18px] shrink-0" />
           )}
 
-          {!collapsed && (
-            <span>Collapse</span>
-          )}
+          {!collapsed && <span>Collapse</span>}
         </button>
       </div>
     </aside>

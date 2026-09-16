@@ -67,7 +67,6 @@ export type Database = {
           at: string | null
           created_at: string
           data: Json
-          dedupe_key: string | null
           id: string
           query_id: string | null
         }
@@ -75,7 +74,6 @@ export type Database = {
           at?: string | null
           created_at?: string
           data: Json
-          dedupe_key?: string | null
           id: string
           query_id?: string | null
         }
@@ -83,60 +81,8 @@ export type Database = {
           at?: string | null
           created_at?: string
           data?: Json
-          dedupe_key?: string | null
           id?: string
           query_id?: string | null
-        }
-        Relationships: []
-      }
-      crm_notifications: {
-        Row: {
-          category: string
-          created_at: string
-          dedupe_key: string | null
-          href: string | null
-          id: string
-          kind: string
-          message: string
-          query_id: string | null
-          read: boolean
-          recipient_name: string | null
-          recipient_user_id: string | null
-          task_id: string | null
-          title: string
-          updated_at: string
-        }
-        Insert: {
-          category?: string
-          created_at?: string
-          dedupe_key?: string | null
-          href?: string | null
-          id: string
-          kind?: string
-          message: string
-          query_id?: string | null
-          read?: boolean
-          recipient_name?: string | null
-          recipient_user_id?: string | null
-          task_id?: string | null
-          title: string
-          updated_at?: string
-        }
-        Update: {
-          category?: string
-          created_at?: string
-          dedupe_key?: string | null
-          href?: string | null
-          id?: string
-          kind?: string
-          message?: string
-          query_id?: string | null
-          read?: boolean
-          recipient_name?: string | null
-          recipient_user_id?: string | null
-          task_id?: string | null
-          title?: string
-          updated_at?: string
         }
         Relationships: []
       }
@@ -144,109 +90,58 @@ export type Database = {
         Row: {
           created_at: string
           data: Json
-          escalated_at: string | null
           id: string
-          lost_reason: string | null
-          next_action_due: string | null
           owner: string | null
-          owner_user_id: string | null
           query_id: string | null
-          reopened_at: string | null
           stage: string | null
-          sub_stage: string | null
           updated_at: string
         }
         Insert: {
           created_at?: string
           data: Json
-          escalated_at?: string | null
           id: string
-          lost_reason?: string | null
-          next_action_due?: string | null
           owner?: string | null
-          owner_user_id?: string | null
           query_id?: string | null
-          reopened_at?: string | null
           stage?: string | null
-          sub_stage?: string | null
           updated_at?: string
         }
         Update: {
           created_at?: string
           data?: Json
-          escalated_at?: string | null
           id?: string
-          lost_reason?: string | null
-          next_action_due?: string | null
           owner?: string | null
-          owner_user_id?: string | null
           query_id?: string | null
-          reopened_at?: string | null
           stage?: string | null
-          sub_stage?: string | null
           updated_at?: string
         }
         Relationships: []
       }
       crm_tasks: {
         Row: {
-          cancelled_at: string | null
-          cancelled_reason: string | null
-          completed_by: string | null
           created_at: string
           data: Json
-          dedupe_key: string | null
           done: boolean
-          followup_type: string | null
           id: string
-          item_kind: string
-          next_followup_at: string | null
-          outcome: string | null
           owner: string | null
-          owner_user_id: string | null
-          purpose: string | null
           query_id: string | null
-          status: string
           updated_at: string
         }
         Insert: {
-          cancelled_at?: string | null
-          cancelled_reason?: string | null
-          completed_by?: string | null
           created_at?: string
           data: Json
-          dedupe_key?: string | null
           done?: boolean
-          followup_type?: string | null
           id: string
-          item_kind?: string
-          next_followup_at?: string | null
-          outcome?: string | null
           owner?: string | null
-          owner_user_id?: string | null
-          purpose?: string | null
           query_id?: string | null
-          status?: string
           updated_at?: string
         }
         Update: {
-          cancelled_at?: string | null
-          cancelled_reason?: string | null
-          completed_by?: string | null
           created_at?: string
           data?: Json
-          dedupe_key?: string | null
           done?: boolean
-          followup_type?: string | null
           id?: string
-          item_kind?: string
-          next_followup_at?: string | null
-          outcome?: string | null
           owner?: string | null
-          owner_user_id?: string | null
-          purpose?: string | null
           query_id?: string | null
-          status?: string
           updated_at?: string
         }
         Relationships: []
@@ -358,7 +253,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      next_crm_query_number: { Args: never; Returns: string }
     }
     Enums: {
       app_role: "admin" | "staff"

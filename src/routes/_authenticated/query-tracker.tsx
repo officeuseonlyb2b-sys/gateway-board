@@ -1,6 +1,6 @@
-import { createFileRoute } from '@tanstack/react-router'
-import QueryTracker from '../../pages/query-tracker'
-
-export const Route = createFileRoute('/_authenticated/query-tracker')({
-  component: QueryTracker,
-})
+import { createFileRoute, redirect } from "@tanstack/react-router";
+export const Route = createFileRoute("/_authenticated/query-tracker")({
+  beforeLoad: () => {
+    throw redirect({ to: "/queries/query-tracker" });
+  },
+});

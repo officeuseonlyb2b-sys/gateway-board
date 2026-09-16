@@ -4,10 +4,6 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityItem, CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
 import { LIFECYCLE } from "./types";
-import type { FollowupOutcome, FollowupType, QuerySubStage } from "./types";
-import { MEANINGFUL_EVENTS } from "./types";
-import { addNotification } from "@/lib/notifications-store";
-
 
 const KEY = "mp_crm_queries_v2";
 const TASK_KEY = "mp_crm_tasks_v2";
@@ -17,9 +13,14 @@ const isBrowser = () => typeof window !== "undefined";
 
 // ---- helpers ---------------------------------------------------------------
 
-
-function iso(d: Date) { return d.toISOString(); }
-function addDays(base: Date, n: number) { const d = new Date(base); d.setDate(d.getDate() + n); return d; }
+function iso(d: Date) {
+  return d.toISOString();
+}
+function addDays(base: Date, n: number) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + n);
+  return d;
+}
 
 /** Date-coded id, e.g. QRY-2608-0187 */
 export function codeId(prefix: string, date: Date, seq: number) {
@@ -31,15 +32,52 @@ export function codeId(prefix: string, date: Date, seq: number) {
 function buildLifecycle(stage: Stage, created: Date): { label: string; at?: string }[] {
   const order = ["New", "Requirement Review", "Costing", "Quotation Sent", "Follow-up"];
   const reachedIdx = order.indexOf(stage === "Nurturing" ? "Follow-up" : stage);
-  return LIFECYCLE.map((label, i) => {
-    if (label === "Assigned") return { label, at: iso(addDays(created, 0)) };
-    if (label === "Confirmed / Lost") {
-      return stage === "Confirmed" || stage === "Lost" ? { label, at: iso(addDays(created, 6)) } : { label };
-    }
+  return LIFECYCLE.map((label) => {
+    if (label === "New") return { label, at: iso(created) };
+    if (label === "Assigned") return { label };
+    if (label === "Won / Lost") return { label };
     const idx = order.indexOf(label);
-    const done = stage === "Confirmed" || stage === "Lost" || (reachedIdx >= 0 && idx <= reachedIdx);
-    return done ? { label, at: iso(addDays(created, Math.max(0, idx))) } : { label };
+    const done = stage === "Won" || stage === "Lost" || (reachedIdx >= 0 && idx <= reachedIdx);
+    return done && label === "New" ? { label, at: iso(created) } : { label };
   });
+}
+
+function normalizeQuery(record: CrmQuery): CrmQuery {
+  const legacyStage = record.stage as Stage | "Confirmed";
+  const stage: Stage = legacyStage === "Confirmed" ? "Won" : legacyStage;
+  const owner = record.owner === "Unassigned" ? "" : record.owner;
+  const assigned = Boolean(owner);
+  return {
+    ...record,
+    stage,
+    owner,
+    created_by: record.created_by || record.last_updated_by || "Imported",
+    assignment_status: record.assignment_status || (assigned ? "Assigned" : "Awaiting Assignment"),
+    assigned_at: record.assigned_at || (assigned ? record.assigned_on : undefined),
+    stage_changed_at: record.stage_changed_at || record.created_at,
+    assignment_history: record.assignment_history || [],
+    work_status: stage === "Won" ? "Won" : stage === "Lost" ? "Lost" : "Open",
+    primary_unit: record.primary_unit || "Madhya Pradesh",
+    participating_units: record.participating_units || ["Madhya Pradesh"],
+    customer_type:
+      record.customer_type ||
+      (/b2b|agent|partner/i.test(record.lead_source) ? "B2B Agent" : "B2C Client"),
+    min_pax: record.min_pax ?? record.pax,
+    max_pax: record.max_pax ?? record.pax,
+    costing_basis: record.costing_basis || record.travel_type,
+    commercials: {
+      ...record.commercials,
+      bottom_line: record.commercials?.bottom_line ?? record.commercials?.cost_price ?? 0,
+      top_line:
+        record.commercials?.top_line ?? record.commercials?.selling_price ?? record.value ?? 0,
+    },
+    lifecycle: record.lifecycle?.length
+      ? record.lifecycle.map((step) =>
+          step.label === "Confirmed / Lost" ? { ...step, label: "Won / Lost" } : step,
+        )
+      : buildLifecycle(stage, new Date(record.created_at)),
+    activities: record.activities || [],
+  };
 }
 
 // ---- persistence -----------------------------------------------------------
@@ -64,13 +102,15 @@ function parse<T>(raw: string | null): T[] {
 function load() {
   inited = true;
   if (!isBrowser()) return;
-  queries = parse<CrmQuery>(localStorage.getItem(KEY));
+  queries = parse<CrmQuery>(localStorage.getItem(KEY)).map(normalizeQuery);
   tasks = parse<CrmTask>(localStorage.getItem(TASK_KEY));
   employees = parse<Employee>(localStorage.getItem(EMP_KEY));
   events = parse<CrmEvent>(localStorage.getItem(EVENT_KEY));
 }
 
-function emit() { listeners.forEach((l) => l()); }
+function emit() {
+  listeners.forEach((l) => l());
+}
 export interface CrmSnapshot {
   queries: CrmQuery[];
   tasks: CrmTask[];
@@ -86,7 +126,7 @@ export function getCrmSnapshot(): CrmSnapshot {
 export function hydrateCrm(snapshot: CrmSnapshot) {
   inited = true;
   queries = snapshot.queries.map(normalizeQuery);
-  tasks = snapshot.tasks.map(normalizeTask);
+  tasks = snapshot.tasks;
   employees = snapshot.employees;
   events = snapshot.events;
   if (isBrowser()) {
@@ -96,23 +136,6 @@ export function hydrateCrm(snapshot: CrmSnapshot) {
     localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
   }
   emit();
-}
-
-function normalizeQuery(q: CrmQuery): CrmQuery {
-  return {
-    ...q,
-    owner: q.owner || "Unassigned",
-    sub_stage: q.sub_stage ?? (q.owner && q.owner !== "Unassigned" ? "First Contact" : "Unassigned"),
-    next_action: q.next_action || "Review Requirement",
-    next_action_due: q.next_action_due || q.followup_due || q.created_at,
-    lifecycle: Array.isArray(q.lifecycle) ? q.lifecycle : buildLifecycle(q.stage || "New", new Date(q.created_at)),
-    activities: Array.isArray(q.activities) ? q.activities : [],
-    commercials: q.commercials ?? { cost_price: 0, selling_price: 0, commission_pct: 0 },
-  };
-}
-
-function normalizeTask(t: CrmTask): CrmTask {
-  return { ...t, item_kind: t.item_kind ?? "task", status: t.status ?? (t.done ? "completed" : "pending"), updates: t.updates ?? [] };
 }
 
 export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
@@ -153,14 +176,35 @@ export function getCrmQuery(queryId: string): CrmQuery | undefined {
 
 // ---- activity log ----------------------------------------------------------
 /** Event types that should NOT bump "last activity" (system generated). */
-const PASSIVE_EVENTS = new Set(["followup_overdue", "task_overdue", "followup_missed", "lead_viewed"]);
+const PASSIVE_EVENTS = new Set([
+  "followup_overdue",
+  "task_overdue",
+  "followup_missed",
+  "lead_viewed",
+]);
 
 function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
   const at = e.at ?? iso(new Date());
-  events = [{ id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at, ...e }, ...events];
-  if (e.query_id && MEANINGFUL_EVENTS.includes(e.type) && !PASSIVE_EVENTS.has(e.type)) {
+  events = [
+    { id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at, ...e },
+    ...events,
+  ];
+  if (e.query_id && !PASSIVE_EVENTS.has(e.type)) {
     queries = queries.map((q) =>
-      q.query_id === e.query_id ? { ...q, last_activity_at: at, last_updated_by: e.by } : q,
+      q.query_id === e.query_id
+        ? {
+            ...q,
+            last_activity_at: at,
+            last_updated_by: e.by,
+            first_action_at:
+              q.first_action_at ||
+              (q.assignment_status === "Assigned" &&
+              e.type !== "lead_assigned" &&
+              e.type !== "lead_reassigned"
+                ? at
+                : undefined),
+          }
+        : q,
     );
   }
 }
@@ -200,7 +244,8 @@ export function logCall(queryId: string, connected: boolean, note?: string, by?:
   logLeadActivity(queryId, connected ? "call_connected" : "call_not_connected", {
     by: actor,
     title: connected ? `Call connected by ${actor}` : `Call not connected (${actor})`,
-    detail: note || (q ? `${q.contact_person || q.customer} • ${q.mobile || "no number"}` : undefined),
+    detail:
+      note || (q ? `${q.contact_person || q.customer} • ${q.mobile || "no number"}` : undefined),
   });
 }
 
@@ -212,73 +257,51 @@ export function setQueryPriority(queryId: string, priority: string, by?: string)
   const actor = by || q.owner || "System";
   queries = queries.map((x) => (x.id === q.id ? { ...x, priority } : x));
   logEvent({
-    type: "priority_changed", by: actor,
+    type: "priority_changed",
+    by: actor,
     title: `Priority changed by ${actor}`,
     detail: `${q.priority || "—"} → ${priority} • ${q.customer}`,
-    query_id: q.query_id, lead_id: q.lead_id,
-    prev_value: q.priority, new_value: priority,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
+    prev_value: q.priority,
+    new_value: priority,
   });
   persist();
 }
 
 /** Schedule (or reschedule) the next follow-up for a lead. */
-export function scheduleFollowup(
-  queryId: string,
-  dueISO: string,
-  note?: string,
-  by?: string,
-  type: FollowupType = "Customer Call",
-  dedupeKey?: string,
-) {
+export function scheduleFollowup(queryId: string, dueISO: string, note?: string, by?: string) {
   if (!inited) load();
   const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
   if (!q) return;
   const actor = by || q.owner || "System";
   const prev = q.followup_due;
   queries = queries.map((x) =>
-    x.id === q.id ? { ...x, followup_due: dueISO, next_action_due: dueISO, next_action: note || type, followup_note: note ?? x.followup_note, followup_done_at: undefined } : x,
+    x.id === q.id
+      ? {
+          ...x,
+          followup_due: dueISO,
+          revisit_at: dueISO,
+          followup_note: note ?? x.followup_note,
+          followup_done_at: undefined,
+        }
+      : x,
   );
-  const key = dedupeKey ?? `followup:${q.query_id}:${dueISO}:${type}`;
-  const existing = tasks.some((task) => task.dedupe_key === key && !task.done && task.status !== "cancelled");
-  if (!existing) {
-    tasks = [{
-      id: `tk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      title: note || type,
-      query_id: q.query_id,
-      due_at: dueISO,
-      owner: q.owner,
-      owner_user_id: q.owner_user_id,
-      priority: q.priority || "Medium",
-      note,
-      purpose: note,
-      item_kind: "followup",
-      followup_type: type,
-      status: "pending",
-      done: false,
-      assigned_by: actor,
-      assigned_at: iso(new Date()),
-      dedupe_key: key,
-      updates: [],
-    }, ...tasks];
-  }
   logEvent({
-    type: "followup_created", by: actor,
+    type: "followup_created",
+    by: actor,
     title: `Follow-up added by ${actor}`,
     detail: `${note ? note + " • " : ""}Scheduled for ${new Date(dueISO).toLocaleString("en-GB")}`,
-    query_id: q.query_id, lead_id: q.lead_id,
-    prev_value: prev, new_value: dueISO,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
+    prev_value: prev,
+    new_value: dueISO,
   });
   persist();
 }
 
 /** Mark the current follow-up as completed, optionally scheduling the next one. */
-export function completeFollowup(
-  queryId: string,
-  note?: string,
-  nextDue?: string,
-  by?: string,
-  outcome: FollowupOutcome = "Connected",
-) {
+export function completeFollowup(queryId: string, note?: string, nextDue?: string, by?: string) {
   if (!inited) load();
   const q = queries.find((x) => x.query_id === queryId || x.id === queryId);
   if (!q) return;
@@ -287,40 +310,45 @@ export function completeFollowup(
   queries = queries.map((x) =>
     x.id === q.id
       ? {
-        ...x,
-        followup_done_at: iso(now),
-        followup_due: nextDue ?? x.followup_due,
-        next_action_due: nextDue ?? x.next_action_due,
-        next_action: nextDue ? `Follow up: ${outcome}` : x.next_action,
-        activities: [{ id: "a_" + now.getTime(), title: note || "Follow-up completed", at: iso(now), by: actor }, ...x.activities],
-      }
+          ...x,
+          followup_done_at: iso(now),
+          first_followup_at: x.first_followup_at || iso(now),
+          last_followup_at: iso(now),
+          followup_due: nextDue ?? x.followup_due,
+          revisit_at: nextDue ?? x.revisit_at,
+          activities: [
+            {
+              id: "a_" + now.getTime(),
+              title: note || "Follow-up completed",
+              at: iso(now),
+              by: actor,
+            },
+            ...x.activities,
+          ],
+        }
       : x,
   );
-  const current = tasks
-    .filter((task) => task.query_id === q.query_id && task.item_kind === "followup" && !task.done)
-    .sort((a, b) => a.due_at.localeCompare(b.due_at))[0];
-  if (current) {
-    tasks = tasks.map((task) => task.id === current.id ? {
-      ...task, done: true, status: "completed", outcome, completed_at: iso(now), completed_by: actor,
-      next_followup_at: nextDue,
-    } : task);
-  }
   logEvent({
-    type: "followup_completed", by: actor, at: iso(now),
+    type: "followup_completed",
+    by: actor,
+    at: iso(now),
     title: `Follow-up completed by ${actor}`,
-    detail: `${q.query_id} • ${outcome}${note ? " • " + note : ""}`,
-    query_id: q.query_id, lead_id: q.lead_id,
-    outcome,
+    detail: `${q.query_id}${note ? " • " + note : ""}`,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
   });
   if (nextDue) {
     logEvent({
-      type: "followup_created", by: actor, at: iso(now),
+      type: "followup_created",
+      by: actor,
+      at: iso(now),
       title: `Next follow-up added by ${actor}`,
       detail: `Scheduled for ${new Date(nextDue).toLocaleString("en-GB")}`,
-      query_id: q.query_id, lead_id: q.lead_id, new_value: nextDue,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
+      new_value: nextDue,
     });
   }
-  if (nextDue) scheduleFollowup(q.query_id, nextDue, `Next follow-up after ${outcome}`, actor, current?.followup_type ?? "Customer Call");
   persist();
 }
 
@@ -335,7 +363,6 @@ export function inactiveHours(q: CrmQuery): number {
   return Math.max(0, (Date.now() - new Date(at).getTime()) / 36e5);
 }
 
-
 // ---- employees -------------------------------------------------------------
 export interface EmployeeInput {
   name: string;
@@ -344,6 +371,22 @@ export interface EmployeeInput {
   phone?: string;
   target_monthly?: number;
   active?: boolean;
+  department?: Employee["department"];
+  unit?: string;
+  data_scope?: Employee["data_scope"];
+  manager_id?: string;
+  designation?: string;
+  unit_scope?: string[];
+  permissions?: string[];
+  employee_code?: string;
+  employee_status?: Employee["employee_status"];
+  account_status?: Employee["account_status"];
+  dashboard_template?: Employee["dashboard_template"];
+  destination_expertise?: string[];
+  product_expertise?: string[];
+  languages?: string[];
+  permission_grants?: string[];
+  permission_restrictions?: string[];
 }
 
 export function addEmployee(input: EmployeeInput): Employee {
@@ -357,6 +400,42 @@ export function addEmployee(input: EmployeeInput): Employee {
     target_monthly: input.target_monthly ?? 0,
     active: input.active ?? true,
     joined_at: iso(new Date()),
+    employee_code: input.employee_code || `EMP-${String(employees.length + 1).padStart(4, "0")}`,
+    employee_status: input.employee_status || "Active",
+    account_status: input.account_status || "Active",
+    dashboard_template:
+      input.dashboard_template ||
+      ([
+        "Assistant Manager",
+        "Sales Manager",
+        "Sales Head",
+        "Unit Head",
+        "Administrator",
+        "Owner / Director",
+      ].includes(input.role)
+        ? "Sales Control Tower"
+        : "My Sales Desk"),
+    department: input.department ?? "Sales",
+    unit: input.unit ?? "Madhya Pradesh",
+    data_scope:
+      input.data_scope ??
+      (input.role === "Assistant Manager" ||
+      input.role === "Sales Manager" ||
+      input.role === "Sales Head" ||
+      input.role === "Unit Head" ||
+      input.role === "Administrator" ||
+      input.role === "Owner / Director"
+        ? "Unit"
+        : "Own"),
+    manager_id: input.manager_id,
+    designation: input.designation || input.role,
+    unit_scope: input.unit_scope?.length ? input.unit_scope : [input.unit ?? "Madhya Pradesh"],
+    permissions: input.permissions ?? [],
+    destination_expertise: input.destination_expertise ?? [],
+    product_expertise: input.product_expertise ?? [],
+    languages: input.languages ?? [],
+    permission_grants: input.permission_grants ?? [],
+    permission_restrictions: input.permission_restrictions ?? [],
   };
   employees = [...employees, emp];
   persist();
@@ -365,7 +444,9 @@ export function addEmployee(input: EmployeeInput): Employee {
 
 export function updateEmployee(id: string, patch: Partial<EmployeeInput>) {
   if (!inited) load();
-  employees = employees.map((e) => (e.id === id ? { ...e, ...patch, name: patch.name?.trim() ?? e.name } : e));
+  employees = employees.map((e) =>
+    e.id === id ? { ...e, ...patch, name: patch.name?.trim() ?? e.name } : e,
+  );
   persist();
 }
 
@@ -374,7 +455,6 @@ export function removeEmployee(id: string) {
   employees = employees.filter((e) => e.id !== id);
   persist();
 }
-
 
 export interface NewLeadInput {
   lead_source: string;
@@ -388,7 +468,14 @@ export interface NewLeadInput {
   destination: string;
   priority: string;
   requirement: string;
-  owner: string;
+  owner?: string;
+  created_by?: string;
+  customer_type?: CrmQuery["customer_type"];
+  agent_id?: string;
+  client_id?: string;
+  relationship_owner?: string;
+  primary_unit?: string;
+  participating_units?: string[];
   mobile?: string;
   email?: string;
   adults?: number;
@@ -397,25 +484,38 @@ export interface NewLeadInput {
   travel_type?: string;
   cost_price?: number;
   selling_price?: number;
-  owner_user_id?: string;
-  created_by?: string;
-  query_id?: string;
+  min_pax?: number;
+  max_pax?: number;
+  costing_basis?: string;
+  hotel_category_from?: string;
+  hotel_category_to?: string;
+  program_id?: string;
+  program_name?: string;
+  routing?: string;
+  special_requirements?: string;
 }
 
 export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to: string } {
   if (!inited) load();
   const now = new Date();
-  const seq = Date.now() % 10000;
-  const actor = input.created_by || input.owner || "System";
-  const owner = input.owner || "Unassigned";
+  const seq = queries.length + 40;
+  const creator = input.created_by || "Sales Desk";
+  const requestedOwner = input.owner && input.owner !== "Unassigned" ? input.owner : "";
   const q: CrmQuery = {
     id: "cq_" + now.getTime(),
-    query_id: input.query_id || codeId("QRY", now, seq),
+    query_id: codeId("QRY", now, seq),
     lead_id: codeId("LD", now, seq + 50),
     created_at: iso(now),
-    assigned_on: iso(now),
-    assigned_by: actor,
-    last_updated_by: actor,
+    assigned_on: "",
+    created_by: creator,
+    assignment_status: "Awaiting Assignment",
+    assignment_history: [],
+    work_status: "Open",
+    primary_unit: input.primary_unit || "Madhya Pradesh",
+    participating_units: input.participating_units?.length
+      ? input.participating_units
+      : ["Madhya Pradesh"],
+    last_updated_by: creator,
     last_activity_at: iso(now),
 
     lead_source: input.lead_source,
@@ -426,6 +526,12 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     market: input.market,
     priority: input.priority,
     requirement: input.requirement,
+    customer_type:
+      input.customer_type ||
+      (/b2b|agent|partner/i.test(input.lead_source) ? "B2B Agent" : "B2C Client"),
+    agent_id: input.agent_id,
+    client_id: input.client_id,
+    relationship_owner: input.relationship_owner,
     enquiry_type: input.enquiry_type,
     travel_type: input.travel_type ?? "Family Tour",
     destination: input.destination,
@@ -434,70 +540,120 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     pax: input.pax,
     adults: input.adults ?? input.pax,
     children: input.children ?? 0,
+    min_pax: input.min_pax ?? input.pax,
+    max_pax: input.max_pax ?? input.pax,
+    costing_basis: input.costing_basis || input.travel_type,
+    hotel_category_from: input.hotel_category_from,
+    hotel_category_to: input.hotel_category_to,
+    program_id: input.program_id,
+    program_name: input.program_name,
+    routing: input.routing,
+    special_requirements: input.special_requirements,
     stage: "New",
-    owner,
-    owner_user_id: input.owner_user_id,
-    sub_stage: owner === "Unassigned" ? "Unassigned" : "First Contact",
+    stage_changed_at: iso(now),
+    owner: "",
     value: 0,
     next_action: "Review Requirement",
-    followup_due: iso(addDays(now, 1)),
-    next_action_due: iso(addDays(now, 1)),
+    followup_due: "",
     lifecycle: buildLifecycle("New", now),
-    activities: [{ id: `a_${now.getTime()}`, title: "Lead created", at: iso(now), by: actor }],
+    activities: [
+      {
+        id: "a1",
+        title: "Query created — awaiting managerial assignment",
+        at: iso(now),
+        by: creator,
+      },
+    ],
     commercials: {
       cost_price: input.cost_price ?? 0,
       selling_price: input.selling_price ?? 0,
       commission_pct: 10,
+      bottom_line: input.cost_price ?? 0,
+      top_line: input.selling_price ?? 0,
     },
     ...(input.traveler_type ? { traveler_type: input.traveler_type } : {}),
   };
   queries = [q, ...queries];
   logEvent({
-    type: "lead_created", by: actor, at: iso(now),
-    title: `Lead created by ${actor}`,
+    type: "lead_created",
+    by: creator,
+    at: iso(now),
+    title: `Query created by ${creator}`,
     detail: `${q.lead_id} • ${q.enquiry_type} • ${q.destination}`,
-    query_id: q.query_id, lead_id: q.lead_id,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
   });
+  persist();
+  if (requestedOwner)
+    assignQuery(q.query_id, requestedOwner, creator, "Assigned during query creation");
+  return { query: getCrmQuery(q.query_id) || q, assigned_to: requestedOwner };
+}
+
+/** Initial manager assignment. Query creation and assignment remain distinct audited events. */
+export function assignQuery(queryId: string, newOwner: string, by: string, reason?: string) {
+  if (!inited) load();
+  const q = getCrmQuery(queryId);
+  if (!q || !newOwner.trim()) return;
+  if (q.assignment_status === "Assigned") {
+    reassignQuery(queryId, newOwner, by, reason);
+    return;
+  }
+  const now = new Date();
+  const at = iso(now);
+  const assignment = { assigned_at: at, assigned_by: by, assigned_to: newOwner, reason };
+  queries = queries.map((item) =>
+    item.id === q.id
+      ? {
+          ...item,
+          owner: newOwner,
+          assignment_status: "Assigned",
+          assigned_on: at,
+          assigned_at: at,
+          assigned_by: by,
+          assignment_history: [...(item.assignment_history || []), assignment],
+          lifecycle: item.lifecycle.map((step) =>
+            step.label === "Assigned" ? { ...step, at } : step,
+          ),
+          activities: [
+            {
+              id: `a_${now.getTime()}`,
+              title: `Assigned to ${newOwner}${reason ? ` — ${reason}` : ""}`,
+              at,
+              by,
+            },
+            ...item.activities,
+          ],
+        }
+      : item,
+  );
   logEvent({
-    type: "lead_assigned", by: actor, at: iso(now),
-    title: owner === "Unassigned" ? "Lead awaiting assignment" : `Lead assigned to ${owner}`,
-    detail: `${q.lead_id} • ${q.customer}`,
-    query_id: q.query_id, lead_id: q.lead_id,
-    assigned_to: owner,
+    type: "lead_assigned",
+    by,
+    at,
+    title: `Query assigned to ${newOwner}`,
+    detail: `${q.query_id} • ${q.customer}${reason ? ` • ${reason}` : ""}`,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
+    assigned_to: newOwner,
   });
   tasks = [
     {
-      id: "tk_" + now.getTime(),
+      id: `tk_${now.getTime()}`,
       title: `Review new requirement (${q.query_id})`,
       query_id: q.query_id,
       due_at: iso(addDays(now, 1)),
-      owner,
-      owner_user_id: input.owner_user_id,
-      note: `${q.pax} Pax ${q.enquiry_type}`,
+      owner: newOwner,
+      note: `${q.pax} Pax • ${q.enquiry_type}`,
       done: false,
-      item_kind: "task",
-      status: "pending",
-      priority: input.priority,
-      assigned_by: actor,
-      assigned_at: iso(now),
-      dedupe_key: `first-contact:${q.query_id}`,
-      updates: [], // ✅ NEW: initialise updates array
+      assigned_by: by,
+      assigned_at: at,
+      category: "Query",
+      priority: q.priority,
+      updates: [],
     },
     ...tasks,
   ];
-  addNotification({
-    kind: owner === "Unassigned" ? "warning" : "info",
-    category: "query_followup",
-    title: owner === "Unassigned" ? "New query needs assignment" : "New query assigned",
-    message: `${q.query_id} • ${q.customer} • Review requirement by ${new Date(q.followup_due).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
-    href: `/queries/${q.query_id}`,
-    query_id: q.query_id,
-    recipient_user_id: input.owner_user_id,
-    recipient_name: owner,
-    dedupe_key: `assignment:${q.query_id}:${owner}`,
-  });
   persist();
-  return { query: q, assigned_to: input.owner };
 }
 
 /** Reassign a query to another employee. Records a trackable event. */
@@ -510,26 +666,48 @@ export function reassignQuery(queryId: string, newOwner: string, by?: string, re
     const actor = by || q.owner || newOwner;
     const from = q.owner;
     logEvent({
-      type: "lead_reassigned", by: actor, at: iso(now),
+      type: "lead_reassigned",
+      by: actor,
+      at: iso(now),
       title: `${q.query_id} reassigned to ${newOwner}`,
       detail: `${from ? `From ${from} → ` : ""}${newOwner} • ${q.customer}${reason ? ` • Reason: ${reason}` : ""}`,
-      query_id: q.query_id, lead_id: q.lead_id,
-      assigned_to: newOwner, assigned_from: from, assign_reason: reason,
-      prev_value: from, new_value: newOwner,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
+      assigned_to: newOwner,
+      assigned_from: from,
+      assign_reason: reason,
+      prev_value: from,
+      new_value: newOwner,
     });
     return {
       ...q,
       owner: newOwner,
       assigned_on: iso(now),
       assigned_by: actor,
+      assignment_status: "Assigned",
+      assigned_at: iso(now),
+      assignment_history: [
+        ...(q.assignment_history || []),
+        {
+          assigned_at: iso(now),
+          assigned_by: actor,
+          assigned_to: newOwner,
+          assigned_from: from,
+          reason,
+        },
+      ],
       last_updated_by: actor,
       last_activity_at: iso(now),
       activities: [
-        { id: "a_" + now.getTime(), title: `Reassigned from ${from || "unassigned"} to ${newOwner}${reason ? ` — ${reason}` : ""}`, at: iso(now), by: actor },
+        {
+          id: "a_" + now.getTime(),
+          title: `Reassigned from ${from || "unassigned"} to ${newOwner}${reason ? ` — ${reason}` : ""}`,
+          at: iso(now),
+          by: actor,
+        },
         ...q.activities,
       ],
     };
-
   });
   // open tasks for that query follow the new owner
   tasks = tasks.map((t) => (t.query_id === queryId && !t.done ? { ...t, owner: newOwner } : t));
@@ -543,6 +721,7 @@ export interface NewTaskInput {
   owner: string;
   note?: string;
   priority?: string;
+  category?: CrmTask["category"];
 }
 
 /** Create a task explicitly assigned to an employee. */
@@ -558,6 +737,7 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
     owner: input.owner,
     note: input.note,
     priority: input.priority ?? "Medium",
+    category: input.category ?? "General",
     done: false,
     assigned_by: actor,
     assigned_at: iso(now),
@@ -565,11 +745,14 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
   };
   tasks = [task, ...tasks];
   logEvent({
-    type: "task_assigned", by: actor, at: iso(now),
+    type: "task_assigned",
+    by: actor,
+    at: iso(now),
     title: `Task assigned to ${input.owner}`,
     detail: `${task.title}${input.query_id ? ` • ${input.query_id}` : ""}`,
     query_id: input.query_id || undefined,
-    assigned_to: input.owner, task_id: task.id,
+    assigned_to: input.owner,
+    task_id: task.id,
   });
   persist();
   return task;
@@ -579,7 +762,7 @@ export function addTask(input: NewTaskInput, by?: string): CrmTask {
 export function addTaskUpdate(taskId: string, text: string, by?: string) {
   if (!inited) load();
   const now = new Date();
-  const task = tasks.find(t => t.id === taskId);
+  const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
   const actor = by || task.owner || "System";
   const update = {
@@ -587,14 +770,14 @@ export function addTaskUpdate(taskId: string, text: string, by?: string) {
     text: text.trim(),
     by: actor,
   };
-  tasks = tasks.map(t =>
-    t.id === taskId
-      ? { ...t, updates: [...(t.updates || []), update] }
-      : t
+  tasks = tasks.map((t) =>
+    t.id === taskId ? { ...t, updates: [...(t.updates || []), update] } : t,
   );
   // Also log to event stream for admin audit
   logEvent({
-    type: "task_updated", by: actor, at: iso(now),
+    type: "task_updated",
+    by: actor,
+    at: iso(now),
     title: `Progress update on task: ${task.title}`,
     detail: text,
     task_id: taskId,
@@ -610,13 +793,19 @@ export function reassignTask(id: string, newOwner: string, by?: string) {
   const task = tasks.find((t) => t.id === id);
   if (!task || task.owner === newOwner) return;
   const actor = by || task.owner;
-  tasks = tasks.map((t) => (t.id === id ? { ...t, owner: newOwner, assigned_by: actor, assigned_at: iso(now) } : t));
+  tasks = tasks.map((t) =>
+    t.id === id ? { ...t, owner: newOwner, assigned_by: actor, assigned_at: iso(now) } : t,
+  );
   logEvent({
-    type: "task_reassigned", by: actor, at: iso(now),
+    type: "task_reassigned",
+    by: actor,
+    at: iso(now),
     title: `Task reassigned to ${newOwner}`,
     detail: `${task.title} • From ${task.owner} → ${newOwner}`,
     query_id: task.query_id || undefined,
-    assigned_to: newOwner, assigned_from: task.owner, task_id: task.id,
+    assigned_to: newOwner,
+    assigned_from: task.owner,
+    task_id: task.id,
   });
   persist();
 }
@@ -625,7 +814,9 @@ export function reassignTask(id: string, newOwner: string, by?: string) {
 export function assignmentHistory(queryId: string): CrmEvent[] {
   if (!inited) load();
   return events
-    .filter((e) => e.query_id === queryId && (e.type === "lead_assigned" || e.type === "lead_reassigned"))
+    .filter(
+      (e) => e.query_id === queryId && (e.type === "lead_assigned" || e.type === "lead_reassigned"),
+    )
     .slice()
     .sort((a, b) => (a.at < b.at ? -1 : 1));
 }
@@ -639,92 +830,194 @@ export function stageEnteredAt(q: CrmQuery, log: CrmEvent[] = events): string {
 }
 
 /** Move a query to a new stage; records the lifecycle step, activity + event. */
-export function setQueryStage(queryId: string, stage: Stage, by?: string) {
+export function setQueryStage(
+  queryId: string,
+  stage: Stage,
+  by?: string,
+  closure?: { reason?: string; notes?: string },
+) {
   if (!inited) load();
   const now = new Date();
+  const current = queries.find((q) => q.query_id === queryId || q.id === queryId);
+  if (!current) return;
+  if (stage === "Lost" && !closure?.reason?.trim()) {
+    throw new Error("A Lost reason is required before closing this query.");
+  }
+  if (current.assignment_status !== "Assigned" && stage !== "Lost") {
+    throw new Error("Assign the query before moving it through the Sales lifecycle.");
+  }
   queries = queries.map((q) => {
     if (q.query_id !== queryId && q.id !== queryId) return q;
     if (q.stage === stage) return q;
     const actor = by ?? q.owner;
-    const lifecycleLabel = stage === "Confirmed" || stage === "Lost" ? "Confirmed / Lost" : stage;
-    const lifecycle = q.lifecycle.map((s) => (s.label === lifecycleLabel ? { ...s, at: iso(now) } : s));
+    const lifecycleLabel = stage === "Won" || stage === "Lost" ? "Won / Lost" : stage;
+    const lifecycle = q.lifecycle.map((s) =>
+      s.label === lifecycleLabel ? { ...s, at: iso(now) } : s,
+    );
     const enteredAt = stageEnteredAt(q);
     const durationHours = Math.max(0, (now.getTime() - new Date(enteredAt).getTime()) / 36e5);
-    const activity: ActivityItem = { id: "a_" + now.getTime(), title: `Stage changed: ${q.stage} → ${stage}`, at: iso(now), by: actor };
+    const activity: ActivityItem = {
+      id: "a_" + now.getTime(),
+      title: `Stage changed: ${q.stage} → ${stage}`,
+      at: iso(now),
+      by: actor,
+    };
     logEvent({
-      type: stage === "Confirmed" ? "won" : stage === "Lost" ? "lost" : stage === "Quotation Sent" ? "quotation_sent" : "stage_changed",
-      by: actor, at: iso(now),
+      type:
+        stage === "Won"
+          ? "won"
+          : stage === "Lost"
+            ? "lost"
+            : stage === "Quotation Sent"
+              ? "quotation_sent"
+              : "stage_changed",
+      by: actor,
+      at: iso(now),
       title:
-        stage === "Confirmed" ? `Query confirmed by ${actor}`
-          : stage === "Lost" ? `Query marked lost by ${actor}`
-            : stage === "Quotation Sent" ? `Quotation sent by ${actor}`
+        stage === "Won"
+          ? `Query won by ${actor}`
+          : stage === "Lost"
+            ? `Query marked lost by ${actor}`
+            : stage === "Quotation Sent"
+              ? `Quotation sent by ${actor}`
               : `${q.query_id} moved to ${stage} by ${actor}`,
       detail: `${q.stage} → ${stage} • spent ${fmtDur(durationHours)} in ${q.stage} • ${q.customer}`,
-      query_id: q.query_id, lead_id: q.lead_id,
-      from_stage: q.stage, to_stage: stage, duration_hours: durationHours,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
+      from_stage: q.stage,
+      to_stage: stage,
+      duration_hours: durationHours,
     });
-    return { ...q, stage, lifecycle, activities: [activity, ...q.activities] };
+    const assignedFirstAction = q.first_action_at || iso(now);
+    const wonHandoff =
+      stage === "Won"
+        ? {
+            id: `ops_${q.id}_${now.getTime()}`,
+            status: "Awaiting Operations Acceptance" as const,
+            created_at: iso(now),
+            created_by: actor || "System",
+          }
+        : q.operations_handoff;
+    return {
+      ...q,
+      stage,
+      stage_changed_at: iso(now),
+      requirement_completed_at:
+        stage === "Costing" && !q.requirement_completed_at ? iso(now) : q.requirement_completed_at,
+      costing_started_at:
+        stage === "Costing" && !q.costing_started_at ? iso(now) : q.costing_started_at,
+      costing_completed_at:
+        stage === "Quotation Sent" && !q.costing_completed_at ? iso(now) : q.costing_completed_at,
+      first_quotation_sent_at:
+        stage === "Quotation Sent"
+          ? q.first_quotation_sent_at || iso(now)
+          : q.first_quotation_sent_at,
+      latest_quotation_sent_at: stage === "Quotation Sent" ? iso(now) : q.latest_quotation_sent_at,
+      nurturing_at: stage === "Nurturing" ? iso(now) : q.nurturing_at,
+      work_status: stage === "Won" ? "Won" : stage === "Lost" ? "Lost" : "Open",
+      first_action_at: assignedFirstAction,
+      closed_at: stage === "Won" || stage === "Lost" ? iso(now) : undefined,
+      lost_reason: stage === "Lost" ? closure?.reason?.trim() : undefined,
+      lost_notes: stage === "Lost" ? closure?.notes?.trim() : undefined,
+      operations_handoff: wonHandoff,
+      lifecycle,
+      activities: [activity, ...q.activities],
+    };
   });
+  const updated = getCrmQuery(queryId);
+  if (stage === "Quotation Sent" && updated) {
+    const due = iso(addDays(now, 3));
+    queries = queries.map((q) =>
+      q.id === updated.id ? { ...q, followup_due: due, next_action: "Follow up on quotation" } : q,
+    );
+    tasks = [
+      {
+        id: `tk_quote_${now.getTime()}`,
+        title: `Follow up after quotation (${updated.query_id})`,
+        query_id: updated.query_id,
+        due_at: due,
+        owner: updated.owner,
+        note: "Automatically scheduled 3 days after quotation was sent.",
+        done: false,
+        assigned_by: by || updated.owner,
+        assigned_at: iso(now),
+        category: "Follow-up",
+        priority: updated.priority,
+        updates: [],
+      },
+      ...tasks,
+    ];
+    logEvent({
+      type: "followup_created",
+      by: by || updated.owner,
+      at: iso(now),
+      title: "Automatic +3 day quotation follow-up created",
+      detail: `Due ${due}`,
+      query_id: updated.query_id,
+      lead_id: updated.lead_id,
+      new_value: due,
+    });
+  }
+  if ((stage === "Lost" || stage === "Won") && updated) {
+    tasks = tasks.map((task) =>
+      task.query_id === updated.query_id && !task.done
+        ? { ...task, done: true, completed_at: iso(now), closed_reason: `Query marked ${stage}` }
+        : task,
+    );
+    if (stage === "Lost") {
+      logEvent({
+        type: "lost_reason_recorded",
+        by: by || updated.owner,
+        at: iso(now),
+        title: `Lost reason: ${closure?.reason}`,
+        detail: closure?.notes,
+        query_id: updated.query_id,
+        lead_id: updated.lead_id,
+      });
+    } else {
+      logEvent({
+        type: "operations_handoff_created",
+        by: by || updated.owner,
+        at: iso(now),
+        title: "Operations handoff created",
+        detail: "Awaiting Operations Acceptance",
+        query_id: updated.query_id,
+        lead_id: updated.lead_id,
+      });
+    }
+  }
   persist();
 }
 
-export function updateQueryWorkflow(
-  queryId: string,
-  patch: { sub_stage?: QuerySubStage; next_action?: string; next_action_due?: string; requirement?: string },
-  by?: string,
-) {
+export function acceptOperationsHandoff(queryId: string, by: string, note?: string) {
   if (!inited) load();
-  const q = getCrmQuery(queryId);
-  if (!q) return false;
-  if (isActiveStage(q.stage) && patch.next_action !== undefined && (!patch.next_action.trim() || !patch.next_action_due)) return false;
-  const actor = by || q.owner || "System";
-  queries = queries.map((item) => item.id === q.id ? { ...item, ...patch } : item);
-  if (patch.sub_stage && patch.sub_stage !== q.sub_stage) logEvent({
-    type: "sub_stage_changed", by: actor, title: `Sub-stage changed to ${patch.sub_stage}`,
-    detail: `${q.sub_stage || "—"} → ${patch.sub_stage}`, query_id: q.query_id,
-    prev_value: q.sub_stage, new_value: patch.sub_stage,
-  });
-  if (patch.requirement !== undefined && patch.requirement !== q.requirement) logEvent({
-    type: "requirement_updated", by: actor, title: `Requirement updated by ${actor}`,
-    detail: patch.requirement, query_id: q.query_id,
-  });
-  persist();
-  return true;
-}
-
-const isActiveStage = (stage: Stage) => stage !== "Confirmed" && stage !== "Lost";
-
-export function closeQuery(queryId: string, stage: "Confirmed" | "Lost", reason: string, by?: string) {
-  const q = getCrmQuery(queryId);
-  if (!q || (stage === "Lost" && !reason.trim())) return false;
   const now = iso(new Date());
-  queries = queries.map((item) => item.id === q.id ? {
-    ...item, stage, sub_stage: stage === "Confirmed" ? "Won" : "Lost",
-    lost_reason: stage === "Lost" ? reason.trim() : undefined,
-    next_action: "", next_action_due: undefined,
-  } : item);
-  tasks = tasks.map((task) => task.query_id === q.query_id && !task.done ? {
-    ...task, status: "cancelled", cancelled_at: now, cancelled_reason: `${stage}: ${reason}`,
-  } : task);
-  logEvent({ type: stage === "Confirmed" ? "won" : "lost", by: by || q.owner || "System", at: now,
-    title: stage === "Confirmed" ? "Query marked won" : "Query marked lost", detail: reason,
-    reason, query_id: q.query_id, from_stage: q.stage, to_stage: stage });
-  persist();
-  return true;
-}
-
-export function reopenQuery(queryId: string, nextAction: string, nextDue: string, by?: string) {
   const q = getCrmQuery(queryId);
-  if (!q || !nextAction.trim() || !nextDue) return false;
-  const now = iso(new Date());
-  queries = queries.map((item) => item.id === q.id ? {
-    ...item, stage: "Follow-up", sub_stage: "Awaiting Response", reopened_at: now,
-    next_action: nextAction.trim(), next_action_due: nextDue, followup_due: nextDue,
-  } : item);
-  logEvent({ type: "reopened", by: by || q.owner || "System", at: now, title: "Query reopened",
-    detail: nextAction, query_id: q.query_id, from_stage: q.stage, to_stage: "Follow-up" });
+  if (!q?.operations_handoff) return;
+  queries = queries.map((item) =>
+    item.id === q.id
+      ? {
+          ...item,
+          operations_handoff: {
+            ...item.operations_handoff!,
+            status: "Accepted",
+            accepted_at: now,
+            accepted_by: by,
+            note,
+          },
+        }
+      : item,
+  );
+  logEvent({
+    type: "operations_handoff_accepted",
+    by,
+    at: now,
+    title: "Operations handoff accepted",
+    detail: note,
+    query_id: q.query_id,
+    lead_id: q.lead_id,
+  });
   persist();
-  return true;
 }
 
 export function saveQueryCosting(
@@ -738,45 +1031,68 @@ export function saveQueryCosting(
   queries = queries.map((q) => {
     if (q.query_id !== queryId && q.id !== queryId) return q;
     const previous = q.costing_versions ?? [];
-    const duplicate = previous.find((item) => item.quote.id === quote.id);
-    if (duplicate) return q;
     const version = previous.reduce((max, item) => Math.max(max, item.version), 0) + 1;
-    const sellingPrice = Math.max(quote.totals.grand_sgl, quote.totals.grand_dbl, quote.totals.grand_trp);
-    const costPrice = Math.max(quote.totals.room_net_sgl, quote.totals.room_net_dbl, quote.totals.room_net_trp)
-      + quote.totals.addons_total;
+    const sellingPrice = Math.max(
+      quote.totals.grand_sgl,
+      quote.totals.grand_dbl,
+      quote.totals.grand_trp,
+    );
+    const costPrice =
+      Math.max(quote.totals.room_net_sgl, quote.totals.room_net_dbl, quote.totals.room_net_trp) +
+      quote.totals.addons_total;
     return {
       ...q,
       stage: q.stage === "New" || q.stage === "Requirement Review" ? "Costing" : q.stage,
+      stage_changed_at:
+        q.stage === "New" || q.stage === "Requirement Review" ? iso(now) : q.stage_changed_at,
+      costing_started_at: q.costing_started_at || iso(now),
+      costing_completed_at: iso(now),
       value: sellingPrice,
-      commercials: { ...q.commercials, cost_price: costPrice, selling_price: sellingPrice },
+      first_action_at: q.first_action_at || iso(now),
+      commercials: {
+        ...q.commercials,
+        cost_price: costPrice,
+        selling_price: sellingPrice,
+        bottom_line: q.commercials.bottom_line || costPrice,
+        top_line: Math.max(q.commercials.top_line || 0, sellingPrice),
+        final_cost: costPrice,
+        final_selling: sellingPrice,
+        margin_value: sellingPrice - costPrice,
+        margin_pct: sellingPrice ? ((sellingPrice - costPrice) / sellingPrice) * 100 : 0,
+      },
       lifecycle: q.lifecycle.map((item) =>
         item.label === "Costing" && !item.at ? { ...item, at: iso(now) } : item,
       ),
       costing_versions: [
         ...previous,
-        { version, saved_at: quote.saved_at, saved_by: by, draft_id: draftId, quote: { ...quote, version } },
+        {
+          version,
+          saved_at: quote.saved_at,
+          saved_by: by,
+          draft_id: draftId,
+          quote: { ...quote, version },
+        },
       ],
-       activities: [
+      activities: [
         { id: `a_${now.getTime()}`, title: `Costing V${version} saved`, at: iso(now), by },
         ...q.activities,
       ],
     };
   });
-  const savedQuery = getCrmQuery(queryId);
-  const version = savedQuery?.costing_versions?.at(-1)?.version ?? 1;
-  logEvent({ type: version > 1 ? "quotation_revised" : "quotation_created", by, at: iso(now),
-    title: version > 1 ? `Quotation revised — V${version}` : "Quotation created",
-    detail: quote.quote_number, query_id: savedQuery?.query_id ?? queryId, dedupe_key: `quote:${quote.id}` });
+  const updated = getCrmQuery(queryId);
+  const latest = updated?.costing_versions?.at(-1);
+  if (updated && latest) {
+    logEvent({
+      type: latest.version === 1 ? "quotation_started" : "quotation_updated",
+      by,
+      at: iso(now),
+      title: `Costing V${latest.version} saved`,
+      detail: `${latest.quote.quote_number} • ${updated.customer}`,
+      query_id: updated.query_id,
+      lead_id: updated.lead_id,
+    });
+  }
   persist();
-}
-
-export function markQuotationSent(queryId: string, by?: string) {
-  const q = getCrmQuery(queryId);
-  if (!q) return false;
-  setQueryStage(q.query_id, "Quotation Sent", by);
-  const due = iso(addDays(new Date(), 3));
-  scheduleFollowup(q.query_id, due, "Quotation sent + 3 days follow-up", by, "Quotation Follow-up", `quote-followup:${q.query_id}:${due.slice(0, 10)}`);
-  return true;
 }
 
 /** Human readable duration, e.g. "1d 4h" / "2h 15m". */
@@ -798,11 +1114,21 @@ export function addNote(queryId: string, text: string, by?: string) {
     if (q.query_id !== queryId && q.id !== queryId) return q;
     const actor = by ?? q.owner;
     logEvent({
-      type: "note_added", by: actor, at: iso(now),
-      title: `Note added by ${actor}`, detail: text,
-      query_id: q.query_id, lead_id: q.lead_id,
+      type: "note_added",
+      by: actor,
+      at: iso(now),
+      title: `Note added by ${actor}`,
+      detail: text,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
     });
-    return { ...q, activities: [{ id: "a_" + now.getTime(), title: text, at: iso(now), by: actor }, ...q.activities] };
+    return {
+      ...q,
+      activities: [
+        { id: "a_" + now.getTime(), title: text, at: iso(now), by: actor },
+        ...q.activities,
+      ],
+    };
   });
   persist();
 }
@@ -814,22 +1140,57 @@ export function addNote(queryId: string, text: string, by?: string) {
 export function sweepOverdue(): number {
   if (!inited) load();
   const now = Date.now();
-  const openStages: Stage[] = ["New", "Requirement Review", "Costing", "Quotation Sent", "Follow-up", "Nurturing"];
+  const openStages: Stage[] = [
+    "New",
+    "Requirement Review",
+    "Costing",
+    "Quotation Sent",
+    "Follow-up",
+    "Nurturing",
+  ];
   let logged = 0;
 
   queries.forEach((q) => {
     if (!openStages.includes(q.stage)) return;
     const due = new Date(q.followup_due).getTime();
     if (!due || due >= now) return;
-    const already = events.some((e) => e.type === "followup_overdue" && e.query_id === q.query_id && e.detail?.includes(q.followup_due));
+    const already = events.some(
+      (e) =>
+        e.type === "followup_overdue" &&
+        e.query_id === q.query_id &&
+        e.detail?.includes(q.followup_due),
+    );
     if (already) return;
     logEvent({
-      type: "followup_overdue", by: q.owner || "System", at: iso(new Date()),
+      type: "followup_overdue",
+      by: q.owner || "System",
+      at: iso(new Date()),
       title: `Follow-up overdue — ${q.query_id}`,
       detail: `Due ${q.followup_due} • ${q.customer} • owner ${q.owner || "unassigned"}`,
-      query_id: q.query_id, lead_id: q.lead_id,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
       overdue_hours: (now - due) / 36e5,
     });
+    if (
+      (now - due) / 36e5 >= 48 &&
+      !events.some(
+        (e) =>
+          e.type === "manager_escalated" &&
+          e.query_id === q.query_id &&
+          e.detail?.includes(q.followup_due),
+      )
+    ) {
+      logEvent({
+        type: "manager_escalated",
+        by: "System",
+        at: iso(new Date()),
+        title: `Manager escalation — ${q.query_id}`,
+        detail: `Follow-up overdue by more than 48 hours • ${q.owner || "unassigned"} • ${q.followup_due}`,
+        query_id: q.query_id,
+        lead_id: q.lead_id,
+        overdue_hours: (now - due) / 36e5,
+      });
+    }
     logged++;
   });
 
@@ -840,26 +1201,15 @@ export function sweepOverdue(): number {
     const already = events.some((e) => e.type === "task_overdue" && e.task_id === t.id);
     if (already) return;
     logEvent({
-      type: "task_overdue", by: t.owner || "System", at: iso(new Date()),
+      type: "task_overdue",
+      by: t.owner || "System",
+      at: iso(new Date()),
       title: `Task overdue — ${t.title}`,
       detail: `Due ${t.due_at} • owner ${t.owner || "unassigned"}`,
-      query_id: t.query_id || undefined, task_id: t.id,
+      query_id: t.query_id || undefined,
+      task_id: t.id,
       overdue_hours: (now - due) / 36e5,
     });
-    logged++;
-  });
-
-  queries.forEach((q) => {
-    if (!isActiveStage(q.stage) || inactiveHours(q) < 48) return;
-    const key = `manager-escalated:${q.query_id}:${q.last_activity_at || q.created_at}`;
-    if (events.some((event) => event.dedupe_key === key)) return;
-    logEvent({ type: "manager_escalated", by: "System", title: `Manager escalation — ${q.query_id}`,
-      detail: `${q.owner || "Unassigned"} • ${inactiveHours(q).toFixed(1)}h inactive`, query_id: q.query_id,
-      overdue_hours: inactiveHours(q), dedupe_key: key });
-    queries = queries.map((item) => item.id === q.id ? { ...item, escalated_at: iso(new Date()) } : item);
-    addNotification({ kind: "error", category: "query_followup", title: "Manager escalation",
-      message: `${q.query_id} • ${q.customer} • ${inactiveHours(q).toFixed(1)} hours without meaningful activity`,
-      href: `/queries/${q.query_id}`, query_id: q.query_id, dedupe_key: key });
     logged++;
   });
 
@@ -875,7 +1225,6 @@ export function startOverdueWatcher() {
   sweepTimer = setInterval(sweepOverdue, 60_000);
 }
 
-
 /** Log a follow-up against a query (optionally pushing the next due date). */
 export function logFollowup(queryId: string, note: string, nextDue?: string, by?: string) {
   if (!inited) load();
@@ -884,51 +1233,95 @@ export function logFollowup(queryId: string, note: string, nextDue?: string, by?
     if (q.query_id !== queryId && q.id !== queryId) return q;
     const actor = by ?? q.owner;
     logEvent({
-      type: "followup_logged", by: actor, at: iso(now),
+      type: "followup_logged",
+      by: actor,
+      at: iso(now),
       title: `Follow-up logged by ${actor}`,
       detail: `${q.query_id} • ${note}`,
-      query_id: q.query_id, lead_id: q.lead_id,
+      query_id: q.query_id,
+      lead_id: q.lead_id,
     });
     return {
       ...q,
       followup_due: nextDue ?? q.followup_due,
-      activities: [{ id: "a_" + now.getTime(), title: note || "Follow-up logged", at: iso(now), by: actor }, ...q.activities],
+      activities: [
+        { id: "a_" + now.getTime(), title: note || "Follow-up logged", at: iso(now), by: actor },
+        ...q.activities,
+      ],
     };
   });
   persist();
 }
 
-export function toggleTask(id: string, by?: string) {
+export function toggleTask(id: string) {
   if (!inited) load();
   const task = tasks.find((t) => t.id === id);
   const now = iso(new Date());
-  tasks = tasks.map((t) => (t.id === id ? { ...t, done: !t.done, completed_at: t.done ? undefined : now } : t));
+  tasks = tasks.map((t) =>
+    t.id === id ? { ...t, done: !t.done, completed_at: t.done ? undefined : now } : t,
+  );
   if (task && !task.done) {
     logEvent({
-      type: "task_completed", by: by || task.owner, at: now,
-      title: `Task completed by ${by || task.owner}`,
-      detail: task.title, query_id: task.query_id, task_id: task.id,
+      type: "task_completed",
+      by: task.owner,
+      at: now,
+      title: `Task completed by ${task.owner}`,
+      detail: task.title,
+      query_id: task.query_id,
+      task_id: task.id,
     });
   }
   persist();
 }
 
-
-function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
 
 const EMPTY: never[] = [];
 
 export function useCrmQueries(): CrmQuery[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return queries; }, () => EMPTY);
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!inited) load();
+      return queries;
+    },
+    () => EMPTY,
+  );
 }
 export function useCrmTasks(): CrmTask[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return tasks; }, () => EMPTY);
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!inited) load();
+      return tasks;
+    },
+    () => EMPTY,
+  );
 }
 export function useEmployees(): Employee[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return employees; }, () => EMPTY);
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!inited) load();
+      return employees;
+    },
+    () => EMPTY,
+  );
 }
 export function useCrmEvents(): CrmEvent[] {
-  return useSyncExternalStore(subscribe, () => { if (!inited) load(); return events; }, () => EMPTY);
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!inited) load();
+      return events;
+    },
+    () => EMPTY,
+  );
 }
 
 // ---- derived helpers -------------------------------------------------------

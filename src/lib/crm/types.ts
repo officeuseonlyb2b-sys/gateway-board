@@ -8,35 +8,128 @@ export type Stage =
   | "Quotation Sent"
   | "Follow-up"
   | "Nurturing"
-  | "Confirmed"
+  | "Won"
   | "Lost";
 
 export const STAGES: Stage[] = [
-  "New", "Requirement Review", "Costing", "Quotation Sent", "Follow-up", "Nurturing", "Confirmed", "Lost",
+  "New",
+  "Requirement Review",
+  "Costing",
+  "Quotation Sent",
+  "Follow-up",
+  "Nurturing",
+  "Won",
+  "Lost",
 ];
 
 /** Stages shown as the lifecycle stepper on the detail page. */
 export const LIFECYCLE: string[] = [
-  "New", "Assigned", "Requirement Review", "Costing", "Quotation Sent", "Follow-up", "Confirmed / Lost",
+  "New",
+  "Assigned",
+  "Requirement Review",
+  "Costing",
+  "Quotation Sent",
+  "Follow-up",
+  "Won / Lost",
 ];
 
 export const LEAD_SOURCES = [
-  "Website", "Phone Call", "Email", "Referral", "Walk-in", "Social Media", "Google / Ads", "Exhibition", "Repeat Guest",
+  "Website",
+  "Phone Call",
+  "Email",
+  "Referral",
+  "Walk-in",
+  "Social Media",
+  "Google / Ads",
+  "Exhibition",
+  "Repeat Guest",
 ];
 
-export const MARKETS = ["Domestic - India", "Inbound - Europe", "Inbound - USA", "Inbound - Asia", "MICE / Corporate"];
+export const MARKETS = [
+  "Domestic - India",
+  "Inbound - Europe",
+  "Inbound - USA",
+  "Inbound - Asia",
+  "MICE / Corporate",
+];
 
 export const ENQUIRY_TYPES = [
-  "Tour Package", "Customized Tour", "Group Tour", "MICE / Corporate", "Only Hotel Booking", "Only Transport", "Pilgrimage",
+  "Tour Package",
+  "Customized Tour",
+  "Group Tour",
+  "MICE / Corporate",
+  "Only Hotel Booking",
+  "Only Transport",
+  "Pilgrimage",
 ];
 
-export const TRAVEL_TYPES = ["Family Tour", "Group Tour", "Pilgrimage", "Honeymoon", "Corporate", "Solo", "Wildlife"];
+export const TRAVEL_TYPES = [
+  "Family Tour",
+  "Group Tour",
+  "Pilgrimage",
+  "Honeymoon",
+  "Corporate",
+  "Solo",
+  "Wildlife",
+];
 
 export const DESTINATIONS = [
-  "Madhya Pradesh", "Rajasthan", "Gujarat", "Uttar Pradesh", "Maharashtra", "Kerala", "Golden Triangle",
+  "Madhya Pradesh",
+  "Rajasthan",
+  "Gujarat",
+  "Uttar Pradesh",
+  "Maharashtra",
+  "Kerala",
+  "Golden Triangle",
 ];
 
 export const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
+
+export type AssignmentStatus = "Awaiting Assignment" | "Assigned";
+export type WorkStatus = "Open" | "Won" | "Lost";
+export type CustomerType = "B2B Agent" | "B2C Client";
+export type DataScope = "Own" | "Team" | "Department" | "Unit" | "Organisation" | "Custom";
+export type Department =
+  | "Sales"
+  | "Operations"
+  | "Product"
+  | "Contracting"
+  | "Vendor Management"
+  | "Accounts"
+  | "Marketing"
+  | "Technology"
+  | "Management"
+  | "Admin";
+export type AppRole =
+  | "Sales Executive"
+  | "Assistant Manager"
+  | "Sales Manager"
+  | "Sales Head"
+  | "Operations Executive"
+  | "Unit Head"
+  | "Administrator"
+  | "Owner / Director"
+  | "Product Executive"
+  | "Contracting Executive"
+  | "Vendor Executive";
+
+export interface AssignmentRecord {
+  assigned_at: string;
+  assigned_by: string;
+  assigned_to: string;
+  assigned_from?: string;
+  reason?: string;
+}
+
+export interface OperationsHandoff {
+  id: string;
+  status: "Awaiting Operations Acceptance" | "Accepted";
+  created_at: string;
+  created_by: string;
+  accepted_at?: string;
+  accepted_by?: string;
+  note?: string;
+}
 
 export interface LifecycleStep {
   label: string;
@@ -63,17 +156,8 @@ export interface CrmTask {
   assigned_at?: string;
   priority?: string;
   completed_at?: string;
-  owner_user_id?: string;
-  item_kind?: "task" | "followup";
-  followup_type?: FollowupType;
-  purpose?: string;
-  status?: "pending" | "completed" | "cancelled";
-  outcome?: FollowupOutcome;
-  completed_by?: string;
-  cancelled_at?: string;
-  cancelled_reason?: string;
-  next_followup_at?: string;
-  dedupe_key?: string;
+  closed_reason?: string;
+  category?: "Follow-up" | "Query" | "Rate Gap" | "Operations" | "General";
   // NEW: daily progress updates
   updates?: {
     timestamp: string;
@@ -86,6 +170,12 @@ export interface Commercials {
   cost_price: number;
   selling_price: number;
   commission_pct: number;
+  bottom_line?: number;
+  top_line?: number;
+  final_cost?: number;
+  final_selling?: number;
+  margin_value?: number;
+  margin_pct?: number;
 }
 
 export interface CostingVersion {
@@ -102,33 +192,65 @@ export interface CrmQuery {
   lead_id: string;
   created_at: string;
   assigned_on: string;
+  created_by?: string;
+  assignment_status?: AssignmentStatus;
+  assigned_at?: string;
+  first_action_at?: string;
+  stage_changed_at?: string;
+  requirement_completed_at?: string;
+  costing_started_at?: string;
+  costing_completed_at?: string;
+  first_quotation_sent_at?: string;
+  latest_quotation_sent_at?: string;
+  first_followup_at?: string;
+  last_followup_at?: string;
+  nurturing_at?: string;
+  revisit_at?: string;
+  manager_escalated_at?: string;
+  assignment_history?: AssignmentRecord[];
+  work_status?: WorkStatus;
+  primary_unit?: string;
+  participating_units?: string[];
 
   // Lead / customer
   lead_source: string;
-  customer: string;        // travel partner / source partner
+  customer: string; // travel partner / source partner
   contact_person: string;
   mobile: string;
   email: string;
   market: string;
   priority: string;
   requirement: string;
+  customer_type?: CustomerType;
+  agent_id?: string;
+  client_id?: string;
+  relationship_owner?: string;
 
   // Trip
   enquiry_type: string;
   travel_type: string;
   destination: string;
-  travel_start: string;    // yyyy-mm-dd
+  travel_start: string; // yyyy-mm-dd
   travel_end: string;
   pax: number;
   adults: number;
   children: number;
+  min_pax?: number;
+  max_pax?: number;
+  costing_basis?: string;
+  hotel_category_from?: string;
+  hotel_category_to?: string;
+  program_id?: string;
+  program_name?: string;
+  routing?: string;
+  special_requirements?: string;
 
   // Progress
   stage: Stage;
   owner: string;
   value: number;
   next_action: string;
-  followup_due: string;    // ISO datetime
+  followup_due: string; // ISO datetime
   lifecycle: LifecycleStep[];
   activities: ActivityItem[];
   commercials: Commercials;
@@ -143,51 +265,41 @@ export interface CrmQuery {
   last_activity_at?: string;
   followup_note?: string;
   followup_done_at?: string;
-  owner_user_id?: string;
-  sub_stage?: QuerySubStage;
-  next_action_due?: string;
   lost_reason?: string;
-  reopened_at?: string;
-  escalated_at?: string;
+  lost_notes?: string;
+  closed_at?: string;
+  operations_handoff?: OperationsHandoff;
 }
-
-export const QUERY_SUB_STAGES = [
-  "Unassigned", "First Contact", "Requirement Pending", "Requirement Complete",
-  "Costing In Progress", "Quotation Ready", "Quotation Sent", "Awaiting Response",
-  "Callback Requested", "Negotiation", "Waiting for Approval", "Won", "Lost",
-] as const;
-export type QuerySubStage = (typeof QUERY_SUB_STAGES)[number];
-
-export const FOLLOWUP_TYPES = [
-  "Customer Call", "WhatsApp", "Email", "Quotation Follow-up", "Payment Follow-up",
-  "Requirement Follow-up", "Internal Follow-up", "Other",
-] as const;
-export type FollowupType = (typeof FOLLOWUP_TYPES)[number];
-
-export const FOLLOWUP_OUTCOMES = [
-  "Connected", "No Answer", "Callback Requested", "Interested", "Not Interested",
-  "Price Issue", "Date Issue", "Hotel Issue", "Waiting for Family", "Waiting for Approval",
-  "Quotation Requested", "Negotiation", "Won", "Lost", "Other",
-] as const;
-export type FollowupOutcome = (typeof FOLLOWUP_OUTCOMES)[number];
-
-export const LOST_REASONS = [
-  "Price Too High", "Competitor", "No Response", "Travel Date Issue", "Customer Cancelled",
-  "Destination Changed", "No Budget", "Other",
-] as const;
 
 export interface Executive {
   id: string;
   name: string;
-  role: "Sales Executive" | "Sales Manager";
+  role: AppRole;
   email: string;
+  department?: Department;
+  unit?: string;
+  data_scope?: DataScope;
+  manager_id?: string;
+  designation?: string;
+  unit_scope?: string[];
+  permissions?: string[];
 }
 
 export interface Employee extends Executive {
+  employee_code?: string;
   phone?: string;
   target_monthly?: number;
   active: boolean;
   joined_at: string; // ISO
+  employee_status?: "Active" | "Inactive" | "On Leave" | "Exited";
+  account_status?: "Active" | "Suspended" | "Disabled";
+  dashboard_template?:
+    "My Sales Desk" | "Sales Control Tower" | "Operations Desk" | "Admin Console";
+  destination_expertise?: string[];
+  product_expertise?: string[];
+  languages?: string[];
+  permission_grants?: string[];
+  permission_restrictions?: string[];
 }
 
 /** Every tracked employee action in the CRM. */
@@ -221,11 +333,9 @@ export type CrmEventType =
   | "customer_replied"
   | "negotiation_started"
   | "priority_changed"
-  | "sub_stage_changed"
-  | "requirement_updated"
-  | "quotation_created"
-  | "quotation_revised"
-  | "reopened"
+  | "lost_reason_recorded"
+  | "operations_handoff_created"
+  | "operations_handoff_accepted"
   | "manager_escalated"
   // NEW: progress update on a task
   | "task_updated";
@@ -233,8 +343,8 @@ export type CrmEventType =
 export interface CrmEvent {
   id: string;
   type: CrmEventType;
-  at: string;          // ISO datetime
-  by: string;          // who performed the action
+  at: string; // ISO datetime
+  by: string; // who performed the action
   title: string;
   detail?: string;
   query_id?: string;
@@ -253,9 +363,6 @@ export interface CrmEvent {
   duration_hours?: number;
   /** overdue tracking */
   overdue_hours?: number;
-  dedupe_key?: string;
-  outcome?: FollowupOutcome;
-  reason?: string;
 }
 
 export const EVENT_LABELS: Record<CrmEventType, string> = {
@@ -287,27 +394,24 @@ export const EVENT_LABELS: Record<CrmEventType, string> = {
   customer_replied: "Customer replied",
   negotiation_started: "Negotiation started",
   priority_changed: "Priority changed",
-  sub_stage_changed: "Sub-stage changed",
-  requirement_updated: "Requirement updated",
-  quotation_created: "Quotation created",
-  quotation_revised: "Quotation revised",
-  reopened: "Reopened",
+  lost_reason_recorded: "Lost reason recorded",
+  operations_handoff_created: "Operations handoff created",
+  operations_handoff_accepted: "Operations handoff accepted",
   manager_escalated: "Manager escalated",
   task_updated: "Task updated", // NEW
 };
 
 /** Activity event types that count as "the employee worked this lead". */
 export const CONTACT_EVENTS: CrmEventType[] = [
-  "call_made", "call_connected", "call_not_connected", "whatsapp_sent", "email_sent",
-  "followup_logged", "followup_completed", "customer_replied", "negotiation_started",
-];
-
-export const MEANINGFUL_EVENTS: CrmEventType[] = [
-  "call_made", "call_connected", "call_not_connected", "whatsapp_sent", "email_sent",
-  "customer_replied", "requirement_updated", "quotation_started", "quotation_created",
-  "quotation_updated", "quotation_revised", "quotation_sent", "followup_logged",
-  "followup_completed", "task_completed", "stage_changed", "sub_stage_changed",
-  "priority_changed", "won", "lost", "reopened", "negotiation_started",
+  "call_made",
+  "call_connected",
+  "call_not_connected",
+  "whatsapp_sent",
+  "email_sent",
+  "followup_logged",
+  "followup_completed",
+  "customer_replied",
+  "negotiation_started",
 ];
 
 export const LEAD_PRIORITIES = ["Low", "Medium", "High", "Urgent"] as const;

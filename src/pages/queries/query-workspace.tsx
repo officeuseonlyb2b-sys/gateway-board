@@ -1,48 +1,55 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
+  CalendarClock,
   CheckCircle2,
   Circle,
-  CalendarClock,
-  Mail,
-  MapPin,
-  Users,
-  Briefcase,
+  Download,
   FileText,
+  Mail,
+  MessageCircle,
   Phone,
-  RefreshCcw,
-  Search,
-  TrendingUp,
-  MessageSquare,
-  StickyNote,
-  X,
   Plus,
-  Globe,
   Sparkles,
-  Clock,
-  AlertCircle,
-  ChevronRight,
-  Database,
-  PhoneCall,
-  CalendarDays,
-  BadgeCheck,
-  Loader2,
+  UserRoundCheck,
 } from "lucide-react";
-
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
-import { useCrmMetrics } from "@/lib/crm/metrics";
-import { addNote, logFollowup, setQueryStage } from "@/lib/crm/store";
-import type { CrmQuery, Stage } from "@/lib/crm/types";
+import { NewTaskDialog, ReassignQuery, useActor } from "@/components/crm/assign";
+import { inr } from "@/components/crm/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
+import { durationLabel, queryClock } from "@/lib/crm/insights";
+import {
+  assignmentHistory,
+  logLeadActivity,
+  scheduleFollowup,
+  setQueryStage,
+  useCrmEvents,
+  useCrmTasks,
+} from "@/lib/crm/store";
+import { LIFECYCLE, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
+import { usePrograms } from "@/lib/wizard/agents-store";
 
 const TABS = [
   "Overview",
@@ -53,588 +60,423 @@ const TABS = [
   "Latest Activity",
   "Follow-ups / Next Steps",
 ] as const;
-
 type Tab = (typeof TABS)[number];
-
-const STAGES: Stage[] = [
-  "New",
-  "Requirement Review",
-  "Costing",
-  "Quotation Sent",
-  "Follow-up",
-  "Nurturing",
-  "Confirmed",
-  "Lost",
+const LOST_REASONS = [
+  "Budget mismatch",
+  "No response",
+  "Travel cancelled",
+  "Competitor selected",
+  "Dates unavailable",
+  "Duplicate query",
+  "Other",
 ];
+const fmt = (value?: string) =>
+  value
+    ? new Date(value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+const dateOnly = (value?: string) =>
+  value ? new Date(value).toLocaleDateString("en-GB", { dateStyle: "medium" }) : "—";
 
-// Modal dropdown data
-const MEDIUMS = ["Call", "Email", "WhatsApp", "Meeting"];
-const STATUSES = ["NURTURING", "WIN", "LOST"];
-const REASONS = [
-  "Package Cost is High",
-  "Choose Other Destination",
-  "Lost to Competitor",
-  "Postponed",
-  "No Longer Interested",
-  "Non Availability of Train or Flight on desired dates",
-  "Balck out dates",
-  "Irrelevant Query",
-  "Too Low Budget",
-  "Health Issues",
-  "Personal Reasons",
-  "Confirmed But Later Lost",
-  "Went Cold",
-];
-
-// Constants for Mock Overview Data
-const ACTIVITY_LOG = [
-  { id: 1, title: "Follow-up 2 recorded", sub: "Via Email", date: "06 Aug 2026", type: "followup", color: "bg-orange-400" },
-  { id: 2, title: "Follow-up 1 recorded", sub: "Via Email", date: "27 Jun 2026", type: "followup", color: "bg-orange-400" },
-  { id: 3, title: "Query received", sub: "Agent · Email", date: "20 Jun 2026", type: "query", color: "bg-blue-500" },
-];
-
-const PROGRAM_SNAPSHOT = {
-  code: "EX8WL05",
-  name: "Marvels of Chambal & Bundelkhand",
-  routing: "Ex Gwl | Gwl (2N) + Mor - Son - Dat - Orc (1N) - Hjr (1N) - Gwl",
-  type: "Quick Getaways · North MP",
-};
-
-const COMMERCIAL_SNAPSHOT = {
-  bottomLine: 1200000,
-  topLine: 1200000,
-  pax: 9,
-  hotel: "5 Star",
-  ratePerPerson: 33333,
-  costingBasis: "FIT",
-  hotelCount: 1,
-};
-
-function formatMoney(value: number) {
-  const amount = Number(value) || 0;
-  if (amount >= 10_000_000) return `₹${(amount / 10_000_000).toFixed(2)} Cr`;
-  if (amount >= 100_000) return `₹${(amount / 100_000).toFixed(1)} L`;
-  if (amount >= 1_000) return `₹${(amount / 1_000).toFixed(1)} K`;
-  return `₹${amount.toLocaleString("en-IN")}`;
-}
-
-function formatDate(value?: string) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function todayISO(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function stageBadgeClass(stage: Stage) {
-  switch (stage) {
-    case "Confirmed": return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    case "Lost": return "bg-red-50 text-red-700 border-red-200";
-    case "Nurturing": return "bg-orange-50 text-orange-700 border-orange-200";
-    case "Follow-up": return "bg-violet-50 text-violet-700 border-violet-200";
-    case "Quotation Sent": return "bg-blue-50 text-blue-700 border-blue-200";
-    case "Costing": return "bg-amber-50 text-amber-700 border-amber-200";
-    case "Requirement Review": return "bg-indigo-50 text-indigo-700 border-indigo-200";
-    default: return "bg-sky-50 text-sky-700 border-sky-200";
-  }
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{children || "—"}</div>
+    </div>
+  );
 }
 
 export default function QueryWorkspace() {
+  const { id } = useParams({ strict: false }) as { id: string };
   const navigate = useNavigate();
-  const params = useParams({ strict: false }) as { id?: string; queryId?: string };
-  const queryId = params.id || params.queryId || "";
-  const m = useCrmMetrics();
-
-  // refreshTick forces the memo to recompute after mutations, so the UI
-  // reflects the change even if the underlying store snapshot identity
-  // doesn't change.
-  const [refreshTick, setRefreshTick] = useState(0);
-
-  const query = useMemo(
-    () => m.queries.find((item) => item.id === queryId || item.query_id === queryId),
-    [m.queries, queryId, refreshTick],
-  );
-  const costingVersions = [...(query?.costing_versions ?? [])].sort((a, b) => b.version - a.version);
-
+  const actor = useActor();
+  const access = useAccessProfile();
+  const query = useAccessibleQueries().find((item) => item.id === id || item.query_id === id);
+  const allEvents = useCrmEvents();
+  const tasks = useCrmTasks().filter((task) => task.query_id === query?.query_id);
+  const programs = usePrograms();
   const [tab, setTab] = useState<Tab>("Overview");
-  const [note, setNote] = useState("");
-  const [followupNote, setFollowupNote] = useState("");
-  const [nextDate, setNextDate] = useState("");
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [celebrate, setCelebrate] = useState(false);
+  const [medium, setMedium] = useState("Phone");
+  const [activityNote, setActivityNote] = useState("");
+  const [nextDue, setNextDue] = useState("");
+  const [newStage, setNewStage] = useState<Stage | "">("");
+  const [lostReason, setLostReason] = useState("");
+  const [closureNote, setClosureNote] = useState("");
+  const events = useMemo(
+    () =>
+      allEvents
+        .filter((event) => event.query_id === query?.query_id)
+        .sort((a, b) => b.at.localeCompare(a.at)),
+    [allEvents, query?.query_id],
+  );
+  const program = programs.find(
+    (item) => item.id === query?.program_id || item.name === query?.program_name,
+  );
+  const versions = [...(query?.costing_versions || [])].sort((a, b) => b.version - a.version);
 
-  // Modal States
-  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [isCostingModalOpen, setIsCostingModalOpen] = useState(false);
-
-  // Submission States
-  const [savingLog, setSavingLog] = useState(false);
-  const [savingStatus, setSavingStatus] = useState(false);
-
-  // Log form state
-  const [logDate, setLogDate] = useState(() => todayISO());
-  const [logMedium, setLogMedium] = useState("");
-  const [logOutcome, setLogOutcome] = useState("");
-  const [logNextActionDate, setLogNextActionDate] = useState(() => todayISO());
-
-  // Status form state
-  const [newStatus, setNewStatus] = useState("");
-  const [statusReason, setStatusReason] = useState("");
-  const [internalNote, setInternalNote] = useState("");
-
-  // Costing Form States
-  const [costingPax, setCostingPax] = useState("9");
-  const [bottomLine, setBottomLine] = useState("1200000");
-  const [topLine, setTopLine] = useState("1200000");
-  const [ratePerPerson, setRatePerPerson] = useState("33333");
-  const [hotelCategory, setHotelCategory] = useState("5 Star");
-
-  const status: Stage = query?.stage ?? "New";
-  const currentActor = query?.owner || "Chhaya Prajapati";
-  const activities = useMemo(() => ACTIVITY_LOG, []);
-
-  const mockQueryDetails = query ? {
-    id: query.query_id,
-    customer: query.customer,
-    travelStart: query.travel_start,
-    travelEnd: query.travel_end,
-    pax: query.pax,
-    destination: query.destination,
-    enquiry_type: query.enquiry_type,
-    owner: query.owner,
-    contact_person: query.contact_person,
-    mobile: query.mobile,
-    email: query.email,
-    market: query.market,
-    lead_source: query.lead_source,
-  } : null;
-
-  // ---- Log modal reset when it opens ----
-  useEffect(() => {
-    if (isLogModalOpen) {
-      setLogDate(todayISO());
-      setLogMedium("");
-      setLogOutcome("");
-      setLogNextActionDate(todayISO());
-    }
-  }, [isLogModalOpen]);
-
-  // ---- Status modal reset when it opens ----
-  useEffect(() => {
-    if (isStatusModalOpen) {
-      setNewStatus("");
-      setStatusReason("");
-      setInternalNote("");
-    }
-  }, [isStatusModalOpen]);
-
-  if (!query || !mockQueryDetails) {
+  if (!query)
     return (
-      <div className="mx-auto max-w-4xl p-8">
+      <div className="p-8">
         <Card>
-          <CardContent className="p-8 text-center">
-            <h1 className="text-xl font-semibold">Query not found</h1>
-            <p className="mt-2 text-sm text-muted-foreground">The requested CRM query could not be found.</p>
-            <Button className="mt-5" onClick={() => navigate({ to: "/queries/query-tracker" })}>
-              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Query Tracker
+          <CardContent className="p-10 text-center">
+            <h1 className="text-xl font-bold">Query not found</h1>
+            <Button className="mt-4" onClick={() => navigate({ to: "/queries/query-tracker" })}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back
             </Button>
           </CardContent>
         </Card>
       </div>
     );
-  }
 
-  const currentBottomLine = query.commercials?.cost_price || Number(bottomLine);
-  const currentTopLine = query.commercials?.selling_price || Number(topLine);
+  const submitActivity = () => {
+    if (!activityNote.trim()) return toast.error("Add an outcome or note.");
+    const type: CrmEventType =
+      medium === "Email" ? "email_sent" : medium === "WhatsApp" ? "whatsapp_sent" : "call_made";
+    logLeadActivity(query.query_id, type, {
+      by: actor,
+      title: `${medium} activity logged`,
+      detail: activityNote.trim(),
+    });
+    if (nextDue)
+      scheduleFollowup(
+        query.query_id,
+        new Date(`${nextDue}T10:00:00`).toISOString(),
+        activityNote.trim(),
+        actor,
+      );
+    setActivityNote("");
+    setNextDue("");
+    setActivityOpen(false);
+    toast.success("Activity logged");
+  };
 
-  const targetQueryId = query.query_id || mockQueryDetails.id;
-
-  // ------------------------------------------------------------------
-  // Log follow-up
-  // ------------------------------------------------------------------
-  const handleLogFollowup = () => {
-    // ---- validation ----
-    if (!logMedium) {
-      toast.error("Please select a medium.");
-      return;
-    }
-    if (!logOutcome.trim()) {
-      toast.error("Please enter an outcome / note.");
-      return;
-    }
-    if (!logDate) {
-      toast.error("Please pick the activity date.");
-      return;
-    }
-    if (!logNextActionDate) {
-      toast.error("Please pick the next action date.");
-      return;
-    }
-
-    setSavingLog(true);
+  const submitStatus = () => {
+    if (!newStage) return;
+    if (newStage === "Lost" && !lostReason) return toast.error("Select a Lost reason.");
     try {
-      const noteText = `[${logMedium}] ${logOutcome.trim()}`;
-      const nextIso = new Date(logNextActionDate).toISOString();
-
-      // 1) Persist the follow-up (stores note + next-action date + actor)
-      logFollowup(targetQueryId, noteText, nextIso, currentActor);
-
-      // 2) Also record a note entry (keeps the activity timeline consistent)
-      try {
-        addNote(targetQueryId, noteText, currentActor);
-      } catch (err) {
-        // Non-fatal if the store rejects duplicate notes.
-        console.warn("addNote failed (non-fatal):", err);
-      }
-
-      toast.success("Activity saved successfully");
-      setIsLogModalOpen(false);
-      setLogMedium("");
-      setLogOutcome("");
-      setLogDate(todayISO());
-      setLogNextActionDate(todayISO());
-
-      // 3) Force UI re-read
-      setRefreshTick((t) => t + 1);
-    } catch (err) {
-      console.error("logFollowup failed:", err);
-      toast.error("Could not save activity. Please try again.");
-    } finally {
-      setSavingLog(false);
+      setQueryStage(query.query_id, newStage, actor, { reason: lostReason, notes: closureNote });
+      if (newStage === "Won") setCelebrate(true);
+      setStatusOpen(false);
+      setNewStage("");
+      setLostReason("");
+      setClosureNote("");
+      toast.success(`Query moved to ${newStage}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Status could not be changed.");
     }
   };
 
-  // ------------------------------------------------------------------
-  // Update status
-  // ------------------------------------------------------------------
-  const handleUpdateStatus = () => {
-    if (!newStatus) {
-      toast.error("Please select a new status.");
-      return;
-    }
-    if ((newStatus === "WIN" || newStatus === "LOST") && !statusReason) {
-      toast.error("Please pick a reason for this outcome.");
-      return;
-    }
+  const bottom = query.commercials.bottom_line ?? query.commercials.cost_price;
+  const top = query.commercials.top_line ?? query.commercials.selling_price ?? query.value;
+  const routeText =
+    query.routing ||
+    program?.routing
+      .map((row) => row.overnight_city)
+      .filter(Boolean)
+      .join(" → ") ||
+    query.destination;
+  const lifecycleAt = (label: string) => query.lifecycle.find((step) => step.label === label)?.at;
+  const clock = queryClock(query);
 
-    let mappedStage: Stage = "Nurturing";
-    if (newStatus === "WIN") mappedStage = "Confirmed";
-    if (newStatus === "LOST") mappedStage = "Lost";
+  const LifecycleClock = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>Lifecycle Clock</CardTitle>
+        <p className="text-xs text-slate-500">
+          Operational elapsed time from recorded Query events
+        </p>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          [
+            "Assignment wait",
+            durationLabel(clock.assignmentWait),
+            query.assigned_at ? "Recorded" : "Still waiting",
+          ],
+          [
+            "First response",
+            clock.firstResponse === null ? "Pending" : durationLabel(clock.firstResponse),
+            "After assignment",
+          ],
+          [
+            "Quotation TAT",
+            clock.quotationTat === null ? "Pending" : durationLabel(clock.quotationTat),
+            "From Query receipt",
+          ],
+          ["Current stage age", durationLabel(clock.stageAge), query.stage],
+          ["Total Query age", durationLabel(clock.queryAge), query.work_status || "Open"],
+          [
+            "Sales cycle",
+            clock.salesCycle === null ? "In progress" : durationLabel(clock.salesCycle),
+            "Receipt to closure",
+          ],
+        ].map(([label, value, helper]) => (
+          <div key={label} className="rounded-xl border bg-slate-50 p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
+            <p className="text-xs text-slate-500">{helper}</p>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
 
-    setSavingStatus(true);
-    try {
-      // 1) Persist the stage change
-      setQueryStage(targetQueryId, mappedStage, currentActor);
+  const ProgramCard = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>Program Snapshot</CardTitle>
+        <p className="text-xs text-slate-500">Selected programme and routing</p>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-xl border border-teal-200 bg-gradient-to-r from-teal-50 to-emerald-50 p-5">
+          <p className="text-xs font-bold uppercase tracking-wider text-teal-700">
+            {program?.id || query.program_id || "Program pending"}
+          </p>
+          <h3 className="mt-2 text-xl font-bold">
+            {program?.name || query.program_name || query.destination || "Not selected"}
+          </h3>
+          <p className="mt-2 text-sm text-slate-600">
+            {routeText || "Routing is not yet defined."}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(program?.categories || []).map((category) => (
+              <Badge key={category} variant="outline" className="bg-white">
+                {category}
+              </Badge>
+            ))}
+            <Badge className="bg-teal-700">MP Unit</Badge>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
-      // 2) Add a note describing the change (visible in the activity log)
-      const reasonPart = statusReason ? ` — ${statusReason}` : "";
-      const notePart = internalNote.trim() ? ` — ${internalNote.trim()}` : "";
-      const noteText = `Status updated to ${mappedStage}${reasonPart}${notePart}`;
-      try {
-        addNote(targetQueryId, noteText, currentActor);
-      } catch (err) {
-        console.warn("addNote failed (non-fatal):", err);
-      }
+  const ActivityCard = ({ limit }: { limit?: number }) => (
+    <Card>
+      <CardHeader>
+        <CardTitle>Latest Activity</CardTitle>
+        <p className="text-xs text-slate-500">Actual Query audit history</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {events.length === 0 && <p className="text-sm text-slate-500">No activity recorded.</p>}
+        {events.slice(0, limit).map((event) => (
+          <div key={event.id} className="flex gap-3 border-b pb-3 last:border-0">
+            <span className="mt-1 h-2.5 w-2.5 rounded-full bg-teal-500" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">{event.title}</p>
+              <p className="text-xs text-slate-500">{event.detail}</p>
+            </div>
+            <p className="whitespace-nowrap text-xs text-slate-400">{fmt(event.at)}</p>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
 
-      toast.success(`Status updated to ${mappedStage}.`);
-      setIsStatusModalOpen(false);
-      setNewStatus("");
-      setStatusReason("");
-      setInternalNote("");
-
-      // 3) Force UI re-read
-      setRefreshTick((t) => t + 1);
-    } catch (err) {
-      console.error("setQueryStage failed:", err);
-      toast.error("Could not update status. Please try again.");
-    } finally {
-      setSavingStatus(false);
-    }
-  };
-
-  // ------------------------------------------------------------------
-  // Save costing (local-only toast for now — hook up to store if needed)
-  // ------------------------------------------------------------------
-  const handleSaveCosting = () => {
-    toast.success("Costing values updated successfully");
-    setIsCostingModalOpen(false);
-    setRefreshTick((t) => t + 1);
-  };
+  const LifecycleCard = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>Lifecycle Progress</CardTitle>
+        <p className="text-xs text-slate-500">Only recorded milestones are dated</p>
+      </CardHeader>
+      <CardContent className="space-y-0">
+        {LIFECYCLE.map((label, index) => {
+          const at = lifecycleAt(label);
+          const reached =
+            Boolean(at) || (label === "Won / Lost" && ["Won", "Lost"].includes(query.stage));
+          return (
+            <div key={label} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full ${reached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}
+                >
+                  {reached ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+                </span>
+                {index < LIFECYCLE.length - 1 && (
+                  <span className={`h-10 w-px ${reached ? "bg-teal-500" : "bg-slate-200"}`} />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{label}</p>
+                <p className="text-xs text-slate-500">
+                  {at
+                    ? fmt(at)
+                    : label === "Won / Lost" && query.closed_at
+                      ? fmt(query.closed_at)
+                      : "Pending"}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8 bg-slate-50 min-h-screen rounded-xl">
-      {/* TOP HEADER */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 bg-gradient-to-r from-[#043b3a] via-[#0a5c59] to-[#098f8b] rounded-2xl p-6 shadow-lg relative overflow-hidden">
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-bold text-teal-200">{mockQueryDetails.id}</span>
-            <Badge variant="outline" className={`px-2 py-0 ${stageBadgeClass(status)} bg-white/90`}>{status}</Badge>
-          </div>
-          <h1 className="text-3xl font-bold text-white mt-1">{mockQueryDetails.customer}</h1>
-          <p className="text-sm text-teal-100 mt-1">
-            Received 20 Jun 2026 • Owned by {mockQueryDetails.owner}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 relative z-10 self-start">
-          <Button className="bg-white hover:bg-slate-100 text-teal-700" onClick={() => setIsLogModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Add Action
-          </Button>
-
-          <Button variant="outline" className="bg-transparent border-white/30 text-white hover:bg-white/10 hover:text-white" onClick={() => setIsStatusModalOpen(true)}>
-            Update Status
-          </Button>
-
-          <Button variant="ghost" size="icon" className="text-white/70 hover:text-white hover:bg-white/10" onClick={() => navigate({ to: "/queries/query-tracker" })}>
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
-      </div>
-
-      {/* INFO BAR */}
-      <div className="flex flex-wrap items-center gap-6 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="bg-blue-50 p-1.5 rounded-md text-blue-600"><Users className="h-4 w-4" /></div>
-          <span className="font-semibold text-slate-800">{mockQueryDetails.pax} Pax</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="bg-purple-50 p-1.5 rounded-md text-purple-600"><MapPin className="h-4 w-4" /></div>
-          <span className="font-semibold text-slate-800">{mockQueryDetails.destination}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="bg-amber-50 p-1.5 rounded-md text-amber-600"><CalendarClock className="h-4 w-4" /></div>
-          <span className="font-semibold text-slate-800">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="bg-cyan-50 p-1.5 rounded-md text-cyan-600"><Briefcase className="h-4 w-4" /></div>
-          <span className="font-semibold text-slate-800">{mockQueryDetails.enquiry_type}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="bg-teal-50 p-1.5 rounded-md text-teal-600"><CheckCircle2 className="h-4 w-4" /></div>
-          <span className="font-semibold text-slate-800">{status}</span>
-        </div>
-      </div>
-
-      {/* TABS */}
-      <div className="flex gap-2 border-b border-slate-200 overflow-x-auto pb-0 bg-white rounded-t-xl px-4 pt-2">
-        {TABS.map((item) => (
-          <button
-            key={item}
-            onClick={() => setTab(item)}
-            className={`whitespace-nowrap pb-3 px-3 text-sm font-medium transition-all duration-200 ${
-              tab === item ? "border-b-2 border-teal-600 text-teal-700 bg-teal-50/50 rounded-t-md" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-t-md"
-            }`}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
-
-      {/* TAB CONTENT */}
-      <div className="mt-6">
-        {tab === "Overview" && (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-            <div className="xl:col-span-2 space-y-6">
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Query Overview</h2>
-                  <p className="text-xs text-muted-foreground mb-6">The main facts, current stage and immediate action</p>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Travel partner</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.customer}</p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Contact person</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.contact_person}</p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Mobile / Email</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.mobile}</p>
-                        <p className="text-xs text-slate-500 break-all">{mockQueryDetails.email}</p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Market / Source</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.market} • {mockQueryDetails.lead_source}</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Travel dates</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Traveller range</p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">{mockQueryDetails.pax} pax</p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-xs font-semibold text-slate-500 uppercase">Current stage</p>
-                        <Badge variant="outline" className={`mt-1 px-2 py-0 ${stageBadgeClass(status)}`}>{status}</Badge>
-                      </div>
-                      <div className="bg-red-50 p-3 rounded-lg border border-red-100">
-                        <p className="text-xs font-semibold text-red-500 uppercase">Next action</p>
-                        <p className="mt-1 text-sm font-bold text-red-600">08 Aug 2026 • Overdue</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Program Snapshot</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Selected programme and routing</p>
-
-                  <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-3">
-                      <p className="text-xs font-bold text-teal-700 tracking-wider">{PROGRAM_SNAPSHOT.code}</p>
-                      <div className="bg-teal-600 text-white p-1 rounded-md"><Sparkles className="h-4 w-4" /></div>
-                    </div>
-                    <h4 className="text-xl font-bold text-slate-900">{PROGRAM_SNAPSHOT.name}</h4>
-                    <p className="text-sm text-slate-600 mt-1">{PROGRAM_SNAPSHOT.routing}</p>
-                    <div className="mt-3 pt-3 border-t border-teal-200 flex justify-between items-center">
-                      <p className="text-xs font-semibold text-teal-800">{PROGRAM_SNAPSHOT.type}</p>
-                      <Badge variant="outline" className="bg-white text-teal-700 border-teal-300">Active</Badge>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Latest Activity</h3>
-                  <p className="text-xs text-muted-foreground mb-6">Most recent movements on this query</p>
-
-                  <div className="space-y-0">
-                    {ACTIVITY_LOG.map((event, idx) => (
-                      <div key={event.id} className="flex gap-4">
-                        <div className="flex flex-col items-center">
-                          <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color} ring-4 ring-white`}></div>
-                          {idx !== ACTIVITY_LOG.length - 1 && (
-                            <div className="w-px flex-1 bg-slate-200"></div>
-                          )}
-                        </div>
-                        <div className="pb-6">
-                          <div className="flex justify-between items-start gap-4">
-                            <div>
-                              <p className="font-semibold text-slate-900 text-sm">{event.title}</p>
-                              <p className="text-xs text-slate-500 mt-0.5">{event.sub}</p>
-                            </div>
-                            <div className="bg-slate-100 px-2 py-1 rounded-md text-xs font-medium text-slate-600 whitespace-nowrap">{event.date}</div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <Button variant="outline" className="w-full border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-teal-500 hover:text-teal-600 transition-colors">
-                    View all 5 activities <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </CardContent>
-              </Card>
+    <div className="min-h-screen bg-slate-50 p-6 lg:p-8">
+      <div className="mx-auto max-w-[1600px] space-y-6">
+        <div className="rounded-2xl bg-gradient-to-r from-[#043b3a] via-[#0a5c59] to-[#098f8b] p-6 text-white shadow-lg">
+          <div className="flex flex-col justify-between gap-4 lg:flex-row">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-teal-100">{query.query_id}</span>
+                <Badge className="bg-white text-slate-900">{query.stage}</Badge>
+                <Badge variant="outline" className="border-white/40 text-white">
+                  {query.assignment_status}
+                </Badge>
+              </div>
+              <h1 className="mt-2 text-3xl font-bold">{query.customer}</h1>
+              <p className="mt-1 text-sm text-teal-100">
+                Received {fmt(query.created_at)} ·{" "}
+                {query.owner ? `Owned by ${query.owner}` : "Awaiting manager assignment"} ·{" "}
+                {query.primary_unit} Unit
+              </p>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button className="bg-white text-teal-800" onClick={() => setActivityOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Action
+              </Button>
+              <NewTaskDialog
+                queryId={query.query_id}
+                trigger={
+                  <Button variant="outline" className="border-white/40 bg-transparent text-white">
+                    Add Task
+                  </Button>
+                }
+              />
+              <Button
+                variant="outline"
+                className="border-white/40 bg-transparent text-white"
+                onClick={() => setStatusOpen(true)}
+              >
+                Update Stage
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate({ to: "/queries/query-tracker" })}
+              >
+                <ArrowLeft />
+              </Button>
+            </div>
+          </div>
+        </div>
 
+        <div className="grid gap-3 rounded-xl border bg-white p-4 md:grid-cols-5">
+          <Fact label="Travellers">
+            {query.min_pax || query.pax}–{query.max_pax || query.pax} pax
+          </Fact>
+          <Fact label="Destination">{query.destination}</Fact>
+          <Fact label="Travel dates">
+            {dateOnly(query.travel_start)} – {dateOnly(query.travel_end)}
+          </Fact>
+          <Fact label="Costing basis">{query.costing_basis || query.travel_type}</Fact>
+          <Fact label="Owner">
+            {access.canAssign ? (
+              <ReassignQuery queryId={query.query_id} owner={query.owner} />
+            ) : (
+              query.owner || "Awaiting Assignment"
+            )}
+          </Fact>
+        </div>
+        <div className="flex gap-1 overflow-x-auto rounded-xl border bg-white px-3 pt-2">
+          {TABS.map((item) => (
+            <button
+              key={item}
+              onClick={() => setTab(item)}
+              className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-semibold ${tab === item ? "border-teal-600 text-teal-700" : "border-transparent text-slate-500"}`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        {tab === "Overview" && (
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div className="space-y-6 xl:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Query Overview</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Fact label="Partner / Client">
+                    {query.customer} · {query.customer_type}
+                  </Fact>
+                  <Fact label="Contact">
+                    {query.contact_person}
+                    <br />
+                    {query.mobile} · {query.email}
+                  </Fact>
+                  <Fact label="Query nature">
+                    {query.enquiry_type} · {query.requirement}
+                  </Fact>
+                  <Fact label="Commercial opportunity">
+                    {inr(bottom)} → {inr(top)}
+                  </Fact>
+                  <Fact label="Next action">
+                    {query.next_action || "Not set"} · {fmt(query.followup_due)}
+                  </Fact>
+                  <Fact label="Assignment">
+                    Created by {query.created_by || "—"}
+                    <br />
+                    Assigned by {query.assigned_by || "—"}
+                  </Fact>
+                </CardContent>
+              </Card>
+              <LifecycleClock />
+              <ProgramCard />
+              <ActivityCard limit={5} />
+            </div>
             <div className="space-y-6">
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h2 className="text-lg font-bold text-slate-900">Lifecycle Progress</h2>
-                  <p className="text-xs text-muted-foreground mb-6">{status} • 5 recorded activities</p>
-
-                  <div className="space-y-0">
-                    {STAGES.filter(s => s !== "Confirmed" && s !== "Lost").map((stage, idx) => {
-                      const isReached = STAGES.indexOf(status) >= STAGES.indexOf(stage);
-                      const stageDates: Record<string, string> = {
-                        "New": "20 Jun 2026",
-                        "Requirement Review": "20 Jun 2026",
-                        "Costing": "06 Aug 2026",
-                        "Quotation Sent": "06 Aug 2026",
-                        "Follow-up": "06 Aug 2026",
-                      };
-
-                      return (
-                        <div key={stage} className="flex gap-4">
-                          <div className="flex flex-col items-center">
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
-                              {isReached ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-                            </div>
-                            {idx < STAGES.filter(s => s !== "Confirmed" && s !== "Lost").length - 1 && (
-                              <div className={`w-px flex-1 min-h-[40px] ${isReached ? "bg-teal-600" : "bg-slate-200"}`}></div>
-                            )}
-                          </div>
-                          <div className="pb-6">
-                            <p className="text-sm font-semibold text-slate-900">{stage}</p>
-                            <p className="text-xs text-slate-500">{stageDates[stage] || "Pending"}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="flex gap-4 items-center">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-                        <Circle className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Confirmed / Lost</p>
-                        <p className="text-xs text-slate-500">
-                          {status === "Confirmed" || status === "Lost" ? status : "Pending"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Commercial Snapshot</h3>
-                  <p className="text-xs text-muted-foreground mb-6">Bottom-line to top-line opportunity</p>
-
-                  <div className="flex justify-between items-center mb-2">
+              <LifecycleCard />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Commercial Snapshot</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Bottom Line</p>
-                      <p className="text-xl font-bold text-teal-700">{formatMoney(currentBottomLine)}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">{COMMERCIAL_SNAPSHOT.pax} pax • {COMMERCIAL_SNAPSHOT.hotel}</p>
+                      <p className="text-xs text-slate-500">BOTTOM LINE</p>
+                      <p className="text-2xl font-bold text-teal-700">{inr(bottom)}</p>
+                      <p className="text-xs text-slate-500">
+                        {query.min_pax || query.pax} pax ·{" "}
+                        {query.hotel_category_from || "category pending"}
+                      </p>
                     </div>
-                    <div className="text-slate-300 text-xl font-bold">→</div>
+                    <span className="text-2xl text-teal-600">→</span>
                     <div className="text-right">
-                      <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Top Line</p>
-                      <p className="text-xl font-bold text-slate-900">{formatMoney(currentTopLine)}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">{COMMERCIAL_SNAPSHOT.pax} pax • {COMMERCIAL_SNAPSHOT.hotel}</p>
+                      <p className="text-xs text-slate-500">TOP LINE</p>
+                      <p className="text-2xl font-bold">{inr(top)}</p>
+                      <p className="text-xs text-slate-500">
+                        {query.max_pax || query.pax} pax ·{" "}
+                        {query.hotel_category_to || "category pending"}
+                      </p>
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-4">
-                    <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200">
-                      <Database className="h-3 w-3 mr-1" /> {COMMERCIAL_SNAPSHOT.costingBasis}
-                    </Badge>
-                    <p className="text-xs text-slate-500">{COMMERCIAL_SNAPSHOT.hotelCount} hotel category quoted</p>
                   </div>
                 </CardContent>
               </Card>
-
-              <Card className="border-red-200 shadow-md shadow-red-100 hover:shadow-lg transition-shadow duration-300">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Follow-ups / Next Step</h3>
-                  <p className="text-xs text-muted-foreground mb-4">The next accountable action</p>
-
-                  <div className="bg-gradient-to-r from-[#FDF1F1] to-red-50 border border-[#F3D4D4] rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-bold text-red-700 uppercase flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" /> Action Overdue
-                      </p>
-                      <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm" onClick={() => setIsLogModalOpen(true)}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Action
-                      </Button>
-                    </div>
-                    <p className="text-xl font-bold text-slate-900">08 Aug 2026</p>
-                    <p className="text-xs text-slate-600 mt-1">Keep the client conversation and ownership visible.</p>
-                  </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Follow-ups / Next Step</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p
+                    className={`text-lg font-bold ${query.followup_due && new Date(query.followup_due) < new Date() ? "text-red-600" : "text-slate-900"}`}
+                  >
+                    {query.followup_due ? fmt(query.followup_due) : "Not scheduled"}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {query.followup_note || query.next_action}
+                  </p>
+                  <Button className="mt-4" onClick={() => setActivityOpen(true)}>
+                    Log & schedule
+                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -643,685 +485,337 @@ export default function QueryWorkspace() {
 
         {tab === "Program Info" && (
           <div className="space-y-6">
-            <Card className="border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <p className="text-xs font-bold text-teal-700 uppercase mb-2">Program Information</p>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold text-slate-900">{PROGRAM_SNAPSHOT.name}</h2>
-                    <p className="text-sm text-slate-500 mt-1">{PROGRAM_SNAPSHOT.routing}</p>
-                  </div>
-                  <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200">{PROGRAM_SNAPSHOT.code}</Badge>
+            <ProgramCard />
+            <Card>
+              <CardHeader>
+                <CardTitle>Program Details</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-3">
+                <Fact label="Program code">{program?.id || query.program_id}</Fact>
+                <Fact label="Program name">{program?.name || query.program_name}</Fact>
+                <Fact label="Region">
+                  {query.destination} · {query.primary_unit}
+                </Fact>
+                <Fact label="Duration">{program ? `${program.nights} nights` : "—"}</Fact>
+                <Fact label="Starting city">{program?.departure_city}</Fact>
+                <Fact label="Travel modes">{program?.travel_modes?.join(", ")}</Fact>
+                <div className="md:col-span-3">
+                  <Fact label="Routing">{routeText}</Fact>
                 </div>
               </CardContent>
             </Card>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Programme identity</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Catalogue classification</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme code</p>
-                      <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.code}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme name</p>
-                      <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.name}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme type</p>
-                      <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.type.split("·")[0]}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Programme region</p>
-                      <p className="text-sm font-bold text-slate-900">{PROGRAM_SNAPSHOT.type.split("·")[1]}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Travel framework</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Dates, duration and journey</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Travel dates</p>
-                      <p className="text-sm font-bold text-slate-900">{mockQueryDetails.travelStart} – {mockQueryDetails.travelEnd}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Duration</p>
-                      <p className="text-sm font-bold text-slate-900">5 Days</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Start city</p>
-                      <p className="text-sm font-bold text-slate-900">Gwalior</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">End city</p>
-                      <p className="text-sm font-bold text-slate-900">Gwalior</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           </div>
         )}
-
         {tab === "Commercials" && (
-          <div className="space-y-6">
-            <Card className="bg-gradient-to-r from-slate-50 to-white border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase">Bottom-line Query Value</p>
-                    <p className="text-2xl font-bold text-teal-700 mt-1">{formatMoney(currentBottomLine)}</p>
-                    <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
-                  </div>
-
-                  <Button variant="outline" size="sm" onClick={() => setIsCostingModalOpen(true)} className="border-teal-600 text-teal-700 hover:bg-teal-50 shadow-sm">
-                    Edit Costing
-                  </Button>
-
-                  <div className="text-right">
-                    <p className="text-xs font-semibold text-slate-500 uppercase">Top-line Query Value</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatMoney(currentTopLine)}</p>
-                    <p className="text-xs text-slate-500">{costingPax} pax • {formatMoney(Number(ratePerPerson))} • {hotelCategory}</p>
-                  </div>
-                </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Opportunity Range</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                <Fact label="Bottom line">{inr(bottom)}</Fact>
+                <Fact label="Top line">{inr(top)}</Fact>
+                <Fact label="Hotel categories">
+                  {query.hotel_category_from || "—"} → {query.hotel_category_to || "—"}
+                </Fact>
+                <Fact label="Costing basis">{query.costing_basis || query.travel_type}</Fact>
               </CardContent>
             </Card>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Bottom-line scenario</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Lowest qualifying quotation</p>
-                  <div className="border-2 border-teal-600 rounded-lg p-4 bg-teal-50/20 shadow-sm">
-                    <p className="text-xs font-bold text-teal-700 uppercase">Entry Scenario</p>
-                    <p className="text-2xl font-bold text-teal-700 mt-2">{formatMoney(currentBottomLine)}</p>
-                    <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md hover:shadow-lg transition-shadow">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Top-line scenario</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Highest qualifying quotation</p>
-                  <div className="border-2 border-slate-300 rounded-lg p-4 bg-slate-50/20 shadow-sm">
-                    <p className="text-xs font-bold text-slate-600 uppercase">Maximum Scenario</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-2">{formatMoney(currentTopLine)}</p>
-                    <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Travellers</p><p className="text-sm font-bold">{costingPax} pax</p></div>
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Hotel</p><p className="text-sm font-bold">{hotelCategory}</p></div>
-                      <div className="bg-white rounded p-2 border border-slate-100"><p className="text-[10px] text-slate-500">Rate / person</p><p className="text-sm font-bold">{formatMoney(Number(ratePerPerson))}</p></div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Hotel categories quoted</h3>
-                  <p className="text-xs text-muted-foreground mb-4">1 category included in the commercial range</p>
-                  <div className="flex gap-2">
-                    <Badge className="bg-teal-50 text-teal-700 border-teal-200 px-3 py-1 shadow-sm">{hotelCategory}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Commercial classification</h3>
-                  <p className="text-xs text-muted-foreground mb-4">How this query has been costed</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Costing basis</p>
-                      <p className="text-sm font-bold text-slate-900">FIT</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Requirement</p>
-                      <p className="text-sm font-bold text-slate-900">Package</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Traveller range</p>
-                      <p className="text-sm font-bold text-slate-900">{costingPax} to {costingPax} pax</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Value range</p>
-                      <p className="text-sm font-bold text-slate-900">{formatMoney(currentBottomLine)}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Latest Final Commercial</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                <Fact label="Final cost">
+                  {inr(query.commercials.final_cost || query.commercials.cost_price)}
+                </Fact>
+                <Fact label="Final selling">
+                  {inr(query.commercials.final_selling || query.commercials.selling_price)}
+                </Fact>
+                <Fact label="Margin">{inr(query.commercials.margin_value || 0)}</Fact>
+                <Fact label="Margin %">{(query.commercials.margin_pct || 0).toFixed(1)}%</Fact>
+              </CardContent>
+            </Card>
           </div>
         )}
-
         {tab === "Itinerary & Costings" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="space-y-5">
+            <div className="flex justify-between">
               <div>
-                <p className="text-xs font-bold text-teal-700 uppercase">Version Control</p>
-                <h2 className="text-2xl font-bold text-slate-900">Itineraries & Costings</h2>
-                <p className="text-sm text-slate-500">Every generated version stays available for review, editing and download.</p>
+                <h2 className="text-2xl font-bold">Itinerary & Costing Versions</h2>
+                <p className="text-sm text-slate-500">
+                  Every saved linked Costing is retained as a Query version.
+                </p>
               </div>
               <Button
                 onClick={() => navigate({ to: "/costing", search: { queryId: query.query_id } })}
-                className="bg-teal-600 hover:bg-teal-700 text-white shadow-md"
-              >+ New Version</Button>
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Create linked costing
+              </Button>
             </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Itinerary versions</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Programme documents shared or prepared</p>
-                  <div className="space-y-4">
-                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                      <div className="bg-blue-100 p-3 rounded-lg text-blue-600"><FileText className="h-6 w-6" /></div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold">Itinerary V2</p>
-                          <Badge className="bg-teal-100 text-teal-700 border-0">CURRENT</Badge>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1">{PROGRAM_SNAPSHOT.name} - latest working route</p>
-                        <p className="text-[10px] text-slate-400 mt-2">Prepared 06 Aug 2026 - Chhaya Prajapati</p>
-                      </div>
-                      <div className="flex gap-2 self-center">
-                        <Button variant="outline" size="sm">View</Button>
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm">Download</Button>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4 border border-slate-200 rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity">
-                      <div className="bg-blue-50 p-3 rounded-lg text-blue-600"><FileText className="h-6 w-6" /></div>
-                      <div className="flex-1">
-                        <p className="font-bold">Itinerary V1</p>
-                        <p className="text-xs text-slate-500 mt-1">Initial requirement and routing draft</p>
-                        <p className="text-[10px] text-slate-400 mt-2">Prepared 20 Jun 2026 - Chhaya Prajapati</p>
-                      </div>
-                      <div className="flex gap-2 self-center">
-                        <Button variant="outline" size="sm">View</Button>
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm">Download</Button>
-                      </div>
-                    </div>
+            {versions.length === 0 && (
+              <Card>
+                <CardContent className="p-10 text-center text-slate-500">
+                  No linked costing version yet.
+                </CardContent>
+              </Card>
+            )}
+            {versions.map((version) => (
+              <Card key={version.version}>
+                <CardContent className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
+                  <div>
+                    <p className="font-bold">
+                      Costing V{version.version} · {version.quote.quote_number}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Saved {fmt(version.saved_at)} by {version.saved_by}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const blob = new Blob([JSON.stringify(version.quote, null, 2)], {
+                          type: "application/json",
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `${query.query_id}-costing-v${version.version}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download
+                    </Button>
+                    {version.draft_id && (
+                      <Button
+                        onClick={() =>
+                          navigate({ to: "/costing", search: { id: version.draft_id } })
+                        }
+                      >
+                        <FileText className="mr-2 h-4 w-4" />
+                        Edit version
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
-
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900">Costing versions</h3>
-                  <p className="text-xs text-muted-foreground mb-4">Scenario calculations and quotation history</p>
-                  <div className="space-y-4">
-                    {costingVersions.length === 0 && <p className="text-sm text-muted-foreground">No costing versions saved yet.</p>}
-                    {costingVersions.map((item, index) => (
-                      <div key={`${item.version}-${item.saved_at}`} className={`flex gap-4 border border-slate-200 rounded-lg p-4 ${index === 0 ? "bg-slate-50/50" : "opacity-60 hover:opacity-100"}`}>
-                        <div className="bg-teal-50 p-3 rounded-lg text-teal-600"><TrendingUp className="h-6 w-6" /></div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-bold">Costing V{item.version}</p>
-                            {index === 0 && <Badge className="bg-teal-100 text-teal-700 border-0">CURRENT</Badge>}
-                          </div>
-                          <p className="text-xs text-slate-500 mt-1">{formatMoney(Math.max(item.quote.totals.grand_sgl, item.quote.totals.grand_dbl, item.quote.totals.grand_trp))} • {item.quote.quote_number}</p>
-                          <p className="text-[10px] text-slate-400 mt-2">Prepared {new Date(item.saved_at).toLocaleDateString("en-IN")} - {item.saved_by}</p>
-                        </div>
-                        <div className="flex gap-2 self-center">
-                          {item.draft_id && <Button variant="outline" size="sm" onClick={() => navigate({ to: "/costing", search: { id: item.draft_id } })}>Edit</Button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            ))}
           </div>
         )}
-
         {tab === "Lifecycle Progress" && (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-            <Card className="xl:col-span-2 border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <p className="text-xs font-bold text-teal-700 uppercase">Query Journey</p>
-                    <h2 className="text-2xl font-bold text-slate-900">Lifecycle Progress</h2>
-                    <p className="text-sm text-slate-500">From generation and assignment through costing, follow-up and the final outcome.</p>
-                  </div>
-                  <Badge variant="outline" className={`${stageBadgeClass(status)} shadow-sm`}>{status}</Badge>
-                </div>
-
-                <p className="text-xs font-semibold text-slate-500 mb-6">Current stage: {status}</p>
-
-                <div className="space-y-0">
-                  {STAGES.filter(s => s !== "Confirmed" && s !== "Lost").map((stage, idx) => {
-                    const isReached = STAGES.indexOf(status) >= STAGES.indexOf(stage);
-                    const lastDate = activities.find((act) => act.type === stage)?.date;
-
-                    return (
-                      <div key={stage} className="flex gap-4">
-                        <div className="flex flex-col items-center">
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm ${isReached ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
-                            {isReached ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-                          </div>
-                          <div className={`w-px flex-1 min-h-[50px] ${isReached && idx < 4 ? "bg-teal-600" : "bg-slate-200"}`}></div>
-                        </div>
-                        <div className="pb-6 pt-1">
-                          <p className="font-bold text-slate-900">{stage}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">{lastDate || "Pending"}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="flex gap-4 items-center pt-1">
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-full ${status === "Confirmed" || status === "Lost" ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-400"}`}>
-                      {status === "Confirmed" || status === "Lost" ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900">Confirmed / Lost</p>
+          <div className="space-y-6">
+            <LifecycleClock />
+            <div className="grid gap-6 lg:grid-cols-2">
+              <LifecycleCard />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Assignment History</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {assignmentHistory(query.query_id).map((event) => (
+                    <div key={event.id} className="rounded-lg border p-3">
+                      <p className="font-semibold">
+                        {event.assigned_from ? `${event.assigned_from} → ` : ""}
+                        {event.assigned_to}
+                      </p>
                       <p className="text-xs text-slate-500">
-                        {status === "Confirmed" || status === "Lost" ? status : "Pending"}
+                        {fmt(event.at)} · by {event.by}
+                        {event.assign_reason ? ` · ${event.assign_reason}` : ""}
                       </p>
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <h3 className="font-bold text-slate-900 mb-4">Lifecycle summary</h3>
-                <p className="text-xs text-muted-foreground mb-6">Key accountability signals</p>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Owner</p>
-                    <p className="text-sm font-bold text-slate-900">{mockQueryDetails.owner}</p>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Days in pipeline</p>
-                    <p className="text-sm font-bold text-slate-900">5</p>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Follow-ups</p>
-                    <p className="text-sm font-bold text-slate-900">2</p>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Outcome</p>
-                    <p className="text-sm font-bold text-slate-900">{status}</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 bg-teal-50 rounded-lg p-4 border border-teal-100">
-                  <p className="text-[10px] font-bold text-teal-700 uppercase">Next control point</p>
-                  <p className="font-bold text-slate-900 mt-1">08 Aug 2026</p>
-                  <p className="text-xs text-slate-500 mt-1">Action is overdue.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {tab === "Latest Activity" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-              <div>
-                <p className="text-xs font-bold text-teal-700 uppercase">Audit Trail</p>
-                <h2 className="text-2xl font-bold text-slate-900">Latest Activity</h2>
-                <p className="text-sm text-slate-500">A single chronological history of calls, emails, status updates and internal progress.</p>
-              </div>
-              <Button variant="outline" className="border-teal-600 text-teal-700 hover:bg-teal-50" onClick={() => setIsLogModalOpen(true)}>+ Log Activity</Button>
-            </div>
-
-            <Card className="border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <h3 className="font-bold text-slate-900">Complete activity history</h3>
-                <p className="text-xs text-muted-foreground mb-6">{ACTIVITY_LOG.length} recorded events</p>
-
-                <div className="space-y-6">
-                  {ACTIVITY_LOG.map((event) => (
-                    <div key={event.id} className="flex gap-4">
-                      <div className={`h-3 w-3 rounded-full mt-1.5 ${event.color} ring-4 ring-white shadow-sm`}></div>
-                      <div className="flex-1 border-b border-slate-100 pb-4">
-                        <div className="flex justify-between">
-                          <p className="font-semibold text-slate-900">{event.title}</p>
-                          <div className="bg-slate-100 px-2 py-1 rounded-md text-xs font-medium text-slate-600">{event.date}</div>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-0.5">{event.sub}</p>
-                      </div>
-                    </div>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                  {!assignmentHistory(query.query_id).length && (
+                    <p className="text-sm text-slate-500">Awaiting first assignment.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
-
+        {tab === "Latest Activity" && <ActivityCard />}
         {tab === "Follow-ups / Next Steps" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-              <div>
-                <p className="text-xs font-bold text-teal-700 uppercase">Action Desk</p>
-                <h2 className="text-2xl font-bold text-slate-900">Follow-ups / Next Steps</h2>
-                <p className="text-sm text-slate-500">Make the next commitment, due date and conversation history explicit.</p>
-              </div>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white shadow-md" onClick={() => setIsLogModalOpen(true)}>+ Add Follow-up</Button>
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-              <Card className="xl:col-span-2 border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900 mb-4">Next action</h3>
-                  <p className="text-xs text-muted-foreground mb-4">The next accountable client touchpoint</p>
-
-                  <div className="bg-gradient-to-r from-[#043b3a] to-[#0a5c59] rounded-lg p-6 text-white shadow-lg">
-                    <p className="text-xs font-bold opacity-70 uppercase">Due Date</p>
-                    <p className="text-3xl font-bold mt-2">08 Aug 2026</p>
-                    <p className="text-sm opacity-80 mt-2">Owner: {mockQueryDetails.owner} • Email</p>
-                    <Button className="mt-4 bg-white text-[#043b3a] hover:bg-slate-100 shadow-md" onClick={() => setIsLogModalOpen(true)}>
-                      Log outcome & schedule next
-                    </Button>
-                  </div>
-
-                  <div className="mt-6 space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                    <Textarea
-                      value={followupNote}
-                      onChange={(e) => setFollowupNote(e.target.value)}
-                      placeholder="What was discussed or sent?"
-                    />
-                    <div className="flex gap-2">
-                      <Input
-                        type="date"
-                        value={nextDate}
-                        onChange={(e) => setNextDate(e.target.value)}
-                        placeholder="Next action date"
-                        className="bg-white"
-                      />
-                      <Button
-                        onClick={() => {
-                          if (!followupNote.trim()) {
-                            toast.error("Please enter what was discussed.");
-                            return;
-                          }
-                          if (!nextDate) {
-                            toast.error("Please pick the next action date.");
-                            return;
-                          }
-                          try {
-                            const noteText = followupNote.trim();
-                            logFollowup(targetQueryId, noteText, new Date(nextDate).toISOString(), currentActor);
-                            try { addNote(targetQueryId, noteText, currentActor); } catch { /* non-fatal */ }
-                            toast.success("Follow-up scheduled.");
-                            setFollowupNote("");
-                            setNextDate("");
-                            setRefreshTick((t) => t + 1);
-                          } catch (err) {
-                            console.error("logFollowup failed:", err);
-                            toast.error("Could not schedule follow-up.");
-                          }
-                        }}
-                        disabled={!nextDate || !followupNote.trim()}
-                        className="bg-teal-600 hover:bg-teal-700"
-                      >
-                        <CalendarClock className="mr-2 h-4 w-4" /> Schedule
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 shadow-md">
-                <CardContent className="p-6">
-                  <h3 className="font-bold text-slate-900 mb-4">Follow-up health</h3>
-                  <p className="text-xs text-muted-foreground mb-6">Cadence and query position</p>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Total Follow-ups</p>
-                      <p className="text-sm font-bold text-slate-900">2</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Last Contact</p>
-                      <p className="text-sm font-bold text-slate-900">06 Aug 2026</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Current Stage</p>
-                      <p className="text-sm font-bold text-slate-900">{status}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase">Advisor</p>
-                      <p className="text-sm font-bold text-slate-900">{mockQueryDetails.owner}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 bg-gradient-to-r from-red-50 to-[#FDF1F1] rounded-lg p-4 border border-red-200 shadow-sm shadow-red-100">
-                    <p className="text-[10px] font-bold text-red-700 uppercase">Next control point</p>
-                    <p className="font-bold text-slate-900 mt-1">08 Aug 2026</p>
-                    <p className="text-xs text-slate-500 mt-1">Action overdue.</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="border-slate-200 shadow-md">
-              <CardContent className="p-6">
-                <h3 className="font-bold text-slate-900 mb-4">Follow-up history</h3>
-                <p className="text-xs text-muted-foreground mb-6">Every recorded contact date</p>
-                <div className="flex gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <div className="h-10 w-10 bg-amber-100 rounded-full flex items-center justify-center text-amber-600">
-                    <PhoneCall className="h-5 w-5" />
-                  </div>
-                  <div className="flex-1 border-b border-slate-200 pb-4">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Next accountable action</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">
+                  {query.followup_due ? fmt(query.followup_due) : "Not scheduled"}
+                </p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {query.followup_note || query.next_action}
+                </p>
+                <Button className="mt-5" onClick={() => setActivityOpen(true)}>
+                  <CalendarClock className="mr-2 h-4 w-4" />
+                  Log outcome & schedule next
+                </Button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Common Task Engine</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {tasks.map((task) => (
+                  <div key={task.id} className="rounded-lg border p-3">
                     <div className="flex justify-between">
-                      <p className="font-semibold text-slate-900">Follow-up 2</p>
-                      <p className="text-xs text-slate-500">06 Aug 2026</p>
+                      <p className="font-semibold">{task.title}</p>
+                      <Badge variant={task.done ? "secondary" : "outline"}>
+                        {task.done ? "Closed" : task.priority}
+                      </Badge>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">Via Email</p>
+                    <p className="text-xs text-slate-500">
+                      Owner {task.owner} · due {fmt(task.due_at)}
+                    </p>
                   </div>
-                </div>
+                ))}
+                <NewTaskDialog
+                  queryId={query.query_id}
+                  trigger={
+                    <Button variant="outline">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add task
+                    </Button>
+                  }
+                />
               </CardContent>
             </Card>
           </div>
         )}
       </div>
 
-      {/* ====================================================== */}
-      {/* LOG FOLLOW-UP MODAL */}
-      {/* ====================================================== */}
-      <Dialog open={isLogModalOpen} onOpenChange={(open) => !savingLog && setIsLogModalOpen(open)}>
-        <DialogContent className="sm:max-w-[550px]">
+      <Dialog open={activityOpen} onOpenChange={setActivityOpen}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Log Follow-up</DialogTitle>
-            <p className="text-xs text-slate-500">{mockQueryDetails.id} • {mockQueryDetails.customer}</p>
+            <DialogTitle>Log communication / follow-up</DialogTitle>
           </DialogHeader>
-
-          <div className="grid grid-cols-2 gap-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Activity date <span className="text-red-500">*</span></Label>
-              <Input type="date" value={logDate} onChange={(e) => setLogDate(e.target.value)} className="bg-white border" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Medium <span className="text-red-500">*</span></Label>
-              <Select value={logMedium} onValueChange={setLogMedium}>
-                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+          <div className="space-y-4">
+            <div>
+              <Label>Medium</Label>
+              <Select value={medium} onValueChange={setMedium}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {MEDIUMS.map((med) => <SelectItem key={med} value={med}>{med}</SelectItem>)}
+                  {["Phone", "Email", "WhatsApp", "Meeting"].map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="col-span-2 space-y-2">
-              <Label className="text-sm font-medium">Outcome / note <span className="text-red-500">*</span></Label>
+            <div>
+              <Label>Outcome / note</Label>
               <Textarea
-                placeholder="What was discussed or sent?"
-                value={logOutcome}
-                onChange={(e) => setLogOutcome(e.target.value)}
-                className="min-h-[100px]"
+                value={activityNote}
+                onChange={(event) => setActivityNote(event.target.value)}
               />
             </div>
-
-            <div className="col-span-2 space-y-2">
-              <Label className="text-sm font-medium">Next action date <span className="text-red-500">*</span></Label>
-              <Input type="date" value={logNextActionDate} onChange={(e) => setLogNextActionDate(e.target.value)} className="bg-white border" />
+            <div>
+              <Label>Next follow-up date</Label>
+              <Input
+                type="date"
+                value={nextDue}
+                onChange={(event) => setNextDue(event.target.value)}
+              />
             </div>
           </div>
-
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLogModalOpen(false)} disabled={savingLog}>
+            <Button variant="outline" onClick={() => setActivityOpen(false)}>
               Cancel
             </Button>
-            <Button
-              className="bg-teal-600 hover:bg-teal-700 text-white"
-              onClick={handleLogFollowup}
-              disabled={savingLog}
-            >
-              {savingLog ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…</>
+            <Button onClick={submitActivity}>
+              {medium === "Email" ? (
+                <Mail className="mr-2 h-4 w-4" />
+              ) : medium === "WhatsApp" ? (
+                <MessageCircle className="mr-2 h-4 w-4" />
               ) : (
-                "Save activity"
+                <Phone className="mr-2 h-4 w-4" />
               )}
+              Save activity
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ====================================================== */}
-      {/* UPDATE STATUS MODAL */}
-      {/* ====================================================== */}
-      <Dialog open={isStatusModalOpen} onOpenChange={(open) => !savingStatus && setIsStatusModalOpen(open)}>
-        <DialogContent className="sm:max-w-[550px]">
+      <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Update Query Status</DialogTitle>
-            <p className="text-xs text-slate-500">{mockQueryDetails.id} • currently {status}</p>
+            <DialogTitle>Update Sales lifecycle stage</DialogTitle>
           </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">New status <span className="text-red-500">*</span></Label>
-              <Select value={newStatus} onValueChange={setNewStatus}>
-                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+          <div className="space-y-4">
+            <div>
+              <Label>New stage</Label>
+              <Select value={newStage} onValueChange={(value) => setNewStage(value as Stage)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select stage" />
+                </SelectTrigger>
                 <SelectContent>
-                  {STATUSES.map((st) => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                  {STAGES.map((stage) => (
+                    <SelectItem key={stage} value={stage}>
+                      {stage}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                Reason / remark {(newStatus === "WIN" || newStatus === "LOST") && <span className="text-red-500">*</span>}
-              </Label>
-              <Select value={statusReason} onValueChange={setStatusReason}>
-                <SelectTrigger><SelectValue placeholder="Select if applicable" /></SelectTrigger>
-                <SelectContent>
-                  {REASONS.map((reason) => <SelectItem key={reason} value={reason}>{reason}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Internal note</Label>
+            {newStage === "Lost" && (
+              <div>
+                <Label>Lost reason (required)</Label>
+                <Select value={lostReason} onValueChange={setLostReason}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LOST_REASONS.map((reason) => (
+                      <SelectItem key={reason} value={reason}>
+                        {reason}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div>
+              <Label>Internal note</Label>
               <Textarea
-                placeholder="Add any context for this change…"
-                value={internalNote}
-                onChange={(e) => setInternalNote(e.target.value)}
-                className="min-h-[100px]"
+                value={closureNote}
+                onChange={(event) => setClosureNote(event.target.value)}
               />
             </div>
-
-            <div className="bg-teal-50 border border-teal-100 rounded-md p-4">
-              <p className="text-xs font-semibold text-teal-800 mb-2">Automatic outcome rules</p>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
-                  <p className="text-xs text-teal-800">Won → celebration and Operations Kitty hand-off</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
-                  <p className="text-xs text-teal-800">Lost → reason required and pending tasks closed</p>
-                </div>
+            {newStage === "Won" && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                Won creates an Operations handoff in “Awaiting Operations Acceptance”.
               </div>
-            </div>
+            )}
           </div>
-
-          <DialogFooter className="flex justify-between items-center border-t pt-4">
-            <p className="text-xs text-slate-400">Every change is added to the query activity history.</p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setIsStatusModalOpen(false)} disabled={savingStatus}>
-                Cancel
-              </Button>
-              <Button
-                className="bg-teal-600 hover:bg-teal-700 text-white"
-                onClick={handleUpdateStatus}
-                disabled={savingStatus}
-              >
-                {savingStatus ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating…</>
-                ) : (
-                  "Update status"
-                )}
-              </Button>
-            </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={submitStatus}>Update stage</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ====================================================== */}
-      {/* EDIT COSTING MODAL */}
-      {/* ====================================================== */}
-      <Dialog open={isCostingModalOpen} onOpenChange={setIsCostingModalOpen}>
-        <DialogContent className="sm:max-w-[550px]">
-          <DialogHeader>
-            <DialogTitle>Edit Commercials</DialogTitle>
-            <p className="text-xs text-slate-500">{mockQueryDetails.id} • Costing Range</p>
-          </DialogHeader>
-
-          <div className="grid grid-cols-2 gap-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Pax / Travellers</Label>
-              <Input type="number" value={costingPax} onChange={(e) => setCostingPax(e.target.value)} className="bg-white border" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Hotel Category</Label>
-              <Select value={hotelCategory} onValueChange={setHotelCategory}>
-                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                <SelectContent>
-                  {["3 Star", "4 Star", "5 Star"].map((cat) => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="col-span-2 space-y-2">
-              <Label className="text-sm font-medium">Rate per person (₹)</Label>
-              <Input type="number" value={ratePerPerson} onChange={(e) => setRatePerPerson(e.target.value)} className="bg-white border" />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Bottom-line Value (₹) <span className="text-red-500">*</span></Label>
-              <Input type="number" value={bottomLine} onChange={(e) => setBottomLine(e.target.value)} className="bg-white border" />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Top-line Value (₹) <span className="text-red-500">*</span></Label>
-              <Input type="number" value={topLine} onChange={(e) => setTopLine(e.target.value)} className="bg-white border" />
-            </div>
+      <Dialog open={celebrate} onOpenChange={setCelebrate}>
+        <DialogContent className="text-center">
+          <div className="py-8">
+            <div className="text-7xl">🎉</div>
+            <Sparkles className="mx-auto mt-3 h-8 w-8 text-amber-500" />
+            <DialogTitle className="mt-4 text-3xl">Query Won!</DialogTitle>
+            <p className="mt-2 text-slate-500">
+              {query.query_id} is now in the Operations handoff queue.
+            </p>
+            <Button className="mt-6" onClick={() => setCelebrate(false)}>
+              <UserRoundCheck className="mr-2 h-4 w-4" />
+              Continue
+            </Button>
           </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCostingModalOpen(false)}>Cancel</Button>
-            <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={handleSaveCosting}>Save Costing</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
