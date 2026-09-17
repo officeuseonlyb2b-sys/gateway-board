@@ -152,7 +152,11 @@ export default function NewQuery() {
       toast.error("Tour ending date cannot be before the starting date.");
       return;
     }
-    const pax = Math.max(1, Number(maxPax || minPax || 1));
+    // Pax and commercial range are intentionally optional at Query creation.
+    // They are populated from the linked Costing/Quotation when it is saved.
+    const minPaxValue = minPax ? Math.max(1, Number(minPax)) : undefined;
+    const maxPaxValue = maxPax ? Math.max(1, Number(maxPax)) : undefined;
+    const pax = maxPaxValue ?? minPaxValue ?? 0;
     const matchedAgent = agents.find((agent) =>
       [agent.agency, agent.email, agent.phone].some(
         (value) => value && [sourcePartner, emailId, contactNumber].includes(value),
@@ -208,14 +212,19 @@ export default function NewQuery() {
         travel_type: costingBasis || queryType,
         cost_price: Number(bottomLineRate) || 0,
         selling_price: Number(topLineRate) || 0,
-        min_pax: Math.max(1, Number(minPax || 1)),
-        max_pax: pax,
+        min_pax: minPaxValue,
+        max_pax: maxPaxValue,
         costing_basis: costingBasis,
         hotel_category_from: hotelFrom,
         hotel_category_to: hotelTo,
         program_id: programmes.find((program) => program.name === interestedProgramme)?.id,
         program_name: interestedProgramme,
-        routing: `${tourStartCity || "—"} → ${tourEndCity || "—"}`,
+        tour_start_city: tourStartCity || undefined,
+        tour_end_city: tourEndCity || undefined,
+        routing:
+          tourStartCity || tourEndCity
+            ? `${tourStartCity || "—"} → ${tourEndCity || "—"}`
+            : undefined,
       });
       await pushCrmSnapshotNow();
       toast.success("Query created and sent to the Assignment Desk");
@@ -556,20 +565,17 @@ export default function NewQuery() {
                 Costing Range
               </h2>
               <div className="bg-slate-100 border border-slate-200 rounded-md p-3 text-sm text-slate-600 mb-4">
-                Define the lowest and highest quotation scenarios. For a single-option query, keep
-                both ends of the range identical.
+                Optional at Query creation. These values are populated automatically when a linked
+                Costing/Quotation is saved. Enter them here only when the client has already shared
+                a firm range.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Minimum pax <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Minimum pax</Label>
                   <Input type="number" value={minPax} onChange={(e) => setMinPax(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Hotel category — from <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Hotel category — from</Label>
                   <Select value={hotelFrom} onValueChange={setHotelFrom}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -584,9 +590,7 @@ export default function NewQuery() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Bottom-line Query value <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Bottom-line Query value</Label>
                   <Input
                     type="number"
                     value={bottomLineRate}
@@ -595,15 +599,11 @@ export default function NewQuery() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Maximum pax <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Maximum pax</Label>
                   <Input type="number" value={maxPax} onChange={(e) => setMaxPax(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Hotel category — to <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Hotel category — to</Label>
                   <Select value={hotelTo} onValueChange={setHotelTo}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -618,9 +618,7 @@ export default function NewQuery() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    Top-line Query value <span className="text-red-500">*</span>
-                  </Label>
+                  <Label>Top-line Query value</Label>
                   <Input
                     type="number"
                     value={topLineRate}

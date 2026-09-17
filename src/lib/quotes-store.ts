@@ -89,6 +89,16 @@ export interface SavedScenario {
   grand_total: number;
   persons: SavedScenarioPerson[];
 }
+export interface SavedQuerySnapshot {
+  program_id?: string;
+  program_name?: string;
+  routing?: string;
+  pax_min?: number;
+  pax_max?: number;
+  hotel_categories: string[];
+  bottom_line: number;
+  top_line: number;
+}
 export interface SavedQuote {
   id: string;
   query_id?: string;
@@ -114,6 +124,8 @@ export interface SavedQuote {
   group_total_pax?: number;
   group_rows?: SavedGroupRow[];
   scenarios?: SavedScenario[];
+  /** Query-facing values captured from the quotation at save time. */
+  query_snapshot?: SavedQuerySnapshot;
 }
 
 
@@ -171,4 +183,3 @@ export function useSavedQuotes(): SavedQuote[] {
     () => [],
   );
 }
-

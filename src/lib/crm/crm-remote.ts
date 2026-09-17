@@ -1,12 +1,14 @@
 import { supabase } from "@/integrations/supabase/client";
-import {
-  getCrmSnapshot,
-  hydrateCrm,
-  onCrmPersist,
-  type CrmSnapshot,
-} from "./store";
+import { getCrmSnapshot, hydrateCrm, onCrmPersist, type CrmSnapshot } from "./store";
 import type { CrmEvent, CrmQuery, CrmTask, Employee } from "./types";
 import type { Json } from "@/integrations/supabase/types";
+import {
+  IMPORTED_DATASET_MARKER,
+  IMPORTED_QUERIES,
+  IMPORTED_QUERY_EVENTS,
+  IMPORTED_QUERY_TASKS,
+  QUERY_TRACKER_MARKER_ID,
+} from "./query-tracker-import.generated";
 
 type CloudRow = { id: string; data: unknown };
 
@@ -17,7 +19,7 @@ let pending: CrmSnapshot | null = null;
 let pullTimer: ReturnType<typeof setTimeout> | null = null;
 let channel: ReturnType<typeof supabase.channel> | null = null;
 
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
 
 function mergeById<T extends { id: string }>(remote: T[], local: T[]): T[] {
@@ -52,29 +54,110 @@ async function readCloud(): Promise<CrmSnapshot> {
 async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
   const operations = [
     snapshot.queries.length
-      ? supabase.from("crm_queries").upsert(snapshot.queries.map((q) => ({
-        id: q.id, query_id: q.query_id, owner: q.owner, stage: q.stage, data: asJson(q),
-      })), { onConflict: "id" })
+      ? supabase.from("crm_queries").upsert(
+          snapshot.queries.map((q) => ({
+            id: q.id,
+            query_id: q.query_id,
+            owner: q.owner,
+            stage: q.stage,
+            data: asJson(q),
+          })),
+          { onConflict: "id" },
+        )
       : Promise.resolve({ error: null }),
     snapshot.tasks.length
-      ? supabase.from("crm_tasks").upsert(snapshot.tasks.map((task) => ({
-        id: task.id, query_id: task.query_id || null, owner: task.owner, done: task.done, data: asJson(task),
-      })), { onConflict: "id" })
+      ? supabase.from("crm_tasks").upsert(
+          snapshot.tasks.map((task) => ({
+            id: task.id,
+            query_id: task.query_id || null,
+            owner: task.owner,
+            done: task.done,
+            data: asJson(task),
+          })),
+          { onConflict: "id" },
+        )
       : Promise.resolve({ error: null }),
     snapshot.employees.length
-      ? supabase.from("crm_employees").upsert(snapshot.employees.map((employee) => ({
-        id: employee.id, data: asJson(employee),
-      })), { onConflict: "id" })
+      ? supabase.from("crm_employees").upsert(
+          snapshot.employees.map((employee) => ({
+            id: employee.id,
+            data: asJson(employee),
+          })),
+          { onConflict: "id" },
+        )
       : Promise.resolve({ error: null }),
     snapshot.events.length
-      ? supabase.from("crm_events").upsert(snapshot.events.map((event) => ({
-        id: event.id, query_id: event.query_id ?? null, at: event.at, data: asJson(event),
-      })), { onConflict: "id" })
+      ? supabase.from("crm_events").upsert(
+          snapshot.events.map((event) => ({
+            id: event.id,
+            query_id: event.query_id ?? null,
+            at: event.at,
+            data: asJson(event),
+          })),
+          { onConflict: "id" },
+        )
       : Promise.resolve({ error: null }),
   ];
   const results = await Promise.all(operations);
   const error = results.find((result) => result.error)?.error;
   if (error) throw error;
+}
+
+async function hasImportedDatasetMarker(): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("crm_events")
+    .select("id")
+    .eq("id", QUERY_TRACKER_MARKER_ID)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
+}
+
+async function deleteQueryLinkedCloudRows(): Promise<void> {
+  // Remove dependent query activity first, then tasks, then the Queries.
+  // Standalone/common tasks and events are deliberately preserved.
+  const eventResult = await supabase.from("crm_events").delete().not("query_id", "is", null);
+  if (eventResult.error) throw eventResult.error;
+  const taskResult = await supabase.from("crm_tasks").delete().not("query_id", "is", null);
+  if (taskResult.error) throw taskResult.error;
+  const queryResult = await supabase.from("crm_queries").delete().not("id", "is", null);
+  if (queryResult.error) throw queryResult.error;
+}
+
+async function installImportedQueryDataset(
+  remote: CrmSnapshot,
+  local: CrmSnapshot,
+): Promise<CrmSnapshot> {
+  await deleteQueryLinkedCloudRows();
+
+  const standaloneTasks = mergeById(
+    remote.tasks.filter((task) => !task.query_id),
+    local.tasks.filter((task) => !task.query_id),
+  );
+  const standaloneEvents = mergeById(
+    remote.events.filter((event) => !event.query_id && event.id !== QUERY_TRACKER_MARKER_ID),
+    local.events.filter((event) => !event.query_id && event.id !== QUERY_TRACKER_MARKER_ID),
+  );
+  const snapshot: CrmSnapshot = {
+    queries: clone(IMPORTED_QUERIES),
+    tasks: [...clone(IMPORTED_QUERY_TASKS), ...standaloneTasks],
+    employees: mergeById(remote.employees, local.employees),
+    events: [
+      clone(IMPORTED_DATASET_MARKER),
+      ...clone(IMPORTED_QUERY_EVENTS),
+      ...standaloneEvents,
+    ].slice(0, 800),
+  };
+
+  // Employees are not part of the tracker replacement. Existing roster rows
+  // stay in place; only imported Queries and their related work are upserted.
+  await upsertSnapshot({
+    queries: snapshot.queries,
+    tasks: clone(IMPORTED_QUERY_TASKS),
+    employees: [],
+    events: [clone(IMPORTED_DATASET_MARKER), ...clone(IMPORTED_QUERY_EVENTS)],
+  });
+  return snapshot;
 }
 
 export async function pushCrmSnapshotNow(snapshot = getCrmSnapshot()): Promise<void> {
@@ -96,6 +179,12 @@ function schedulePush(snapshot: CrmSnapshot) {
 async function pullAndMerge() {
   const local = getCrmSnapshot();
   const remote = await readCloud();
+  if (!(await hasImportedDatasetMarker())) {
+    const installed = await installImportedQueryDataset(remote, local);
+    hydrateCrm(installed);
+    ready = true;
+    return;
+  }
   const merged: CrmSnapshot = {
     queries: mergeById(remote.queries, local.queries),
     tasks: mergeById(remote.tasks, local.tasks),
@@ -130,7 +219,8 @@ export function startCrmSync(): () => void {
     offPersist();
     if (pushTimer) clearTimeout(pushTimer);
     if (pullTimer) clearTimeout(pullTimer);
-    if (pending) void upsertSnapshot(pending).catch((error) => console.error("[crm] save failed", error));
+    if (pending)
+      void upsertSnapshot(pending).catch((error) => console.error("[crm] save failed", error));
     if (channel) supabase.removeChannel(channel);
     channel = null;
     pending = null;

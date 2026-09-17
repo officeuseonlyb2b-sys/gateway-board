@@ -5,6 +5,14 @@ import type { Stage } from "@/lib/crm/types";
 
 export const inr = (n: number) => "₹ " + Math.round(n).toLocaleString("en-IN");
 
+export const paxRangeLabel = (query: { pax: number; min_pax?: number; max_pax?: number }) => {
+  const minimum = query.min_pax || query.pax || 0;
+  const maximum = query.max_pax || query.pax || 0;
+  if (!minimum && !maximum) return "Pax pending";
+  if (minimum === maximum) return `${minimum} pax`;
+  return `${minimum || maximum}–${maximum || minimum} pax`;
+};
+
 export const fmtDate = (iso: string) =>
   iso
     ? new Date(iso.length > 10 ? iso : iso + "T00:00:00").toLocaleDateString("en-GB", {

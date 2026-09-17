@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Clock3, Inbox, Users } from "lucide-react";
 
 import { ReassignQuery } from "@/components/crm/assign";
+import { paxRangeLabel } from "@/components/crm/ui";
 import { useAccessibleQueries } from "@/lib/crm/access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -81,7 +82,7 @@ export default function AssignmentDesk() {
               <div>
                 <p className="text-sm font-medium">{query.destination || "Destination pending"}</p>
                 <p className="text-xs text-slate-500">
-                  {query.min_pax || query.pax}–{query.max_pax || query.pax} pax ·{" "}
+                  {paxRangeLabel(query)} ·{" "}
                   {query.costing_basis || query.travel_type}
                 </p>
               </div>

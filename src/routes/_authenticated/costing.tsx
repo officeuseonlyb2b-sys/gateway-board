@@ -179,8 +179,13 @@ function WizardPage() {
             : next.guest,
           start_date: query.travel_start || next.start_date,
           nights,
-          program_name: query.destination,
+          program_mode: query.program_id ? "existing" : "new",
+          program_id: query.program_id,
+          program_name: query.program_name || query.destination,
           adults: query.adults || query.pax || next.adults,
+          pax_min: query.min_pax || undefined,
+          pax_max: query.max_pax || undefined,
+          departure_city: query.tour_start_city || next.departure_city,
           children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
           traveler_type: query.traveler_type ?? (/inbound/i.test(query.market) ? "foreign" : "indian"),
         });
@@ -1441,9 +1446,19 @@ function Step18({ draft, set }: StepProps) {
       <Card className="p-4 bg-primary/5 border-primary/20">
         <div className="section-label mb-3">Final Actions</div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => {
+          <Button onClick={async () => {
             const q = buildSavedQuote();
             persistQuote(q);
+            if (draft.linked_query_id) {
+              saveQueryCosting(draft.linked_query_id, q, undefined, user?.name || "Unknown");
+              try {
+                await pushCrmSnapshotNow();
+              } catch (error) {
+                console.error("Linked costing save failed", error);
+                toast.error("Quote saved locally, but could not be added to the Query.");
+                return;
+              }
+            }
             clearDraft();
             setActiveWizard(null);
             toast.success(`Quote ${q.quote_number} saved.`);

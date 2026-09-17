@@ -85,6 +85,32 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
     addons_total: computeAddonsTotal(draft),
   };
 
+  // Build a Query-facing snapshot from every hotel option, independently of
+  // which option is recommended for the quotation document. This is what lets
+  // a fresh Query start with blank commercial fields and receive its actual
+  // range only after Costing/Quotation is saved.
+  const rangeResults = draft.hotel_options
+    .map((option) => computeScenario(draft, {
+      id: `query-range-${option.key}`,
+      label: option.category || option.label || `Option ${option.key}`,
+      option_key: option.key,
+    }, d))
+    .filter(Boolean);
+  const rangeValues = rangeResults
+    .map((result) => result!.grand_total)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const hotelCategories = Array.from(new Set([
+    ...draft.hotel_options.map((option) => option.category || option.label).filter(Boolean),
+    ...itinerary.map((day) => day.hotel_category).filter((value) => value && value !== "—"),
+  ] as string[]));
+  const quotedPax = Math.max(1, totalPax(draft));
+  const queryPaxMin = draft.query_type === "Brochure"
+    ? Math.max(1, draft.pax_min ?? quotedPax)
+    : quotedPax;
+  const queryPaxMax = draft.query_type === "Brochure"
+    ? Math.max(queryPaxMin, draft.pax_max ?? queryPaxMin)
+    : quotedPax;
+
   const q: SavedQuote = {
     id: uid(),
     query_id: draft.linked_query_id,
@@ -165,6 +191,16 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
           };
         });
     })(),
+    query_snapshot: {
+      program_id: draft.program_id,
+      program_name: draft.program_name || undefined,
+      routing: Array.from(routingCities).join(" → ") || undefined,
+      pax_min: queryPaxMin,
+      pax_max: queryPaxMax,
+      hotel_categories: hotelCategories,
+      bottom_line: rangeValues.length ? Math.min(...rangeValues) : 0,
+      top_line: rangeValues.length ? Math.max(...rangeValues) : 0,
+    },
     ...(isGroupTour(draft) && recOpt ? (() => {
       const pax = Math.max(1, totalPax(draft));
       const dbl = computeGroupOption(draft, recOpt, d, autoDoubleMix(pax));

@@ -4,11 +4,19 @@
 import { useSyncExternalStore } from "react";
 import type { ActivityItem, CrmEvent, CrmQuery, CrmTask, Employee, Stage } from "./types";
 import { LIFECYCLE } from "./types";
+import {
+  IMPORTED_QUERIES,
+  IMPORTED_QUERY_EVENTS,
+  IMPORTED_QUERY_TASKS,
+  QUERY_TRACKER_DATASET_ID,
+} from "./query-tracker-import.generated";
 
 const KEY = "mp_crm_queries_v2";
 const TASK_KEY = "mp_crm_tasks_v2";
 const EMP_KEY = "mp_crm_employees_v2";
 const EVENT_KEY = "mp_crm_events_v2";
+const DATASET_KEY = "mp_crm_query_dataset_revision";
+const LEGACY_QUERY_KEY = "mp_tourism_queries";
 const isBrowser = () => typeof window !== "undefined";
 
 // ---- helpers ---------------------------------------------------------------
@@ -99,13 +107,36 @@ function parse<T>(raw: string | null): T[] {
   }
 }
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function load() {
   inited = true;
   if (!isBrowser()) return;
-  queries = parse<CrmQuery>(localStorage.getItem(KEY)).map(normalizeQuery);
-  tasks = parse<CrmTask>(localStorage.getItem(TASK_KEY));
+  const storedQueries = parse<CrmQuery>(localStorage.getItem(KEY));
+  const storedTasks = parse<CrmTask>(localStorage.getItem(TASK_KEY));
+  const storedEvents = parse<CrmEvent>(localStorage.getItem(EVENT_KEY));
   employees = parse<Employee>(localStorage.getItem(EMP_KEY));
-  events = parse<CrmEvent>(localStorage.getItem(EVENT_KEY));
+
+  if (localStorage.getItem(DATASET_KEY) !== QUERY_TRACKER_DATASET_ID) {
+    // This release intentionally replaces the prior Query Tracker dataset.
+    // Preserve employees and standalone tasks/events; remove only records tied
+    // to the superseded Queries before loading the authoritative Excel import.
+    queries = clone(IMPORTED_QUERIES).map(normalizeQuery);
+    tasks = [...clone(IMPORTED_QUERY_TASKS), ...storedTasks.filter((task) => !task.query_id)];
+    events = [...clone(IMPORTED_QUERY_EVENTS), ...storedEvents.filter((event) => !event.query_id)];
+    localStorage.setItem(KEY, JSON.stringify(queries));
+    localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
+    localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+    localStorage.setItem(DATASET_KEY, QUERY_TRACKER_DATASET_ID);
+    localStorage.removeItem(LEGACY_QUERY_KEY);
+    return;
+  }
+
+  queries = storedQueries.map(normalizeQuery);
+  tasks = storedTasks;
+  events = storedEvents;
 }
 
 function emit() {
@@ -492,6 +523,8 @@ export interface NewLeadInput {
   program_id?: string;
   program_name?: string;
   routing?: string;
+  tour_start_city?: string;
+  tour_end_city?: string;
   special_requirements?: string;
 }
 
@@ -548,6 +581,8 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     program_id: input.program_id,
     program_name: input.program_name,
     routing: input.routing,
+    tour_start_city: input.tour_start_city,
+    tour_end_city: input.tour_end_city,
     special_requirements: input.special_requirements,
     stage: "New",
     stage_changed_at: iso(now),
@@ -1040,6 +1075,33 @@ export function saveQueryCosting(
     const costPrice =
       Math.max(quote.totals.room_net_sgl, quote.totals.room_net_dbl, quote.totals.room_net_trp) +
       quote.totals.addons_total;
+    const scenarioValues = (quote.scenarios ?? [])
+      .map((scenario) => scenario.grand_total)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const bottomLine = quote.query_snapshot?.bottom_line
+      || (scenarioValues.length ? Math.min(...scenarioValues) : sellingPrice);
+    const topLine = quote.query_snapshot?.top_line
+      || (scenarioValues.length ? Math.max(...scenarioValues) : sellingPrice);
+    const categoryRank = (value: string) => {
+      const normalized = value.toLowerCase();
+      if (normalized.includes("budget")) return 1;
+      const stars = Number(normalized.match(/([1-5])\s*star/)?.[1] || 0);
+      if (stars) return stars * 10 + (normalized.includes("deluxe") || normalized.includes("superior") ? 1 : 0);
+      if (normalized.includes("luxury") || normalized.includes("experiential")) return 60;
+      if (normalized.includes("homestay")) return 5;
+      return 50;
+    };
+    const categories = [...(quote.query_snapshot?.hotel_categories ?? [])]
+      .filter(Boolean)
+      .sort((a, b) => categoryRank(a) - categoryRank(b));
+    const scenarioPax = (quote.scenarios ?? [])
+      .map((scenario) => scenario.pax)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const minPax = quote.query_snapshot?.pax_min
+      || (scenarioPax.length ? Math.min(...scenarioPax) : q.min_pax || q.pax);
+    const maxPax = quote.query_snapshot?.pax_max
+      || quote.group_total_pax
+      || (scenarioPax.length ? Math.max(...scenarioPax) : q.max_pax || q.pax);
     return {
       ...q,
       stage: q.stage === "New" || q.stage === "Requirement Review" ? "Costing" : q.stage,
@@ -1047,14 +1109,26 @@ export function saveQueryCosting(
         q.stage === "New" || q.stage === "Requirement Review" ? iso(now) : q.stage_changed_at,
       costing_started_at: q.costing_started_at || iso(now),
       costing_completed_at: iso(now),
-      value: sellingPrice,
+      value: topLine,
+      pax: maxPax || q.pax,
+      adults: q.adults || maxPax || q.pax,
+      min_pax: minPax || q.min_pax,
+      max_pax: maxPax || q.max_pax,
+      hotel_category_from: categories[0] || q.hotel_category_from,
+      hotel_category_to: categories.at(-1) || q.hotel_category_to,
+      program_id: quote.query_snapshot?.program_id || q.program_id,
+      program_name: quote.query_snapshot?.program_name || q.program_name,
+      destination: quote.query_snapshot?.program_name || q.destination,
+      routing: quote.query_snapshot?.routing || q.routing,
+      travel_start: quote.travel_start || q.travel_start,
+      travel_end: quote.travel_end || q.travel_end,
       first_action_at: q.first_action_at || iso(now),
       commercials: {
         ...q.commercials,
         cost_price: costPrice,
         selling_price: sellingPrice,
-        bottom_line: q.commercials.bottom_line || costPrice,
-        top_line: Math.max(q.commercials.top_line || 0, sellingPrice),
+        bottom_line: bottomLine,
+        top_line: topLine,
         final_cost: costPrice,
         final_selling: sellingPrice,
         margin_value: sellingPrice - costPrice,

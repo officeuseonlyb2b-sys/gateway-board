@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 
 import { NewTaskDialog, ReassignQuery, useActor } from "@/components/crm/assign";
-import { inr } from "@/components/crm/ui";
+import { inr, paxRangeLabel } from "@/components/crm/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -370,7 +370,7 @@ export default function QueryWorkspace() {
 
         <div className="grid gap-3 rounded-xl border bg-white p-4 md:grid-cols-5">
           <Fact label="Travellers">
-            {query.min_pax || query.pax}–{query.max_pax || query.pax} pax
+            {paxRangeLabel(query)}
           </Fact>
           <Fact label="Destination">{query.destination}</Fact>
           <Fact label="Travel dates">
@@ -416,6 +416,16 @@ export default function QueryWorkspace() {
                   <Fact label="Query nature">
                     {query.enquiry_type} · {query.requirement}
                   </Fact>
+                  <Fact label="Source / market">
+                    {query.query_market_source || query.customer_type} ·{" "}
+                    {query.query_source_type || query.lead_source} · {query.market || "—"}
+                  </Fact>
+                  <Fact label="Base city / conversation">
+                    {query.query_base_city || "—"} · {query.conversation_medium || "—"}
+                  </Fact>
+                  <Fact label="Tour route">
+                    {query.tour_start_city || "—"} → {query.tour_end_city || "—"}
+                  </Fact>
                   <Fact label="Commercial opportunity">
                     {inr(bottom)} → {inr(top)}
                   </Fact>
@@ -445,7 +455,7 @@ export default function QueryWorkspace() {
                       <p className="text-xs text-slate-500">BOTTOM LINE</p>
                       <p className="text-2xl font-bold text-teal-700">{inr(bottom)}</p>
                       <p className="text-xs text-slate-500">
-                        {query.min_pax || query.pax} pax ·{" "}
+                        {(query.min_pax || query.pax) ? `${query.min_pax || query.pax} pax` : "Pax pending"} ·{" "}
                         {query.hotel_category_from || "category pending"}
                       </p>
                     </div>
@@ -454,7 +464,7 @@ export default function QueryWorkspace() {
                       <p className="text-xs text-slate-500">TOP LINE</p>
                       <p className="text-2xl font-bold">{inr(top)}</p>
                       <p className="text-xs text-slate-500">
-                        {query.max_pax || query.pax} pax ·{" "}
+                        {(query.max_pax || query.pax) ? `${query.max_pax || query.pax} pax` : "Pax pending"} ·{" "}
                         {query.hotel_category_to || "category pending"}
                       </p>
                     </div>
@@ -494,10 +504,15 @@ export default function QueryWorkspace() {
                 <Fact label="Program code">{program?.id || query.program_id}</Fact>
                 <Fact label="Program name">{program?.name || query.program_name}</Fact>
                 <Fact label="Region">
-                  {query.destination} · {query.primary_unit}
+                  {query.program_region || query.destination} · {query.primary_unit}
                 </Fact>
+                <Fact label="Program type">{query.program_type || "—"}</Fact>
                 <Fact label="Duration">{program ? `${program.nights} nights` : "—"}</Fact>
-                <Fact label="Starting city">{program?.departure_city}</Fact>
+                <Fact label="Starting city">
+                  {program?.departure_city || query.tour_start_city || "—"}
+                </Fact>
+                <Fact label="Ending city">{query.tour_end_city || "—"}</Fact>
+                <Fact label="Travel period">{query.travel_period || "—"}</Fact>
                 <Fact label="Travel modes">{program?.travel_modes?.join(", ")}</Fact>
                 <div className="md:col-span-3">
                   <Fact label="Routing">{routeText}</Fact>
@@ -515,6 +530,7 @@ export default function QueryWorkspace() {
               <CardContent className="grid gap-3 md:grid-cols-2">
                 <Fact label="Bottom line">{inr(bottom)}</Fact>
                 <Fact label="Top line">{inr(top)}</Fact>
+                <Fact label="Per person package">{inr(query.per_person_package_cost || 0)}</Fact>
                 <Fact label="Hotel categories">
                   {query.hotel_category_from || "—"} → {query.hotel_category_to || "—"}
                 </Fact>

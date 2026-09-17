@@ -269,6 +269,28 @@ export interface CrmQuery {
   lost_notes?: string;
   closed_at?: string;
   operations_handoff?: OperationsHandoff;
+
+  // Source-tracker fields retained during the FY 26-27 Excel migration.
+  // These remain optional so newly created Queries and older cloud records
+  // continue to use the same authoritative Query model.
+  source_serial?: number;
+  source_workbook?: string;
+  query_market_source?: string;
+  query_base_city?: string;
+  query_source_type?: string;
+  conversation_medium?: string;
+  tour_start_city?: string;
+  tour_end_city?: string;
+  travel_period?: string;
+  program_type?: string;
+  program_region?: string;
+  per_person_package_cost?: number;
+  source_followup_dates?: string[];
+  source_status_flags?: {
+    new_status?: string;
+    working?: string;
+    nurturing?: string;
+  };
 }
 
 export interface Executive {

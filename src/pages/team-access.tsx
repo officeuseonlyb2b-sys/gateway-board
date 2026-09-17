@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Building2, LayoutDashboard, Network, ShieldCheck, UserCheck, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,22 @@ export default function TeamAccess() {
   const events = useCrmEvents();
   const active = employees.filter((e) => e.active !== false && e.employee_status !== "Exited");
   const departments = Array.from(new Set(employees.map((e) => e.department || "Sales")));
+  const summaryCards: { label: string; value: number; Icon: LucideIcon }[] = [
+    { label: "Employees", value: employees.length, Icon: Users },
+    {
+      label: "Active accounts",
+      value: active.filter((e) => e.account_status !== "Disabled").length,
+      Icon: UserCheck,
+    },
+    { label: "Departments", value: departments.length, Icon: Building2 },
+    {
+      label: "Access events",
+      value: events.filter((e) =>
+        ["lead_assigned", "lead_reassigned", "task_assigned", "task_reassigned"].includes(e.type),
+      ).length,
+      Icon: ShieldCheck,
+    },
+  ];
   return (
     <div className="mx-auto max-w-[1700px] space-y-6 p-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -31,25 +48,8 @@ export default function TeamAccess() {
         </Button>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
-        {[
-          ["Employees", employees.length, Users],
-          [
-            "Active accounts",
-            active.filter((e) => e.account_status !== "Disabled").length,
-            UserCheck,
-          ],
-          ["Departments", departments.length, Building2],
-          [
-            "Access events",
-            events.filter((e) =>
-              ["lead_assigned", "lead_reassigned", "task_assigned", "task_reassigned"].includes(
-                e.type,
-              ),
-            ).length,
-            ShieldCheck,
-          ],
-        ].map(([label, value, Icon]) => (
-          <Card key={String(label)}>
+        {summaryCards.map(({ label, value, Icon }) => (
+          <Card key={label}>
             <CardContent className="flex items-center justify-between p-5">
               <div>
                 <p className="text-sm text-slate-500">{label}</p>

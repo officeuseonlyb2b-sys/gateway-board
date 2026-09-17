@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Clock3, IndianRupee, Plus, UserRoundCheck, Users } from "lucide-react";
 
 import { QueryFilters, useQueryFilters } from "@/components/crm/query-filters";
-import { inr } from "@/components/crm/ui";
+import { inr, paxRangeLabel } from "@/components/crm/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -124,7 +124,7 @@ export default function QueryTracker() {
                         {inr(query.commercials.top_line || query.value || 0)}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {query.min_pax || query.pax}–{query.max_pax || query.pax} pax
+                        {paxRangeLabel(query)}
                       </p>
                     </TableCell>
                     <TableCell>
