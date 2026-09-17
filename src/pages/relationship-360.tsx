@@ -1,13 +1,17 @@
 import { Link, useParams } from "@tanstack/react-router";
 import {
+  Activity,
   ArrowLeft,
   BriefcaseBusiness,
+  Building2,
   CalendarClock,
   IndianRupee,
+  Mail,
   MapPin,
   Phone,
   Target,
   Trophy,
+  UserRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +20,7 @@ import { Progress } from "@/components/ui/progress";
 import { useAccessibleQueries } from "@/lib/crm/access";
 import { durationLabel, hoursBetween } from "@/lib/crm/insights";
 import { useClients } from "@/lib/crm/clients-store";
+import { queryMatchesAgent, queryMatchesClient } from "@/lib/crm/relationship-links";
 import { useAgents } from "@/lib/wizard/agents-store";
 
 const money = (value: number) =>
@@ -24,6 +29,15 @@ const money = (value: number) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(value);
+
+const dateLabel = (value?: string) =>
+  value
+    ? new Date(value).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "Not available";
 
 export default function Relationship360({ type }: { type: "agent" | "client" }) {
   const { id } = useParams({ strict: false }) as { id: string };
@@ -48,21 +62,25 @@ export default function Relationship360({ type }: { type: "agent" | "client" }) 
         </Card>
       </div>
     );
-  const queries = allQueries.filter((query) =>
-    type === "agent"
-      ? query.agent_id === id ||
-        (query.customer_type === "B2B Agent" &&
-          query.customer === ("agency" in record ? record.agency : ""))
-      : query.client_id === id ||
-        (query.customer_type === "B2C Client" && query.email && query.email === record.email),
-  );
+  const queries = allQueries
+    .filter((query) =>
+      type === "agent" && "agency" in record
+        ? queryMatchesAgent(query, record)
+        : type === "client" && "mobile" in record
+          ? queryMatchesClient(query, record)
+          : false,
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const open = queries.filter((q) => !["Won", "Lost"].includes(q.stage));
   const won = queries.filter((q) => q.stage === "Won");
   const lost = queries.filter((q) => q.stage === "Lost");
-  const closed = won.length + lost.length;
-  const business = won.reduce((sum, q) => sum + (q.commercials.final_selling || q.value || 0), 0);
+  const business = won.reduce(
+    (sum, q) => sum + (q.commercials.final_selling || q.commercials.bottom_line || q.value || 0),
+    0,
+  );
   const opportunity = open.reduce((sum, q) => sum + (q.commercials.top_line || q.value || 0), 0);
   const last = [...queries].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  const first = [...queries].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   const name =
     type === "agent"
       ? "agency" in record
@@ -77,12 +95,54 @@ export default function Relationship360({ type }: { type: "agent" | "client" }) 
       : type === "client" && "client_code" in record
         ? record.client_code
         : record.id;
+  const phone = "phone" in record ? record.phone : record.mobile;
+  const address =
+    type === "agent" && "agency" in record
+      ? [record.address_line1, record.address_line2, record.city, record.state]
+          .filter(Boolean)
+          .join(", ")
+      : "address" in record
+        ? [record.address, record.city, record.state].filter(Boolean).join(", ")
+        : [record.city, record.state].filter(Boolean).join(", ");
+  const relationshipSince = record.created_at || first?.created_at;
+  const lifecycle =
+    type === "agent"
+      ? "status" in record
+        ? record.status || (open.length ? "Active" : "Dormant")
+        : open.length
+          ? "Active"
+          : "Dormant"
+      : queries.length > 1
+        ? "Repeat Client"
+        : open.length
+          ? "Active Client"
+          : won.length
+            ? "Converted Client"
+            : "New Client";
+  const recentActivities = queries
+    .flatMap((query) =>
+      query.activities.map((activity) => ({
+        ...activity,
+        queryId: query.id,
+        queryNo: query.query_id,
+      })),
+    )
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, 8);
+  const followUps = open
+    .filter((query) => query.followup_due || query.next_action)
+    .sort((a, b) => (a.followup_due || "9999").localeCompare(b.followup_due || "9999"))
+    .slice(0, 8);
   const cards = [
     ["Total Queries", queries.length, BriefcaseBusiness],
     ["Open", open.length, Target],
     ["Won", won.length, Trophy],
     ["Lost", lost.length, CalendarClock],
-    ["Conversion", closed ? `${Math.round((won.length / closed) * 100)}%` : "0%", Target],
+    [
+      "Conversion",
+      queries.length ? `${((won.length / queries.length) * 100).toFixed(1)}%` : "0%",
+      Target,
+    ],
     ["Business generated", money(business), IndianRupee],
     ["Open opportunity", money(opportunity), IndianRupee],
     [
@@ -117,7 +177,7 @@ export default function Relationship360({ type }: { type: "agent" | "client" }) 
           <div className="text-sm">
             <p>
               <Phone className="mr-1 inline h-4 w-4" />
-              {"phone" in record ? record.phone : record.mobile}
+              {phone || "Mobile not set"}
             </p>
             <p className="mt-1">{record.email || "Email not set"}</p>
           </div>
@@ -193,6 +253,38 @@ export default function Relationship360({ type }: { type: "agent" | "client" }) 
         <div className="space-y-6">
           <Card>
             <CardHeader>
+              <CardTitle>{type === "agent" ? "Agent 360" : "Client 360"}</CardTitle>
+              <p className="text-sm text-slate-500">
+                {type === "agent"
+                  ? "Relationship ownership and contact profile"
+                  : "Direct traveller identity and ownership"}
+              </p>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  ["Relationship owner", owner, UserRound],
+                  ["Lifecycle", lifecycle, Activity],
+                  ["Mobile", phone || "Not set", Phone],
+                  ["Email", record.email || "Not set", Mail],
+                  ["City", city, MapPin],
+                  ["Relationship since", dateLabel(relationshipSince), CalendarClock],
+                  ["Last Query", last ? dateLabel(last.created_at) : "Never", CalendarClock],
+                  ["Address", address || "Not set", Building2],
+                ] as const
+              ).map(([label, value, Icon]) => (
+                <div key={String(label)} className="rounded-xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <Icon className="h-4 w-4 text-teal-600" />
+                    {label}
+                  </div>
+                  <p className="mt-2 font-semibold text-slate-900">{value}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
               <CardTitle>Funnel</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -238,6 +330,83 @@ export default function Relationship360({ type }: { type: "agent" | "client" }) 
             </CardContent>
           </Card>
         </div>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Latest Relationship Activity</CardTitle>
+            <p className="text-sm text-slate-500">Recent movements across every linked Query.</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {recentActivities.map((activity) => (
+              <Link
+                key={`${activity.queryId}-${activity.id}`}
+                to="/queries/$id"
+                params={{ id: activity.queryId }}
+                className="flex items-start justify-between gap-4 rounded-xl border p-4 hover:border-teal-400 hover:bg-teal-50/40"
+              >
+                <div>
+                  <p className="font-semibold">{activity.title}</p>
+                  <p className="text-xs text-slate-500">
+                    {activity.queryNo} · {activity.by || "System"}
+                    {activity.meta ? ` · ${activity.meta}` : ""}
+                  </p>
+                </div>
+                <span className="whitespace-nowrap text-xs text-slate-500">
+                  {dateLabel(activity.at)}
+                </span>
+              </Link>
+            ))}
+            {!recentActivities.length && (
+              <div className="rounded-xl border border-dashed p-8 text-center text-slate-500">
+                No activity has been recorded yet.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Follow-ups / Next Steps</CardTitle>
+            <p className="text-sm text-slate-500">
+              Open actions across this relationship's active Queries.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {followUps.map((query) => {
+              const overdue = Boolean(
+                query.followup_due && new Date(query.followup_due).getTime() < Date.now(),
+              );
+              return (
+                <Link
+                  key={query.id}
+                  to="/queries/$id"
+                  params={{ id: query.id }}
+                  className={`flex items-start justify-between gap-4 rounded-xl border p-4 hover:border-teal-400 ${
+                    overdue ? "border-red-200 bg-red-50/60" : ""
+                  }`}
+                >
+                  <div>
+                    <p className="font-semibold">{query.next_action || "Review Query"}</p>
+                    <p className="text-xs text-slate-500">
+                      {query.query_id} · {query.owner || "Awaiting assignment"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {overdue && <Badge variant="destructive">Overdue</Badge>}
+                    <p className="mt-1 whitespace-nowrap text-xs text-slate-500">
+                      {query.followup_due ? dateLabel(query.followup_due) : "Date pending"}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+            {!followUps.length && (
+              <div className="rounded-xl border border-dashed p-8 text-center text-slate-500">
+                No open next steps for this relationship.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { createLead } from "@/lib/crm/store";
 import { pushCrmSnapshotNow } from "@/lib/crm/crm-remote";
 import { useAuth } from "@/lib/auth-mock";
 import { useAgents, usePrograms } from "@/lib/wizard/agents-store";
-import { addClient, useClients } from "@/lib/crm/clients-store";
+import { findClientByIdentity, upsertClientFromQuery, useClients } from "@/lib/crm/clients-store";
 
 // Exact data extracted from screenshots
 const LEAD_SOURCES = ["B2B", "B2C", "B2B2B"];
@@ -109,6 +109,7 @@ export default function NewQuery() {
   const [queryFor, setQueryFor] = useState("");
   const [queryBaseCity, setQueryBaseCity] = useState("");
   const [sourceType, setSourceType] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [sourcePartner, setSourcePartner] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [contactNumber, setContactNumber] = useState("");
@@ -130,6 +131,7 @@ export default function NewQuery() {
   const [bottomLineRate, setBottomLineRate] = useState("");
   const [topLineRate, setTopLineRate] = useState("");
   const [interestedProgramme, setInterestedProgramme] = useState("");
+  const isB2B = marketSource.startsWith("B2B");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,25 +154,29 @@ export default function NewQuery() {
       toast.error("Tour ending date cannot be before the starting date.");
       return;
     }
+    if (isB2B && !selectedAgentId) {
+      toast.error("Select an existing B2B Agent from the Agent Master before creating the Query.");
+      return;
+    }
     // Pax and commercial range are intentionally optional at Query creation.
     // They are populated from the linked Costing/Quotation when it is saved.
     const minPaxValue = minPax ? Math.max(1, Number(minPax)) : undefined;
     const maxPaxValue = maxPax ? Math.max(1, Number(maxPax)) : undefined;
     const pax = maxPaxValue ?? minPaxValue ?? 0;
-    const matchedAgent = agents.find((agent) =>
-      [agent.agency, agent.email, agent.phone].some(
-        (value) => value && [sourcePartner, emailId, contactNumber].includes(value),
-      ),
-    );
-    let matchedClient = clients.find(
-      (client) =>
-        (emailId && client.email.toLowerCase() === emailId.toLowerCase()) ||
-        (contactNumber && client.mobile.replace(/\D/g, "") === contactNumber.replace(/\D/g, "")),
-    );
-    const isB2B = marketSource === "B2B" || sourceType === "Agent" || sourceType === "Partner";
+    const matchedAgent = agents.find((agent) => agent.id === selectedAgentId);
+    if (isB2B && !matchedAgent) {
+      toast.error("The selected B2B Agent is no longer available. Please select it again.");
+      return;
+    }
+    let matchedClient = findClientByIdentity({
+      name: contactPerson,
+      mobile: contactNumber,
+      email: emailId,
+      city: queryBaseCity,
+    });
     try {
-      if (!isB2B && !matchedClient) {
-        matchedClient = addClient({
+      if (!isB2B) {
+        matchedClient = upsertClientFromQuery({
           name: contactPerson,
           mobile: contactNumber,
           email: emailId,
@@ -183,7 +189,9 @@ export default function NewQuery() {
       }
       createLead({
         lead_source: marketSource || sourceType || "Direct",
-        customer: sourcePartner || contactPerson || "Direct Guest",
+        customer: isB2B
+          ? matchedAgent?.agency || sourcePartner
+          : matchedClient?.name || contactPerson || "Direct Guest",
         contact_person: contactPerson,
         market: marketRegion,
         enquiry_type: queryType || costingBasis || "Customized",
@@ -242,6 +250,7 @@ export default function NewQuery() {
     setQueryFor("");
     setQueryBaseCity("");
     setSourceType("");
+    setSelectedAgentId("");
     setSourcePartner("");
     setContactPerson("");
     setContactNumber("");
@@ -372,18 +381,22 @@ export default function NewQuery() {
                     Query base city <span className="text-red-500">*</span>
                   </Label>
                   <Input
-                    list="organisation-partners"
+                    list="organisation-cities"
                     placeholder=""
                     value={queryBaseCity}
                     onChange={(e) => setQueryBaseCity(e.target.value)}
                   />
-                  <datalist id="organisation-partners">
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.agency} />
-                    ))}
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.name} />
-                    ))}
+                  <datalist id="organisation-cities">
+                    {[
+                      ...new Set([
+                        ...agents.map((agent) => agent.city),
+                        ...clients.map((client) => client.city),
+                      ]),
+                    ]
+                      .filter(Boolean)
+                      .map((city) => (
+                        <option key={city} value={city} />
+                      ))}
                   </datalist>
                 </div>
                 <div className="space-y-2">
@@ -406,38 +419,81 @@ export default function NewQuery() {
 
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1">
-                    Source / partner name <span className="text-red-500">*</span>
+                    {isB2B ? "B2B Agent" : "Existing B2C client"}
+                    {isB2B && <span className="text-red-500">*</span>}
                   </Label>
-                  <Input
-                    list="source-relationships"
-                    placeholder="Select an existing Agent / Client or enter a new B2C name"
-                    value={sourcePartner}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setSourcePartner(value);
-                      const agent = agents.find(
-                        (item) => item.agency === value || item.name === value,
-                      );
-                      const client = clients.find((item) => item.name === value);
-                      if (agent) {
-                        setContactPerson(agent.contact_person || agent.name);
-                        setContactNumber(agent.phone || "");
-                        setEmailId(agent.email || "");
-                      } else if (client) {
-                        setContactPerson(client.name);
-                        setContactNumber(client.mobile || "");
-                        setEmailId(client.email || "");
-                      }
-                    }}
-                  />
-                  <datalist id="source-relationships">
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.agency || agent.name} />
-                    ))}
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.name} />
-                    ))}
-                  </datalist>
+                  {isB2B ? (
+                    <>
+                      <Select
+                        value={selectedAgentId}
+                        onValueChange={(value) => {
+                          setSelectedAgentId(value);
+                          const agent = agents.find((item) => item.id === value);
+                          if (!agent) return;
+                          setSourcePartner(agent.agency || agent.name);
+                          setContactPerson(agent.contact_person || agent.name);
+                          setContactNumber(agent.phone || "");
+                          setEmailId(agent.email || "");
+                          if (!queryBaseCity && agent.city) setQueryBaseCity(agent.city);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select from B2B Agent Master" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agents
+                            .filter((agent) => (agent.status || "Active") === "Active")
+                            .map((agent) => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                {agent.agency || agent.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-500">
+                        Agent not listed?{" "}
+                        <Link
+                          to="/agents"
+                          target="_blank"
+                          className="font-semibold text-teal-700 hover:underline"
+                        >
+                          Add it in Agent Master
+                        </Link>
+                        , then return and select it here.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        list="b2c-relationships"
+                        placeholder="Optional: select an existing client"
+                        value={sourcePartner}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const previous = sourcePartner;
+                          setSourcePartner(value);
+                          const client = clients.find((item) => item.name === value);
+                          if (client) {
+                            setContactPerson(client.name);
+                            setContactNumber(client.mobile || "");
+                            setEmailId(client.email || "");
+                            if (!queryBaseCity && client.city) setQueryBaseCity(client.city);
+                          } else if (!contactPerson || contactPerson === previous) {
+                            setContactPerson(value);
+                          }
+                        }}
+                      />
+                      <datalist id="b2c-relationships">
+                        {clients.map((client) => (
+                          <option key={client.id} value={client.name} />
+                        ))}
+                      </datalist>
+                      <p className="text-xs text-slate-500">
+                        New clients are added to the B2C Client List automatically when this Query
+                        is created.
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1">

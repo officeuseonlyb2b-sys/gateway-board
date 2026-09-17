@@ -21,6 +21,10 @@ Latest populated Query: `EMP26-27EMP0356` (16 September 2026)
 | Lost | 202 |
 | Imported open follow-up tasks | 107 |
 | Imported per-Query audit events | 356 |
+| B2B Query rows linked to Agent Master | 262 |
+| Deduplicated B2B Agent records | 122 |
+| B2C Query rows linked to Client List | 94 |
+| Deduplicated B2C Client records | 93 |
 | Total reconstructed Query value | ₹41,416,021.90 |
 
 The workbook contains three populated rows whose cached `Total Query Amount` is blank even though both Pax and per-person price exist. The import applies the workbook formula (`Pax × Per Person Package Cost`) to preserve the intended value:
@@ -34,6 +38,19 @@ The workbook contains three populated rows whose cached `Total Query Amount` is 
 Sixteen other Queries remain at ₹0 total value because the workbook is missing either Pax or per-person price. No commercial value was invented for those rows.
 
 Advisor ownership was imported exactly as supplied: Bhumika Prajapati (156), Chhaya Prajapati (127), Deeksha Saini (56), Ashish Prajapati (12), and Shivam Kushwah (5).
+
+## Relationship master refresh
+
+- All 262 B2B Queries now carry an `agent_id` connected to the generated B2B Agent Master.
+- All 94 B2C Queries now carry a `client_id` connected to the generated B2C Client List.
+- Repeated B2B agency names are consolidated into one master relationship; additional contact names
+  found against that agency are retained in the master notes.
+- Repeated B2C contacts are reconciled by valid phone, valid email, or contact name plus city.
+  Placeholder values such as `NA` are not treated as shared email identities.
+- Twenty-one B2B records whose agency name is blank in Excel are retained instead of discarded and
+  visibly flagged as `agency name pending` for cleanup.
+- Manually created Agent/Client records already present in the application are preserved and merged
+  with the imported relationships on the first load of this release.
 
 ## Field mapping
 
@@ -64,7 +81,7 @@ Won Queries create the existing minimal `Awaiting Operations Acceptance` handoff
 
 On the first **administrator** login after this build is deployed:
 
-1. the app checks for the dataset marker `query-tracker-fy26-27-2026-09-16-v1`;
+1. the app checks for the dataset marker `query-tracker-fy26-27-2026-09-17-v2`;
 2. old cloud Query events and tasks linked to Queries are removed;
 3. old cloud Queries are removed;
 4. the 356 imported Queries, 107 open follow-up tasks and 356 audit events are uploaded;
@@ -93,6 +110,7 @@ Changing the dataset ID is required for a future authoritative replacement; it c
 | `data-import/Query Tracker Sheet FY 26-27.xlsx` | Supplied source workbook retained for audit/regeneration |
 | `scripts/generate-query-tracker-data.mjs` | Deterministic Excel-to-CRM transformer and validations |
 | `src/lib/crm/query-tracker-import.generated.ts` | Generated 356-Query replacement dataset |
+| `src/lib/crm/relationship-master-import.generated.ts` | Generated 122-agent and 93-client master dataset |
 | `src/lib/crm/store.ts` | One-time local replacement plus linked Costing/Quotation write-back |
 | `src/lib/crm/crm-remote.ts` | One-time cloud replacement and persistent dataset marker |
 | `src/lib/crm/types.ts` | Optional source fields needed to retain all workbook information |
@@ -100,6 +118,11 @@ Changing the dataset ID is required for a future authoritative replacement; it c
 | `package.json` | Adds `data:import:queries` command |
 | `src/pages/team-access.tsx` | Corrects a pre-existing TypeScript tuple inference error found during verification |
 | `src/pages/new-lead.tsx` | Makes the Costing Range optional at Query creation and preserves unknown pax as pending |
+| `src/lib/wizard/agents-store.ts` | Loads/merges imported B2B Agents and exposes them to Create Query |
+| `src/lib/crm/clients-store.ts` | Loads/merges B2C Clients and automatically upserts new clients from Queries |
+| `src/lib/crm/relationship-links.ts` | Shared safe matching between Queries and Agent/Client relationships |
+| `src/pages/clients.tsx` | Uses shared relationship matching for client metrics and Query counts |
+| `src/pages/relationship-360.tsx` | Uses IDs plus safe fallbacks for complete Query journey/history links |
 | `src/routes/_authenticated/costing.tsx` | Prefills linked Query context and connects both Save Quote actions to Query write-back |
 | `src/lib/wizard/build-saved-quote.ts` | Captures a Query-facing commercial/program/pax/hotel snapshot from the quotation |
 | `src/lib/quotes-store.ts` | Adds the typed Query snapshot to saved quotation records |
@@ -128,9 +151,24 @@ was extended only to expose its calculated Query snapshot and to write it back t
   bottom/top-line opportunity, internal cost/selling figures, lifecycle, activity and version history.
 - Existing Costing formulas, rate lookups, quotation documents and master-data modules remain intact.
 
+## Create Query → Relationship connection
+
+- B2B and B2B2B Queries must select an active record from the B2B Agent Master. Free-text
+  creation of an unlinked B2B Agent is blocked.
+- **Add it in Agent Master** opens the existing master route in a new tab. Cross-tab store refresh
+  makes the newly created Agent selectable without rebuilding the Query module.
+- Selecting a B2B Agent fills its agency, contact, phone, email and available city into the Query.
+- B2C creation remains direct: the user can select an existing client or enter contact name, number,
+  email and city while creating the Query.
+- Creating a new B2C Query automatically creates the B2C Client master record; an existing matching
+  client is reused and receives the new Query in Client 360.
+- Agent 360 and Client 360 link to the same authoritative Query records and show the complete Query
+  journey, pipeline totals, won business and open opportunity without duplicating Query data.
+
 ## Verification completed
 
 - Import generation: passed (356 unique populated rows)
+- Relationship generation: passed (262/262 B2B and 94/94 B2C Queries linked)
 - TypeScript (`npx tsc --noEmit`): passed
 - Production build (`npm run build`): passed
 - Linked Query → Costing prefill and both Costing → Query save paths: connected

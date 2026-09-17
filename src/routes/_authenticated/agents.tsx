@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, Search, Users, Eye } from "lucide-react";
 import { toast } from "sonner";
@@ -42,15 +42,64 @@ import {
 } from "@/components/ui/dialog";
 import { AgentFormDialog } from "@/components/AgentFormDialog";
 import { useAccessibleQueries } from "@/lib/crm/access";
+import { queryMatchesAgent } from "@/lib/crm/relationship-links";
+import type { CrmQuery } from "@/lib/crm/types";
 
 export const Route = createFileRoute("/_authenticated/agents")({
   head: () => ({ meta: [{ title: "Agents — MP Tourism Hub" }] }),
-  component: AgentsPage,
+  component: AgentsRoute,
 });
+
+function AgentsRoute() {
+  const { id } = useParams({ strict: false }) as { id?: string };
+  return id ? <Outlet /> : <AgentsPage />;
+}
 
 const PAGE_SIZE = 25;
 
+const money = (value: number) => {
+  if (value >= 10_000_000) return `₹${(value / 10_000_000).toFixed(2)} Cr`;
+  if (value >= 100_000) return `₹${(value / 100_000).toFixed(1)} L`;
+  if (value >= 1_000) return `₹${(value / 1_000).toFixed(1)} K`;
+  return `₹${Math.round(value).toLocaleString("en-IN")}`;
+};
+
+function relationshipMetrics(agent: Agent, queries: CrmQuery[]) {
+  const linked = queries.filter((query) => queryMatchesAgent(query, agent));
+  const open = linked.filter((query) => !["Won", "Lost"].includes(query.stage));
+  const won = linked.filter((query) => query.stage === "Won");
+  const business = won.reduce(
+    (sum, query) =>
+      sum + (query.commercials.final_selling || query.commercials.bottom_line || query.value || 0),
+    0,
+  );
+  const lastQuery = linked.reduce<string | undefined>(
+    (latest, query) => (!latest || query.created_at > latest ? query.created_at : latest),
+    undefined,
+  );
+  const recentCutoff = new Date();
+  recentCutoff.setDate(recentCutoff.getDate() - 90);
+  const active =
+    agent.status !== "Inactive" &&
+    (open.length > 0 || Boolean(lastQuery && new Date(lastQuery) >= recentCutoff));
+  const status =
+    agent.status === "Inactive" || agent.status === "Prospect"
+      ? agent.status
+      : active
+        ? "Active"
+        : "Dormant";
+  return {
+    linked,
+    open: open.length,
+    won: won.length,
+    business,
+    conversion: linked.length ? (won.length / linked.length) * 100 : 0,
+    status,
+  };
+}
+
 function AgentsPage() {
+  const navigate = useNavigate();
   const agents = useAgents();
   const queries = useAccessibleQueries();
   const [q, setQ] = useState("");
@@ -76,7 +125,7 @@ function AgentsPage() {
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return agents.filter((a) => {
-      if (status !== "all" && (a.status || "Active") !== status) return false;
+      if (status !== "all" && relationshipMetrics(a, queries).status !== status) return false;
       if (stateF !== "all" && a.state !== stateF) return false;
       if (cityF !== "all" && a.city !== cityF) return false;
       if (!term) return true;
@@ -86,11 +135,15 @@ function AgentsPage() {
         .toLowerCase()
         .includes(term);
     });
-  }, [agents, q, status, stateF, cityF]);
+  }, [agents, queries, q, status, stateF, cityF]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const paged = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+  const allMetrics = useMemo(
+    () => agents.map((agent) => relationshipMetrics(agent, queries)),
+    [agents, queries],
+  );
 
   const openNew = () => {
     setEditing(null);
@@ -111,11 +164,11 @@ function AgentsPage() {
     <div className="p-6 lg:p-8 space-y-6 max-w-[1400px] mx-auto">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Users className="h-6 w-6 text-accent" /> Agents
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Users className="h-7 w-7 text-accent" /> B2B Agent Master
           </h1>
           <p className="text-sm text-muted-foreground">
-            Master directory of travel agents used across quotations.
+            One permanent relationship record per travel partner, linked to every Query.
           </p>
         </div>
         <Button onClick={openNew}>
@@ -213,19 +266,13 @@ function AgentsPage() {
           ["Total agents", agents.length],
           [
             "Active relationships",
-            agents.filter((agent) => (agent.status || "Active") === "Active").length,
+            allMetrics.filter((metric) => metric.status === "Active").length,
           ],
           [
-            "Open B2B Queries",
-            queries.filter(
-              (query) =>
-                query.customer_type === "B2B Agent" && !["Won", "Lost"].includes(query.stage),
-            ).length,
+            "Converted business",
+            money(allMetrics.reduce((sum, metric) => sum + metric.business, 0)),
           ],
-          [
-            "B2B business won",
-            `₹${(queries.filter((query) => query.customer_type === "B2B Agent" && query.stage === "Won").reduce((sum, query) => sum + (query.commercials.final_selling || query.value || 0), 0) / 100000).toFixed(1)}L`,
-          ],
+          ["Repeat partners", allMetrics.filter((metric) => metric.linked.length > 1).length],
         ].map(([label, value]) => (
           <Card key={String(label)} className="p-5">
             <p className="text-sm text-muted-foreground">{label}</p>
@@ -234,77 +281,107 @@ function AgentsPage() {
         ))}
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Agent</TableHead>
-              <TableHead>Agency</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>City / State</TableHead>
-              <TableHead>GST</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paged.length === 0 ? (
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1180px]">
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
-                  No agents found
-                </TableCell>
+                <TableHead>Agent ID</TableHead>
+                <TableHead>Company / contact</TableHead>
+                <TableHead>City</TableHead>
+                <TableHead>Owner</TableHead>
+                <TableHead>Queries</TableHead>
+                <TableHead>Open</TableHead>
+                <TableHead>Won</TableHead>
+                <TableHead>Business</TableHead>
+                <TableHead>Conversion</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ) : (
-              paged.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>
-                    <div className="font-mono text-[10px] text-teal-700">
-                      {a.agent_code || a.id}
-                    </div>
-                    <div className="font-medium">{a.name}</div>
-                    {a.contact_person && a.contact_person !== a.name && (
-                      <div className="text-xs text-muted-foreground">{a.contact_person}</div>
-                    )}
-                  </TableCell>
-                  <TableCell>{a.agency}</TableCell>
-                  <TableCell>
-                    <div className="text-sm">{a.phone}</div>
-                    <div className="text-xs text-muted-foreground">{a.email}</div>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {[a.city, a.state].filter(Boolean).join(", ") || "—"}
-                  </TableCell>
-                  <TableCell className="text-xs">{a.gst_number || "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={(a.status || "Active") === "Active" ? "default" : "secondary"}>
-                      {a.status || "Active"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="inline-flex gap-1">
-                      <Button asChild size="icon" variant="ghost" title="Open Agent 360">
-                        <Link to="/agents/$id" params={{ id: a.id }}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(a)} title="Edit">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setConfirmDel(a)}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {paged.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={11} className="text-center py-10 text-muted-foreground">
+                    No agents found
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                paged.map((a) => {
+                  const metrics = relationshipMetrics(a, queries);
+                  const openDashboard = () => navigate({ to: "/agents/$id", params: { id: a.id } });
+                  return (
+                    <TableRow
+                      key={a.id}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Open ${a.agency || a.name} Agent 360 dashboard`}
+                      className="cursor-pointer transition-colors hover:bg-teal-50/70 focus-visible:bg-teal-50 focus-visible:outline-none"
+                      onClick={openDashboard}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openDashboard();
+                        }
+                      }}
+                    >
+                      <TableCell className="font-mono text-xs font-semibold text-teal-700">
+                        {a.agent_code || a.id}
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-semibold text-slate-900">{a.agency || a.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[a.contact_person || a.name, a.phone].filter(Boolean).join(" · ") || "—"}
+                        </div>
+                      </TableCell>
+                      <TableCell>{a.city || "—"}</TableCell>
+                      <TableCell>{a.relationship_owner || "Not assigned"}</TableCell>
+                      <TableCell className="font-semibold">{metrics.linked.length}</TableCell>
+                      <TableCell>{metrics.open}</TableCell>
+                      <TableCell>{metrics.won}</TableCell>
+                      <TableCell className="font-semibold">{money(metrics.business)}</TableCell>
+                      <TableCell>{metrics.conversion.toFixed(1)}%</TableCell>
+                      <TableCell>
+                        <Badge variant={metrics.status === "Active" ? "default" : "secondary"}>
+                          {metrics.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="inline-flex gap-1">
+                          <Button asChild size="sm" variant="ghost" title="Open Agent 360">
+                            <Link to="/agents/$id" params={{ id: a.id }}>
+                              <Eye className="mr-1 h-4 w-4" />
+                              Open
+                            </Link>
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openEdit(a)}
+                            title="Edit"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setConfirmDel(a)}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
 
         {totalPages > 1 && (
           <div className="flex items-center justify-between p-3 border-t text-sm">

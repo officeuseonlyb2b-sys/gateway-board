@@ -1,5 +1,9 @@
 // Wizard mock stores for agents & saved programs (localStorage-backed).
 import { useSyncExternalStore } from "react";
+import {
+  IMPORTED_B2B_AGENTS,
+  RELATIONSHIP_MASTER_DATASET_ID,
+} from "@/lib/crm/relationship-master-import.generated";
 
 export type AgentStatus = "Active" | "Inactive" | "Prospect" | "Dormant";
 
@@ -63,6 +67,7 @@ export interface SavedProgram {
 }
 
 const AGENTS_KEY = "mp_tourism_agents";
+const AGENTS_DATASET_KEY = "mp_tourism_agents_dataset_revision";
 const PROGRAMS_KEY = "mp_tourism_programs";
 const isBrowser = () => typeof window !== "undefined";
 
@@ -78,7 +83,7 @@ function nowIso() {
 }
 
 function seedAgents(): Agent[] {
-  return [];
+  return JSON.parse(JSON.stringify(IMPORTED_B2B_AGENTS)) as Agent[];
 }
 function seedPrograms(): SavedProgram[] {
   const defaultInclusions = [
@@ -190,22 +195,29 @@ function readAgents(): Agent[] {
   if (!isBrowser()) return seedAgents();
   try {
     const raw = localStorage.getItem(AGENTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Agent[];
-      // Backfill defaults for older records
-      return parsed.map((a) => ({
+    const parsed = raw ? (JSON.parse(raw) as Agent[]) : [];
+    if (Array.isArray(parsed)) {
+      const withDefaults = parsed.map((a) => ({
         status: "Active" as AgentStatus,
         country: "India",
         created_at: a.created_at || nowIso(),
         updated_at: a.updated_at || nowIso(),
         ...a,
       }));
+      if (localStorage.getItem(AGENTS_DATASET_KEY) === RELATIONSHIP_MASTER_DATASET_ID) {
+        return withDefaults;
+      }
+      const merged = mergeImportedAgents(withDefaults);
+      localStorage.setItem(AGENTS_KEY, JSON.stringify(merged));
+      localStorage.setItem(AGENTS_DATASET_KEY, RELATIONSHIP_MASTER_DATASET_ID);
+      return merged;
     }
   } catch {
     /* fall through */
   }
   const s = seedAgents();
   localStorage.setItem(AGENTS_KEY, JSON.stringify(s));
+  localStorage.setItem(AGENTS_DATASET_KEY, RELATIONSHIP_MASTER_DATASET_ID);
   return s;
 }
 function readPrograms(): SavedProgram[] {
@@ -249,19 +261,76 @@ function refreshP() {
   pInit = true;
 }
 
-const norm = (s?: string) => (s || "").trim().toLowerCase();
+const norm = (s?: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+const emailKey = (s?: string) => {
+  const value = norm(s);
+  return ["", "-", "na", "n/a", "unknown"].includes(value) ? "" : value;
+};
+const phoneKey = (s?: string) => {
+  const value = (s || "").replace(/\D/g, "");
+  return value.length >= 7 ? value : "";
+};
+
+function agentsMatch(left: Agent, right: Agent) {
+  if (norm(left.agency) && norm(left.agency) === norm(right.agency)) return true;
+  if (emailKey(left.email) && emailKey(left.email) === emailKey(right.email)) return true;
+  if (phoneKey(left.phone) && phoneKey(left.phone) === phoneKey(right.phone)) return true;
+  return false;
+}
+
+function mergeImportedAgents(existing: Agent[]): Agent[] {
+  const merged = [...existing];
+  for (const imported of IMPORTED_B2B_AGENTS) {
+    const index = merged.findIndex((agent) => agentsMatch(agent, imported));
+    if (index < 0) {
+      merged.push({ ...imported });
+      continue;
+    }
+    const current = merged[index];
+    merged[index] = {
+      ...imported,
+      ...current,
+      name: current.name || imported.name,
+      agency: current.agency || imported.agency,
+      contact_person: current.contact_person || imported.contact_person,
+      phone: current.phone || imported.phone,
+      alt_phone: current.alt_phone || imported.alt_phone,
+      email: current.email || imported.email,
+      city: current.city || imported.city,
+      relationship_owner: current.relationship_owner || imported.relationship_owner,
+      notes: current.notes || imported.notes,
+      internal_remarks: current.internal_remarks || imported.internal_remarks,
+    };
+  }
+  return merged.sort((a, b) => a.agency.localeCompare(b.agency, "en", { sensitivity: "base" }));
+}
+
+export function findAgentByIdentity(input: {
+  id?: string;
+  agency?: string;
+  email?: string;
+  phone?: string;
+}): Agent | undefined {
+  return readAgents().find((agent) => {
+    if (input.id && agent.id === input.id) return true;
+    if (input.agency && norm(agent.agency) === norm(input.agency)) return true;
+    if (emailKey(input.email) && emailKey(agent.email) === emailKey(input.email)) return true;
+    if (phoneKey(input.phone) && phoneKey(agent.phone) === phoneKey(input.phone)) return true;
+    return false;
+  });
+}
 
 export function findDuplicateAgent(
   input: { email?: string; phone?: string },
   ignoreId?: string,
 ): Agent | undefined {
   const list = readAgents();
-  const email = norm(input.email);
-  const phone = norm(input.phone).replace(/\s+/g, "");
+  const email = emailKey(input.email);
+  const phone = phoneKey(input.phone);
   return list.find((a) => {
     if (ignoreId && a.id === ignoreId) return false;
-    if (email && norm(a.email) === email) return true;
-    if (phone && norm(a.phone).replace(/\s+/g, "") === phone) return true;
+    if (email && emailKey(a.email) === email) return true;
+    if (phone && phoneKey(a.phone) === phone) return true;
     return false;
   });
 }
@@ -307,8 +376,17 @@ export function getAgent(id: string): Agent | undefined {
 export function useAgents(): Agent[] {
   return useSyncExternalStore(
     (cb) => {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key !== AGENTS_KEY) return;
+        refreshA();
+        cb();
+      };
       agentListeners.add(cb);
-      return () => agentListeners.delete(cb);
+      if (isBrowser()) window.addEventListener("storage", onStorage);
+      return () => {
+        agentListeners.delete(cb);
+        if (isBrowser()) window.removeEventListener("storage", onStorage);
+      };
     },
     () => {
       if (!aInit) refreshA();

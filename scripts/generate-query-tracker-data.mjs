@@ -8,7 +8,15 @@ const ROOT = process.cwd();
 const SOURCE_NAME = "Query Tracker Sheet FY 26-27.xlsx";
 const SOURCE = path.join(ROOT, "data-import", SOURCE_NAME);
 const OUTPUT = path.join(ROOT, "src", "lib", "crm", "query-tracker-import.generated.ts");
-const DATASET_ID = "query-tracker-fy26-27-2026-09-16-v1";
+const RELATIONSHIP_OUTPUT = path.join(
+  ROOT,
+  "src",
+  "lib",
+  "crm",
+  "relationship-master-import.generated.ts",
+);
+const DATASET_ID = "query-tracker-fy26-27-2026-09-17-v2";
+const RELATIONSHIP_DATASET_ID = "relationship-master-fy26-27-2026-09-17-v1";
 const MARKER_ID = `crm_dataset_${DATASET_ID}`;
 
 const clean = (value) =>
@@ -56,6 +64,30 @@ const addDays = (iso, days) => {
 };
 
 const safeId = (value) => clean(value).replace(/[^a-zA-Z0-9_-]+/g, "_");
+const normalizeIdentity = (value) => clean(value).toLowerCase();
+const phoneDigits = (value) => clean(value).replace(/\D/g, "");
+const stableHash = (value) => {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+const isMeaningfulName = (value) => {
+  const normalized = normalizeIdentity(value);
+  return Boolean(normalized && !["-", "na", "n/a", "direct", "unknown"].includes(normalized));
+};
+const lastFilled = (group, column) => {
+  for (let index = group.length - 1; index >= 0; index -= 1) {
+    const value = clean(group[index][column]);
+    if (value) return value;
+  }
+  return "";
+};
+const uniqueFilled = (group, column) => [
+  ...new Set(group.map((row) => clean(row[column])).filter(Boolean)),
+];
 
 const normalizeStage = (value) => {
   const status = clean(value).toUpperCase();
@@ -83,6 +115,126 @@ if (!sheet) throw new Error('Worksheet "QTS - EMP" was not found.');
 const sourceRows = XLSX.utils.sheet_to_json(sheet, { range: 3, defval: null, raw: true });
 const rows = sourceRows.filter((row) => clean(row["Query No."]) && dateOnly(row["Query Date"]));
 
+const b2bKey = (row) => {
+  const agency = clean(row["Query Source Name"]);
+  const contact = clean(row["Contact Person"]);
+  const email = clean(row["Email Id"]);
+  const phone = phoneDigits(row["Contact Number"]);
+  const city = clean(row["Query Base City"]);
+  if (isMeaningfulName(agency)) return `agency:${normalizeIdentity(agency)}`;
+  if (isMeaningfulName(email)) return `email:${normalizeIdentity(email)}`;
+  if (phone) return `phone:${phone}`;
+  if (isMeaningfulName(contact))
+    return `contact:${normalizeIdentity(contact)}|${normalizeIdentity(city)}`;
+  return `query:${clean(row["Query No."])}`;
+};
+
+const b2cKey = (row) => {
+  const contact = clean(row["Contact Person"]);
+  const email = clean(row["Email Id"]);
+  const phone = phoneDigits(row["Contact Number"]);
+  const city = clean(row["Query Base City"]);
+  if (phone.length >= 7) return `phone:${phone}`;
+  if (isMeaningfulName(email)) return `email:${normalizeIdentity(email)}`;
+  if (isMeaningfulName(contact))
+    return `contact:${normalizeIdentity(contact)}|${normalizeIdentity(city)}`;
+  return `query:${clean(row["Query No."])}`;
+};
+
+const agentGroups = new Map();
+const clientGroups = new Map();
+for (const row of rows) {
+  const marketSource = clean(row["Query Market Source"]).toUpperCase();
+  const isB2B = marketSource.startsWith("B2B");
+  const key = isB2B ? b2bKey(row) : b2cKey(row);
+  const groups = isB2B ? agentGroups : clientGroups;
+  const group = groups.get(key) || [];
+  group.push(row);
+  groups.set(key, group);
+}
+
+const agentIdByQuery = new Map();
+const clientIdByQuery = new Map();
+
+const importedAgents = [...agentGroups.entries()]
+  .map(([key, group]) => {
+    const agencySource = group.map((row) => clean(row["Query Source Name"])).find(isMeaningfulName);
+    const contact = lastFilled(group, "Contact Person");
+    const phone = lastFilled(group, "Contact Number");
+    const alternatePhone = uniqueFilled(group, "Contact Number").find(
+      (value) => phoneDigits(value) !== phoneDigits(phone),
+    );
+    const rawEmail = lastFilled(group, "Email Id");
+    const email = isMeaningfulName(rawEmail) ? rawEmail : "";
+    const city = lastFilled(group, "Query Base City");
+    const owner = lastFilled(group, "Travel Advisor");
+    const firstQuery = clean(group[0]["Query No."]);
+    const agency =
+      agencySource ||
+      `${contact || email || phone || `Unnamed agent ${firstQuery}`} — agency name pending`;
+    const id = `excel_agent_${stableHash(key)}`;
+    group.forEach((row) => agentIdByQuery.set(clean(row["Query No."]), id));
+    const contacts = uniqueFilled(group, "Contact Person").slice(0, 6);
+    return {
+      id,
+      name: contact || agency,
+      agency,
+      contact_person: contact,
+      phone,
+      alt_phone: alternatePhone,
+      email,
+      city,
+      country: "India",
+      agency_type: "B2B",
+      preferred_currency: "INR",
+      relationship_owner: owner,
+      notes: `Imported from ${SOURCE_NAME}; ${group.length} linked ${group.length === 1 ? "Query" : "Queries"}.${contacts.length > 1 ? ` Contacts observed: ${contacts.join(", ")}.` : ""}`,
+      internal_remarks: agencySource
+        ? "Imported from the offline Query Tracker."
+        : "Agency name was not available in the source workbook and requires review.",
+      status: "Active",
+      created_at: businessIso(group[0]["Query Date"]),
+      updated_at: businessIso(group.at(-1)["Query Date"]),
+      created_by: "Excel Import",
+    };
+  })
+  .sort((a, b) => a.agency.localeCompare(b.agency, "en", { sensitivity: "base" }))
+  .map((agent, index) => ({
+    agent_code: `AGT-${String(index + 1).padStart(6, "0")}`,
+    ...agent,
+  }));
+
+const importedClients = [...clientGroups.entries()]
+  .map(([key, group]) => {
+    const contact = lastFilled(group, "Contact Person");
+    const phone = lastFilled(group, "Contact Number");
+    const rawEmail = lastFilled(group, "Email Id");
+    const email = isMeaningfulName(rawEmail) ? rawEmail : "";
+    const city = lastFilled(group, "Query Base City");
+    const owner = lastFilled(group, "Travel Advisor");
+    const firstQuery = clean(group[0]["Query No."]);
+    const name = isMeaningfulName(contact) ? contact : `Client ${firstQuery}`;
+    const id = `excel_client_${stableHash(key)}`;
+    group.forEach((row) => clientIdByQuery.set(clean(row["Query No."]), id));
+    return {
+      id,
+      name,
+      mobile: phone,
+      email,
+      city,
+      source: lastFilled(group, "Query Source Type") || "B2C Query",
+      relationship_owner: owner,
+      notes: `Created from ${SOURCE_NAME}; ${group.length} linked ${group.length === 1 ? "Query" : "Queries"}.`,
+      active: true,
+      created_at: businessIso(group[0]["Query Date"]),
+    };
+  })
+  .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+  .map((client, index) => ({
+    client_code: `CLI-${String(index + 1).padStart(6, "0")}`,
+    ...client,
+  }));
+
 const queries = [];
 const tasks = [];
 const events = [];
@@ -95,7 +247,12 @@ for (const row of rows) {
   const owner = clean(row["Travel Advisor"]);
   const marketSource = clean(row["Query Market Source"]);
   const sourceType = clean(row["Query Source Type"]);
-  const customer = clean(row["Query Source Name"]) || clean(row["Contact Person"]) || "Direct";
+  const contactPerson = clean(row["Contact Person"]);
+  const sourceName = clean(row["Query Source Name"]);
+  const customer =
+    marketSource === "B2C"
+      ? contactPerson || sourceName || "Direct Guest"
+      : sourceName || contactPerson || "Agent name pending";
   const pax = Math.max(0, finiteNumber(row["No. of Pax"]));
   const perPerson = Math.max(0, finiteNumber(row["Per Person Package Cost"]));
   const workbookTotal = Math.max(0, finiteNumber(row["Total Query Amount"]));
@@ -169,13 +326,15 @@ for (const row of rows) {
 
     lead_source: sourceType || marketSource,
     customer,
-    contact_person: clean(row["Contact Person"]),
+    contact_person: contactPerson,
     mobile: clean(row["Contact Number"]),
     email: clean(row["Email Id"]),
     market: clean(row["Query Market / Region"]),
     priority: "Normal",
     requirement: queryFor,
-    customer_type: marketSource === "B2B" ? "B2B Agent" : "B2C Client",
+    customer_type: marketSource.startsWith("B2B") ? "B2B Agent" : "B2C Client",
+    agent_id: marketSource.startsWith("B2B") ? agentIdByQuery.get(queryId) : undefined,
+    client_id: marketSource === "B2C" ? clientIdByQuery.get(queryId) : undefined,
     relationship_owner: owner,
 
     enquiry_type: queryType,
@@ -290,6 +449,20 @@ const duplicateIds = queries.filter(
 if (duplicateIds.length)
   throw new Error(`Duplicate Query IDs: ${duplicateIds.map((q) => q.query_id).join(", ")}`);
 
+const agentIds = new Set(importedAgents.map((agent) => agent.id));
+const clientIds = new Set(importedClients.map((client) => client.id));
+const unlinkedRelationships = queries.filter((query) =>
+  query.customer_type === "B2B Agent"
+    ? !query.agent_id || !agentIds.has(query.agent_id)
+    : !query.client_id || !clientIds.has(query.client_id),
+);
+if (unlinkedRelationships.length)
+  throw new Error(
+    `Queries without a valid relationship link: ${unlinkedRelationships
+      .map((query) => query.query_id)
+      .join(", ")}`,
+  );
+
 const counts = queries.reduce((acc, query) => {
   acc[query.stage] = (acc[query.stage] || 0) + 1;
   return acc;
@@ -314,6 +487,16 @@ fs.writeFileSync(
   await format(moduleText, { ...prettierOptions, parser: "typescript" }),
   "utf8",
 );
+const relationshipModuleText = `${banner}\nimport type { Client } from "./clients-store";\nimport type { Agent } from "../wizard/agents-store";\n\nexport const RELATIONSHIP_MASTER_DATASET_ID = ${JSON.stringify(RELATIONSHIP_DATASET_ID)};\nexport const IMPORTED_RELATIONSHIP_MANIFEST = ${JSON.stringify({ source: SOURCE_NAME, sheet: "QTS - EMP", b2bRows: rows.filter((row) => clean(row["Query Market Source"]) === "B2B").length, b2cRows: rows.filter((row) => clean(row["Query Market Source"]) === "B2C").length, agentCount: importedAgents.length, clientCount: importedClients.length }, null, 2)} as const;\n\nexport const IMPORTED_B2B_AGENTS: Agent[] = ${JSON.stringify(importedAgents, null, 2)};\n\nexport const IMPORTED_B2C_CLIENTS: Client[] = ${JSON.stringify(importedClients, null, 2)};\n`;
+fs.writeFileSync(
+  RELATIONSHIP_OUTPUT,
+  await format(relationshipModuleText, { ...prettierOptions, parser: "typescript" }),
+  "utf8",
+);
 console.log(`Generated ${path.relative(ROOT, OUTPUT)}`);
+console.log(`Generated ${path.relative(ROOT, RELATIONSHIP_OUTPUT)}`);
 console.log(`Queries: ${queries.length}; tasks: ${tasks.length}; events: ${events.length}`);
+console.log(
+  `Relationships: ${importedAgents.length} B2B agents; ${importedClients.length} B2C clients`,
+);
 console.log(`Stages: ${JSON.stringify(counts)}; value: ${totalValue.toFixed(2)}`);
