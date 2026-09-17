@@ -432,11 +432,20 @@ const td =
   "p-1.5 text-right tabular-nums whitespace-nowrap";
 
 /**
- * Existing calculation used by all NON-ACTIVITY and NON-ENTRANCE categories.
+ * Existing calculation used by all NON-ACTIVITY categories.
  *
  * DO NOT change this because Activity & Experiences
- * and Monument Entrances have their own calculation below.
+ * has its own calculation below.
  */
+const gross = (
+  net: number,
+  mk: number,
+  gst: number,
+) => {
+  const withMk = net * (1 + mk / 100);
+  return withMk * (1 + gst / 100);
+};
+
 function applyMarkupAndGst(
   base: number,
   mk: number,
@@ -460,9 +469,9 @@ function applyMarkupAndGst(
 }
 
 /**
- * ACTIVITY & EXPERIENCES + MONUMENT ENTRANCES
+ * ACTIVITY & EXPERIENCES ONLY
  *
- * The activity / entrance amount is a GROUP TOTAL.
+ * The activity amount is a GROUP TOTAL.
  *
  * Example:
  *
@@ -489,7 +498,7 @@ function applyMarkupAndGst(
  * ₹2,482 + ₹124
  * = ₹2,606
  *
- * This function is used ONLY for Activities and Entrances.
+ * This function is used ONLY for Activities.
  */
 function applyActivityMarkupAndGst(
   baseTotal: number,
@@ -521,8 +530,8 @@ function applyActivityMarkupAndGst(
     basePlusMarkup + gstAmt;
 
   /*
-   * The actual activity / entrance total remains unchanged.
-   * We do NOT multiply the total by pax.
+   * The actual activity total remains unchanged.
+   * We do NOT multiply the activity total by pax.
    */
   return {
     baseTotal,
@@ -678,21 +687,6 @@ function pickActivitySlab<
  * It is NOT divided by pax in the activity list.
  */
 function getActivityDisplayAmount(
-  opt: SheetOption,
-): number {
-  return opt.amount;
-}
-
-/**
- * Entrance amount shown in the entrance column.
- *
- * Entrance is treated as a TOTAL amount (same as Activity).
- *
- * Therefore:
- * ₹600 stays ₹600.
- * It is NOT divided by pax in the entrance list.
- */
-function getEntranceDisplayAmount(
   opt: SheetOption,
 ): number {
   return opt.amount;
@@ -883,9 +877,9 @@ function OptionCell({
 }) {
   if (opts.length === 0) {
     return (
-      <td className="p-1.5 text-right text-muted-foreground">
+      <span className="block p-1.5 text-right text-muted-foreground">
         —
-      </td>
+      </span>
     );
   }
 
@@ -895,38 +889,21 @@ function OptionCell({
       .map((o) => o.id),
   };
 
-  const perPersonBuckets: Bucket[] = [
-    "misc",
-  ];
-
-  const showPerPerson =
-    perPersonBuckets.includes(
-      bucket,
-    );
-
   return (
-    <td className="p-1.5 align-top">
+    <div className="p-1.5 align-top">
       <div className="space-y-1">
         {opts.map((o) => {
           /*
-           * ACTIVITY & ENTRANCES:
+           * ACTIVITY:
            * Always show the TOTAL amount.
            *
-           * Misc:
-           * Keep existing per-person behavior.
+           * Entrances/Misc are priced as raw line totals in the costing sheet,
+           * matching the existing Vehicle Options treatment.
            */
           const displayAmount =
-            bucket === "activities" ||
-            bucket === "entrances"
-              ? bucket === "activities"
-                ? getActivityDisplayAmount(o)
-                : getEntranceDisplayAmount(o)
-              : showPerPerson
-                ? getPerPersonAmount(
-                    o,
-                    pax,
-                  )
-                : o.amount;
+            bucket === "activities"
+              ? getActivityDisplayAmount(o)
+              : o.amount;
 
           return (
             <label
@@ -971,31 +948,8 @@ function OptionCell({
           );
         })}
       </div>
-    </td>
+    </div>
   );
-}
-
-function getPerPersonAmount(
-  opt: SheetOption,
-  pax: number,
-): number {
-  const safePax = Math.max(
-    1,
-    pax,
-  );
-
-  const text =
-    `${opt.sub || ""} ${opt.label || ""}`;
-
-  if (
-    /per[_\s]person/i.test(
-      text,
-    )
-  ) {
-    return opt.amount;
-  }
-
-  return opt.amount / safePax;
 }
 
 function LandPartBlock({
@@ -1439,57 +1393,45 @@ function LandPartBlock({
                     ) : (
                       <div className="space-y-1">
                         {r.entrance_opts.map(
-                          (o) => {
-                            /*
-                             * ENTRANCES:
-                             * Show the TOTAL amount (same as Activities).
-                             * Do NOT divide by pax.
-                             */
-                            const displayAmount =
-                              getEntranceDisplayAmount(
-                                o,
-                              );
-
-                            return (
-                              <label
-                                key={o.id}
-                                className="flex items-start gap-1.5 cursor-pointer"
-                              >
-                                <Checkbox
-                                  checked={
-                                    o.checked
-                                  }
-                                  onCheckedChange={() =>
-                                    toggle(
+                          (o) => (
+                            <label
+                              key={o.id}
+                              className="flex items-start gap-1.5 cursor-pointer"
+                            >
+                              <Checkbox
+                                checked={
+                                  o.checked
+                                }
+                                onCheckedChange={() =>
+                                  toggle(
+                                    "entrances",
+                                    r.day,
+                                    o.id,
+                                    checkedByDay(
                                       "entrances",
-                                      r.day,
-                                      o.id,
-                                      checkedByDay(
-                                        "entrances",
-                                      ),
-                                    )
-                                  }
-                                  className="mt-0.5"
-                                />
+                                    ),
+                                  )
+                                }
+                                className="mt-0.5"
+                              />
 
-                                <span className="flex-1 truncate max-w-[150px]">
-                                  {o.label}
-                                </span>
+                              <span className="flex-1 truncate max-w-[150px]">
+                                {o.label}
+                              </span>
 
-                                <span
-                                  className={`tabular-nums ${
-                                    o.checked
-                                      ? ""
-                                      : "line-through text-muted-foreground"
-                                  }`}
-                                >
-                                  {inr(
-                                    displayAmount,
-                                  )}
-                                </span>
-                              </label>
-                            );
-                          },
+                              <span
+                                className={`tabular-nums ${
+                                  o.checked
+                                    ? ""
+                                    : "line-through text-muted-foreground"
+                                }`}
+                              >
+                                {inr(
+                                  o.amount,
+                                )}
+                              </span>
+                            </label>
+                          ),
                         )}
                       </div>
                     )}
@@ -1577,12 +1519,6 @@ function LandPartBlock({
             const activityGstTotal = (land.activities_total + activityMarkupTotal) * (pct.gst / 100);
             const activityTotalFinal = land.activities_total + activityMarkupTotal + activityGstTotal;
             const activityPerPerson = activityTotalFinal / pax;
-
-            // ===== FIXED: Entrance total markup and GST on total, not per-person =====
-            const entranceMarkupTotal = land.entrances_total * (pct.mk / 100);
-            const entranceGstTotal = (land.entrances_total + entranceMarkupTotal) * (pct.gst / 100);
-            const entranceTotalFinal = land.entrances_total + entranceMarkupTotal + entranceGstTotal;
-            const entrancePerPerson = entranceTotalFinal / pax;
 
             const renderVehicleCells =
               (values: number[], empty = false) => (
@@ -1678,12 +1614,13 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ENTRANCE MARKUP TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      entranceMarkupTotal,
+                      land.entrances_total *
+                        (pct.mk /
+                          100),
                     )}
                   </td>
 
@@ -1732,12 +1669,18 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ENTRANCE GST TOTAL */}
                   <td
                     className={td}
                   >
                     {inr(
-                      entranceGstTotal,
+                      (
+                        land.entrances_total *
+                        (1 +
+                          pct.mk /
+                            100)
+                      ) *
+                        (pct.gst /
+                          100),
                     )}
                   </td>
 
@@ -1792,13 +1735,15 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ENTRANCE TOTAL FINAL */}
-                  <td className={`${td} font-semibold`}>
-                    {inr(entranceTotalFinal)}
+                  <td className={td}>
+                    {inr(
+                      land.entrances_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
+                    )}
                   </td>
 
-                  {/* ACTIVITY TOTAL FINAL */}
-                  <td className={`${td} font-semibold`}>
+                  <td className={td}>
                     {inr(activityTotalFinal)}
                   </td>
 
@@ -1838,12 +1783,17 @@ function LandPartBlock({
                     )}
                   </td>
 
-                  {/* ENTRANCE PER PERSON */}
-                  <td className={`${td} font-bold`}>
-                    {inr(entrancePerPerson)}
+                  <td
+                    className={td}
+                  >
+                    {inr(
+                      land.entrances_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
+                    )}
                   </td>
 
-                  {/* ACTIVITY PER PERSON */}
+                  {/* FINAL ACTIVITY PER PERSON */}
                   <td
                     className={`${td} font-bold`}
                   >
@@ -1856,15 +1806,9 @@ function LandPartBlock({
                     className={td}
                   >
                     {inr(
-                      (
-                        land.misc_total *
-                        (1 +
-                          pct.mk /
-                            100) *
-                        (1 +
-                          pct.gst /
-                            100)
-                      ) / pax,
+                      land.misc_total *
+                        (1 + pct.mk / 100) *
+                        (1 + pct.gst / 100),
                     )}
                   </td>
                 </tr>
@@ -3131,6 +3075,7 @@ function RateSheetBlock({
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const selectable = !!(
+
     set &&
     draft &&
     optionKey
@@ -3230,22 +3175,15 @@ function RateSheetBlock({
 
   const landPerPerson = {
     /*
-     * Entrances are now treated as a GROUP TOTAL
-     * (same as Activities).
-     *
-     * The pre-computed value here uses the overall
-     * pax and is kept for backwards compatibility.
-     * Each rate-sheet row recomputes entrances
-     * using its own pax via
-     * `getEntrancesPerPersonForPax`.
+     * Entrances and Miscellaneous are shown as the total selected amount for the
+     * active row, without reducing them to a per-person item rate.
      */
     entrances:
-      applyActivityMarkupAndGst(
+      gross(
         land.entrances_total,
         landPct.mk,
         landPct.gst,
-        pax,
-      ).finalPerPerson,
+      ),
 
     /*
      * Activity is calculated dynamically
@@ -3260,12 +3198,11 @@ function RateSheetBlock({
       ).finalPerPerson,
 
     misc:
-      applyMarkupAndGst(
+      gross(
         land.misc_total,
         landPct.mk,
         landPct.gst,
-        pax,
-      ).per_person,
+      ),
   };
 
   const visibleGroups =
@@ -3314,23 +3251,16 @@ function RateSheetBlock({
       const activities = getActivitiesPerPersonForPax(
         land, db, r.pax, landPct,
       );
-      /*
-       * Entrances: recompute per row using its own pax.
-       * Same pattern as Activities.
-       */
-      const entrances = getEntrancesPerPersonForPax(
-        land, r.pax, landPct,
-      );
       const common =
         r.transport + r.guide + r.escort +
-        entrances + activities + landPerPerson.misc;
+        landPerPerson.entrances + activities + landPerPerson.misc;
       return {
         vehicle: g.vehicle,
         pax: r.pax,
         transport: r.transport,
         guide: r.guide,
         escort: r.escort,
-        entrances,
+        entrances: landPerPerson.entrances,
         activities,
         misc: landPerPerson.misc,
         single: r.single,
@@ -3721,78 +3651,6 @@ function getActivitiesPerPersonForPax(
   );
 }
 
-/**
- * ENTRANCE RATE SHEET
- *
- * Same pattern as Activities:
- *
- * Entrance Total (group total)
- * ÷ Pax
- * = rounded Entrance Per Person
- *
- * Then:
- * + Markup
- * + GST
- *
- * Example for 7 pax:
- * ₹4,200 / 7 = ₹600
- * Markup 10% = ₹60
- * GST 5% = ₹33
- * Final = ₹693
- */
-function getEntrancesPerPersonForPax(
-  land: LandPartSheet,
-  pax: number,
-  landPct: {
-    mk: number;
-    gst: number;
-  },
-): number {
-  const safePax =
-    Math.max(
-      1,
-      Math.round(pax),
-    );
-
-  /*
-   * Sum of checked entrance amounts.
-   * Each entrance amount is a GROUP TOTAL.
-   */
-  const total =
-    land.rows.reduce(
-      (sum, row) =>
-        sum +
-        row.entrance_opts.reduce(
-          (
-            rowSum,
-            option,
-          ) => {
-            if (!option.checked) {
-              return rowSum;
-            }
-            return (
-              rowSum +
-              option.amount
-            );
-          },
-          0,
-        ),
-      0,
-    );
-
-  const entranceCalc =
-    applyActivityMarkupAndGst(
-      total,
-      landPct.mk,
-      landPct.gst,
-      safePax,
-    );
-
-  return (
-    entranceCalc.finalPerPerson
-  );
-}
-
 function FragmentGroup({
   group: g,
   land,
@@ -3878,24 +3736,11 @@ function FragmentGroup({
             landPct,
           );
 
-        /*
-         * ENTRANCE:
-         *
-         * Same pattern as Activities — recompute
-         * using the exact pax of this row.
-         */
-        const entrancesPerPerson =
-          getEntrancesPerPersonForPax(
-            land,
-            r.pax,
-            landPct,
-          );
-
         const commonLandPerPerson =
           r.transport +
           r.guide +
           r.escort +
-          entrancesPerPerson +
+          landPerPerson.entrances +
           activitiesPerPerson +
           landPerPerson.misc;
 
@@ -3971,12 +3816,9 @@ function FragmentGroup({
               )}
             </td>
 
-            {/* ENTRANCE FINAL PER PERSON */}
-            <td
-              className={`${td} font-semibold`}
-            >
+            <td className={td}>
               {inr(
-                entrancesPerPerson,
+                landPerPerson.entrances,
               )}
             </td>
 

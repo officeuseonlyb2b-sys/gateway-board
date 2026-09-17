@@ -547,15 +547,17 @@ export function buildRateSheet(
       if (span.length) fitting = span;
     }
     const rows: RateSheetRow[] = (fitting.length ? fitting : paxList).map((pax) => {
-
-
       const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
-      const transport = pp(land.transport_total);
+      // Keep each selected transport line independent in the Rate Sheet / Final
+      // Costing. When multiple vehicles exist, each vehicle must retain its own
+      // transport amount instead of being added together into one total.
+      const transportBase = line ? transportLineTotal(line) : land.transport_total;
+      const transport = pp(transportBase);
       const guide = pp(land.guide_only_total);
       const escort = pp(land.escort_total);
-      const entrances = pp(land.entrances_total);
+      const entrances = gross(land.entrances_total, mk.land, mk.lg);
       const activities = pp(land.activities_total);
-      const misc = pp(land.misc_total);
+      const misc = gross(land.misc_total, mk.land, mk.lg);
       const landPP = transport + guide + escort + entrances + activities + misc;
       const meals = lunch + dinner;
       return {
