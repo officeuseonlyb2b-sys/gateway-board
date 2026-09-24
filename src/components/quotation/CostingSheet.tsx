@@ -893,17 +893,8 @@ function OptionCell({
     <div className="p-1.5 align-top">
       <div className="space-y-1">
         {opts.map((o) => {
-          /*
-           * ACTIVITY:
-           * Always show the TOTAL amount.
-           *
-           * Entrances/Misc are priced as raw line totals in the costing sheet,
-           * matching the existing Vehicle Options treatment.
-           */
           const displayAmount =
-            bucket === "activities"
-              ? getActivityDisplayAmount(o)
-              : o.amount;
+            o.per_person_amount ?? getActivityDisplayAmount(o);
 
           return (
             <label
@@ -1427,7 +1418,7 @@ function LandPartBlock({
                                 }`}
                               >
                                 {inr(
-                                  o.amount,
+                                  o.per_person_amount ?? o.amount,
                                 )}
                               </span>
                             </label>
@@ -1520,6 +1511,16 @@ function LandPartBlock({
             const activityTotalFinal = land.activities_total + activityMarkupTotal + activityGstTotal;
             const activityPerPerson = activityTotalFinal / pax;
 
+            const entrancePerPersonFinal =
+              land.entrances_per_person_total *
+              (1 + pct.mk / 100) *
+              (1 + pct.gst / 100);
+            const entrancePerPersonMarkup =
+              land.entrances_per_person_total * (pct.mk / 100);
+            const entrancePerPersonGst =
+              (land.entrances_per_person_total + entrancePerPersonMarkup) *
+              (pct.gst / 100);
+
             const renderVehicleCells =
               (values: number[], empty = false) => (
                 <td className="p-1.5 align-top">
@@ -1572,7 +1573,7 @@ function LandPartBlock({
                     className={td}
                   >
                     {inr(
-                      land.entrances_total,
+                      land.entrances_per_person_total,
                     )}
                   </td>
 
@@ -1618,9 +1619,7 @@ function LandPartBlock({
                     className={td}
                   >
                     {inr(
-                      land.entrances_total *
-                        (pct.mk /
-                          100),
+                      entrancePerPersonMarkup,
                     )}
                   </td>
 
@@ -1673,14 +1672,7 @@ function LandPartBlock({
                     className={td}
                   >
                     {inr(
-                      (
-                        land.entrances_total *
-                        (1 +
-                          pct.mk /
-                            100)
-                      ) *
-                        (pct.gst /
-                          100),
+                      entrancePerPersonGst,
                     )}
                   </td>
 
@@ -1737,9 +1729,7 @@ function LandPartBlock({
 
                   <td className={td}>
                     {inr(
-                      land.entrances_total *
-                        (1 + pct.mk / 100) *
-                        (1 + pct.gst / 100),
+                      entrancePerPersonFinal,
                     )}
                   </td>
 
@@ -1786,11 +1776,7 @@ function LandPartBlock({
                   <td
                     className={td}
                   >
-                    {inr(
-                      land.entrances_total *
-                        (1 + pct.mk / 100) *
-                        (1 + pct.gst / 100),
-                    )}
+                    {inr(entrancePerPersonFinal)}
                   </td>
 
                   {/* FINAL ACTIVITY PER PERSON */}
@@ -1808,7 +1794,8 @@ function LandPartBlock({
                     {inr(
                       land.misc_total *
                         (1 + pct.mk / 100) *
-                        (1 + pct.gst / 100),
+                        (1 + pct.gst / 100) /
+                        pax,
                     )}
                   </td>
                 </tr>

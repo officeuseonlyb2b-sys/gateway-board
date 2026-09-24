@@ -29,6 +29,7 @@ export interface SheetOption {
   label: string;
   sub?: string;
   amount: number;     // amount contributed to THIS day when checked
+  per_person_amount?: number; // display-only per-person amount; totals keep using amount
   checked: boolean;
 }
 
@@ -59,6 +60,7 @@ export interface LandPartSheet {
   guide_only_total: number;   // non-escort guides
   escort_total: number;
   entrances_total: number;
+  entrances_per_person_total: number;
   activities_total: number;
   misc_total: number;
   grand_total: number;
@@ -192,12 +194,21 @@ export function buildLandPart(
         foreign: l.foreign_pax * l.foreign_rate,
         student: (l.student_pax ?? 0) * (l.student_rate ?? 0),
       };
+      const rates: Record<EntranceCat, number> = {
+        indian: l.indian_rate,
+        foreign: l.foreign_rate,
+        student: l.student_rate ?? 0,
+      };
       const amount = ALL_CATS.reduce(
         (s, c) => s + (catPicked(draft, day, c) ? parts[c] : 0), 0) / target.length;
       opts[day].entrances.push({
         id: l.id,
         label: l.custom_name || d.entrance_sites?.find((s) => s.id === l.site_id)?.site_name || "Entrance",
         amount,
+        per_person_amount: ALL_CATS.reduce(
+          (sum, c) => sum + (catPicked(draft, day, c) ? rates[c] : 0),
+          0,
+        ) / target.length,
         checked: isPicked(draft, "entrances", day, l.id),
       });
     });
@@ -212,6 +223,9 @@ export function buildLandPart(
       id: l.id,
       label: l.custom_name || d.activities?.find((a) => a.id === l.activity_id)?.activity_name || "Activity",
       amount: each,
+      per_person_amount: l.pricing_mode === "per_person"
+        ? l.rate / target.length
+        : undefined,
       checked: isPicked(draft, "activities", day, l.id),
     }));
   });
@@ -227,6 +241,7 @@ export function buildLandPart(
         label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
         sub: l.unit || undefined,
         amount: l.rate * l.qty,
+        per_person_amount: l.unit === "per_person" ? l.rate : undefined,
         checked: isPicked(draft, "misc", miscDay, l.id),
       });
     });
@@ -271,6 +286,17 @@ export function buildLandPart(
   const transport_total = sum((r) => r.transport);
   const guide_total = sum((r) => r.guide);
   const entrances_total = sum((r) => r.entrances);
+  const entrances_per_person_total = rows.reduce(
+    (total, row) =>
+      total +
+      row.entrance_opts.reduce(
+        (rowTotal, option) =>
+          rowTotal +
+          (option.checked ? option.per_person_amount ?? 0 : 0),
+        0,
+      ),
+    0,
+  );
   const activities_total = sum((r) => r.activities);
   const misc_total = sum((r) => r.misc);
 
@@ -282,7 +308,7 @@ export function buildLandPart(
     rows, transport_total, guide_total,
     guide_only_total: guide_total - escort_total,
     escort_total,
-    entrances_total, activities_total, misc_total,
+    entrances_total, entrances_per_person_total, activities_total, misc_total,
     grand_total: transport_total + guide_total + entrances_total + activities_total + misc_total,
   };
 }
