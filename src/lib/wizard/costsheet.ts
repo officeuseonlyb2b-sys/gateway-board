@@ -4,7 +4,7 @@
 // hotel category and per pax so the Costing page can be rendered as a sheet.
 import type { DB, GuideLanguage } from "@/lib/mock-store";
 import {
-  activityRateForPax,
+  activityPricingForPax,
   guideRateForPax,
   miscRateForPax,
   VEHICLE_ALLOCATION,
@@ -62,7 +62,9 @@ export interface LandPartSheet {
   entrances_total: number;
   entrances_per_person_total: number;
   activities_total: number;
+  activities_per_person_total: number;
   misc_total: number;
+  misc_per_person_total: number;
   grand_total: number;
 }
 
@@ -215,17 +217,27 @@ export function buildLandPart(
   });
 
   // ------- Activities
+  const paxForLand = Math.max(1, effectivePaxForPricing(draft));
   draft.activities.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
-    const each = (l.rate * l.qty) / target.length;
+    const master = l.activity_id
+      ? d.activities.find((activity) => activity.id === l.activity_id)
+      : undefined;
+    const resolved = master
+      ? activityPricingForPax(master, paxForLand, draft.traveler_type ?? "indian")
+      : undefined;
+    const total = resolved?.total ?? l.rate * l.qty;
+    const each = total / target.length;
     target.forEach((day) => opts[day].activities.push({
       id: l.id,
-      label: l.custom_name || d.activities?.find((a) => a.id === l.activity_id)?.activity_name || "Activity",
+      label: l.custom_name || master?.activity_name || "Activity",
       amount: each,
-      per_person_amount: l.pricing_mode === "per_person"
-        ? l.rate / target.length
-        : undefined,
+      per_person_amount: resolved
+        ? resolved.per_person / target.length
+        : l.pricing_mode === "per_person"
+          ? l.rate / target.length
+          : (l.rate * l.qty) / paxForLand / target.length,
       checked: isPicked(draft, "activities", day, l.id),
     }));
   });
@@ -236,12 +248,21 @@ export function buildLandPart(
     draft.misc.forEach((l) => {
       const target = targetDays(l.from_routing_days, all);
       if (!target.length) return;
+      const master = l.item_id
+        ? d.miscellaneous_items.find((item) => item.id === l.item_id)
+        : undefined;
+      if (l.item_id && (!master || !master.is_active)) return;
+      const resolved = master
+        ? miscRateForPax(master, paxForLand, Math.max(1, draft.nights))
+        : undefined;
       opts[miscDay].misc.push({
         id: l.id,
-        label: l.custom_name || d.miscellaneous_items?.find((m) => m.id === l.item_id)?.name || "Item",
-        sub: l.unit || undefined,
-        amount: l.rate * l.qty,
-        per_person_amount: l.unit === "per_person" ? l.rate : undefined,
+        label: l.custom_name || master?.name || "Item",
+        sub: resolved?.label || l.unit || undefined,
+        amount: resolved?.total ?? l.rate * l.qty,
+        per_person_amount:
+          resolved?.per_person ??
+          (l.unit === "per_person" ? l.rate : (l.rate * l.qty) / paxForLand),
         checked: isPicked(draft, "misc", miscDay, l.id),
       });
     });
@@ -299,6 +320,20 @@ export function buildLandPart(
   );
   const activities_total = sum((r) => r.activities);
   const misc_total = sum((r) => r.misc);
+  const activities_per_person_total = rows.reduce(
+    (total, row) => total + row.activity_opts.reduce(
+      (rowTotal, option) => rowTotal + (option.checked ? option.per_person_amount ?? 0 : 0),
+      0,
+    ),
+    0,
+  );
+  const misc_per_person_total = rows.reduce(
+    (total, row) => total + row.misc_opts.reduce(
+      (rowTotal, option) => rowTotal + (option.checked ? option.per_person_amount ?? 0 : 0),
+      0,
+    ),
+    0,
+  );
 
   const escortIds = new Set(draft.guides.filter((g) => g.is_escort).map((g) => g.id));
   const escort_total = rows.reduce(
@@ -308,7 +343,8 @@ export function buildLandPart(
     rows, transport_total, guide_total,
     guide_only_total: guide_total - escort_total,
     escort_total,
-    entrances_total, entrances_per_person_total, activities_total, misc_total,
+    entrances_total, entrances_per_person_total, activities_total, activities_per_person_total,
+    misc_total, misc_per_person_total,
     grand_total: transport_total + guide_total + entrances_total + activities_total + misc_total,
   };
 }
@@ -494,13 +530,8 @@ const gross = (net: number, mk: number, gst: number) => {
   return withMk * (1 + gst);
 };
 
-/**
- * Re-price the selected Land Part services for one row of the pax rate sheet.
- * The editing steps hold the amount for the draft's current/effective pax; a
- * range quotation needs the master slab/per-person rules to be evaluated again
- * for every requested pax row.
- */
-function selectedActivityTotalForPax(draft: QuoteDraft, d: DB, pax: number): number {
+/** Resolve checked Activity & Experience lines to a per-person amount for one Rate Sheet row. */
+function selectedActivityPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): number {
   const routingDays = draft.routing.map((day) => day.day);
   return draft.activities.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);
@@ -510,16 +541,17 @@ function selectedActivityTotalForPax(draft: QuoteDraft, d: DB, pax: number): num
     const master = line.activity_id
       ? d.activities.find((activity) => activity.id === line.activity_id)
       : undefined;
-    const total = master
-      ? activityRateForPax(master, pax)
+    const perPerson = master
+      ? activityPricingForPax(master, pax, draft.traveler_type ?? "indian").per_person
       : line.pricing_mode === "per_person"
-        ? line.rate * pax
-        : line.rate * line.qty;
-    return sum + total * (selectedDays / days.length);
+        ? line.rate
+        : (line.rate * line.qty) / Math.max(1, pax);
+    return sum + perPerson * (selectedDays / days.length);
   }, 0);
 }
 
-function selectedMiscTotalForPax(draft: QuoteDraft, d: DB, pax: number): number {
+/** Resolve checked Miscellaneous lines to a per-person amount for one Rate Sheet row. */
+function selectedMiscPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): number {
   const routingDays = draft.routing.map((day) => day.day);
   return draft.misc.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);
@@ -530,12 +562,13 @@ function selectedMiscTotalForPax(draft: QuoteDraft, d: DB, pax: number): number 
     const master = line.item_id
       ? d.miscellaneous_items.find((item) => item.id === line.item_id)
       : undefined;
-    const total = master
-      ? miscRateForPax(master, pax, Math.max(1, draft.nights)).total
+    if (line.item_id && (!master || !master.is_active)) return sum;
+    const perPerson = master
+      ? miscRateForPax(master, pax, Math.max(1, draft.nights)).per_person
       : line.unit === "per_person"
-        ? line.rate * pax
-        : line.rate * line.qty;
-    return sum + total;
+        ? line.rate
+        : (line.rate * line.qty) / Math.max(1, pax);
+    return sum + perPerson;
   }, 0);
 }
 
@@ -665,8 +698,12 @@ export function buildRateSheet(
       const guide = includeLand ? pp(guideAtPax.guide) : 0;
       const escort = includeLand ? pp(guideAtPax.escort) : 0;
       const entrances = includeLand ? pp(selectedEntranceTotalForPax(draft, pax)) : 0;
-      const activities = includeLand ? pp(selectedActivityTotalForPax(draft, d, pax)) : 0;
-      const misc = includeLand ? pp(selectedMiscTotalForPax(draft, d, pax)) : 0;
+      const activities = includeLand
+        ? gross(selectedActivityPerPersonForPax(draft, d, pax), mk.land, mk.lg)
+        : 0;
+      const misc = includeLand
+        ? gross(selectedMiscPerPersonForPax(draft, d, pax), mk.land, mk.lg)
+        : 0;
       const landPP = transport + guide + escort + entrances + activities + misc;
       const meals = lunch + dinner;
       return {

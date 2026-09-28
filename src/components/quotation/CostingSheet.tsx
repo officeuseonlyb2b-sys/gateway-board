@@ -55,25 +55,9 @@ export function CostingSheet({
   const options = draft.hotel_options ?? [];
   const [tab, setTab] = useState<string>(options[0]?.key ?? "A");
 
-  /*
-   * IMPORTANT:
-   *
-   * Activity & Experiences are normalized here as TOTAL activity amounts.
-   *
-   * Example:
-   * Batik Art = 10000
-   * VIP Darshan = 2800
-   * Boat Ride = 3000
-   *
-   * Activity Total = 15800
-   *
-   * This total must NEVER be multiplied by pax.
-   */
-  const pricingPax = Math.max(1, effectivePaxForPricing(draft));
-
   const land = useMemo<LandPartSheet>(
-    () => normalizeActivityPricing(buildLandPart(draft, d), d, pricingPax),
-    [draft, d, pricingPax],
+    () => buildLandPart(draft, d),
+    [draft, d],
   );
 
   if (options.length === 0) {
@@ -468,82 +452,6 @@ function applyMarkupAndGst(
   };
 }
 
-/**
- * ACTIVITY & EXPERIENCES ONLY
- *
- * The activity amount is a GROUP TOTAL.
- *
- * Example:
- *
- * Base Total = ₹15,800
- * Pax = 7
- *
- * Base Per Person:
- * Math.round(15800 / 7)
- * = ₹2,257
- *
- * Markup:
- * Math.round(2257 × 10%)
- * = ₹225
- *
- * Subtotal:
- * ₹2,257 + ₹225
- * = ₹2,482
- *
- * GST:
- * Math.round(2482 × 5%)
- * = ₹124
- *
- * Final:
- * ₹2,482 + ₹124
- * = ₹2,606
- *
- * This function is used ONLY for Activities.
- */
-function applyActivityMarkupAndGst(
-  baseTotal: number,
-  mk: number,
-  gst: number,
-  pax: number,
-) {
-  const safePax = Math.max(
-    1,
-    Math.round(pax),
-  );
-
-  const perPersonBase = Math.round(
-    baseTotal / safePax,
-  );
-
-  const markup = Math.round(
-    perPersonBase * (mk / 100),
-  );
-
-  const basePlusMarkup =
-    perPersonBase + markup;
-
-  const gstAmt = Math.round(
-    basePlusMarkup * (gst / 100),
-  );
-
-  const finalPerPerson =
-    basePlusMarkup + gstAmt;
-
-  /*
-   * The actual activity total remains unchanged.
-   * We do NOT multiply the activity total by pax.
-   */
-  return {
-    baseTotal,
-    perPersonBase,
-    markup,
-    basePlusMarkup,
-    gstAmt,
-    finalPerPerson,
-    finalTotal: baseTotal,
-  };
-}
-
 function MarkupRows({
   label,
   values,
@@ -631,53 +539,6 @@ function MarkupRows({
 }
 
 /**
- * Activity slab helper.
- *
- * Activity prices are treated as TOTAL amounts.
- */
-function isSlabOption(
-  opt: SheetOption,
-): boolean {
-  const text =
-    `${opt.sub || ""} ${opt.label || ""}`.toLowerCase();
-
-  return (
-    /\bslab\b|\btotal\b|\/total\b/.test(
-      text,
-    )
-  );
-}
-
-function pickActivitySlab<
-  T extends {
-    from_pax: number;
-    to_pax: number;
-    price: number;
-  },
->(
-  slabs: T[],
-  pax: number,
-): T {
-  const sorted = [...slabs].sort(
-    (a, b) =>
-      a.from_pax - b.from_pax,
-  );
-
-  return (
-    sorted.find(
-      (s) =>
-        pax >= s.from_pax &&
-        pax <= s.to_pax,
-    ) ??
-    (
-      pax < sorted[0].from_pax
-        ? sorted[0]
-        : sorted[sorted.length - 1]
-    )
-  );
-}
-
-/**
  * Activity amount shown in the activity column.
  *
  * Activity is a TOTAL amount.
@@ -690,176 +551,6 @@ function getActivityDisplayAmount(
   opt: SheetOption,
 ): number {
   return opt.amount;
-}
-
-/**
- * IMPORTANT ACTIVITY NORMALIZATION
- *
- * Every selected Activity & Experience amount
- * is treated as a TOTAL/group amount.
- *
- * It is never multiplied by pax.
- */
-function normalizeActivityPricing(
-  land: LandPartSheet,
-  db: ReturnType<typeof useDB>,
-  pax: number,
-): LandPartSheet {
-  const safePax = Math.max(
-    1,
-    pax,
-  );
-
-  const rows = land.rows.map(
-    (row) => {
-      const destination =
-        db.destination_cities.find(
-          (city) =>
-            city.name
-              .trim()
-              .toLowerCase() ===
-            row.city
-              .trim()
-              .toLowerCase(),
-        );
-
-      const activity_opts =
-        row.activity_opts.map(
-          (opt) => {
-            const activity =
-              db.activities.find(
-                (a) => {
-                  const sameName =
-                    a.activity_name
-                      .trim()
-                      .toLowerCase() ===
-                    opt.label
-                      .trim()
-                      .toLowerCase();
-
-                  const sameDestination =
-                    destination
-                      ? a.destination_id ===
-                        destination.id
-                      : true;
-
-                  return (
-                    sameName &&
-                    sameDestination
-                  );
-                },
-              );
-
-            if (!activity) {
-              /*
-               * Existing option amount is already
-               * considered a total amount.
-               */
-              return {
-                ...opt,
-                sub:
-                  opt.sub ??
-                  `${inr(
-                    opt.amount,
-                  )} total`,
-              };
-            }
-
-            const slabs =
-              activity.pricing_slabs ??
-              [];
-
-            /*
-             * If pricing slabs exist, select the
-             * correct slab for pax.
-             *
-             * IMPORTANT:
-             * The selected slab price is a TOTAL.
-             */
-            if (slabs.length > 0) {
-              const slab =
-                pickActivitySlab(
-                  slabs,
-                  safePax,
-                );
-
-              return {
-                ...opt,
-                amount: slab.price,
-                sub: `Slab ${slab.from_pax}-${slab.to_pax}: ${inr(
-                  slab.price,
-                )} total`,
-              };
-            }
-
-            /*
-             * No slabs:
-             *
-             * Activity price is also treated as
-             * the TOTAL amount for this costing.
-             */
-            return {
-              ...opt,
-              amount:
-                activity.price ??
-                opt.amount,
-              sub:
-                activity.price !=
-                null
-                  ? `${inr(
-                      activity.price,
-                    )} total`
-                  : `${inr(
-                      opt.amount,
-                    )} total`,
-            };
-          },
-        );
-
-      return {
-        ...row,
-        activity_opts,
-      };
-    },
-  );
-
-  /*
-   * CRITICAL:
-   *
-   * Activity total =
-   * sum of selected activity amounts.
-   *
-   * NEVER:
-   * activity amount × pax
-   */
-  const activities_total =
-    rows.reduce(
-      (sum, row) =>
-        sum +
-        row.activity_opts.reduce(
-          (
-            rowSum,
-            option,
-          ) => {
-            if (!option.checked) {
-              return rowSum;
-            }
-
-            return (
-              rowSum +
-              option.amount
-            );
-          },
-          0,
-        ),
-      0,
-    );
-
-  return {
-    ...land,
-    rows,
-    activities_total,
-  };
 }
 
 function OptionCell({
@@ -894,7 +585,7 @@ function OptionCell({
       <div className="space-y-1">
         {opts.map((o) => {
           const displayAmount =
-            o.per_person_amount ?? getActivityDisplayAmount(o);
+            o.per_person_amount ?? getActivityDisplayAmount(o) / Math.max(1, pax);
 
           return (
             <label
@@ -1505,11 +1196,14 @@ function LandPartBlock({
               (total + vehicleMarkup[i] + vehicleGst[i]) / pax
             );
 
-            // ===== FIXED: Activity total markup and GST on total, not per-person =====
-            const activityMarkupTotal = land.activities_total * (pct.mk / 100);
-            const activityGstTotal = (land.activities_total + activityMarkupTotal) * (pct.gst / 100);
-            const activityTotalFinal = land.activities_total + activityMarkupTotal + activityGstTotal;
-            const activityPerPerson = activityTotalFinal / pax;
+            const activityBase = land.activities_per_person_total;
+            const miscBase = land.misc_per_person_total;
+            const activityMarkupTotal = activityBase * (pct.mk / 100);
+            const activityGstTotal = (activityBase + activityMarkupTotal) * (pct.gst / 100);
+            const activityTotalFinal = activityBase + activityMarkupTotal + activityGstTotal;
+            const miscMarkupTotal = miscBase * (pct.mk / 100);
+            const miscGstTotal = (miscBase + miscMarkupTotal) * (pct.gst / 100);
+            const miscTotalFinal = miscBase + miscMarkupTotal + miscGstTotal;
 
             const entrancePerPersonFinal =
               land.entrances_per_person_total *
@@ -1581,17 +1275,13 @@ function LandPartBlock({
                   <td
                     className={`${td} font-semibold`}
                   >
-                    {inr(
-                      land.activities_total,
-                    )}
+                    {inr(activityBase)}
                   </td>
 
                   <td
                     className={td}
                   >
-                    {inr(
-                      land.misc_total,
-                    )}
+                    {inr(miscBase)}
                   </td>
                 </tr>
 
@@ -1635,11 +1325,7 @@ function LandPartBlock({
                   <td
                     className={td}
                   >
-                    {inr(
-                      land.misc_total *
-                        (pct.mk /
-                          100),
-                    )}
+                    {inr(miscMarkupTotal)}
                   </td>
                 </tr>
 
@@ -1688,16 +1374,7 @@ function LandPartBlock({
                   <td
                     className={td}
                   >
-                    {inr(
-                      (
-                        land.misc_total *
-                        (1 +
-                          pct.mk /
-                            100)
-                      ) *
-                        (pct.gst /
-                          100),
-                    )}
+                    {inr(miscGstTotal)}
                   </td>
                 </tr>
 
@@ -1738,11 +1415,7 @@ function LandPartBlock({
                   </td>
 
                   <td className={td}>
-                    {inr(
-                      land.misc_total *
-                        (1 + pct.mk / 100) *
-                        (1 + pct.gst / 100),
-                    )}
+                    {inr(miscTotalFinal)}
                   </td>
                 </tr>
 
@@ -1757,46 +1430,25 @@ function LandPartBlock({
 
                   {renderVehicleCells(vehiclePerPerson)}
 
-                  <td
-                    className={td}
-                  >
+                  <td className={td}>
                     {inr(
-                      (
-                        land.guide_total *
-                        (1 +
-                          pct.mk /
-                            100) *
-                        (1 +
-                          pct.gst /
-                            100)
-                      ) / pax,
-                    )}
-                  </td>
-
-                  <td
-                    className={td}
-                  >
-                    {inr(entrancePerPersonFinal)}
-                  </td>
-
-                  {/* FINAL ACTIVITY PER PERSON */}
-                  <td
-                    className={`${td} font-bold`}
-                  >
-                    {inr(
-                      activityPerPerson,
-                    )}
-                  </td>
-
-                  <td
-                    className={td}
-                  >
-                    {inr(
-                      land.misc_total *
+                      land.guide_total *
                         (1 + pct.mk / 100) *
                         (1 + pct.gst / 100) /
                         pax,
                     )}
+                  </td>
+
+                  <td className={td}>
+                    {inr(entrancePerPersonFinal)}
+                  </td>
+
+                  <td className={`${td} font-bold`}>
+                    {inr(activityTotalFinal)}
+                  </td>
+
+                  <td className={td}>
+                    {inr(miscTotalFinal)}
                   </td>
                 </tr>
 
@@ -2811,20 +2463,7 @@ export function ScenarioRateSheet({
         [];
 
   const land = useMemo<LandPartSheet>(
-    () =>
-      normalizeActivityPricing(
-        buildLandPart(
-          draft,
-          d,
-        ),
-        d,
-        Math.max(
-          1,
-          effectivePaxForPricing(
-            draft,
-          ),
-        ),
-      ),
+    () => buildLandPart(draft, d),
     [draft, d],
   );
 
@@ -2899,16 +2538,8 @@ export function FinalRateSheet({
   );
 
   const land = useMemo<LandPartSheet>(
-    () =>
-      normalizeActivityPricing(
-        buildLandPart(
-          draft,
-          d,
-        ),
-        d,
-        pax,
-      ),
-    [draft, d, pax],
+    () => buildLandPart(draft, d),
+    [draft, d],
   );
 
   const includedKeys =
@@ -3460,146 +3091,6 @@ function RateSheetBlock({
         </table>
       </div>
     </Card>
-  );
-}
-
-/**
- * ACTIVITY RATE SHEET
- *
- * For each exact pax row:
- *
- * Activity Total
- * ÷ Pax
- * = rounded Activity Per Person
- *
- * Then:
- * + Markup
- * + GST
- *
- * Example for 7 pax:
- * ₹15,800 / 7 = ₹2,257
- * Markup 10% = ₹225
- * GST 5% = ₹124
- * Final = ₹2,606
- */
-function getActivitiesPerPersonForPax(
-  land: LandPartSheet,
-  db: ReturnType<
-    typeof useDB
-  >,
-  pax: number,
-  landPct: {
-    mk: number;
-    gst: number;
-  },
-): number {
-  const safePax =
-    Math.max(
-      1,
-      Math.round(pax),
-    );
-
-  const total =
-    land.rows.reduce(
-      (sum, row) => {
-        const destination =
-          db.destination_cities.find(
-            (city) =>
-              city.name
-                .trim()
-                .toLowerCase() ===
-              row.city
-                .trim()
-                .toLowerCase(),
-          );
-
-        const rowTotal =
-          row.activity_opts.reduce(
-            (
-              rowSum,
-              option,
-            ) => {
-              if (
-                !option.checked
-              ) {
-                return rowSum;
-              }
-
-              const activity =
-                db.activities.find(
-                  (a) => {
-                    const sameName =
-                      a.activity_name
-                        .trim()
-                        .toLowerCase() ===
-                      option.label
-                        .trim()
-                        .toLowerCase();
-
-                    const sameDestination =
-                      destination
-                        ? a.destination_id ===
-                          destination.id
-                        : true;
-
-                    return (
-                      sameName &&
-                      sameDestination
-                    );
-                  },
-                );
-
-              /*
-               * IMPORTANT:
-               *
-               * Activity amount is already
-               * a GROUP TOTAL.
-               *
-               * Do NOT multiply by pax.
-               */
-              if (
-                activity?.pricing_slabs
-                  ?.length
-              ) {
-                const slab =
-                  pickActivitySlab(
-                    activity.pricing_slabs,
-                    safePax,
-                  );
-
-                return (
-                  rowSum +
-                  slab.price
-                );
-              }
-
-              return (
-                rowSum +
-                (activity?.price ??
-                  option.amount)
-              );
-            },
-            0,
-          );
-
-        return (
-          sum +
-          rowTotal
-        );
-      },
-      0,
-    );
-
-  const activityCalc =
-    applyActivityMarkupAndGst(
-      total,
-      landPct.mk,
-      landPct.gst,
-      safePax,
-    );
-
-  return (
-    activityCalc.finalPerPerson
   );
 }
 

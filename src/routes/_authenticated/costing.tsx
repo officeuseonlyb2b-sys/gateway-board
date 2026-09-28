@@ -1661,6 +1661,8 @@ function Step4({ draft, set }: StepProps) {
           day: index + 1,
           overnight_city: null,
           program_text: index === 0 ? p.routing_summary : "",
+          from_city: undefined,
+          destination_city: undefined,
         }));
     const routing: RoutingDay[] = sourceRouting.map((r, i) => ({
       day: r.day,

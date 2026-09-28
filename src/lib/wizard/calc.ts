@@ -1,5 +1,6 @@
 // Costing calculator — rolls up totals for a single hotel option.
 import type { DB, RatePlan } from "@/lib/mock-store";
+import { miscRateForPax } from "@/lib/mock-store";
 import type { QuoteDraft, HotelOption } from "./types";
 import { addDaysISO } from "@/lib/format";
 
@@ -202,7 +203,19 @@ export function computeAddonsTotal(
     0,
   );
   const g = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);
-  const m = draft.misc.reduce((s, l) => s + l.rate * l.qty, 0);
+  const m = draft.misc.reduce((sum, line) => {
+    const master = line.item_id
+      ? d?.miscellaneous_items.find((item) => item.id === line.item_id)
+      : undefined;
+    if (line.item_id && (!master || !master.is_active)) return sum;
+    const miscDay = draft.routing[0]?.day;
+    const selected = miscDay == null ? undefined : draft.costing_selection?.misc?.[miscDay];
+    if (selected && !selected.includes(line.id)) return sum;
+    const isSlab = (master?.pricing_type ?? master?.unit) === "slab";
+    return sum + (isSlab && master
+      ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
+      : line.rate * line.qty);
+  }, 0);
   const meals = computeMealsTotal(draft, d);
   // Optional supplements are deliberately excluded from the package total.
   // They are priced and displayed separately in Step 9.

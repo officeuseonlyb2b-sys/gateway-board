@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
-import { useDB, activityFlatPrice, activitySlabsFor } from "@/lib/mock-store";
+import { useDB, activityPricingForPax } from "@/lib/mock-store";
 import { effectivePaxForPricing, landMarkup, landGst } from "@/lib/wizard/calc";
 import {
   uid,
@@ -37,103 +37,15 @@ export function Step11({ draft, set }: StepProps) {
         (x.from_routing_days ?? []).includes(day)
     );
 
-  /*
-   * IMPORTANT:
-   * Slab pricing can exist in old records as "total"
-   * and in newer records as "slab".
-   *
-   * We intentionally convert to String() here so TypeScript
-   * does not complain if the database type only contains one
-   * of these values while old data contains the other.
-   */
-  const isSlabActivity = (
-    a: typeof d.activities[number]
-  ): boolean => {
-    const slabPricingType = String(
-      a.slab_pricing_type ?? ""
-    ).toLowerCase();
-
-    const pricingType = String(
-      a.pricing_type ?? ""
-    ).toLowerCase();
-
-    return (
-      slabPricingType === "slab" ||
-      slabPricingType === "total" ||
-      pricingType === "slab" ||
-      pricingType === "total"
-    );
-  };
-
-  /*
-   * Get the correct price for the current quotation pax.
-   *
-   * PER PERSON:
-   *   ₹3000/person
-   *
-   * SLAB:
-   *   1-5  = ₹1500 TOTAL
-   *   6-10 = ₹2000 TOTAL
-   *   11-15 = ₹2500 TOTAL
-   *
-   * IMPORTANT:
-   * Slab amount is NEVER multiplied by pax.
-   */
   const slabRate = (
     a: typeof d.activities[number]
   ) => {
-    const slabMode = isSlabActivity(a);
-
-    /*
-     * No slabs available.
-     */
-    const slabsForTraveler = activitySlabsFor(a, traveler);
-
-    if (slabsForTraveler.length === 0) {
-      return {
-        rate: activityFlatPrice(a, traveler),
-
-        slab: null as
-          | null
-          | {
-              from_pax: number;
-              to_pax: number;
-              price: number;
-            },
-
-        isSlab: slabMode,
-      };
-    }
-
-    /*
-     * Sort slabs by pax range.
-     */
-    const sorted = [...slabsForTraveler].sort(
-      (x, y) => x.from_pax - y.from_pax
-    );
-
-    /*
-     * Find the slab matching quotation pax.
-     */
-    const slab =
-      sorted.find(
-        (s) =>
-          pax >= s.from_pax &&
-          pax <= s.to_pax
-      ) ??
-      /*
-       * Fallback:
-       * below first slab -> first slab
-       * above last slab -> last slab
-       */
-      (pax < sorted[0].from_pax
-        ? sorted[0]
-        : sorted[sorted.length - 1]);
-
+    const resolved = activityPricingForPax(a, pax, traveler);
     return {
-      rate: slab.price,
-      slab,
-      isSlab: slabMode,
+      rate: resolved.rate,
+      perPerson: resolved.per_person,
+      slab: resolved.slab,
+      isSlab: resolved.pricing_mode === "slab",
     };
   };
 
@@ -156,13 +68,7 @@ export function Step11({ draft, set }: StepProps) {
       return;
     }
 
-    const {
-      rate,
-      isSlab,
-    } = slabRate(a);
-
-    const mode: "per_person" | "slab" =
-      isSlab ? "slab" : "per_person";
+    const resolved = activityPricingForPax(a, pax, traveler);
 
     /*
      * IMPORTANT:
@@ -181,12 +87,9 @@ export function Step11({ draft, set }: StepProps) {
         {
           id: uid(),
           activity_id: a.id,
-          qty:
-            mode === "slab"
-              ? 1
-              : pax || 1,
-          rate,
-          pricing_mode: mode,
+          qty: resolved.qty,
+          rate: resolved.rate,
+          pricing_mode: resolved.pricing_mode,
           from_routing_days: [day],
         },
       ],
@@ -200,12 +103,14 @@ export function Step11({ draft, set }: StepProps) {
       if (!l.activity_id) return l;
       const a = d.activities.find((x) => x.id === l.activity_id);
       if (!a) return l;
-      const { rate, isSlab } = slabRate(a);
-      const mode: "per_person" | "slab" = isSlab ? "slab" : "per_person";
-      const qty = mode === "slab" ? 1 : pax || 1;
-      if (l.rate === rate && l.pricing_mode === mode && l.qty === qty) return l;
+      const resolved = activityPricingForPax(a, pax, traveler);
+      if (
+        l.rate === resolved.rate &&
+        l.pricing_mode === resolved.pricing_mode &&
+        l.qty === resolved.qty
+      ) return l;
       dirty = true;
-      return { ...l, rate, pricing_mode: mode, qty };
+      return { ...l, rate: resolved.rate, pricing_mode: resolved.pricing_mode, qty: resolved.qty };
     });
     if (dirty) set({ activities: next });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,20 +174,10 @@ export function Step11({ draft, set }: StepProps) {
 
         if (!activity) return null;
 
-        return {
-          line,
-          activity,
-          isSlab:
-            isSlabActivity(activity) ||
-            String(
-              line.pricing_mode ?? ""
-            ).toLowerCase() === "slab",
-        };
+        return { activity };
       })
       .filter(Boolean) as Array<{
-      line: typeof draft.activities[number];
       activity: typeof d.activities[number];
-      isSlab: boolean;
     }>;
   }, [
     draft.activities,
@@ -403,6 +298,7 @@ export function Step11({ draft, set }: StepProps) {
 
                                     const {
                                       rate,
+                                      perPerson,
                                       slab,
                                       isSlab,
                                     } =
@@ -444,15 +340,9 @@ export function Step11({ draft, set }: StepProps) {
                                           <div className="text-[10px] text-muted-foreground">
                                             {slabMode
                                               ? slab
-                                                ? `Slab ${slab.from_pax}-${slab.to_pax}: ₹${rate.toLocaleString(
-                                                    "en-IN"
-                                                  )} total`
-                                                : `₹${rate.toLocaleString(
-                                                    "en-IN"
-                                                  )} total`
-                                              : `₹${rate.toLocaleString(
-                                                  "en-IN"
-                                                )}/pp`}
+                                                ? `SLAB ${slab.from_pax}-${slab.to_pax}: ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
+                                                : `SLAB · ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
+                                              : `PER PERSON · ${inr(perPerson)}/person`}
                                           </div>
                                         </div>
 
@@ -540,110 +430,10 @@ export function Step11({ draft, set }: StepProps) {
                   },
                   (_, i) => i + 1
                 ).map((n) => {
-                  const rowPerPerson =
+                          const rowPerPerson =
                     selectedActivities.map(
-                      ({
-                        activity,
-                        line,
-                        isSlab,
-                      }) => {
-                        /*
-                         * ==========================================
-                         * PER PERSON ACTIVITY
-                         * ==========================================
-                         *
-                         * line.rate = price for ONE person.
-                         *
-                         * Example:
-                         * ₹3000/person
-                         *
-                         * Breakdown per person remains:
-                         * ₹3000
-                         */
-                        if (!isSlab) {
-                          return (
-                            line.rate ?? 0
-                          );
-                        }
-
-                        /*
-                         * ==========================================
-                         * SLAB ACTIVITY
-                         * ==========================================
-                         *
-                         * Slab price is TOTAL.
-                         *
-                         * Example:
-                         * 1-5 pax = ₹1500 TOTAL
-                         *
-                         * For 2 pax:
-                         * ₹1500 / 2 = ₹750 per person
-                         *
-                         * For 5 pax:
-                         * ₹1500 / 5 = ₹300 per person
-                         *
-                         * IMPORTANT:
-                         * We DO NOT multiply slab price by pax.
-                         */
-                        const slabs = [
-                          ...(activity.pricing_slabs ??
-                            []),
-                        ].sort(
-                          (a, b) =>
-                            a.from_pax -
-                            b.from_pax
-                        );
-
-                        /*
-                         * If this is marked as slab but
-                         * there are no slabs, treat line.rate
-                         * as the total amount.
-                         */
-                        if (
-                          slabs.length === 0
-                        ) {
-                          return (
-                            (line.rate ??
-                              0) /
-                            Math.max(
-                              1,
-                              n
-                            )
-                          );
-                        }
-
-                        /*
-                         * Find slab for THIS row's pax.
-                         */
-                        const slab =
-                          slabs.find(
-                            (s) =>
-                              n >=
-                                s.from_pax &&
-                              n <=
-                                s.to_pax
-                          ) ??
-                          (n <
-                          slabs[0].from_pax
-                            ? slabs[0]
-                            : slabs[
-                                slabs.length -
-                                  1
-                              ]);
-
-                        /*
-                         * SLAB TOTAL / PAX
-                         *
-                         * Only for displaying per-person
-                         * equivalent in this breakdown table.
-                         */
-                        return (
-                          slab.price /
-                          Math.max(
-                            1,
-                            n
-                          )
-                        );
+                      ({ activity }) => {
+                                return activityPricingForPax(activity, n, traveler).per_person;
                       }
                     );
 

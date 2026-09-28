@@ -175,6 +175,27 @@ export interface MiscellaneousItem {
   created_at: string;
 }
 
+export interface ResolvedPaxCost {
+  rate: number;
+  qty: number;
+  total: number;
+  per_person: number;
+}
+
+/** Resolve a configured unit or group/slab rate into a group total and per-person cost. */
+export function resolvePerPersonCost(
+  rate: number,
+  pax: number,
+  pricingType: "per_person" | "slab",
+  slabIsPerPerson = false,
+): ResolvedPaxCost {
+  const safePax = Math.max(1, Math.round(pax));
+  const perPerson = pricingType === "per_person" || slabIsPerPerson;
+  const qty = perPerson ? safePax : 1;
+  const total = rate * qty;
+  return { rate, qty, total, per_person: total / safePax };
+}
+
 export function miscRateForPax(
   m: MiscellaneousItem,
   pax: number,
@@ -183,6 +204,7 @@ export function miscRateForPax(
   rate: number;
   qty: number;
   total: number;
+  per_person: number;
   label: string;
 } {
   const type = m.pricing_type ?? m.unit;
@@ -205,33 +227,20 @@ export function miscRateForPax(
 
   if (type === "slab" && hasSlabs) {
     const slab = pickSlab();
-
-    if (m.slab_is_per_person) {
-      const total = slab.price * Math.max(1, pax);
-
-      return {
-        rate: slab.price,
-        qty: pax,
-        total,
-        label: `${slab.from_pax}-${slab.to_pax} pax · per person`,
-      };
-    }
+    const resolved = resolvePerPersonCost(slab.price, pax, "slab");
 
     return {
-      rate: slab.price,
-      qty: 1,
-      total: slab.price,
+      ...resolved,
       label: `${slab.from_pax}-${slab.to_pax} pax · total`,
     };
   }
 
   if (type === "per_person") {
     const perRate = hasSlabs ? pickSlab().price : m.rate;
+    const resolved = resolvePerPersonCost(perRate, pax, "per_person");
 
     return {
-      rate: perRate,
-      qty: pax,
-      total: perRate * pax,
+      ...resolved,
       label: hasSlabs
         ? `Per person · slab ${pickSlab().from_pax}-${pickSlab().to_pax}`
         : "Per person",
@@ -243,6 +252,7 @@ export function miscRateForPax(
       rate: m.rate,
       qty: nights,
       total: m.rate * nights,
+      per_person: (m.rate * nights) / Math.max(1, pax),
       label: "Per day",
     };
   }
@@ -251,6 +261,7 @@ export function miscRateForPax(
     rate: m.rate,
     qty: 1,
     total: m.rate,
+    per_person: m.rate / Math.max(1, pax),
     label: "Fixed",
   };
 }
@@ -510,70 +521,61 @@ export function activitySlabsFor(
   return indian.length ? indian : all;
 }
 
+export function activityPricingForPax(
+  a: Activity,
+  pax: number,
+  traveler: TravelerType = "indian",
+): ResolvedPaxCost & {
+  slab: ActivitySlab | null;
+  pricing_mode: "per_person" | "slab";
+} {
+  const declaredSlabType = String(a.slab_pricing_type ?? "").toLowerCase();
+  const pricingType = String(a.pricing_type ?? "").toLowerCase();
+  const pricingMode = declaredSlabType === "slab" || declaredSlabType === "total"
+    ? "slab"
+    : declaredSlabType === "per_person"
+      ? "per_person"
+      : pricingType === "per_person"
+        ? "per_person"
+        : "slab";
+  const slabs = activitySlabsFor(a, traveler).slice().sort((left, right) => left.from_pax - right.from_pax);
+  const selectedSlab = slabs.find((slab) => pax >= slab.from_pax && pax <= slab.to_pax)
+    ?? (slabs.length
+      ? pax < slabs[0].from_pax ? slabs[0] : slabs[slabs.length - 1]
+      : null);
+
+  if (!selectedSlab && declaredSlabType !== "per_person" && slabs.length === 0) {
+    const legacyGroupRates = [
+      { from_pax: 1, to_pax: 6, price: a.group_rate_1_to_6 },
+      { from_pax: 7, to_pax: 14, price: a.group_rate_7_to_14 },
+      { from_pax: 15, to_pax: 20, price: a.group_rate_15_to_20 },
+    ].filter((band): band is { from_pax: number; to_pax: number; price: number } => band.price != null);
+    const groupBand = legacyGroupRates.find((band) => pax >= band.from_pax && pax <= band.to_pax);
+    if (groupBand) {
+      return {
+        ...resolvePerPersonCost(groupBand.price, pax, "slab"),
+        slab: null,
+        pricing_mode: "slab",
+      };
+    }
+  }
+
+  const flatRate = pricingType === "per_vehicle" || pricingType === "total_fixed"
+    ? a.price
+    : activityFlatPrice(a, traveler);
+  const rate = selectedSlab?.price ?? flatRate;
+  return {
+    ...resolvePerPersonCost(rate, pax, pricingMode),
+    slab: selectedSlab,
+    pricing_mode: pricingMode,
+  };
+}
+
 export function activityRateForPax(
   a: Activity,
   pax: number,
 ): number {
-  const slabs = a.pricing_slabs ?? [];
-
-  if (
-    a.slab_pricing_type === "per_person" &&
-    slabs.length === 0
-  ) {
-    return (a.price || 0) * Math.max(1, pax);
-  }
-
-  if (slabs.length > 0) {
-    const slab = slabs.find(
-      (s) => pax >= s.from_pax && pax <= s.to_pax,
-    );
-
-    const chosen =
-      slab ??
-      (() => {
-        const sorted = [...slabs].sort(
-          (x, y) => x.from_pax - y.from_pax,
-        );
-
-        return pax < sorted[0].from_pax
-          ? sorted[0]
-          : sorted[sorted.length - 1];
-      })();
-
-    return a.slab_pricing_type === "total"
-      ? chosen.price
-      : chosen.price * Math.max(1, pax);
-  }
-
-  if (
-    pax <= 6 &&
-    a.group_rate_1_to_6 != null
-  ) {
-    return a.group_rate_1_to_6;
-  }
-
-  if (
-    pax <= 14 &&
-    a.group_rate_7_to_14 != null
-  ) {
-    return a.group_rate_7_to_14;
-  }
-
-  if (
-    pax <= 20 &&
-    a.group_rate_15_to_20 != null
-  ) {
-    return a.group_rate_15_to_20;
-  }
-
-  if (a.per_person_indian != null) {
-    return (
-      a.per_person_indian *
-      Math.max(1, pax)
-    );
-  }
-
-  return a.price;
+  return activityPricingForPax(a, pax).total;
 }
 
 export function guidePrimaryLanguage(

@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB, miscRateForPax } from "@/lib/mock-store";
-import { effectivePaxForPricing } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, landGst, landMarkup } from "@/lib/wizard/calc";
 import { uid, CustomAdd, type StepProps } from "../shared";
 
 export function Step14({ draft, set }: StepProps) {
@@ -15,6 +15,8 @@ export function Step14({ draft, set }: StepProps) {
   const items = d.miscellaneous_items.filter((x) => x.is_active);
   const pax = effectivePaxForPricing(draft);
   const nights = draft.nights || 1;
+  const withMarkupGst = (base: number) =>
+    base * (1 + landMarkup(draft)) * (1 + landGst(draft));
 
   const effType = (m: typeof items[number]): "per_person" | "slab" => {
     const raw = (m.pricing_type ?? m.unit) as string;
@@ -39,7 +41,11 @@ export function Step14({ draft, set }: StepProps) {
       const m = items.find((x) => x.id === l.item_id);
       if (!m) return l;
       const info = miscRateForPax(m, pax, nights);
-      if (l.rate !== info.rate || l.qty !== info.qty) { dirty = true; return { ...l, rate: info.rate, qty: info.qty }; }
+      const unit = effType(m) === "slab" ? "fixed" : "per_person";
+      if (l.rate !== info.rate || l.qty !== info.qty || l.unit !== unit) {
+        dirty = true;
+        return { ...l, rate: info.rate, qty: info.qty, unit };
+      }
       return l;
     });
     if (dirty) set({ misc: next });
@@ -87,8 +93,7 @@ export function Step14({ draft, set }: StepProps) {
             const on = !!line;
             const type = effType(m);
             const info = miscRateForPax(m, pax, nights);
-            const isSlabPP = type === "slab" && !!m.slab_is_per_person;
-            const typeLabel = type === "slab" ? (isSlabPP ? "Slab · Per Person" : "Slab · Total") : "Per Person";
+            const typeLabel = type === "slab" ? "SLAB" : "PER PERSON";
             const fromDays = line?.from_routing_days ?? [];
             return (
               <div key={m.id} className={cn("flex items-center gap-2 px-3 py-2", on && "bg-accent/5")}>
@@ -106,6 +111,11 @@ export function Step14({ draft, set }: StepProps) {
                   <div className="text-[10px] text-muted-foreground">
                     ₹{info.rate.toLocaleString("en-IN")} · {info.label}
                   </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {type === "slab"
+                      ? `→ ${inr(info.per_person)}/person for ${pax} pax`
+                      : `${inr(info.per_person)}/person`}
+                  </div>
                   {type === "slab" && (m.price_ranges ?? []).length > 0 && (
                     <div className="mt-1 text-[10px] text-muted-foreground">
                       <span className="uppercase mr-1">Slabs:</span>
@@ -114,7 +124,7 @@ export function Step14({ draft, set }: StepProps) {
                         return (
                           <span key={i} className={cn("inline-block mr-1 px-1.5 py-0.5 rounded",
                             active ? "bg-accent/20 text-accent font-semibold" : "bg-muted")}>
-                            {s.from_pax}-{s.to_pax}: ₹{s.price.toLocaleString("en-IN")}{isSlabPP ? "/pp" : ""}
+                            {s.from_pax}-{s.to_pax}: ₹{s.price.toLocaleString("en-IN")} total
                           </span>
                         );
                       })}
@@ -122,10 +132,10 @@ export function Step14({ draft, set }: StepProps) {
                   )}
                 </div>
                 <div className={cn("w-28 text-right tabular-nums text-[11px] font-semibold", !on && "opacity-40")}>
-                  {on && line ? inr(line.qty * line.rate) : inr(0)}
+                  {on && line ? inr(info.total) : inr(0)}
                   {on && line && (
                     <div className="text-[10px] text-muted-foreground font-normal">
-                      {line.qty} × ₹{line.rate.toLocaleString("en-IN")}
+                      {info.qty} × ₹{info.rate.toLocaleString("en-IN")}
                     </div>
                   )}
                 </div>
@@ -154,11 +164,9 @@ export function Step14({ draft, set }: StepProps) {
               </thead>
               <tbody>
                 {Array.from({ length: Math.max(1, pax) }, (_, i) => i + 1).map((n) => {
-                  const rowPerPerson = selectedMisc.map(({ item, isSlab }) => {
+                  const rowPerPerson = selectedMisc.map(({ item }) => {
                     const info = miscRateForPax(item, n, nights);
-                    if (!isSlab) return info.rate;
-                    const totalCost = info.rate * info.qty;
-                    return totalCost / Math.max(1, n);
+                    return info.per_person;
                   });
                   const rowTotal = rowPerPerson.reduce((s, v) => s + v, 0);
                   return (
@@ -167,7 +175,12 @@ export function Step14({ draft, set }: StepProps) {
                       {rowPerPerson.map((v, ci) => (
                         <td key={ci} className="p-2 text-right tabular-nums">{inr(v)}</td>
                       ))}
-                      <td className="p-2 text-right tabular-nums font-semibold">{inr(rowTotal)}</td>
+                      <td className="p-2 text-right tabular-nums font-semibold">
+                        {inr(withMarkupGst(rowTotal))}
+                        <div className="text-[9px] font-normal text-muted-foreground">
+                          base {inr(rowTotal)}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}

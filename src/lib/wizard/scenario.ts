@@ -180,9 +180,11 @@ export function computeScenario(
   const landSheet = buildLandPart(draft, d, transportLines[0]);
   const transport_total = includesLand || includesTransportOnly ? landSheet.transport_total : 0;
   const guide_total = includesLand ? landSheet.guide_total : 0;
-  const activities_total = includesLand ? landSheet.activities_total : 0;
+  const activities_per_person = includesLand ? landSheet.activities_per_person_total : 0;
+  const activities_total = activities_per_person * pax;
   const entrances_total = includesLand ? landSheet.entrances_total : 0;
-  const misc_total = includesLand ? landSheet.misc_total : 0;
+  const misc_per_person = includesLand ? landSheet.misc_per_person_total : 0;
+  const misc_total = misc_per_person * pax;
   const optionals_total = draft.optionals.reduce((s, l) => s + l.rate * l.qty, 0);
   const meals_total = includesAccommodation ? computeMealsTotal(draft, d, opt.key) : 0;
 
@@ -196,8 +198,6 @@ export function computeScenario(
   const landGs = includesLand || includesTransportOnly ? landGst(draft) : 0;
   const hotelMk = includesAccommodation ? hotelsMarkup(draft) : 0;
   const hotelGs = includesAccommodation ? hotelsGst(draft) : 0;
-  const land_total = transport_total + guide_total + activities_total
-    + entrances_total + misc_total;
   const allocs = opt.pax_allocations ?? [];
 
   const persons: ScenarioPersonRow[] = Array.from({ length: pax }, (_, p) => {
@@ -205,9 +205,10 @@ export function computeScenario(
     const hotel_gst = perPersonGst[p];
     const hotel_total = hotel_net + hotel_gst;
     const share = (v: number) => v / pax;
-    const addons_pp = share(addons_total);
-    const land_pp = share(land_total);
     const meals_pp = share(meals_total);
+    const land_pp = share(transport_total + guide_total + entrances_total)
+      + activities_per_person + misc_per_person;
+    const addons_pp = land_pp + meals_pp;
     const subtotal = hotel_total + addons_pp;
     // Land Part markup/GST and Hotels & Meals markup/GST are computed apart.
     const landMarkupAmt = land_pp * landMk;
@@ -223,9 +224,9 @@ export function computeScenario(
       hotel_net, hotel_gst, hotel_total,
       transport: share(transport_total),
       guide: share(guide_total),
-      activities: share(activities_total),
+      activities: activities_per_person,
       entrances: share(entrances_total),
-      misc: share(misc_total),
+      misc: misc_per_person,
       meals: share(meals_total),
       optionals: share(optionals_total),
       addons_total: addons_pp,

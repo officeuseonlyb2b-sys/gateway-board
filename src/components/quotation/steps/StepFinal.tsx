@@ -83,8 +83,8 @@ export function Step17({ draft }: StepProps) {
               <CostLine label="Transport" value={scenario.transport_total} />
               <CostLine label="Guide" value={scenario.guide_total} />
               <CostLine label="Entrances" value={scenario.entrances_total} />
-              <CostLine label="Activities" value={scenario.activities_total} />
-              <CostLine label="Miscellaneous" value={scenario.misc_total} />
+              <CostLine label="Activities (per person)" value={scenario.persons[0]?.activities ?? 0} />
+              <CostLine label="Miscellaneous (per person)" value={scenario.persons[0]?.misc ?? 0} />
               <CostLine label="Meals" value={scenario.meals_total} />
               <CostLine label="Commercial markup" value={scenario.markup_total} strong />
               <CostLine label="Company GST" value={scenario.gst5_total} strong />
