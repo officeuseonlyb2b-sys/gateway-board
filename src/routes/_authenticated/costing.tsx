@@ -96,6 +96,8 @@ import {
   mixCoversPax,
   mixLabel,
   computeGroupOption,
+  getQueryPricingPaxRange,
+  deriveTourTypeFromPricingPax,
   type OptionTotals,
   type PersonOptionTotal,
   type GroupOptionTotals,
@@ -400,6 +402,29 @@ const INTERNATIONAL_CITIES = [
 // ============================================================
 // Root
 // ============================================================
+function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
+  if (!draft.linked_query_id) return draft;
+  const linkedQuery = getCrmQuery(draft.linked_query_id);
+  if (!linkedQuery) return draft;
+  const range = getQueryPricingPaxRange(linkedQuery);
+  if (!range) return draft;
+
+  const existingRange = draft.pax_range && draft.pax_range !== "auto" ? draft.pax_range.trim() : "";
+  if (existingRange) return draft;
+
+  const nextRange = `${range.min}-${range.max}`;
+  if (draft.pax_range === nextRange && draft.pax_min === range.min && draft.pax_max === range.max) {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    pax_min: range.min,
+    pax_max: range.max,
+    pax_range: nextRange,
+  };
+}
+
 function WizardPage() {
   const draft = useDraft();
   const dbData = useDB();
@@ -428,11 +453,12 @@ function WizardPage() {
             : next.nights;
         const isB2B = /b2b|partner|agent/i.test(`${query.lead_source} ${query.market}`);
         const isGroup = /git|group/i.test(`${query.enquiry_type} ${query.travel_type}`);
-        writeDraft({
+        const linkedRange = getQueryPricingPaxRange(query);
+        const nextDraft: QuoteDraft = {
           ...next,
           linked_query_id: query.query_id,
           linked_query_name: query.customer,
-          query_type: isB2B ? "B2B" : "B2C",
+          query_type: (isB2B ? "B2B" : "B2C") as QueryType,
           tour_type: isGroup ? "GIT" : "FIT",
           agent: isB2B
             ? {
@@ -458,15 +484,17 @@ function WizardPage() {
           program_code: query.program_id,
           program_name: query.program_name || query.destination,
           adults: query.adults || query.pax || next.adults,
-          pax_min: query.min_pax || undefined,
-          pax_max: query.max_pax || undefined,
+          pax_min: linkedRange?.min ?? query.min_pax ?? undefined,
+          pax_max: linkedRange?.max ?? query.max_pax ?? undefined,
+          pax_range: linkedRange ? `${linkedRange.min}-${linkedRange.max}` : "auto",
           departure_city: query.tour_start_city || next.departure_city,
           tour_start_city: query.tour_start_city || next.tour_start_city,
           tour_end_city: query.tour_end_city || next.tour_end_city,
           children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
           traveler_type:
             query.traveler_type ?? (/inbound/i.test(query.market) ? "foreign" : "indian"),
-        });
+        };
+        writeDraft(nextDraft);
         setInitialized(true);
         return;
       }
@@ -474,15 +502,21 @@ function WizardPage() {
     if (search.id) {
       const rec = getDraft(search.id);
       if (rec) {
-        writeDraft(rec.wizard_state);
+        const synced = syncLinkedQueryPaxRange(rec.wizard_state);
+        writeDraft(synced);
         setCurrentDraftId(rec.id);
         setInitialized(true);
         return;
       }
     }
     const existing = draft || loadDraft();
-    if (existing) setShowBanner(true);
-    else initDraft();
+    if (existing) {
+      const hydrated = syncLinkedQueryPaxRange(existing);
+      if (hydrated !== existing) writeDraft(hydrated);
+      setShowBanner(true);
+    } else {
+      initDraft();
+    }
     setInitialized(true);
   }, [initialized, search.id, search.queryId, draft]);
 
@@ -3420,9 +3454,7 @@ function StepPaxType({ draft, set }: StepProps) {
   const pricingPax = effectivePaxForPricing(draft);
   const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure
     ? "Brochure"
-    : pricingPax <= 5
-      ? "FIT"
-      : "GIT";
+    : deriveTourTypeFromPricingPax(pricingPax);
 
   useEffect(() => {
     if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });

@@ -237,19 +237,80 @@ export function paxRangeActive(draft: QuoteDraft): boolean {
   return !!r && r !== "auto";
 }
 
+function normalizeInt(value: number | null | undefined, fallback = 1): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+export function getQueryPricingPaxRange(
+  query?: Partial<{ min_pax?: number | null; max_pax?: number | null }>,
+): { min: number; max: number } | null {
+  const minRaw = typeof query?.min_pax === "number" ? query.min_pax : null;
+  const maxRaw = typeof query?.max_pax === "number" ? query.max_pax : null;
+
+  if (minRaw == null && maxRaw == null) return null;
+
+  const min = minRaw == null ? null : normalizeInt(minRaw, 1);
+  const max = maxRaw == null ? null : normalizeInt(maxRaw, min ?? 1);
+
+  if (min != null && max != null) {
+    return { min: Math.min(min, max), max: Math.max(min, max) };
+  }
+  if (min != null) return { min, max: Math.max(min, min) };
+  if (max != null) return { min: Math.min(max, max), max };
+  return null;
+}
+
+export function resolveQuotationPricingRange({
+  savedQuotationRange,
+  linkedQueryRange,
+  actualPax,
+}: {
+  savedQuotationRange?: string | null;
+  linkedQueryRange?: { min: number; max: number } | null;
+  actualPax?: number | null;
+}): { min: number; max: number } | null {
+  const explicit = typeof savedQuotationRange === "string" ? savedQuotationRange.trim() : "";
+  if (explicit && explicit !== "auto") {
+    const normalized = parsePaxRangeText(explicit);
+    if (normalized) return normalized;
+  }
+
+  const range = linkedQueryRange ?? null;
+  if (range) return { min: Math.max(1, range.min), max: Math.max(Math.max(1, range.min), range.max) };
+
+  if (typeof actualPax === "number" && Number.isFinite(actualPax) && actualPax > 0) {
+    const safe = Math.max(1, Math.floor(actualPax));
+    return { min: safe, max: safe };
+  }
+
+  return null;
+}
+
+function parsePaxRangeText(value: string): { min: number; max: number } | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "auto") return null;
+  if (trimmed.endsWith("+")) {
+    const min = normalizeInt(parseInt(trimmed.replace(/\+$/, ""), 10) || 1, 1);
+    return { min, max: Math.max(min, min) };
+  }
+  const [a, b] = trimmed.split("-").map((x) => parseInt(x, 10));
+  if (Number.isNaN(a)) return null;
+  const min = normalizeInt(a, 1);
+  const max = Number.isNaN(b) ? min : Math.max(min, normalizeInt(b, min));
+  return { min, max };
+}
+
 /** Parsed { min, max } of an active pax range, else null. */
 export function parsePaxRange(draft: QuoteDraft): { min: number; max: number } | null {
   const r = draft.pax_range;
   if (!r || r === "auto") return null;
-  if (r.endsWith("+")) {
-    const min = parseInt(r) || 1;
-    return { min, max: Math.max(min, totalPax(draft), min) };
-  }
-  const [a, b] = r.split("-").map((x) => parseInt(x));
-  if (isNaN(a)) return null;
-  const min = Math.max(1, a);
-  const max = isNaN(b) ? min : Math.max(min, b);
-  return { min, max };
+  return parsePaxRangeText(r);
+}
+
+export function deriveTourTypeFromPricingPax(pax: number | null | undefined): "FIT" | "GIT" {
+  const pricingPax = typeof pax === "number" && Number.isFinite(pax) ? Math.max(1, Math.floor(pax)) : 1;
+  return pricingPax <= 5 ? "FIT" : "GIT";
 }
 
 // Pricing pax: when a range is active every downstream lookup (guide,
