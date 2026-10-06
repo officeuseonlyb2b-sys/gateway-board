@@ -1,0 +1,14 @@
+project_id = "mikkjphxrzxnpiccxbia"
+
+[auth]
+enable_signup = false
+
+[functions.employee-login]
+verify_jwt = false
+
+[functions.manage-employee-account]
+# Validates the user JWT using Auth and the linked Employee Master row itself.
+verify_jwt = false
+
+[functions.invite-employee]
+verify_jwt = false

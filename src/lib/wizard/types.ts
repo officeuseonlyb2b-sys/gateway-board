@@ -1,0 +1,455 @@
+// Wizard draft types for the 18-step Tour Quotation Builder.
+import type { MealPlan } from "@/lib/mock-store";
+
+export type QueryType = "B2B" | "B2C" | "Brochure";
+export type TourType = "FIT" | "GIT" | "Brochure";
+
+export interface AgentInfo {
+  agent_id?: string;
+  name: string;
+  agency: string;
+  phone: string;
+  email: string;
+}
+export interface GuestInfo {
+  name: string;
+  phone: string;
+  email: string;
+  city: string;
+}
+export interface BrochureInfo {
+  tour_type: string;
+  theme: string;
+  event: string;
+  period_start: string;
+  period_end: string;
+}
+export interface ChildInfo {
+  age: number;
+}
+export interface TravelDetail {
+  from_city?: string;
+  to_city?: string;
+  flight_no?: string;
+  train_name?: string;
+  date?: string;
+  time?: string;
+  pnr?: string;
+  service_name?: string;
+  service_number?: string;
+  remarks?: string;
+}
+export interface DayTransportDetails {
+  // Flight
+  flight_class?: string;
+  airline?: string;
+  flight_number?: string;
+  // Train
+  train_name?: string;
+  train_number?: string;
+  coach_class?: string;
+  boarding_station?: string;
+  destination_station?: string;
+  bus_name?: string;
+  bus_number?: string;
+  is_overnight?: boolean;
+  // Road
+  vehicle_type?: string;
+  vehicle_name?: string;
+  pickup_city?: string;
+  drop_city?: string;
+  reporting_time?: string;
+  distance_km?: number;
+  travel_time?: string;
+  // Self Drive
+  vehicle_category?: string;
+  pickup_location?: string;
+  drop_location?: string;
+  pickup_time?: string;
+  return_time?: string;
+  // Common / Flight-Train
+  from_city?: string;
+  to_city?: string;
+  departure_date?: string;
+  departure_time?: string;
+  arrival_date?: string;
+  arrival_time?: string;
+  remarks?: string;
+}
+
+export interface RoutingDay {
+  day: number;
+  date: string;
+  day_name?: string;
+  city_id: string;          // OVERNIGHT city id — where guests sleep (used by Step 15 hotel lookups)
+  to_city_id?: string;      // DESTINATION city id — primary (kept for backward compat)
+  to_city_ids?: string[];   // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
+
+  tour_title?: string;      // selected destination tour title for the row
+  tour_titles_by_city?: Record<string, string>; // legacy single tour per city
+  tours_selected_by_city?: Record<string, string[]>; // NEW multi-select: routing city id → array of tour titles
+  from_city?: string;       // free-text / city id, day 1 auto from departure_city
+  to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
+  travel_by?: "Road" | "Train" | "Flight" | "Bus" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
+  travel_by_detail?: string;   // optional free-text: vehicle, flight no, train name
+  transport_details?: DayTransportDetails;  // per-day detailed transport info (see Step 9)
+  transport_expanded?: boolean;             // UI state — remembered so re-entry keeps panel open
+  program: string;
+  program_mode: "text" | "select";
+  overnight: boolean;
+}
+
+
+export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
+export type TransportRateMode = "daywise" | "total";
+export interface TransportLine {
+  id: string;
+  travel_id: string;
+  vehicles: number;
+  days: number;
+  rate: number;
+  rate_format?: TransportRateFormat;
+  reporting_cost?: number;
+  total_override?: number;   // used when rate_format === "total"
+  per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
+  remarks?: string;
+  rate_mode?: TransportRateMode; // per-vehicle toggle: "daywise" (per_route days) or "total" (one lump-sum rate)
+  total_rate?: number;           // used when rate_mode === "total"
+}
+export interface PaxRangePrice {
+  from_pax: number;
+  to_pax: number;
+  rate: number;
+}
+export interface ActivityLine {
+  id: string;
+  activity_id?: string;
+  custom_name?: string;
+  qty: number;
+  rate: number;
+  pricing_mode?: "per_person" | "slab"; // NEW: chosen pricing mode in Step 10
+  pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];    // day numbers that added this via Step 9
+}
+export interface EntranceLine {
+  id: string;
+  site_id?: string;
+  custom_name?: string;
+  indian_pax: number;
+  indian_rate: number;
+  foreign_pax: number;
+  foreign_rate: number;
+  student_pax?: number;
+  student_rate?: number;
+  from_routing_days?: number[];    // day numbers that added this via Step 9
+}
+export interface GuideLine {
+  id: string;
+  guide_id: string;
+  days: number;
+  guides: number;
+  rate: number;
+  is_escort?: boolean;            // true when this line is a Tour Escort add-on
+  pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];   // day numbers this guide is assigned to
+  language?: string;              // selected language for this guide line
+}
+export interface MiscLine {
+  id: string;
+  item_id?: string;
+  custom_name?: string;
+  qty: number;
+  rate: number;
+  unit: string;
+  pax_ranges?: PaxRangePrice[];   // Brochure only
+  from_routing_days?: number[];    // day numbers that added this via Step 9
+}
+
+
+export interface HotelSelection {
+  city_id: string;
+  hotel_id: string;
+  room_id: string;
+  meal_plan: MealPlan;
+  is_fallback?: boolean;
+}
+export type OptionKey = "A" | "B" | "C" | "D";
+export type PersonRoomType = "single" | "double" | "triple" | "quad" | "extra_bed" | "cwb";
+export type AllocationMode = "standard" | "dynamic";
+export interface DayRoomMix {
+  single: number;
+  double: number;
+  triple: number;
+  quad: number;
+}
+export interface PersonAllocation {
+  person_id: number;         // stable 1-based id
+  label: string;             // editable, defaults to "Person N"
+  room_type: PersonRoomType;
+  sharing_with: number[];    // other person_ids in the same shared room
+}
+// Per-day, per-quotation rate override (never mutates the hotel's saved contract rate).
+export interface DayRateOverride {
+  sgl?: number;
+  dbl?: number;
+  trp?: number;
+  quad?: number;
+  reason?: string;
+  changed_by?: string;
+  changed_at?: string;
+}
+
+// Meals step — every selection is a per-person rate.  The key used by the
+// selection map is "<day>:<cityId>" so an excursion city and an overnight
+// city on the same day can each carry their own meal decision.
+export type MealSource = "none" | "hotel" | "restaurant";
+export interface MealChoice {
+  source: MealSource;
+  hotel_id?: string;
+  restaurant_id?: string;
+  label?: string;
+  /** Resolved contract/master rate per person at the time of selection. */
+  per_person_rate?: number;
+}
+export interface MealDaySelection {
+  lunch?: MealChoice;
+  dinner?: MealChoice;
+}
+
+export interface HotelOption {
+  key: OptionKey;
+  label: string;
+  category?: string;
+  selections: HotelSelection[];
+  inclusions?: string[];
+  exclusions?: string[];
+  use_custom_allocation?: boolean;
+  pax_allocations?: PersonAllocation[];
+  // keyed by routing day number
+  rate_overrides?: Record<number, DayRateOverride>;
+}
+
+
+/** Pax categories priced on a monument entrance line. */
+export type EntranceCat = "indian" | "foreign" | "student";
+
+/**
+ * Per routing-day inclusion picks made on the Costing sheet. A missing entry
+ * means "everything for that day is included" (backwards compatible default).
+ * Values are arrays of the line ids explicitly UNCHECKED-aware: we store the
+ * checked ids, and `undefined` = all checked.
+ */
+export interface CostingSelection {
+  transport?: Record<number, string[]>;
+  guide?: Record<number, string[]>;
+  entrances?: Record<number, string[]>;
+  entrance_cats?: Record<number, EntranceCat[]>;
+  activities?: Record<number, string[]>;
+  misc?: Record<number, string[]>;
+}
+
+export interface QuoteDraft {
+  step: number;
+  linked_query_id?: string;
+  linked_query_name?: string;
+  query_type: QueryType | null;
+  tour_type?: TourType;
+  agent: AgentInfo;
+  guest: GuestInfo;
+  brochure: BrochureInfo;
+
+  // Duration & dates
+  nights: number;
+  has_dates?: boolean;
+  start_date: string;
+  brochure_validity_from?: string;
+  brochure_validity_till?: string;
+
+  program_mode: "existing" | "new";
+  program_id?: string;
+  program_code?: string;
+  program_name: string;
+  /** Existing masters are never mutated; this explicitly creates a new copy. */
+  save_program_as_new?: boolean;
+  new_program_code?: string;
+  new_program_name?: string;
+
+  // Pax
+  adults: number;
+  ss: number;
+  children: ChildInfo[];
+  pax_min?: number;
+  pax_max?: number;
+
+  /** Traveler category driving Activities / Entrance-fee pricing. */
+  traveler_type?: import("@/lib/mock-store").TravelerType;
+
+  categories: string[];      // legacy — no UI, retained for saved-quote fidelity
+  /** Guest's home/origin city. Never used as the programme's first city. */
+  home_city?: string;
+  /** Explicit programme gateways. `departure_city` remains as a legacy mirror. */
+  tour_start_city?: string;
+  tour_end_city?: string;
+  departure_city: string;
+
+  travel_modes: string[];
+  arrival_mode?: "flight" | "train" | "bus" | "road" | "self";
+  departure_mode?: "flight" | "train" | "bus" | "road" | "self";
+  travel_flight_class?: string;
+  travel_train_class?: string;
+  arrival_flight?: TravelDetail;
+  departure_flight?: TravelDetail;
+  arrival_train?: TravelDetail;
+  departure_train?: TravelDetail;
+  arrival_other?: TravelDetail;
+  departure_other?: TravelDetail;
+
+  routing: RoutingDay[];
+  transport: TransportLine[];
+  activities: ActivityLine[];
+  entrances: EntranceLine[];
+  guides: GuideLine[];
+  misc: MiscLine[];
+
+  hotel_options: HotelOption[];
+  markup_percent: number;
+  commercial_mode?: "package" | "transport_only" | "accommodation_only";
+  /** Markup/GST for the LAND part (transport, guide, entrances, activities, misc). */
+  land_markup_percent?: number;
+  land_gst_percent?: number;
+  /** Markup/GST for HOTELS & MEALS — independent from the land part. */
+  hotel_markup_percent?: number;
+  hotel_gst_percent?: number;
+  inclusions: string[];
+  exclusions: string[];
+  recommended_option: OptionKey | null;
+  optionals: ActivityLine[];
+  included_option_keys?: OptionKey[];
+  group_room_mix?: GroupRoomMix;
+  // Room allocation step (before hotel selection)
+  allocation_mode?: AllocationMode;
+  // Dynamic mode: per itinerary day number → room mix chosen manually
+  day_room_mix?: Record<number, DayRoomMix>;
+  /** Costing sheet — per routing day, which land-part components are included. */
+  costing_selection?: CostingSelection;
+  /**
+   * Rate Sheet row picks. Key: "<optionKey>|<vehicle group id>",
+   * value: the pax counts checked in that vehicle group. Only these rows
+   * carry forward into Final Costing.
+   */
+  rate_sheet_rows?: Record<string, number[]>;
+  // Meals step — per routing day number → lunch/dinner source & selection
+  meal_selections?: Record<string, MealDaySelection>;
+  /** Per accommodation-option meal selections (category-matched restaurants). */
+  meal_selections_by_option?: Partial<Record<OptionKey, Record<string, MealDaySelection>>>;
+
+  // Guide step UI state (Step 12) — non-calc
+  guide_language?: string;
+  guide_reporting_cost?: number;
+  guide_reporting_cost_hindi?: number;
+  guide_reporting_cost_english?: number;
+  guide_reporting_cost_language?: number;
+  // Per-language reporting cost split by pax category (Indian / Foreigner / Student).
+  // Shape: { Hindi: { indian, foreigner, student }, English: {...}, Language: {...} }
+  guide_reporting_by_pax?: Record<string, { indian?: number; foreigner?: number; student?: number }>;
+  guide_tour_disabled_by_day?: Record<number, string[]>;
+  guide_day_escort?: Record<number, number>;
+  guide_remarks?: string;
+  guide_escort_reporting?: number;
+  // Optional pax range/slab override — when set, downstream rate lookups
+  // (guide, activity, misc, transport, hotel room mixes) use this range
+  // instead of the exact headcount. Format: "auto" or "<min>-<max>" / "25+".
+  pax_range?: string;
+  // Days (routing day numbers) explicitly switched to Dynamic room-mix mode
+  // inside Accommodation Options. Every other day stays Standard.
+  dynamic_days?: number[];
+  // Multi-scenario comparison on the Costing step.
+  scenarios?: CostScenario[];
+  /** Present only while preparing a new immutable version. */
+  revision_of_quote_id?: string;
+  revision_of_quote_number?: string;
+  revision_reason?: string;
+  intended_version?: number;
+  updated_at: string;
+
+}
+
+/** A full costing scenario = one vehicle + one accommodation option + all add-ons. */
+export interface CostScenario {
+  id: string;
+  label: string;
+  /** transport line id from draft.transport; empty = include all transport lines */
+  transport_line_id?: string;
+  option_key: OptionKey;
+}
+
+export interface GroupRoomMix {
+  double: number;
+  triple: number;
+  single: number;
+}
+
+
+export const emptyDraft = (): QuoteDraft => ({
+  step: 1,
+  linked_query_id: undefined,
+  linked_query_name: undefined,
+  query_type: null,
+  tour_type: undefined,
+  agent: { name: "", agency: "", phone: "", email: "" },
+  guest: { name: "", phone: "", email: "", city: "" },
+  brochure: { tour_type: "", theme: "", event: "", period_start: "", period_end: "" },
+  nights: 3,
+  has_dates: true,
+  start_date: new Date().toISOString().slice(0, 10),
+  brochure_validity_from: "",
+  brochure_validity_till: "",
+  program_mode: "new",
+  program_code: "",
+  program_name: "",
+  save_program_as_new: false,
+  new_program_code: "",
+  new_program_name: "",
+  adults: 2,
+  ss: 0,
+  children: [],
+  pax_min: 1,
+  pax_max: 40,
+  traveler_type: "indian",
+  categories: [],
+  home_city: "",
+  tour_start_city: "",
+  tour_end_city: "",
+  departure_city: "",
+  travel_modes: [],
+  arrival_mode: undefined,
+  departure_mode: undefined,
+  arrival_flight: {},
+  departure_flight: {},
+  arrival_train: {},
+  departure_train: {},
+  arrival_other: {},
+  departure_other: {},
+  routing: [],
+  transport: [],
+  activities: [],
+  entrances: [],
+  guides: [],
+  misc: [],
+  hotel_options: [{ key: "A", label: "", category: "", selections: [] }],
+    markup_percent: 10,
+    commercial_mode: "package",
+  land_markup_percent: 10,
+  land_gst_percent: 5,
+  hotel_markup_percent: 10,
+  hotel_gst_percent: 5,
+  inclusions: [],
+  exclusions: [
+    "Airfare / train fare unless specified",
+    "Personal expenses (laundry, tips, phone calls)",
+    "Anything not mentioned in inclusions",
+  ],
+  recommended_option: null,
+  optionals: [],
+  updated_at: new Date().toISOString(),
+});

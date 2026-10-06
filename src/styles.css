@@ -1,0 +1,338 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-light: var(--primary-light);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-light: var(--accent-light);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-teal: var(--teal);
+  --color-sand: var(--sand);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", "Plus Jakarta Sans", sans-serif;
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Premium navy + muted gold palette */
+  --background: #F0F2F5;
+  --foreground: #0F2D48;
+
+  --card: #FFFFFF;
+  --card-foreground: #0F2D48;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F2D48;
+
+  --primary: #0F2D48;
+  /* dark navy */
+  --primary-foreground: #FFFFFF;
+  --primary-light: #1A4A6B;
+  /* medium navy */
+
+  --secondary: #F3F4F6;
+  --secondary-foreground: #0F2D48;
+
+  --muted: #F3F4F6;
+  --muted-foreground: #9CA3AF;
+
+  --accent: #C9A84C;
+  /* muted gold */
+  --accent-foreground: #FFFFFF;
+  --accent-light: #F5EDD6;
+  /* very light gold */
+
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #C9A84C;
+
+  --gold: #C9A84C;
+  --gold-foreground: #0F2D48;
+  --teal: #1A4A6B;
+  --sand: #F5EDD6;
+
+  --success: #059669;
+  --warning: #C9A84C;
+  --danger: #DC2626;
+  --info: #1A4A6B;
+
+  --chart-1: #0F2D48;
+  --chart-2: #1A4A6B;
+  --chart-3: #C9A84C;
+  --chart-4: #6B7A8D;
+  --chart-5: #059669;
+
+  /* Dark navy sidebar */
+  --sidebar: #0F2D48;
+  --sidebar-foreground: #D1D5DB;
+  --sidebar-primary: #C9A84C;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #1A3A52;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #17324D;
+  --sidebar-ring: #C9A84C;
+}
+
+.dark {
+  --background: #0F1A26;
+  --foreground: #E8EEF4;
+  --card: #172436;
+  --card-foreground: #E8EEF4;
+  --popover: #172436;
+  --popover-foreground: #E8EEF4;
+  --primary: #E67E22;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1F3149;
+  --secondary-foreground: #E8EEF4;
+  --muted: #1F3149;
+  --muted-foreground: #94A3B8;
+  --accent: #E67E22;
+  --accent-foreground: #FFFFFF;
+  --destructive: #E74C3C;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #E67E22;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+}
+
+@utility card-elevated {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07), 0 4px 16px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 200ms ease, transform 200ms ease;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+  }
+}
+
+@utility page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: -0.02em;
+  position: relative;
+  padding-bottom: 10px;
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 40px;
+    background: var(--color-accent);
+    border-radius: 2px;
+  }
+}
+
+@utility section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-foreground);
+}
+
+/* -------- Quote print / PDF CSS -------- */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  body.quote-viewer-open * {
+    visibility: hidden !important;
+  }
+
+  body.quote-viewer-open .quote-print-target,
+  body.quote-viewer-open .quote-print-target * {
+    visibility: visible !important;
+  }
+
+  body.quote-viewer-open .quote-viewer-overlay {
+    position: static !important;
+    background: transparent !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  body.quote-viewer-open .quote-viewer-actions {
+    display: none !important;
+  }
+
+  body.quote-viewer-open .quote-print-target {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 8mm 10mm !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* -------- Costing / Rate Sheet landscape print -------- */
+@page costing-landscape {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+@media print {
+  body.costing-print-open * {
+    visibility: hidden !important;
+  }
+
+  body.costing-print-open .printing-section,
+  body.costing-print-open .printing-section * {
+    visibility: visible !important;
+  }
+
+  body.costing-print-open .printing-section {
+    page: costing-landscape;
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0 !important;
+    box-shadow: none !important;
+    font-size: 7.5pt;
+  }
+
+  body.costing-print-open .printing-section .no-print,
+  body.costing-print-open .printing-section button {
+    display: none !important;
+  }
+
+  body.costing-print-open .printing-section [class*="overflow-x-auto"],
+  body.costing-print-open .printing-section [class*="overflow-auto"] {
+    overflow: visible !important;
+  }
+
+  body.costing-print-open .printing-section .min-w-max,
+  body.costing-print-open .printing-section [class*="min-w-["] {
+    min-width: 0 !important;
+  }
+
+  body.costing-print-open .printing-section table {
+    width: 100% !important;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+
+  body.costing-print-open .printing-section th,
+  body.costing-print-open .printing-section td {
+    border: 0.75pt solid #222222 !important;
+    color: #000000 !important;
+    opacity: 1 !important;
+  }
+
+  body.costing-print-open .printing-section thead {
+    display: table-header-group;
+  }
+
+  body.costing-print-open .printing-section tr {
+    page-break-inside: avoid;
+  }
+
+  /* Stack Land Part and Hotels & Meals vertically for print (side-by-side on screen). */
+  body.costing-print-open .printing-section .print-stack-wrap,
+  body.costing-print-open .printing-section .print-stack {
+    display: block !important;
+    overflow: visible !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    gap: 0 !important;
+  }
+
+  body.costing-print-open .printing-section .print-stack>* {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    float: none !important;
+    margin: 0 0 6mm 0 !important;
+  }
+
+  body.costing-print-open .printing-section .print-stack>*+* {
+    break-before: auto !important;
+    page-break-before: auto !important;
+  }
+
+  body.costing-print-open .printing-section .print-stack>* {
+    break-inside: auto;
+  }
+}

@@ -1,0 +1,541 @@
+import { createFileRoute, Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import { Plus, Pencil, Trash2, Search, Users, Eye } from "lucide-react";
+import { toast } from "sonner";
+import { useAgents, deleteAgent, type Agent } from "@/lib/wizard/agents-store";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { AgentFormDialog } from "@/components/AgentFormDialog";
+import { useAccessibleQueries } from "@/lib/crm/access";
+import { queryMatchesAgent } from "@/lib/crm/relationship-links";
+import type { CrmQuery } from "@/lib/crm/types";
+import { queryLostValue, queryWonValue } from "@/lib/crm/relationship-insights";
+
+export const Route = createFileRoute("/_authenticated/agents")({
+  head: () => ({ meta: [{ title: "Agents — MP Tourism Hub" }] }),
+  component: AgentsRoute,
+});
+
+function AgentsRoute() {
+  const { id } = useParams({ strict: false }) as { id?: string };
+  return id ? <Outlet /> : <AgentsPage />;
+}
+
+const PAGE_SIZE = 25;
+
+const money = (value: number) => {
+  if (value >= 10_000_000) return `₹${(value / 10_000_000).toFixed(2)} Cr`;
+  if (value >= 100_000) return `₹${(value / 100_000).toFixed(1)} L`;
+  if (value >= 1_000) return `₹${(value / 1_000).toFixed(1)} K`;
+  return `₹${Math.round(value).toLocaleString("en-IN")}`;
+};
+
+function relationshipMetrics(agent: Agent, queries: CrmQuery[]) {
+  const linked = queries.filter((query) => queryMatchesAgent(query, agent));
+  const open = linked.filter((query) => !["Won", "Lost"].includes(query.stage));
+  const won = linked.filter((query) => query.stage === "Won");
+  const lost = linked.filter((query) => query.stage === "Lost");
+  const business = won.reduce((sum, query) => sum + queryWonValue(query), 0);
+  const lostValue = lost.reduce((sum, query) => sum + queryLostValue(query), 0);
+  const lastQuery = linked.reduce<string | undefined>(
+    (latest, query) => (!latest || query.created_at > latest ? query.created_at : latest),
+    undefined,
+  );
+  const recentCutoff = new Date();
+  recentCutoff.setDate(recentCutoff.getDate() - 90);
+  const active =
+    agent.status !== "Inactive" &&
+    (open.length > 0 || Boolean(lastQuery && new Date(lastQuery) >= recentCutoff));
+  const status =
+    agent.status === "Inactive" || agent.status === "Prospect"
+      ? agent.status
+      : active
+        ? "Active"
+        : "Dormant";
+  return {
+    linked,
+    open: open.length,
+    won: won.length,
+    lost: lost.length,
+    lostValue,
+    business,
+    conversion: linked.length ? (won.length / linked.length) * 100 : 0,
+    status,
+  };
+}
+
+function AgentsPage() {
+  const navigate = useNavigate();
+  const agents = useAgents();
+  const queries = useAccessibleQueries();
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<string>("all");
+  const [stateF, setStateF] = useState<string>("all");
+  const [cityF, setCityF] = useState<string>("all");
+  const [page, setPage] = useState(1);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Agent | null>(null);
+  const [confirmDel, setConfirmDel] = useState<Agent | null>(null);
+  const [viewing, setViewing] = useState<Agent | null>(null);
+
+  const states = useMemo(
+    () => Array.from(new Set(agents.map((a) => a.state).filter(Boolean))) as string[],
+    [agents],
+  );
+  const cities = useMemo(
+    () => Array.from(new Set(agents.map((a) => a.city).filter(Boolean))) as string[],
+    [agents],
+  );
+
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return agents.filter((a) => {
+      if (status !== "all" && relationshipMetrics(a, queries).status !== status) return false;
+      if (stateF !== "all" && a.state !== stateF) return false;
+      if (cityF !== "all" && a.city !== cityF) return false;
+      if (!term) return true;
+      return [
+        a.name,
+        a.agency,
+        a.phone,
+        a.email,
+        a.city,
+        a.gst_number,
+        ...(a.contacts || []).flatMap((contact) => [
+          contact.name,
+          contact.phone,
+          contact.email,
+          contact.designation,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [agents, queries, q, status, stateF, cityF]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+  const allMetrics = useMemo(
+    () => agents.map((agent) => relationshipMetrics(agent, queries)),
+    [agents, queries],
+  );
+
+  const openNew = () => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+  const openEdit = (a: Agent) => {
+    setEditing(a);
+    setFormOpen(true);
+  };
+  const doDelete = () => {
+    if (!confirmDel) return;
+    deleteAgent(confirmDel.id);
+    toast.success("Agent deleted");
+    setConfirmDel(null);
+  };
+
+  return (
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1400px] mx-auto">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Users className="h-7 w-7 text-accent" /> B2B Agent Master
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            One permanent relationship record per travel partner, linked to every Query.
+          </p>
+        </div>
+        <Button onClick={openNew}>
+          <Plus className="h-4 w-4 mr-1" /> Add Agent
+        </Button>
+      </div>
+
+      <Card className="p-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="md:col-span-2">
+            <Label className="text-xs">Search</Label>
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-2.5 top-2.5 text-muted-foreground" />
+              <Input
+                className="pl-8"
+                placeholder="Name, agency, mobile, email, city, GST…"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Status</Label>
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                setStatus(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="Active">Active</SelectItem>
+                <SelectItem value="Inactive">Inactive</SelectItem>
+                <SelectItem value="Prospect">Prospect</SelectItem>
+                <SelectItem value="Dormant">Dormant</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">State</Label>
+            <Select
+              value={stateF}
+              onValueChange={(v) => {
+                setStateF(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {states.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">City</Label>
+            <Select
+              value={cityF}
+              onValueChange={(v) => {
+                setCityF(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {cities.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          ["Total agents", agents.length],
+          [
+            "Active relationships",
+            allMetrics.filter((metric) => metric.status === "Active").length,
+          ],
+          [
+            "Converted business",
+            money(allMetrics.reduce((sum, metric) => sum + metric.business, 0)),
+          ],
+          [
+            "Lost quoted value",
+            money(allMetrics.reduce((sum, metric) => sum + metric.lostValue, 0)),
+          ],
+        ].map(([label, value]) => (
+          <Card key={String(label)} className="p-5">
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="mt-2 text-3xl font-bold">{value}</p>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1320px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Agent ID</TableHead>
+                <TableHead>Company / contact</TableHead>
+                <TableHead>Contacts</TableHead>
+                <TableHead>City</TableHead>
+                <TableHead>Owner</TableHead>
+                <TableHead>Queries</TableHead>
+                <TableHead>Open</TableHead>
+                <TableHead>Won</TableHead>
+                <TableHead>Business</TableHead>
+                <TableHead>Lost value</TableHead>
+                <TableHead>Conversion</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {paged.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-center py-10 text-muted-foreground">
+                    No agents found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                paged.map((a) => {
+                  const metrics = relationshipMetrics(a, queries);
+                  const openDashboard = () => navigate({ to: "/agents/$id", params: { id: a.id } });
+                  return (
+                    <TableRow
+                      key={a.id}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Open ${a.agency || a.name} Agent 360 dashboard`}
+                      className="cursor-pointer transition-colors hover:bg-teal-50/70 focus-visible:bg-teal-50 focus-visible:outline-none"
+                      onClick={openDashboard}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openDashboard();
+                        }
+                      }}
+                    >
+                      <TableCell className="font-mono text-xs font-semibold text-teal-700">
+                        {a.agent_code || a.id}
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-semibold text-slate-900">{a.agency || a.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[a.contact_person || a.name, a.phone].filter(Boolean).join(" · ") || "—"}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {a.contacts?.filter((contact) => contact.active !== false).length || 0}
+                      </TableCell>
+                      <TableCell>{a.city || "—"}</TableCell>
+                      <TableCell>{a.relationship_owner || "Not assigned"}</TableCell>
+                      <TableCell className="font-semibold">{metrics.linked.length}</TableCell>
+                      <TableCell>{metrics.open}</TableCell>
+                      <TableCell>{metrics.won}</TableCell>
+                      <TableCell className="font-semibold">{money(metrics.business)}</TableCell>
+                      <TableCell className="font-semibold text-red-600">
+                        {money(metrics.lostValue)}
+                      </TableCell>
+                      <TableCell>{metrics.conversion.toFixed(1)}%</TableCell>
+                      <TableCell>
+                        <Badge variant={metrics.status === "Active" ? "default" : "secondary"}>
+                          {metrics.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="inline-flex gap-1">
+                          <Button asChild size="sm" variant="ghost" title="Open Agent 360">
+                            <Link to="/agents/$id" params={{ id: a.id }}>
+                              <Eye className="mr-1 h-4 w-4" />
+                              Open
+                            </Link>
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openEdit(a)}
+                            title="Edit"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setConfirmDel(a)}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-3 border-t text-sm">
+            <div className="text-muted-foreground">
+              Page {pageSafe} of {totalPages} · {filtered.length} agents
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pageSafe <= 1}
+                onClick={() => setPage(pageSafe - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pageSafe >= totalPages}
+                onClick={() => setPage(pageSafe + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <AgentFormDialog open={formOpen} onOpenChange={setFormOpen} agent={editing} />
+
+      <AlertDialog open={!!confirmDel} onOpenChange={(o) => !o && setConfirmDel(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete agent?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDel && (
+                <>
+                  This will remove{" "}
+                  <b>
+                    {confirmDel.name} — {confirmDel.agency}
+                  </b>{" "}
+                  from the master. Existing quotations already using this agent will keep their
+                  stored details.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={doDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewing?.name}</DialogTitle>
+            <DialogDescription>{viewing?.agency}</DialogDescription>
+          </DialogHeader>
+          {viewing && <AgentProfile a={viewing} />}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value?: string | number | null }) {
+  if (value === undefined || value === null || value === "") return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-sm">{value}</div>
+    </div>
+  );
+}
+
+function AgentProfile({ a }: { a: Agent }) {
+  return (
+    <div className="space-y-5">
+      <section>
+        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Basic</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Contact Person" value={a.contact_person} />
+          <Field label="Mobile" value={a.phone} />
+          <Field label="Alternate Mobile" value={a.alt_phone} />
+          <Field label="Email" value={a.email} />
+          <Field label="Website" value={a.website} />
+          <Field label="WhatsApp" value={a.whatsapp} />
+        </div>
+      </section>
+      <section>
+        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Address</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Address 1" value={a.address_line1} />
+          <Field label="Address 2" value={a.address_line2} />
+          <Field label="City" value={a.city} />
+          <Field label="State" value={a.state} />
+          <Field label="Country" value={a.country} />
+          <Field label="Pincode" value={a.pincode} />
+        </div>
+      </section>
+      <section>
+        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Business</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="GST" value={a.gst_number} />
+          <Field label="PAN" value={a.pan_number} />
+          <Field label="IATA" value={a.iata} />
+          <Field label="Agency Type" value={a.agency_type} />
+          <Field label="Relationship Owner" value={a.relationship_owner} />
+          <Field label="Preferred Currency" value={a.preferred_currency} />
+          <Field label="Credit Limit" value={a.credit_limit} />
+          <Field label="Payment Terms" value={a.payment_terms} />
+          <Field label="Status" value={a.status} />
+        </div>
+      </section>
+      {(a.notes || a.internal_remarks) && (
+        <section>
+          <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Notes</h4>
+          <div className="grid gap-3">
+            <Field label="Notes" value={a.notes} />
+            <Field label="Internal Remarks" value={a.internal_remarks} />
+          </div>
+        </section>
+      )}
+      <section className="pt-3 border-t text-xs text-muted-foreground">
+        Created {a.created_at ? new Date(a.created_at).toLocaleString() : "—"} · Updated{" "}
+        {a.updated_at ? new Date(a.updated_at).toLocaleString() : "—"}
+      </section>
+    </div>
+  );
+}
