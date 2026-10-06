@@ -79,6 +79,10 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
     "/queries/analytics",
   ];
   if (common.includes(path)) return true;
+  // The existing Query Workspace route is shared by all Sales roles. The
+  // workspace itself resolves the query through useAccessibleQueries, so this
+  // only permits navigation to a record the employee is otherwise allowed to see.
+  if (/^\/queries\/[^/]+$/.test(path)) return true;
   if (profile.role === "Sales Manager")
     return [
       "/queries/assignment-desk",
@@ -88,7 +92,7 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
     ].includes(path);
   if (profile.role === "Senior Sales Executive")
     return ["/queries/review", "/queries/quotation-review", "/queries/assisted"].includes(path);
-  return /^\/queries\/[^/]+$/.test(path);
+  return false;
 }
 
 export function isSalesAssignmentEligible(employee: Employee) {

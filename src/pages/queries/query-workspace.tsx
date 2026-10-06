@@ -50,6 +50,7 @@ import {
   useCrmEvents,
   useEmployees,
   useCrmTasks,
+  useCrmQueries,
 } from "@/lib/crm/store";
 import { LIFECYCLE, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
 import { usePrograms } from "@/lib/wizard/agents-store";
@@ -98,6 +99,7 @@ export default function QueryWorkspace() {
   const actor = useActor();
   const access = useAccessProfile();
   const query = useAccessibleQueries().find((item) => item.id === id || item.query_id === id);
+  const existingQuery = useCrmQueries().find((item) => item.id === id || item.query_id === id);
   const allEvents = useCrmEvents();
   const employees = useEmployees();
   const tasks = useCrmTasks().filter((task) => task.query_id === query?.query_id);
@@ -137,7 +139,14 @@ export default function QueryWorkspace() {
       <div className="p-8">
         <Card>
           <CardContent className="p-10 text-center">
-            <h1 className="text-xl font-bold">Query not found</h1>
+            <h1 className="text-xl font-bold">
+              {existingQuery ? "Access denied" : "Query not found"}
+            </h1>
+            <p className="mt-2 text-sm text-slate-500">
+              {existingQuery
+                ? "You do not have permission to open this Query."
+                : "This Query could not be found."}
+            </p>
             <Button className="mt-4" onClick={() => navigate({ to: "/queries/query-tracker" })}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
