@@ -253,13 +253,16 @@ export function startCrmSync(includeBusiness = true): () => void {
               if (run === syncGeneration) hydrateCrm(snapshot);
             })
           : refreshEmployees()
-      ).catch(() => {
-        if (run === syncGeneration) replaceEmployeesFromCloud([]);
+      ).catch((error) => {
+        // A transient realtime/pull failure must not erase the current
+        // browser's resolved Employee Master profile or turn a valid session
+        // into an apparent logout. The next sync/focus retry will reconcile.
+        console.error("[crm] refresh failed", error);
       });
     }, 250);
   };
-  void (includeBusiness ? pullAndMerge(run) : refreshEmployees()).catch(() => {
-    if (run === syncGeneration) replaceEmployeesFromCloud([]);
+  void (includeBusiness ? pullAndMerge(run) : refreshEmployees()).catch((error) => {
+    console.error("[crm] initial refresh failed", error);
   });
   const offPersist = includeBusiness ? onCrmPersist(schedulePush) : () => {};
 

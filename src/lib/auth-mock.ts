@@ -36,10 +36,12 @@ async function validateUser(user: User | null) {
     .select("id,data")
     .eq("data->>auth_user_id", user.id);
   if (run !== generation) return;
+  // A network/RLS refresh failure is not evidence that this browser's valid
+  // Auth session is unlinked. Keep the resolved profile until a definitive
+  // successful lookup says otherwise; focus/interval refresh will retry.
+  if (error) return;
   const employee =
-    !error && data?.length === 1
-      ? { ...(data[0].data as unknown as Employee), id: data[0].id }
-      : undefined;
+    data?.length === 1 ? { ...(data[0].data as unknown as Employee), id: data[0].id } : undefined;
   const records =
     current?.id === user.id && employee?.role === "Super Admin"
       ? [...listEmployees().filter((row) => row.auth_user_id !== user.id), employee]
@@ -80,8 +82,11 @@ function init() {
       void validateUser(null);
       return;
     }
-    // Do not await another Auth call inside the Auth event lock.
-    if (event !== "INITIAL_SESSION" && !signingIn) setTimeout(() => void revalidate(), 0);
+    // This browser client owns this session. Resolve the profile from the
+    // event payload instead of issuing a competing Auth request in the event
+    // lock, which can otherwise race token refreshes.
+    if (event !== "INITIAL_SESSION" && !signingIn)
+      setTimeout(() => void validateUser(session.user), 0);
   });
   initialization = revalidate();
   window.addEventListener("focus", () => void revalidate());
@@ -157,7 +162,9 @@ export const auth = {
   },
   async signOut() {
     await validateUser(null);
-    if (hasSupabaseConfig) await supabase.auth.signOut();
+    // Explicitly scope logout to this browser's persisted session. Never use
+    // the organisation-wide/global sign-out operation for a normal logout.
+    if (hasSupabaseConfig) await supabase.auth.signOut({ scope: "local" });
   },
 };
 
