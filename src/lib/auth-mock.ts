@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 // Supabase Auth identity; application authority comes only from Employee Master.
+=======
+// Tiny mock auth — replace with Supabase later. Two pre-seeded users.
+// FIXED: Robust session persistence — never treat a momentary null as a logout.
+>>>>>>> 32b9641 (okoo)
 import { useSyncExternalStore } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,6 +18,7 @@ export interface AuthUser {
   role: Role;
   avatarUrl?: string | null;
 }
+<<<<<<< HEAD
 export const hasSupabaseConfig = Boolean(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
 );
@@ -20,9 +26,23 @@ let current: AuthUser | null = null;
 let initialization: Promise<void> | undefined;
 let generation = 0;
 let signingIn = false;
+=======
+
+const KEY = "mp-tourism-auth-v1";
+
+const SEED_USERS: Array<AuthUser & { password: string }> = [
+  { id: "u_admin", email: "admin@mptourism.in", name: "Aarav Sharma", role: "admin", password: "admin123", avatarUrl: null },
+  { id: "u_staff", email: "staff@mptourism.in", name: "Maya Iyer", role: "staff", password: "staff123", avatarUrl: null },
+];
+
+// Module-level state — survives React re-renders, only resets on hard page unload.
+let _current: AuthUser | null = null;
+let _initialized = false;
+>>>>>>> 32b9641 (okoo)
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
+<<<<<<< HEAD
 async function validateUser(user: User | null) {
   const run = ++generation;
   if (!user) {
@@ -93,9 +113,37 @@ function init() {
   window.setInterval(() => {
     if (current) void revalidate();
   }, 30_000);
+=======
+/**
+ * Read and cache the session from localStorage exactly once per page lifecycle.
+ * Subsequent calls return the cached value — no more "flash-null" on re-render.
+ */
+function load(): AuthUser | null {
+  if (_initialized) return _current;
+  _initialized = true;
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as AuthUser;
+      // Basic sanity check before trusting persisted data.
+      if (parsed && parsed.id && parsed.email && parsed.role) {
+        _current = parsed;
+      }
+    }
+  } catch {/* ignore parse errors */}
+  return _current;
+}
+
+function persist() {
+  if (typeof window === "undefined") return;
+  if (_current) localStorage.setItem(KEY, JSON.stringify(_current));
+  else localStorage.removeItem(KEY);
+>>>>>>> 32b9641 (okoo)
 }
 
 export const auth = {
+<<<<<<< HEAD
   current() {
     init();
     return current;
@@ -165,9 +213,48 @@ export const auth = {
     // Explicitly scope logout to this browser's persisted session. Never use
     // the organisation-wide/global sign-out operation for a normal logout.
     if (hasSupabaseConfig) await supabase.auth.signOut({ scope: "local" });
+=======
+  /**
+   * Returns the current user. On first call, hydrates from localStorage.
+   * NEVER returns null transiently — only returns null when genuinely not logged in.
+   */
+  current(): AuthUser | null { return load(); },
+
+  /**
+   * Returns true ONLY when auth has been initialized from storage.
+   * Use this to distinguish "loading" from "not logged in".
+   */
+  isInitialized(): boolean { return _initialized; },
+
+  subscribe(fn: () => void) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  },
+
+  async signIn(email: string, password: string): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string }> {
+    await new Promise((r) => setTimeout(r, 350));
+    const u = SEED_USERS.find((x) => x.email.toLowerCase() === email.toLowerCase() && x.password === password);
+    if (!u) return { ok: false, error: "Invalid email or password." };
+    const { password: _pw, ...safe } = u;
+    _current = safe;
+    persist(); emit();
+    return { ok: true, user: safe };
+  },
+
+  /**
+   * Explicit sign-out. Called only by explicit user action or verified backend revocation.
+   */
+  signOut() {
+    _current = null;
+    persist(); emit();
+>>>>>>> 32b9641 (okoo)
   },
 };
 
+/**
+ * Hook: returns the authenticated user or null.
+ * useSyncExternalStore guarantees the same snapshot across render + hydration.
+ */
 export function useAuth(): AuthUser | null {
   return useSyncExternalStore(auth.subscribe, auth.current, () => null);
 }
