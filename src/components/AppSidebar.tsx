@@ -37,7 +37,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { requestLogout } from "@/lib/logout-manager";
+import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
 import { useDraftCount } from "@/lib/drafts-store";
 import { useUnreadCount } from "@/lib/notifications-store";
@@ -794,7 +794,6 @@ export function AppSidebar() {
       >
         {/* LOGOUT */}
         <button
-<<<<<<< HEAD
           onClick={() => auth.signOut()}
           className={cn(
             "w-full flex items-center gap-3",
@@ -806,10 +805,6 @@ export function AppSidebar() {
             "transition-colors",
             collapsed && "justify-center px-2",
           )}
-=======
-          onClick={() => requestLogout()}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
->>>>>>> 32b9641 (okoo)
           title={collapsed ? "Logout" : undefined}
         >
           <LogOut className="h-[18px] w-[18px] shrink-0" />

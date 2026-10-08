@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import {
   createFileRoute,
   Outlet,
@@ -6,14 +5,10 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-=======
-import { createFileRoute, Outlet, redirect, useRouterState } from "@tanstack/react-router";
->>>>>>> 32b9641 (okoo)
 import { useEffect } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
 import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
-import { UnsavedCostingModal } from "@/components/UnsavedCostingModal";
 import { auth, useAuth } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
@@ -25,38 +20,25 @@ import { canAccessPath, dashboardPathForUser, useAccessProfile } from "@/lib/crm
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
-<<<<<<< HEAD
   beforeLoad: async () => {
     if (typeof window === "undefined") return;
     if (!(await auth.ready())) throw redirect({ to: "/login" });
-=======
-  // FIXED: The beforeLoad guard runs synchronously on the client.
-  // auth.current() now reliably returns the persisted user after initialization,
-  // so this check is safe. We only redirect if the user is definitively NOT logged in.
-  beforeLoad: () => {
-    if (typeof window === "undefined") return; // SSR: no auth, let component handle
-    // Force initialization from localStorage before checking.
-    const user = auth.current();
-    if (!user) throw redirect({ to: "/login" });
->>>>>>> 32b9641 (okoo)
   },
   component: AuthenticatedLayout,
 });
 
 function AuthenticatedLayout() {
   const user = useAuth();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const access = useAccessProfile();
   const hasSupabaseConfig = Boolean(
     import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   );
 
-  // FIXED: Do NOT useEffect-navigate on !user.
-  // The beforeLoad guard already handles the unauthenticated case.
-  // A subsequent user=null here would only happen after an explicit signOut(),
-  // which itself redirects to /login (handled in the logout functions).
-  // Relying on useEffect to redirect causes "flash" logout bugs when React
-  // re-renders briefly before the store emits the updated value.
+  useEffect(() => {
+    if (!user) navigate({ to: "/login" });
+  }, [user, navigate]);
 
   const userId = user?.id;
   const isSuperAdmin = access.accountReady && access.role === "Super Admin";
@@ -94,9 +76,6 @@ function AuthenticatedLayout() {
     navigate({ to: dashboardPathForUser(user) });
   }, [access, navigate, pathname, user]);
 
-  // While the user object is available (guaranteed by beforeLoad), render the app.
-  // If somehow user is null at this point (edge case: explicit signOut already navigating),
-  // just render nothing — the logout handler will redirect.
   if (!user) return null;
   if (!access.accountReady) {
     return (
@@ -127,8 +106,6 @@ function AuthenticatedLayout() {
           <Outlet />
         </main>
       </div>
-      {/* Global modal: guards logout when costing has unsaved changes */}
-      <UnsavedCostingModal />
     </div>
   );
 }

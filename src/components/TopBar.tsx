@@ -3,6 +3,7 @@ import { useState } from "react";
 import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 import { useNavigate } from "@tanstack/react-router";
 import { auth, useAuth } from "@/lib/auth-mock";
+import { useAccessProfile } from "@/lib/crm/access";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,7 +75,12 @@ export function TopBar() {
             <User className="h-4 w-4 mr-2" /> My Profile
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { auth.signOut(); navigate({ to: "/login" }); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              auth.signOut();
+              navigate({ to: "/login" });
+            }}
+          >
             <LogOut className="h-4 w-4 mr-2" /> Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>
