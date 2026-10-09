@@ -10,8 +10,27 @@ export interface AccessProfile {
   unit: string;
   canAssign: boolean;
   canManageTeam: boolean;
+  /** Read/use the shared costing catalogue. Separate from edit rights. */
+  canReadCostingMasters: boolean;
+  /** Create, edit, or delete global costing masters. */
+  canManageCostingMasters: boolean;
   permissions: string[];
   accountReady: boolean;
+}
+
+export const COSTING_MASTER_READ_ROLES = [
+  "Super Admin",
+  "Sales Manager",
+  "Senior Sales Executive",
+  "Sales Executive",
+] as const;
+
+export function canReadCostingMasters(role: AppRole | "" | null) {
+  return COSTING_MASTER_READ_ROLES.includes(role as (typeof COSTING_MASTER_READ_ROLES)[number]);
+}
+
+export function canManageCostingMasters(role: AppRole | "" | null) {
+  return role === "Super Admin";
 }
 
 export const isSalesRole = (role: AppRole | "" | null) =>
@@ -131,6 +150,8 @@ export function useAccessProfile(): AccessProfile {
     unit: employee?.unit || "",
     canAssign: superAdmin || role === "Sales Manager",
     canManageTeam: superAdmin || role === "Sales Manager",
+    canReadCostingMasters: accountReady && canReadCostingMasters(role),
+    canManageCostingMasters: accountReady && canManageCostingMasters(role),
     // Department grants are dormant until the next phase.
     permissions: superAdmin
       ? [

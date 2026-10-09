@@ -5,7 +5,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
 import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
@@ -13,7 +13,12 @@ import { auth, useAuth } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
 import { startDestinationsSync } from "@/lib/destinations-remote";
-import { startMastersSync, afterMastersReady } from "@/lib/masters-remote";
+import {
+  startMastersSync,
+  afterMastersReady,
+  getMasterSyncState,
+  subscribeMasterSync,
+} from "@/lib/masters-remote";
 import { startCrmSync } from "@/lib/crm/crm-remote";
 import { Button } from "@/components/ui/button";
 import { canAccessPath, dashboardPathForUser, useAccessProfile } from "@/lib/crm/access";
@@ -41,7 +46,13 @@ function AuthenticatedLayout() {
   }, [user, navigate]);
 
   const userId = user?.id;
-  const isSuperAdmin = access.accountReady && access.role === "Super Admin";
+  const isSuperAdmin = access.canManageCostingMasters;
+  const canReadMasters = access.canReadCostingMasters;
+  const masterSync = useSyncExternalStore(
+    subscribeMasterSync,
+    getMasterSyncState,
+    getMasterSyncState,
+  );
 
   useEffect(() => {
     if (!isSuperAdmin) return;
@@ -54,14 +65,14 @@ function AuthenticatedLayout() {
   useEffect(() => {
     if (!userId || !hasSupabaseConfig) return;
     const stopCrm = startCrmSync(true);
-    if (!isSuperAdmin) return stopCrm;
-    const stopMasters = startMastersSync();
+    if (!canReadMasters) return stopCrm;
+    const stopMasters = startMastersSync({ readOnly: !isSuperAdmin });
     let disposed = false;
     let stopDestinations: (() => void) | null = null;
     // Destinations reconcile only after the shared master data is in place,
     // so a local-only cache can never delete cloud tours (or their pricing).
     afterMastersReady(() => {
-      if (!disposed) stopDestinations = startDestinationsSync();
+      if (!disposed) stopDestinations = startDestinationsSync({ readOnly: !isSuperAdmin });
     });
     return () => {
       disposed = true;
@@ -69,7 +80,7 @@ function AuthenticatedLayout() {
       stopCrm();
       stopMasters();
     };
-  }, [userId, hasSupabaseConfig, isSuperAdmin]);
+  }, [userId, hasSupabaseConfig, canReadMasters, isSuperAdmin]);
 
   useEffect(() => {
     if (!user || !access.accountReady || canAccessPath(access, pathname)) return;
@@ -103,6 +114,21 @@ function AuthenticatedLayout() {
         {/* Re-mount per-path so the "Hide" state resets on navigation */}
         {isSuperAdmin && <ActiveWizardBanner key={pathname} />}
         <main className="min-w-0 flex-1 overflow-auto">
+          {masterSync.status === "denied" ||
+          masterSync.status === "error" ||
+          masterSync.status === "empty" ? (
+            <div
+              role="alert"
+              className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950"
+            >
+              {masterSync.status === "denied"
+                ? "Access denied while reading shared costing masters."
+                : masterSync.status === "error"
+                  ? "Costing master data could not be loaded."
+                  : "No shared costing master record is visible."}{" "}
+              {masterSync.message}
+            </div>
+          ) : null}
           <Outlet />
         </main>
       </div>

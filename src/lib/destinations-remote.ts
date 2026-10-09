@@ -4,11 +4,13 @@
 // as before. The database is the source of truth; the local store is a cache.
 import { supabase } from "@/integrations/supabase/client";
 import { db } from "@/lib/mock-store";
+import { reportMasterSyncIssue } from "@/lib/masters-remote";
 
 type RemoteCity = { id: string; name: string };
 type RemoteTour = { id: string; city_id: string; title: string; description: string | null };
 
 let started = false;
+let allowSeed = true;
 let channel: ReturnType<typeof supabase.channel> | null = null;
 let pulling: Promise<void> | null = null;
 
@@ -18,7 +20,15 @@ async function fetchAll(): Promise<{ cities: RemoteCity[]; tours: RemoteTour[] }
     supabase.from("destination_tours").select("id,city_id,title,description"),
   ]);
   if (e1 || e2) {
-    console.error("[destinations] fetch failed", e1 ?? e2);
+    const error = e1 ?? e2;
+    reportMasterSyncIssue(
+      `${error?.code ?? ""} ${error?.message ?? ""}`.toLowerCase().includes("row-level security") ||
+        error?.code === "42501"
+        ? "denied"
+        : "error",
+      error,
+      "destinations",
+    );
     return null;
   }
   return { cities: cities ?? [], tours: tours ?? [] };
@@ -28,9 +38,10 @@ async function fetchAll(): Promise<{ cities: RemoteCity[]; tours: RemoteTour[] }
 async function seedRemoteFromLocal() {
   const local = db.get();
   if (!local.destination_cities.length) return;
-  const { error: ce } = await supabase
-    .from("destination_cities")
-    .upsert(local.destination_cities.map((c) => ({ id: c.id, name: c.name })), { onConflict: "id" });
+  const { error: ce } = await supabase.from("destination_cities").upsert(
+    local.destination_cities.map((c) => ({ id: c.id, name: c.name })),
+    { onConflict: "id" },
+  );
   if (ce) {
     console.error("[destinations] seed cities failed", ce);
     return;
@@ -52,11 +63,18 @@ async function seedRemoteFromLocal() {
 /** Reconcile the local cache with the database (adds, renames, deletes). */
 export function pullDestinations(): Promise<void> {
   if (pulling) return pulling;
+  const maySeed = allowSeed;
   pulling = (async () => {
     const remote = await fetchAll();
     if (!remote) return;
 
     if (remote.cities.length === 0 && db.get().destination_cities.length > 0) {
+      if (!maySeed) {
+        console.warn(
+          "[destinations] remote catalogue is empty or not visible; read-only session will not seed or delete the hydrated master list",
+        );
+        return;
+      }
       await seedRemoteFromLocal();
       const again = await fetchAll();
       if (!again) return;
@@ -108,9 +126,10 @@ export function pullDestinations(): Promise<void> {
  * Start the shared sync: initial pull + a single realtime subscription for
  * INSERT/UPDATE/DELETE on both tables. Safe to call repeatedly.
  */
-export function startDestinationsSync(): () => void {
+export function startDestinationsSync(options?: { readOnly?: boolean }): () => void {
   if (started) return () => {};
   started = true;
+  allowSeed = options?.readOnly !== true;
 
   void pullDestinations();
 
@@ -127,6 +146,7 @@ export function startDestinationsSync(): () => void {
   return () => {
     if (channel) supabase.removeChannel(channel);
     channel = null;
+    allowSeed = true;
     started = false;
   };
 }
@@ -170,7 +190,9 @@ export const destinationsRemote = {
       .from("destination_tours")
       .update({
         ...(patch.title != null ? { title: patch.title.trim() } : {}),
-        ...(patch.description !== undefined ? { description: patch.description.trim() || null } : {}),
+        ...(patch.description !== undefined
+          ? { description: patch.description.trim() || null }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

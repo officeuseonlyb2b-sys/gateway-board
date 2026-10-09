@@ -224,6 +224,74 @@ await check(
     assert.equal((await rows("crm_events"))[0].data.by, "Historical actor");
   },
 );
+await check(
+  "Sales roles read the same costing masters and cannot write them or Queries",
+  async () => {
+    await db.query(
+      'INSERT INTO public.app_master_state(id, data) VALUES (\'shared\', \'{"destination_cities":[{"id":"dc1"}]}\')',
+    );
+    await db.query(
+      "INSERT INTO public.destination_cities(id, name) VALUES ('dc-shared', 'Bhopal')",
+    );
+    await db.query(
+      "INSERT INTO public.destination_tours(id, city_id, title) VALUES ('dt-shared', 'dc-shared', 'Fort')",
+    );
+    const sales = [
+      ["Sales Manager", "EMP-0101"],
+      ["Senior Sales Executive", "EMP-0102"],
+      ["Sales Executive", "EMP-0103"],
+    ];
+    for (const [role, code] of sales) {
+      const id = randomUUID();
+      await db.query("INSERT INTO auth.users(id, email) VALUES ($1, $2)", [
+        id,
+        `${code}@example.invalid`,
+      ]);
+      await db.query("INSERT INTO public.crm_employees(id, data) VALUES ($1, $2)", [
+        id,
+        JSON.stringify(record(id, role, code)),
+      ]);
+      await asUser(
+        id,
+        async () => {
+          assert.equal((await rows("app_master_state")).length, 1, role);
+          assert.equal((await rows("destination_cities")).length, 1, role);
+          assert.equal((await rows("destination_tours")).length, 1, role);
+          assert.equal((await rows("crm_queries")).length, 0, role);
+          assert.equal(
+            (await db.query("UPDATE public.app_master_state SET rev='sales-write' RETURNING id"))
+              .rows.length,
+            0,
+            role,
+          );
+          await assert.rejects(
+            db.query(
+              "INSERT INTO public.destination_cities(id, name) VALUES ('dc-sales', 'Denied')",
+            ),
+            /row-level security/,
+          );
+        },
+        `${code}@example.invalid`,
+      );
+    }
+    await asUser(admin, async () => {
+      assert.equal((await rows("app_master_state")).length, 1);
+      assert.equal((await rows("destination_cities")).length, 1);
+      assert.equal(
+        (
+          await db.query(
+            "UPDATE public.app_master_state SET rev='admin-ok' WHERE id='shared' RETURNING id",
+          )
+        ).rows.length,
+        1,
+      );
+    });
+    await asUser(staff, async () => {
+      assert.equal((await rows("app_master_state")).length, 0);
+      assert.equal((await rows("destination_cities")).length, 0);
+    });
+  },
+);
 await db.close();
 console.log(
   `PostgreSQL employee security tests passed: ${count} test groups. No live Supabase writes performed.`,
