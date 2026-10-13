@@ -10,12 +10,12 @@ import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
 import {
   gstRateFor, planForDay, computeMealsTotal,
-  effectivePaxForPricing, optionUsesCustomAllocation, defaultDayMix,
+  effectivePaxForPricing, optionUsesCustomAllocation, defaultDayMix, dynamicAccommodationBreakdown,
   landMarkup, landGst, hotelsMarkup, hotelsGst,
 } from "./calc";
 import { buildLandPart } from "./costsheet";
 import type {
-  QuoteDraft, HotelOption, DayRoomMix, PersonRoomType, CostScenario,
+  QuoteDraft, HotelOption, DayRoomMix, DynamicOccupancy, PersonRoomType, CostScenario,
 } from "./types";
 
 export interface ScenarioPersonRow {
@@ -154,9 +154,33 @@ export function computeScenario(
   const perPersonGst = Array(pax).fill(0) as number[];
   const perPersonTypes: PersonRoomType[][] = Array.from({ length: pax }, () => []);
   let missing = 0;
+  const dynamicDaySet = new Set(draft.dynamic_days ?? []);
+  const dynamicMode = includesAccommodation && (
+    draft.allocation_mode === "dynamic"
+    || draft.routing.some((day) => day.overnight && dynamicDaySet.has(day.day))
+  );
 
+  if (dynamicMode) {
+    const dynamic = dynamicAccommodationBreakdown(draft, opt, d);
+    missing += dynamic.missing;
+    for (let person = 0; person < pax; person++) {
+      perPersonNet[person] = dynamic.net / pax;
+      perPersonGst[person] = dynamic.supplier_gst / pax;
+    }
+    const capacity: Record<DynamicOccupancy, number> = { single: 1, double: 2, triple: 3, quad: 4 };
+    draft.routing.filter((day) => day.overnight && (draft.allocation_mode === "dynamic" || dynamicDaySet.has(day.day))).forEach((day) => {
+      let person = 0;
+      (opt.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
+        const count = Math.max(0, allocation.rooms) * capacity[allocation.occupancy];
+        for (let slot = 0; slot < count && person < pax; slot++, person++) {
+          perPersonTypes[person].push(allocation.occupancy);
+        }
+      });
+    });
+  }
   if (includesAccommodation) draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
+    if (dynamicMode && (draft.allocation_mode === "dynamic" || dynamicDaySet.has(day.day))) return;
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     if (!sel) { missing++; return; }
     const date = day.date || addDaysISO(draft.start_date, i);
@@ -208,13 +232,16 @@ export function computeScenario(
     const meals_pp = share(meals_total);
     const land_pp = share(transport_total + guide_total + entrances_total)
       + activities_per_person + misc_per_person;
+    const guide_pp = share(guide_total);
+    const other_land_pp = land_pp - guide_pp;
     const addons_pp = land_pp + meals_pp;
     const subtotal = hotel_total + addons_pp;
     // Land Part markup/GST and Hotels & Meals markup/GST are computed apart.
     const landMarkupAmt = land_pp * landMk;
     const hotelMarkupAmt = (hotel_total + meals_pp) * hotelMk;
     const markup = landMarkupAmt + hotelMarkupAmt;
-    const gst5 = (land_pp + landMarkupAmt) * landGs
+    const gst5 = (other_land_pp + other_land_pp * landMk) * landGs
+      + (guide_pp + guide_pp * landMk) * 0.05
       + (hotel_total + meals_pp + hotelMarkupAmt) * hotelGs;
     return {
       person_id: p + 1,

@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Card } from "@/components/ui/card";
-import { MarkupGstSettings } from "../MarkupGstSettings";
 import { CostingSheet } from "../CostingSheet";
 import { ScenarioComparison } from "../ScenarioComparison";
 import { useDB } from "@/lib/mock-store";
@@ -74,8 +73,6 @@ export function Step16({ draft, set }: StepProps) {
           vehicle combination independently at the Query's exact pax or requested range.
         </p>
       </div>
-
-      <MarkupGstSettings draft={draft} set={set} />
 
       {draft.commercial_mode !== "transport_only" && <Card className="border-primary/20 bg-primary/[0.04] p-4">
         <div className="text-sm font-semibold text-primary">Accommodation options in this quote</div>

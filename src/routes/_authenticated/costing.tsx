@@ -137,6 +137,9 @@ import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { Step17 } from "@/components/quotation/steps/StepFinal";
 
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
+import { MarkupGstSettings } from "@/components/quotation/MarkupGstSettings";
+import { QUERY_FOR_OPTIONS, normalizeQueryFor, type QueryFor } from "@/lib/query-for";
+import { mapQueryToQuotationTravellers } from "@/lib/wizard/query-quotation-map";
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
@@ -150,18 +153,19 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // ============================================================
 // Step definitions — Room Allocation now lives inside Hotels → 15 steps
 // ============================================================
-const TOTAL_STEPS = 10;
+const TOTAL_STEPS = 11;
 const STEPS: { n: number; label: string; subs?: string[] }[] = [
   { n: 1, label: "Type" },
   { n: 2, label: "Who" },
   { n: 3, label: "Trip Basics" },
   { n: 4, label: "Program" },
   { n: 5, label: "Routing" },
-  { n: 6, label: "Land Part", subs: ["Activity", "Guide", "Entrances", "Misc", "Transport"] },
-  { n: 7, label: "Accommodation Part", subs: ["Hotels", "Meals"] },
-  { n: 8, label: "Costing" },
-  { n: 9, label: "Optional Supplements" },
-  { n: 10, label: "Final Review" },
+  { n: 6, label: "Commercial Setup" },
+  { n: 7, label: "Land Part", subs: ["Transport", "Miscellaneous", "Entrances", "Guides", "Activities / Experiences"] },
+  { n: 8, label: "Accommodation Part", subs: ["Hotels", "Meals"] },
+  { n: 9, label: "Costing" },
+  { n: 10, label: "Optional Supplements" },
+  { n: 11, label: "Final Review" },
 ];
 
 const FLOW_GROUPS = [
@@ -183,12 +187,12 @@ const FLOW_GROUPS = [
   {
     label: "Services & Stay",
     description: "Land services, hotels and meals",
-    steps: [6, 7],
+    steps: [6, 7, 8],
   },
   {
     label: "Review & Generate",
     description: "Costing, supplements and controlled generation",
-    steps: [8, 9, 10],
+    steps: [9, 10, 11],
   },
 ] as const;
 
@@ -224,7 +228,7 @@ function ensureProgramInMaster(
 ): QuoteDraft {
   const saveCustomizedCopy = draft.program_mode === "existing" && draft.save_program_as_new;
   const shouldCreate = draft.program_mode === "new" || saveCustomizedCopy;
-  const targetName = (saveCustomizedCopy ? draft.new_program_name : draft.program_name)?.trim();
+  const targetName = (saveCustomizedCopy || draft.program_mode === "new" ? draft.new_program_name : draft.program_name)?.trim();
   if (!shouldCreate || !targetName) return draft;
   const requestedCode = (
     (saveCustomizedCopy ? draft.new_program_code : draft.program_code) || nextProgramCode()
@@ -404,12 +408,23 @@ const INTERNATIONAL_CITIES = [
 // ============================================================
 function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
   if (!draft.linked_query_id) return draft;
+  // A persisted explicit mode is authoritative; do not overwrite a user's
+  // deliberate Exact selection from the linked Query during reload.
+  if (draft.pax_mode === "exact") return draft;
+  const validRangeBounds =
+    draft.pax_mode === "range"
+    && Number.isInteger(draft.pax_min)
+    && Number.isInteger(draft.pax_max)
+    && (draft.pax_min ?? 0) >= 1
+    && (draft.pax_max ?? 0) >= (draft.pax_min ?? 0);
+  const existingRange = draft.pax_range && draft.pax_range !== "auto" ? draft.pax_range.trim() : "";
+  const defaultBoundsPlaceholder = draft.pax_min === 1 && draft.pax_max === 40 && !existingRange;
+  if (validRangeBounds && !defaultBoundsPlaceholder) return draft;
   const linkedQuery = getCrmQuery(draft.linked_query_id);
   if (!linkedQuery) return draft;
   const range = getQueryPricingPaxRange(linkedQuery);
   if (!range) return draft;
 
-  const existingRange = draft.pax_range && draft.pax_range !== "auto" ? draft.pax_range.trim() : "";
   if (existingRange) return draft;
 
   const nextRange = `${range.min}-${range.max}`;
@@ -419,6 +434,7 @@ function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
 
   return {
     ...draft,
+    pax_mode: "range",
     pax_min: range.min,
     pax_max: range.max,
     pax_range: nextRange,
@@ -454,10 +470,13 @@ function WizardPage() {
         const isB2B = /b2b|partner|agent/i.test(`${query.lead_source} ${query.market}`);
         const isGroup = /git|group/i.test(`${query.enquiry_type} ${query.travel_type}`);
         const linkedRange = getQueryPricingPaxRange(query);
+        const travellerBasics = mapQueryToQuotationTravellers(query);
         const nextDraft: QuoteDraft = {
           ...next,
           linked_query_id: query.query_id,
           linked_query_name: query.customer,
+          query_for: normalizeQueryFor(query.requirement),
+          commercial_mode: normalizeQueryFor(query.requirement) === "Accommodation Part" ? "accommodation_only" : normalizeQueryFor(query.requirement) === "Land Part" ? "transport_only" : "package",
           query_type: (isB2B ? "B2B" : "B2C") as QueryType,
           tour_type: isGroup ? "GIT" : "FIT",
           agent: isB2B
@@ -483,14 +502,14 @@ function WizardPage() {
           program_id: query.program_id,
           program_code: query.program_id,
           program_name: query.program_name || query.destination,
-          adults: query.adults || query.pax || next.adults,
-          pax_min: linkedRange?.min ?? query.min_pax ?? undefined,
-          pax_max: linkedRange?.max ?? query.max_pax ?? undefined,
+          ...travellerBasics,
+          pax_min: linkedRange?.min ?? travellerBasics.pax_min,
+          pax_max: linkedRange?.max ?? travellerBasics.pax_max,
           pax_range: linkedRange ? `${linkedRange.min}-${linkedRange.max}` : "auto",
           departure_city: query.tour_start_city || next.departure_city,
           tour_start_city: query.tour_start_city || next.tour_start_city,
           tour_end_city: query.tour_end_city || next.tour_end_city,
-          children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
+          pax_mode: linkedRange ? "range" : travellerBasics.pax_mode,
           traveler_type:
             query.traveler_type ?? (/inbound/i.test(query.market) ? "foreign" : "indian"),
         };
@@ -1036,35 +1055,35 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
 function validate(d: QuoteDraft, step: number): boolean {
   switch (step) {
     case 1:
-      return d.query_type !== null && !!d.linked_query_id;
+      return d.query_type !== null;
     case 2:
       if (d.query_type === "B2B") return !!d.agent.agent_id;
       if (d.query_type === "B2C") return !!d.guest.name;
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
     case 3: {
-      const paxOk =
-        d.query_type === "Brochure"
-          ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
-          : d.adults + d.ss + d.children.length >= 1;
+      const paxOk = d.pax_mode === "range"
+        ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
+        : d.adults + d.ss + d.children.length >= 1 && d.children.every((child) => child.age !== undefined && child.age >= 0 && child.age <= 17);
       if (!paxOk) return false;
       if (!d.tour_start_city && !d.departure_city) return false;
       if (!d.tour_end_city) return false;
       if (d.nights < 1) return false;
       if (d.query_type === "Brochure")
         return !!d.brochure_validity_from && !!d.brochure_validity_till;
+      if (!d.query_for) return false;
       if (d.has_dates === false) return true;
       return !!d.start_date;
     }
     case 4:
-      return d.program_mode === "existing" ? !!d.program_id : !!d.program_name;
+      return d.program_mode === "existing" ? !!d.program_id : d.categories.length > 0;
     case 5: {
       // Routing
       const overnightRows = d.routing.filter((r) => r.overnight);
       if (overnightRows.length === 0) return false;
       return overnightRows.some((r) => !!r.city_id);
     }
-    case 7: {
+    case 8: {
       // Accommodation Part — Hotels
       const overnightCities = d.routing
         .filter((r) => r.overnight && r.city_id)
@@ -1109,32 +1128,34 @@ function StepContent({
         return <Step4 draft={draft} set={set} />;
       case 5:
         return <Step9 draft={draft} set={set} />; // Routing
-      case 6: {
+      case 6:
+        return <MarkupGstSettings draft={draft} set={set} />;
+      case 7: {
         // Land Part
         switch (sub) {
           case 0:
-            return <Step11 draft={draft} set={set} />; // Activities
+            return <Step10 draft={draft} set={set} />; // Transport
           case 1:
-            return <Step13 draft={draft} set={set} />; // Guide
+            return <Step14 draft={draft} set={set} />; // Miscellaneous
           case 2:
             return <Step12 draft={draft} set={set} />; // Entrances
           case 3:
-            return <Step14 draft={draft} set={set} />; // Misc
+            return <Step13 draft={draft} set={set} />; // Guides
           default:
-            return <Step10 draft={draft} set={set} />; // Transport
+            return <Step11 draft={draft} set={set} />; // Activities
         }
       }
-      case 7: // Accommodation Part
+      case 8: // Accommodation Part
         return sub === 1 ? (
           <StepMeals draft={draft} set={set} />
         ) : (
           <Step15 draft={draft} set={set} />
         );
-      case 8:
-        return <Step16 draft={draft} set={set} />; // Costing
       case 9:
-        return <Step18 draft={draft} set={set} />; // Optional supplements
+        return <Step16 draft={draft} set={set} />; // Costing
       case 10:
+        return <Step18 draft={draft} set={set} />; // Optional supplements
+      case 11:
         return <Step17 draft={draft} set={set} />; // Internal final review
       default:
         return null;
@@ -1144,15 +1165,15 @@ function StepContent({
   if (!subs) return inner;
 
   const subCounts =
-    step === 6
+    step === 7
       ? [
-          draft.activities.length,
-          draft.guides.length,
-          draft.entrances.length,
-          draft.misc.length,
           draft.transport.length,
+          draft.misc.length,
+          draft.entrances.length,
+          draft.guides.length,
+          draft.activities.length,
         ]
-      : step === 7
+      : step === 8
         ? [
             draft.hotel_options.filter((option) => option.selections.length > 0).length,
             Object.keys(draft.meal_selections ?? {}).length,
@@ -1163,7 +1184,7 @@ function StepContent({
     <div className="space-y-5">
       <div className="rounded-xl border bg-muted/20 p-2">
         <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-          {step === 6 ? "Land service sections" : "Accommodation sections"}
+          {step === 7 ? "Land service sections" : "Accommodation sections"}
         </div>
         <div className="grid gap-1.5 sm:grid-cols-2 lg:flex lg:flex-wrap">
           {subs.map((label, i) => {
@@ -1232,6 +1253,7 @@ function Step1({ draft, set }: StepProps) {
       start && end && Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())
         ? Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000))
         : draft.nights;
+    const travellerBasics = mapQueryToQuotationTravellers(query);
     set({
       linked_query_id: query.query_id,
       linked_query_name: query.customer,
@@ -1256,14 +1278,13 @@ function Step1({ draft, set }: StepProps) {
       home_city: query.query_base_city || draft.home_city,
       start_date: query.travel_start || draft.start_date,
       nights,
-      adults: query.adults || query.pax || draft.adults,
-      children: Array.from({ length: Math.max(0, query.children || 0) }, () => ({ age: 8 })),
-      pax_min: query.min_pax || undefined,
-      pax_max: query.max_pax || undefined,
+      ...travellerBasics,
       tour_start_city: query.tour_start_city || draft.tour_start_city,
       tour_end_city: query.tour_end_city || draft.tour_end_city,
       departure_city: query.tour_start_city || draft.departure_city,
       program_mode: query.program_id ? "existing" : draft.program_mode,
+      query_for: normalizeQueryFor(query.requirement) || draft.query_for,
+      commercial_mode: normalizeQueryFor(query.requirement) === "Accommodation Part" ? "accommodation_only" : normalizeQueryFor(query.requirement) === "Land Part" ? "transport_only" : "package",
       program_id: query.program_id || draft.program_id,
       program_code: query.program_id || draft.program_code,
       program_name: query.program_name || query.destination || draft.program_name,
@@ -1276,16 +1297,17 @@ function Step1({ draft, set }: StepProps) {
       <Card className="border-primary/20 bg-primary/[0.03] p-4">
         <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
           <div>
-            <div className="text-sm font-semibold">Authoritative Query</div>
+            <div className="text-sm font-semibold">Link an existing Query <span className="font-normal text-muted-foreground">(optional)</span></div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Every generated quotation must belong to one Query.
+              Leave this blank for a standalone quotation. Linked Queries continue to auto-fill the quotation.
             </p>
           </div>
-          <Select value={draft.linked_query_id || ""} onValueChange={linkQuery}>
+          <Select value={draft.linked_query_id || "__none__"} onValueChange={(value) => value === "__none__" ? set({ linked_query_id: undefined, linked_query_name: undefined, query_for: undefined }) : linkQuery(value)}>
             <SelectTrigger className="bg-background">
-              <SelectValue placeholder="Select Query number, customer or programme" />
+              <SelectValue placeholder="No Query linked" />
             </SelectTrigger>
             <SelectContent className="max-h-[360px]">
+              <SelectItem value="__none__">No Query — standalone quotation</SelectItem>
               {queries.map((query) => (
                 <SelectItem key={query.query_id} value={query.query_id}>
                   {query.query_id} · {query.customer} · {query.program_name || query.destination || "Programme pending"}
@@ -1664,7 +1686,11 @@ function Step4({ draft, set }: StepProps) {
   const programs = usePrograms();
   const db = useDB();
   const [programSearch, setProgramSearch] = useState("");
-  const [durationFilter, setDurationFilter] = useState("all");
+  const [durationFilter, setDurationFilter] = useState(String(draft.nights));
+
+  useEffect(() => {
+    if (!draft.program_id) setDurationFilter(String(draft.nights));
+  }, [draft.nights, draft.program_id]);
 
   const visiblePrograms = useMemo(() => {
     const term = programSearch.trim().toLowerCase();
@@ -1683,6 +1709,18 @@ function Step4({ draft, set }: StepProps) {
   const selectedProgram = programs.find((p) => p.id === draft.program_id);
 
   const applyProgram = (id: string) => {
+    if (id === "__no_program__") {
+      set({
+        program_id: undefined,
+        program_code: "",
+        program_name: "",
+        program_mode: "existing",
+        save_program_as_new: false,
+        new_program_code: "",
+        new_program_name: "",
+      });
+      return;
+    }
     const p = programs.find((x) => x.id === id);
     if (!p) return;
     const nameToId = (name: string | null) => {
@@ -1730,7 +1768,7 @@ function Step4({ draft, set }: StepProps) {
       inclusions: p.inclusions?.length ? p.inclusions : draft.inclusions,
       exclusions: p.exclusions?.length ? p.exclusions : draft.exclusions,
     });
-    toast.success(`Auto-filled from "${p.name}" — all fields remain editable.`);
+    toast.success(`Loaded "${p.name}" — all fields remain editable.`);
   };
 
   const toggleCategory = (tag: string) => {
@@ -1784,6 +1822,7 @@ function Step4({ draft, set }: StepProps) {
                     <SelectValue placeholder="Choose program…" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__no_program__">No Program / Continue Without Existing Program</SelectItem>
                     {visiblePrograms.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.code} · {p.name} · {p.nights}N/{p.days}D ·{" "}
@@ -1921,51 +1960,6 @@ function Step4({ draft, set }: StepProps) {
                   </Card>
                 )}
 
-                {selectedProgram && (
-                  <div className="rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] p-4">
-                    <label className="flex cursor-pointer items-start gap-3">
-                      <Checkbox
-                        checked={!!draft.save_program_as_new}
-                        onCheckedChange={(checked) => set({
-                          save_program_as_new: checked === true,
-                          new_program_name: checked === true
-                            ? draft.new_program_name || `${draft.program_name} — Customized`
-                            : draft.new_program_name,
-                        })}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="block text-sm font-semibold">
-                          Save the customized routing as a new Program
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          The selected master remains unchanged. The working itinerary always stays with this quotation.
-                        </span>
-                      </span>
-                    </label>
-                    {draft.save_program_as_new && (
-                      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
-                        <div>
-                          <Label>New Program Name</Label>
-                          <Input
-                            value={draft.new_program_name || ""}
-                            onChange={(event) => set({ new_program_name: event.target.value })}
-                            placeholder="Name the customized program"
-                          />
-                        </div>
-                        <div>
-                          <Label>New Program Code</Label>
-                          <Input
-                            value={draft.new_program_code || ""}
-                            onChange={(event) => set({ new_program_code: event.target.value.toUpperCase() })}
-                            placeholder="Auto-generated"
-                            className="font-mono"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1981,30 +1975,6 @@ function Step4({ draft, set }: StepProps) {
             {draft.program_mode === "new" && (
               <div className="mt-2 space-y-4">
                 <div>
-                  <Label>
-                    Program Code{" "}
-                    <span className="font-normal text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    placeholder="Auto-generated when quotation is saved"
-                    value={draft.program_code || ""}
-                    onChange={(e) =>
-                      set({ program_code: e.target.value.toUpperCase(), program_id: undefined })
-                    }
-                    className="mt-1 font-mono"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Leave blank for the next MPCUS code, or enter an approved internal code.
-                  </p>
-                </div>
-                <div>
-                  <Label>Program Name</Label>
-                  <Input
-                    placeholder="e.g. Bhopal-Sanchi-Bhimbetka Heritage Tour"
-                    value={draft.program_name}
-                    onChange={(e) => set({ program_name: e.target.value })}
-                    className="mt-1"
-                  />
                 </div>
                 <div>
                   <Label>Program Category</Label>
@@ -2046,12 +2016,27 @@ function Step4({ draft, set }: StepProps) {
 // ============================================================
 function Step9({ draft, set }: StepProps) {
   const d = useDB();
+  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+  const normalizeTourRows = (rows: RoutingDay[]) =>
+    rows.map((row, index) => ({
+      ...row,
+      is_day_zero: false,
+      day: index + 1,
+      date: addDaysISO(draft.start_date, index),
+      overnight: index < rows.length - 1,
+      from_city:
+        index > 0 && rows[index - 1]?.city_id
+          ? cityName(rows[index - 1].city_id)
+          : row.from_city,
+    }));
   useEffect(() => {
     const need = draft.nights + 1;
-    if (draft.routing.length !== need) {
+    const dayZero = draft.routing.find((row) => row.is_day_zero || row.day === 0);
+    const tourRows = draft.routing.filter((row) => !(row.is_day_zero || row.day === 0));
+    if (tourRows.length !== need || draft.routing.some((row, index) => !row.is_day_zero && row.day !== index + 1 - (dayZero ? 1 : 0))) {
       const rows: RoutingDay[] = [];
       for (let i = 0; i < need; i++) {
-        const existing = draft.routing[i];
+        const existing = tourRows[i];
         rows.push(
           existing || {
             day: i + 1,
@@ -2081,22 +2066,75 @@ function Step9({ draft, set }: StepProps) {
           last.city_id = ending.id;
         }
       }
-      writeDraft({ ...draft, routing: rows });
+      const normalized = normalizeTourRows(rows);
+      writeDraft({ ...draft, routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized });
     }
   }, [draft.nights, draft.start_date, draft.tour_start_city, draft.tour_end_city]);
 
   const updateRow = (i: number, patch: Partial<RoutingDay>) => {
     const next = [...draft.routing];
     next[i] = { ...next[i], ...patch };
+    if (patch.city_id !== undefined) {
+      next[i].overnight = Boolean(patch.city_id);
+      if (i + 1 < next.length && patch.city_id) {
+        next[i + 1] = { ...next[i + 1], from_city: cityName(patch.city_id) };
+      }
+    }
     set({ routing: next });
   };
 
+  const insertDay = (tourIndex: number) => {
+    const dayZero = draft.routing.find((row) => row.is_day_zero || row.day === 0);
+    const tourRows = draft.routing.filter((row) => !(row.is_day_zero || row.day === 0));
+    const before = tourRows[tourIndex - 1];
+    const next = [...tourRows];
+    next.splice(tourIndex, 0, {
+      day: 0,
+      date: addDaysISO(draft.start_date, tourIndex),
+      city_id: "",
+      from_city: before ? (cityName(before.city_id) || before.to_city || "") : "",
+      to_city: "",
+      to_city_ids: [],
+      program: "",
+      program_mode: "text",
+      overnight: tourIndex < next.length - 1,
+    });
+    const normalized = normalizeTourRows(next);
+    set({ routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized, nights: Math.max(1, normalized.length - 1) });
+  };
+
+  const addDayZero = () => {
+    if (draft.routing.some((row) => row.is_day_zero || row.day === 0)) return;
+    set({ routing: [{ day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), city_id: "", to_city_ids: [], program: "", program_mode: "text", overnight: true }, ...draft.routing] });
+  };
+
+  const deleteDay = (index: number) => {
+    const row = draft.routing[index];
+    const populated = Boolean(row.city_id || row.to_city || row.from_city || row.program || row.travel_by || row.day_name);
+    if (populated && !window.confirm(`Delete Day ${row.day}?`)) return;
+    if (row.is_day_zero || row.day === 0) {
+      set({ routing: draft.routing.filter((_, itemIndex) => itemIndex !== index) });
+      return;
+    }
+    const dayZero = draft.routing.find((item) => item.is_day_zero || item.day === 0);
+    const remaining = draft.routing.filter((item, itemIndex) => itemIndex !== index && !(item.is_day_zero || item.day === 0));
+    const normalized = normalizeTourRows(remaining);
+    set({ routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized, nights: Math.max(1, normalized.length - 1) });
+  };
+
   const OVERNIGHT_NONE = "__none__";
-  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
+      <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" size="sm" onClick={addDayZero} disabled={draft.routing.some((row) => row.is_day_zero || row.day === 0)}>
+        <Plus className="mr-1 h-4 w-4" /> Add Day 0
+      </Button>
+      <Button type="button" variant="outline" size="sm" onClick={() => insertDay(0)}>
+        <Plus className="mr-1 h-4 w-4" /> Insert before Day 1
+      </Button>
+      </div>
       <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
         <table className="w-full text-sm min-w-[900px] border-collapse">
           <thead className="bg-[#F3F4F6] text-[11px] uppercase text-muted-foreground tracking-wide">
@@ -2109,6 +2147,7 @@ function Step9({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[120px]">Overnight</th>
               <th className="text-left p-2 w-[110px]">Travel By</th>
               <th className="text-left p-2 w-[200px]">Tour Title</th>
+              <th className="text-right p-2 w-[82px]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -2164,7 +2203,7 @@ function Step9({ draft, set }: StepProps) {
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {d.cities.map((c) => (
+                              {[...d.cities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((c) => (
                                 <SelectItem key={c.id} value={c.id}>
                                   {c.name}
                                 </SelectItem>
@@ -2183,7 +2222,9 @@ function Step9({ draft, set }: StepProps) {
                             : r.to_city_id
                               ? [r.to_city_id]
                               : [];
-                        const available = d.cities.filter((c) => !selected.includes(c.id));
+                        const available = d.cities
+                          .filter((c) => !selected.includes(c.id))
+                          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
                         const addCity = (v: string) => {
                           const next = Array.from(new Set([...selected, v]));
                           const primary = next[0];
@@ -2280,7 +2321,7 @@ function Step9({ draft, set }: StepProps) {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
-                            {d.cities.map((c) => (
+                            {[...d.cities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((c) => (
                               <SelectItem key={c.id} value={c.id}>
                                 {c.name}
                               </SelectItem>
@@ -2296,6 +2337,8 @@ function Step9({ draft, set }: StepProps) {
                           onValueChange={(v) =>
                             updateRow(i, {
                               travel_by: v as RoutingDay["travel_by"],
+                              // A mode owns its own details: never reinterpret hidden train data as a flight/bus value.
+                              transport_details: {},
                               transport_expanded: true,
                             })
                           }
@@ -2309,10 +2352,6 @@ function Step9({ draft, set }: StepProps) {
                             <SelectItem value="Flight">Flight</SelectItem>
                             <SelectItem value="Bus">Bus</SelectItem>
                             <SelectItem value="Self Drive">Self Drive</SelectItem>
-                            <SelectItem value="Helicopter">Helicopter</SelectItem>
-                            <SelectItem value="Boat">Boat</SelectItem>
-                            <SelectItem value="Walk">Walk</SelectItem>
-                            <SelectItem value="Custom">Custom</SelectItem>
                           </SelectContent>
                         </Select>
                         {r.travel_by && (
@@ -2440,11 +2479,17 @@ function Step9({ draft, set }: StepProps) {
                         );
                       })()}
                     </td>
+                    <td className="p-2 align-middle">
+                      <div className="flex justify-end gap-1">
+                        {!r.is_day_zero && <button type="button" title={`Add day after Day ${r.day}`} onClick={() => insertDay(draft.routing.filter((row) => !(row.is_day_zero || row.day === 0)).findIndex((row) => row === r) + 1)} className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-muted"><Plus className="h-3.5 w-3.5" /></button>}
+                        <button type="button" title={`Delete Day ${r.day}`} onClick={() => deleteDay(i)} className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </td>
                   </tr>
 
                   {r.travel_by && r.transport_expanded && (
                     <tr key={`${i}-details`} className="border-b border-[#E5E7EB] bg-muted/20">
-                      <td colSpan={8} className="p-3">
+                      <td colSpan={9} className="p-3">
                         <DayTransportPanel
                           mode={r.travel_by}
                           details={r.transport_details || {}}
@@ -2463,9 +2508,23 @@ function Step9({ draft, set }: StepProps) {
                 </React.Fragment>
               );
             })}
+            <tr><td colSpan={9} className="p-0 text-center"><button type="button" className="w-full py-1 text-xs text-primary hover:bg-primary/5" onClick={() => insertDay(draft.routing.filter((row) => !(row.is_day_zero || row.day === 0)).length)}>+ Add day after final day</button></td></tr>
           </tbody>
         </table>
       </div>
+      <Card className="border-dashed border-primary/30 bg-primary/[0.03] p-4">
+        <label className="flex cursor-pointer items-start gap-3">
+          <Checkbox checked={!!draft.save_program_as_new} onCheckedChange={(checked) => set({
+            save_program_as_new: checked === true,
+            new_program_name: checked === true ? draft.new_program_name || `${draft.program_name || "Customized routing"}` : draft.new_program_name,
+          })} className="mt-0.5" />
+          <span><span className="block text-sm font-semibold">Save the customized routing as a new Program</span><span className="block text-xs text-muted-foreground">The selected master program is never overwritten.</span></span>
+        </label>
+        {draft.save_program_as_new && <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
+          <div><Label>New Program Name</Label><Input value={draft.new_program_name || ""} onChange={(event) => set({ new_program_name: event.target.value })} placeholder="Name the customized program" /></div>
+          <div><Label>New Program Code</Label><Input value={draft.new_program_code || ""} onChange={(event) => set({ new_program_code: event.target.value.toUpperCase() })} placeholder="Auto-generated" className="font-mono" /></div>
+        </div>}
+      </Card>
     </div>
   );
 }
@@ -2497,14 +2556,6 @@ function DayTransportPanel({
   if (mode === "Flight") {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <F label="Flight Class">
-          <Input
-            className={cls}
-            value={details.flight_class || ""}
-            onChange={(e) => onChange({ flight_class: e.target.value })}
-            placeholder="Economy / Business"
-          />
-        </F>
         <F label="Airline">
           <Input
             className={cls}
@@ -2521,14 +2572,6 @@ function DayTransportPanel({
             placeholder="6E-214"
           />
         </F>
-        <F label="PNR / Ref">
-          <Input
-            className={cls}
-            value={details.remarks || ""}
-            onChange={(e) => onChange({ remarks: e.target.value })}
-            placeholder="Optional"
-          />
-        </F>
         <F label="From City">
           <Input
             className={cls}
@@ -2543,28 +2586,12 @@ function DayTransportPanel({
             onChange={(e) => onChange({ to_city: e.target.value })}
           />
         </F>
-        <F label="Departure Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.departure_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ departure_date: e.target.value })}
-          />
-        </F>
         <F label="Departure Time">
           <Input
             type="time"
             className={cls}
             value={details.departure_time || ""}
             onChange={(e) => onChange({ departure_time: e.target.value })}
-          />
-        </F>
-        <F label="Arrival Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.arrival_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ arrival_date: e.target.value })}
           />
         </F>
         <F label="Arrival Time">
@@ -2574,6 +2601,9 @@ function DayTransportPanel({
             value={details.arrival_time || ""}
             onChange={(e) => onChange({ arrival_time: e.target.value })}
           />
+        </F>
+        <F label="Flight Type">
+          <div className="flex h-8 items-center gap-2"><Switch checked={!!details.is_overnight} onCheckedChange={(checked) => onChange({ is_overnight: checked })} /><span className="text-xs text-muted-foreground">{details.is_overnight ? "Overnight Flight" : "Same Day Flight"}</span></div>
         </F>
       </div>
     );
@@ -2598,21 +2628,6 @@ function DayTransportPanel({
             placeholder="20171"
           />
         </F>
-        <F label="Coach / Class">
-          <Input
-            className={cls}
-            value={details.coach_class || ""}
-            onChange={(e) => onChange({ coach_class: e.target.value })}
-            placeholder="CC / 3A / SL"
-          />
-        </F>
-        <F label="Remarks">
-          <Input
-            className={cls}
-            value={details.remarks || ""}
-            onChange={(e) => onChange({ remarks: e.target.value })}
-          />
-        </F>
         <F label="Boarding Station">
           <Input
             className={cls}
@@ -2627,28 +2642,12 @@ function DayTransportPanel({
             onChange={(e) => onChange({ destination_station: e.target.value })}
           />
         </F>
-        <F label="Departure Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.departure_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ departure_date: e.target.value })}
-          />
-        </F>
         <F label="Departure Time">
           <Input
             type="time"
             className={cls}
             value={details.departure_time || ""}
             onChange={(e) => onChange({ departure_time: e.target.value })}
-          />
-        </F>
-        <F label="Arrival Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.arrival_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ arrival_date: e.target.value })}
           />
         </F>
         <F label="Arrival Time">
@@ -2677,14 +2676,6 @@ function DayTransportPanel({
   if (mode === "Bus") {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <F label="Bus / Operator">
-          <Input
-            className={cls}
-            value={details.bus_name || ""}
-            onChange={(e) => onChange({ bus_name: e.target.value })}
-            placeholder="Operator or bus name"
-          />
-        </F>
         <F label="Bus Number">
           <Input
             className={cls}
@@ -2706,28 +2697,12 @@ function DayTransportPanel({
             onChange={(e) => onChange({ to_city: e.target.value })}
           />
         </F>
-        <F label="Departure Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.departure_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ departure_date: e.target.value })}
-          />
-        </F>
         <F label="Departure Time">
           <Input
             type="time"
             className={cls}
             value={details.departure_time || ""}
             onChange={(e) => onChange({ departure_time: e.target.value })}
-          />
-        </F>
-        <F label="Arrival Date">
-          <Input
-            type="date"
-            className={cls}
-            value={details.arrival_date ?? defaultDate ?? ""}
-            onChange={(e) => onChange({ arrival_date: e.target.value })}
           />
         </F>
         <F label="Arrival Time">
@@ -2749,15 +2724,6 @@ function DayTransportPanel({
             </span>
           </div>
         </F>
-        <div className="md:col-span-3">
-          <F label="Remarks">
-            <Input
-              className={cls}
-              value={details.remarks || ""}
-              onChange={(e) => onChange({ remarks: e.target.value })}
-            />
-          </F>
-        </div>
       </div>
     );
   }
@@ -2765,44 +2731,6 @@ function DayTransportPanel({
   if (mode === "Road") {
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <F label="Vehicle Type">
-          <Input
-            className={cls}
-            value={details.vehicle_type || ""}
-            onChange={(e) => onChange({ vehicle_type: e.target.value })}
-            placeholder="Tempo Traveller"
-          />
-        </F>
-        <F label="Vehicle Name / Model">
-          <Input
-            className={cls}
-            value={details.vehicle_name || ""}
-            onChange={(e) => onChange({ vehicle_name: e.target.value })}
-            placeholder="Innova Crysta"
-          />
-        </F>
-        <F label="Reporting Time">
-          <Input
-            type="time"
-            className={cls}
-            value={details.reporting_time || ""}
-            onChange={(e) => onChange({ reporting_time: e.target.value })}
-          />
-        </F>
-        <F label="Pickup City">
-          <Input
-            className={cls}
-            value={details.pickup_city ?? defaultFrom ?? ""}
-            onChange={(e) => onChange({ pickup_city: e.target.value })}
-          />
-        </F>
-        <F label="Drop City">
-          <Input
-            className={cls}
-            value={details.drop_city ?? defaultTo ?? ""}
-            onChange={(e) => onChange({ drop_city: e.target.value })}
-          />
-        </F>
         <F label="Distance (km)">
           <Input
             type="number"
@@ -2834,28 +2762,6 @@ function DayTransportPanel({
   if (mode === "Self Drive") {
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <F label="Vehicle Category">
-          <Input
-            className={cls}
-            value={details.vehicle_category || ""}
-            onChange={(e) => onChange({ vehicle_category: e.target.value })}
-            placeholder="SUV / Hatchback"
-          />
-        </F>
-        <F label="Pickup Location">
-          <Input
-            className={cls}
-            value={details.pickup_location ?? defaultFrom ?? ""}
-            onChange={(e) => onChange({ pickup_location: e.target.value })}
-          />
-        </F>
-        <F label="Drop Location">
-          <Input
-            className={cls}
-            value={details.drop_location ?? defaultTo ?? ""}
-            onChange={(e) => onChange({ drop_location: e.target.value })}
-          />
-        </F>
         <F label="Distance (km)">
           <Input
             type="number"
@@ -2871,22 +2777,6 @@ function DayTransportPanel({
             value={details.travel_time || ""}
             onChange={(e) => onChange({ travel_time: e.target.value })}
             placeholder="e.g. 3 hr 30 min"
-          />
-        </F>
-        <F label="Pickup Time">
-          <Input
-            type="time"
-            className={cls}
-            value={details.pickup_time || ""}
-            onChange={(e) => onChange({ pickup_time: e.target.value })}
-          />
-        </F>
-        <F label="Return Time">
-          <Input
-            type="time"
-            className={cls}
-            value={details.return_time || ""}
-            onChange={(e) => onChange({ return_time: e.target.value })}
           />
         </F>
         <F label="Remarks">
@@ -3433,6 +3323,16 @@ function SummaryField({ label, value, detail }: { label: string; value: string; 
 function StepTripBasics({ draft, set }: StepProps) {
   return (
     <div className="space-y-8">
+      <Card className="border-primary/20 bg-primary/[0.03] p-4">
+        <Label>Query For</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Linked Queries are pre-filled; standalone quotations choose the commercial bucket here.
+        </p>
+        <Select value={draft.query_for || ""} onValueChange={(value) => set({ query_for: value as QueryFor, commercial_mode: value === "Accommodation Part" ? "accommodation_only" : value === "Land Part" ? "transport_only" : "package", ...(value === "Package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}) })}>
+          <SelectTrigger className="mt-2 max-w-sm"><SelectValue placeholder="Select Query For" /></SelectTrigger>
+          <SelectContent>{QUERY_FOR_OPTIONS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
+        </Select>
+      </Card>
       <StepPaxType draft={draft} set={set} />
       <div className="border-t pt-6">
         <StepDeparture draft={draft} set={set} />
@@ -3497,44 +3397,13 @@ function StepPaxType({ draft, set }: StepProps) {
   }
 
   // B2B / B2C – custom range override with local state
-  const currentOverride = draft.pax_range;
-  const isAuto = currentOverride === "auto" || !currentOverride;
-
-  const [localMin, setLocalMin] = useState<string>("");
-  const [localMax, setLocalMax] = useState<string>("");
-
-  useEffect(() => {
-    if (isAuto) {
-      setLocalMin("");
-      setLocalMax("");
-    } else {
-      const [min, max] = currentOverride.split("-").map(Number);
-      setLocalMin(min?.toString() ?? "");
-      setLocalMax(max?.toString() ?? "");
-    }
-  }, [currentOverride, isAuto]);
-
-  const applyRangeOverride = () => {
-    const min = parseInt(localMin);
-    const max = parseInt(localMax);
-    if (!isNaN(min) && !isNaN(max) && min <= max) {
-      set({ pax_range: `${min}-${max}` as any });
-    } else {
-      set({ pax_range: "auto" });
-    }
-  };
-
-  const resetToAuto = () => {
-    set({ pax_range: "auto" });
-  };
-
-  const isRangeActive = !isAuto;
+  const isRangeActive = draft.pax_mode === "range";
 
   const handleAdultsChange = (v: number) => {
-    set({ adults: v, pax_range: "auto" });
+    set({ adults: v, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
   };
   const handleSSChange = (v: number) => {
-    set({ ss: v, pax_range: "auto" });
+    set({ ss: v, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
   };
   const handleChildrenChange = (v: number) => {
     const cur = draft.children.length;
@@ -3544,7 +3413,32 @@ function StepPaxType({ draft, set }: StepProps) {
     } else {
       newChildren = draft.children.slice(0, Math.max(0, v));
     }
-    set({ children: newChildren, pax_range: "auto" });
+    set({ children: newChildren, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+  };
+
+  const selectExactMode = () => set({ pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+  const selectRangeMode = () => {
+    const min = isRangeActive && Number.isInteger(draft.pax_min) && (draft.pax_min ?? 0) >= 1
+      ? draft.pax_min!
+      : Math.max(1, totPax);
+    const max = isRangeActive && Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min
+      ? draft.pax_max!
+      : min;
+    set({ pax_mode: "range", pax_min: min, pax_max: max, pax_range: `${min}-${max}` });
+  };
+
+  const updateRangeMin = (value: string) => {
+    const min = parseInt(value, 10);
+    if (!Number.isInteger(min) || min < 1) return;
+    const max = Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min ? draft.pax_max! : min;
+    set({ pax_mode: "range", pax_min: min, pax_max: max, pax_range: `${min}-${max}` });
+  };
+
+  const updateRangeMax = (value: string) => {
+    const max = parseInt(value, 10);
+    const min = Number.isInteger(draft.pax_min) && (draft.pax_min ?? 0) >= 1 ? draft.pax_min! : 1;
+    if (!Number.isInteger(max) || max < min) return;
+    set({ pax_mode: "range", pax_min: min, pax_max: max, pax_range: `${min}-${max}` });
   };
 
   return (
@@ -3595,8 +3489,8 @@ function StepPaxType({ draft, set }: StepProps) {
               disabled={isRangeActive}
               onChange={(e) => {
                 const next = [...draft.children];
-                next[i] = { age: parseInt(e.target.value) || 0 };
-                set({ children: next, pax_range: "auto" });
+                next[i] = { age: e.target.value === "" ? undefined : parseInt(e.target.value) };
+                  set({ children: next, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
               }}
             />
             <span className="text-xs text-muted-foreground">years</span>
@@ -3627,18 +3521,21 @@ function StepPaxType({ draft, set }: StepProps) {
         </div>
 
         <div className="pt-2 border-t space-y-3">
-          <Label className="text-xs">Pax Range (pricing slab override)</Label>
+          <Label className="text-xs">Traveller input mode</Label>
           <div className="flex items-center gap-3">
+            <Button variant={!isRangeActive ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={selectExactMode}>Exact Travellers</Button>
+            <Button variant={isRangeActive ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={selectRangeMode}>Pax Range</Button>
+          </div>
+          {isRangeActive && <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
               <Label className="text-xs">Min</Label>
               <Input
                 type="number"
                 min={1}
                 className="w-20"
-                value={localMin}
-                onChange={(e) => setLocalMin(e.target.value)}
+                value={isRangeActive ? draft.pax_min ?? "" : ""}
+                onChange={(e) => updateRangeMin(e.target.value)}
                 placeholder="min"
-                onBlur={applyRangeOverride}
               />
             </div>
             <span className="text-muted-foreground">–</span>
@@ -3646,28 +3543,25 @@ function StepPaxType({ draft, set }: StepProps) {
               <Label className="text-xs">Max</Label>
               <Input
                 type="number"
-                min={1}
+                min={draft.pax_min ?? 1}
                 className="w-20"
-                value={localMax}
-                onChange={(e) => setLocalMax(e.target.value)}
+                value={isRangeActive ? draft.pax_max ?? "" : ""}
+                onChange={(e) => updateRangeMax(e.target.value)}
                 placeholder="max"
-                onBlur={applyRangeOverride}
               />
             </div>
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={resetToAuto}>
-              Use actual pax
-            </Button>
-          </div>
+          </div>}
           <div className="text-[10px] text-muted-foreground">
-            Current pricing pax: {pricingPax}.
-            {!isAuto && (
+            Pricing Pax: {pricingPax}.
+            {isRangeActive && (
               <span>
-                {" "}
-                Using override range <strong>{currentOverride}</strong>.
+                {" "}Costing Range: <strong>{draft.pax_min}–{draft.pax_max} Pax</strong>.
               </span>
             )}
-            {isAuto && <span> Using actual pax.</span>}
-            Guide, activities, misc, transport filters and group hotel room mixes use this slab.
+            {!isRangeActive && <span> Using exact traveller total ({totPax} Pax).</span>}
+            {isRangeActive
+              ? " Pricing Pax supports FIT/GIT and active slab pricing; costing matrices use the full range."
+              : " Costing matrices use the exact traveller total."}
           </div>
         </div>
       </Card>

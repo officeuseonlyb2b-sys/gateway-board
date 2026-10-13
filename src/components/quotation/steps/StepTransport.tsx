@@ -19,7 +19,7 @@ import {
 
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { effectivePaxForPricing, parsePaxRange, transportLineTotal } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, landGst, landMarkup, parsePaxRange, transportLineTotal } from "@/lib/wizard/calc";
 import { uid, type StepProps } from "../shared";
 
 // ============================================================
@@ -29,9 +29,13 @@ import { uid, type StepProps } from "../shared";
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
   const [showAllVehicles, setShowAllVehicles] = useState(false);
-  const [showCapacityPreview, setShowCapacityPreview] = useState(false);
   const requestedPax = Math.max(1, effectivePaxForPricing(draft));
   const requestedRange = parsePaxRange(draft);
+  const commercial = (amount: number) => {
+    const markup = amount * landMarkup(draft);
+    const gst = (amount + markup) * landGst(draft);
+    return { markup, gst, final: amount + markup + gst };
+  };
 
   const cityName = (id: string) =>
     d.cities.find((c) => c.id === id)?.name || "";
@@ -158,52 +162,16 @@ export function Step10({ draft, set }: StepProps) {
     return vehicle?.vehicle_type || "Vehicle";
   };
 
-  // ============================================================
-  // PER PERSON BREAKDOWN
-  // ============================================================
-  //
-  // Show 1–40 pax so large group costing can also be checked.
-  // ============================================================
-
-  const paxRange = showCapacityPreview
-    ? Array.from(
-        { length: Math.max(requestedPax, ...draft.transport.map((line) => {
-          const vehicle = d.travel_options.find((item) => item.id === line.travel_id);
-          return Math.min(45, vehicle?.max_pax ?? vehicle?.capacity_persons ?? requestedPax);
-        })) },
-        (_, index) => index + 1,
-      )
-    : requestedRange
-      ? Array.from({ length: requestedRange.max - requestedRange.min + 1 }, (_, index) => requestedRange.min + index)
-      : [requestedPax];
-
-  const lineTotals = draft.transport.map((transport) =>
-    transportLineTotal(transport)
-  );
-
-  const breakdownData = paxRange.map((paxCount) => {
-    const perVehicle: Record<string, number | undefined> = {};
-
-    draft.transport.forEach((transport, index) => {
-      const vehicle = d.travel_options.find((item) => item.id === transport.travel_id);
-      if (!vehicle || !fitsPax(vehicle, paxCount)) {
-        perVehicle[transport.id] = undefined;
-        return;
-      }
-      const lineTotal = lineTotals[index] || 0;
-
-      const perPerson =
-        paxCount > 0 ? lineTotal / paxCount : 0;
-
-      perVehicle[transport.id] = perPerson;
-
-    });
-
-    return {
-      pax: paxCount,
-      perVehicle,
-    };
-  });
+  const finalVehicleCost = (line: typeof draft.transport[number]) => commercial(transportLineTotal(line)).final;
+  const optionTotal = (option: NonNullable<typeof draft.transport_options>[number]) =>
+    option.vehicles.reduce((sum, vehicle) => {
+      const line = draft.transport.find((item) => item.id === vehicle.transport_line_id);
+      return sum + (line ? finalVehicleCost(line) * Math.max(1, vehicle.quantity) : 0);
+    }, 0);
+  const optionLabel = (option: NonNullable<typeof draft.transport_options>[number]) => option.vehicles.map((vehicle) => {
+    const line = draft.transport.find((item) => item.id === vehicle.transport_line_id);
+    return line ? `${vehicle.quantity} ${vehLabel(line)}` : "Vehicle";
+  }).join(" + ");
 
   // ============================================================
   // RENDER
@@ -793,6 +761,76 @@ export function Step10({ draft, set }: StepProps) {
 
                 </tr>
 
+                <tr className="bg-muted/10 border-b border-[#E5E7EB]">
+                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
+                    Additional Costs
+                  </td>
+                  {draft.transport.map((transport, index) => (
+                    <td key={transport.id} className="p-2 text-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[10px]"
+                        onClick={() => patchLine(index, {
+                          extra_costs: [...(transport.extra_costs ?? []), { id: uid(), name: "", amount: 0 }],
+                        })}
+                      >
+                        <Plus className="mr-1 h-3 w-3" /> Add Cost Row
+                      </Button>
+                    </td>
+                  ))}
+                </tr>
+
+                {draft.transport.flatMap((transport) =>
+                  (transport.extra_costs ?? []).map((row) => (
+                    <tr key={row.id} className="border-b border-[#E5E7EB]">
+                      <td colSpan={2} className="p-2 text-right text-[10px] text-muted-foreground">
+                        Additional Cost · {vehLabel(transport)}
+                      </td>
+                      {draft.transport.map((candidate, index) => (
+                        <td key={candidate.id} className="p-1.5">
+                          {candidate.id === transport.id && (
+                            <div className="flex min-w-[210px] items-center gap-1">
+                              <Input
+                                className="h-7 min-w-0 text-xs"
+                                placeholder="Cost name"
+                                value={row.name}
+                                onChange={(event) => patchLine(index, {
+                                  extra_costs: (candidate.extra_costs ?? []).map((item) =>
+                                    item.id === row.id ? { ...item, name: event.target.value } : item,
+                                  ),
+                                })}
+                              />
+                              <Input
+                                className="h-7 w-24 text-right text-xs"
+                                type="number"
+                                min={0}
+                                placeholder="Amount"
+                                value={row.amount || ""}
+                                onChange={(event) => patchLine(index, {
+                                  extra_costs: (candidate.extra_costs ?? []).map((item) =>
+                                    item.id === row.id ? { ...item, amount: Number(event.target.value) || 0 } : item,
+                                  ),
+                                })}
+                              />
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => patchLine(index, {
+                                  extra_costs: (candidate.extra_costs ?? []).filter((item) => item.id !== row.id),
+                                })}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  )),
+                )}
+
                 {/* ==================================================
                     REMARKS
                 ================================================== */}
@@ -873,6 +911,39 @@ export function Step10({ draft, set }: StepProps) {
 
                 </tr>
 
+                <tr className="border-b border-[#E5E7EB]">
+                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
+                    Markup ({(landMarkup(draft) * 100).toFixed(1)}%)
+                  </td>
+                  {draft.transport.map((transport) => (
+                    <td key={transport.id} className="p-2 text-right tabular-nums">
+                      {inr(commercial(transportLineTotal(transport)).markup)}
+                    </td>
+                  ))}
+                </tr>
+
+                <tr className="border-b border-[#E5E7EB]">
+                  <td colSpan={2} className="p-2 text-right text-[10px] uppercase text-muted-foreground">
+                    GST ({(landGst(draft) * 100).toFixed(1)}%)
+                  </td>
+                  {draft.transport.map((transport) => (
+                    <td key={transport.id} className="p-2 text-right tabular-nums">
+                      {inr(commercial(transportLineTotal(transport)).gst)}
+                    </td>
+                  ))}
+                </tr>
+
+                <tr className="bg-primary/10 font-bold text-primary">
+                  <td colSpan={2} className="p-2 text-right text-xs uppercase">
+                    Final Vehicle Cost
+                  </td>
+                  {draft.transport.map((transport) => (
+                    <td key={transport.id} className="p-2 text-right tabular-nums text-sm">
+                      {inr(commercial(transportLineTotal(transport)).final)}
+                    </td>
+                  ))}
+                </tr>
+
               </tbody>
 
             </table>
@@ -883,104 +954,12 @@ export function Step10({ draft, set }: StepProps) {
             Each vehicle is an alternative costing scenario. Vehicle totals are not added together.
           </div>
 
-          {/* ====================================================
-              PER PERSON BREAKDOWN
-          ==================================================== */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold">Transport Options / Variations</h3><p className="text-xs text-muted-foreground">Uses the final vehicle costs above; no additional markup or GST is applied here.</p></div><Button size="sm" onClick={() => set({ transport_options: [...(draft.transport_options ?? []), { id: uid(), name: `Option ${(draft.transport_options?.length ?? 0) + 1}`, min_pax: 1, max_pax: 1, vehicles: draft.transport[0] ? [{ transport_line_id: draft.transport[0].id, quantity: 1 }] : [] }] })}><Plus className="mr-1 h-3.5 w-3.5" />Add Option</Button></div>
+            {(draft.transport_options ?? []).map((option) => <Card key={option.id} className="p-3 space-y-2 bg-muted/20"><div className="grid gap-2 md:grid-cols-[1fr_100px_100px_auto]"><Input value={option.name} onChange={(event) => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, name: event.target.value } : item) })} placeholder="Option name" /><Input type="number" min={1} max={40} value={option.min_pax} onChange={(event) => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, min_pax: Math.max(1, Number(event.target.value) || 1) } : item) })} /><Input type="number" min={option.min_pax} max={40} value={option.max_pax} onChange={(event) => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, max_pax: Math.max(item.min_pax, Number(event.target.value) || item.min_pax) } : item) })} /><Button size="icon" variant="ghost" onClick={() => set({ transport_options: (draft.transport_options ?? []).filter((item) => item.id !== option.id) })}><Trash2 className="h-4 w-4 text-destructive" /></Button></div><div className="text-[10px] text-muted-foreground">Option name · Minimum Pax · Maximum Pax</div>{option.vehicles.map((vehicle, vehicleIndex) => { const line = draft.transport.find((item) => item.id === vehicle.transport_line_id); const final = line ? finalVehicleCost(line) : 0; return <div key={`${vehicle.transport_line_id}-${vehicleIndex}`} className="grid items-center gap-2 md:grid-cols-[1fr_80px_130px_130px_auto]"><Select value={vehicle.transport_line_id} onValueChange={(value) => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, vehicles: item.vehicles.map((entry, index) => index === vehicleIndex ? { ...entry, transport_line_id: value } : entry) } : item) })}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{draft.transport.map((entry) => <SelectItem key={entry.id} value={entry.id}>{vehLabel(entry)}</SelectItem>)}</SelectContent></Select><Input className="h-8" type="number" min={1} value={vehicle.quantity} onChange={(event) => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, vehicles: item.vehicles.map((entry, index) => index === vehicleIndex ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) } : entry) } : item) })} /><span className="text-xs text-right">{inr(final)}</span><span className="text-xs text-right font-medium">{inr(final * vehicle.quantity)}</span><Button size="icon" variant="ghost" onClick={() => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, vehicles: item.vehicles.filter((_, index) => index !== vehicleIndex) } : item) })}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button></div>})}<Button size="sm" variant="outline" onClick={() => set({ transport_options: (draft.transport_options ?? []).map((item) => item.id === option.id ? { ...item, vehicles: [...item.vehicles, { transport_line_id: draft.transport[0]?.id ?? "", quantity: 1 }] } : item) })}><Plus className="mr-1 h-3.5 w-3.5" />Add Vehicle to this Option</Button><div className="text-right text-sm font-semibold">Final Total: {inr(optionTotal(option))}</div></Card>)}
+          </Card>
 
-          {draft.transport.length > 0 && (
-            <Card className="p-4 border-2 border-primary/20 bg-primary/5 mt-4">
-
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-primary">Per-Person Cost Breakdown</h3>
-                  <p className="text-[11px] text-muted-foreground">Default view follows this Query's exact pax/range.</p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => setShowCapacityPreview((value) => !value)}>
-                  {showCapacityPreview ? "Query pax only" : "Preview vehicle capacity"}
-                </Button>
-              </div>
-
-              <div className="overflow-x-auto">
-
-                <table className="w-full text-xs border-collapse">
-
-                  <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
-
-                    <tr>
-
-                      <th className="text-left p-2">
-                        Pax
-                      </th>
-
-                      {draft.transport.map(
-                        (transport) => (
-                          <th
-                            key={transport.id}
-                            className="text-right p-2 min-w-[110px]"
-                          >
-
-                            {vehLabel(transport)}
-
-                            <div className="font-normal text-[9px] text-muted-foreground">
-                              total{" "}
-                              {inr(
-                                transportLineTotal(
-                                  transport
-                                )
-                              )}
-                            </div>
-
-                          </th>
-                        )
-                      )}
-
-                    </tr>
-
-                  </thead>
-
-                  <tbody>
-
-                    {breakdownData.map((row) => (
-
-                      <tr
-                        key={row.pax}
-                        className="border-t border-muted-foreground/20 hover:bg-muted/10"
-                      >
-
-                        <td className="p-2 font-medium">
-                          {row.pax} pax
-                        </td>
-
-                        {draft.transport.map(
-                          (transport) => (
-                            <td
-                              key={transport.id}
-                              className="p-2 text-right tabular-nums"
-                            >
-                              {row.perVehicle[transport.id] == null
-                                ? "—"
-                                : inr(row.perVehicle[transport.id] || 0)}
-                            </td>
-                          )
-                        )}
-
-                      </tr>
-
-                    ))}
-
-                  </tbody>
-
-                </table>
-
-              </div>
-
-              <div className="mt-2 text-[11px] text-muted-foreground">
-                * Each column is an independent alternative: that vehicle's tour cost divided by pax.
-              </div>
-
-            </Card>
-          )}
-
+          <Card className="p-4"><h3 className="mb-3 text-sm font-semibold">Pax-wise Transport Costing</h3><div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-muted/40"><tr><th className="p-2 text-left">Vehicle / Combination</th><th className="p-2 text-right">Pax</th><th className="p-2 text-right">Rate (Per Person)</th></tr></thead><tbody>{(draft.transport_options ?? []).flatMap((option) => Array.from({ length: Math.max(0, Math.min(40, option.max_pax) - option.min_pax + 1) }, (_, offset) => { const pax = option.min_pax + offset; return <tr key={`${option.id}-${pax}`} className="border-t"><td className="p-2">{optionLabel(option)}</td><td className="p-2 text-right">{pax}</td><td className="p-2 text-right font-medium">{inr(optionTotal(option) / pax)}</td></tr>; }))}</tbody></table></div></Card>
         </>
       )}
 

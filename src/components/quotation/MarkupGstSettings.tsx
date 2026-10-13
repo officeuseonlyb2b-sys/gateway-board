@@ -16,39 +16,23 @@ export function MarkupGstSettings({ draft, set }: StepProps) {
     { title: "Land Part", hint: "Transport, Guide, Entrances, Activities & Misc", mk: "land_markup_percent", gst: "land_gst_percent" },
     { title: "Hotels & Meals", hint: "Room rates (SGL/DBL/TRP/QUAD) & Lunch/Dinner", mk: "hotel_markup_percent", gst: "hotel_gst_percent" },
   ];
+  const queryFor = draft.query_for || (draft.commercial_mode === "accommodation_only" ? "Accommodation Part" : draft.commercial_mode === "transport_only" ? "Land Part" : "Package");
+  const visibleGroups = queryFor === "Package" ? groups : groups.filter((group) => queryFor === "Land Part" ? group.title === "Land Part" : group.title === "Hotels & Meals");
   return (
     <Card className="p-4">
-      <div className="mb-4 grid gap-3 md:grid-cols-[260px_1fr] md:items-end">
+      <div className="mb-4">
         <div>
-          <Label className="text-xs">Commercial format</Label>
-          <Select
-            value={draft.commercial_mode || "package"}
-            onValueChange={(value) => {
-              const mode = value as QuoteDraft["commercial_mode"];
-              set({
-                commercial_mode: mode,
-                scenarios: undefined,
-                ...(mode === "package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}),
-              });
-            }}
-          >
-            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="package">Complete package</SelectItem>
-              <SelectItem value="transport_only">Transport only</SelectItem>
-              <SelectItem value="accommodation_only">Accommodation only</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label className="text-xs">Query For</Label>
+          <p className="mt-1 text-sm font-semibold">{queryFor}</p>
         </div>
         <p className="text-xs text-muted-foreground">
-          Package GST is fixed at 5%. Transport-only and accommodation-only quotes can use 5% or 18%.
+          Package GST is fixed at 5%. Land Part and Accommodation Part allow only 5% or 18%.
         </p>
       </div>
       <div className="section-label mb-3">Markup &amp; GST Settings</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {groups.map((g) => {
-          const inactive = (draft.commercial_mode === "transport_only" && g.title === "Hotels & Meals")
-            || (draft.commercial_mode === "accommodation_only" && g.title === "Land Part");
+        {visibleGroups.map((g) => {
+          const inactive = false;
           return (
           <div key={g.title} className={`rounded-lg border p-3 space-y-2 bg-muted/20 ${inactive ? "opacity-45" : ""}`}>
             <div>
@@ -71,7 +55,7 @@ export function MarkupGstSettings({ draft, set }: StepProps) {
               </div>
               <div>
                 <Label className="text-[10px]">GST %</Label>
-                {draft.commercial_mode === "package" || !draft.commercial_mode ? (
+                {queryFor === "Package" ? (
                   <Input value={5} readOnly className="h-8 bg-muted" />
                 ) : (
                   <Select

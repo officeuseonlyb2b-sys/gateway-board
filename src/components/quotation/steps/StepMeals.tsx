@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -11,246 +10,407 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { addDaysISO, inr } from "@/lib/format";
 import { restaurantsForCityNames, useDB, type Restaurant } from "@/lib/mock-store";
-import { computeMealDays, effectivePaxForPricing, mealPlanCoverage } from "@/lib/wizard/calc";
+import { computeMealDays, getCostingPaxValues, hotelsGst, hotelsMarkup, mealPlanCoverage } from "@/lib/wizard/calc";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
 import type { MealChoice, MealDaySelection, OptionKey, RoutingDay } from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
 
 type MealKey = "lunch" | "dinner";
 
-const cityIdsForDay = (day: RoutingDay): string[] =>
-  Array.from(
-    new Set([...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[]),
-  );
-
+// eslint-disable-next-line react-refresh/only-export-components
 export function restaurantsForCategory(list: Restaurant[], category?: string): Restaurant[] {
   if (!category) return list;
   const wanted = category.trim().toLowerCase();
-  return list.filter((restaurant) => {
-    const tier = (restaurant.category || "").trim().toLowerCase();
-    return !tier || tier === wanted;
-  });
+  return list.filter((item) => !item.category || item.category.trim().toLowerCase() === wanted);
 }
+
+const citiesForDay = (day: RoutingDay, cities: ReturnType<typeof useDB>["cities"]) => {
+  const from = cities.find(
+    (city) => city.id === day.from_city || city.name.toLowerCase() === day.from_city?.toLowerCase(),
+  )?.id;
+  return Array.from(
+    new Set(
+      [from, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[],
+    ),
+  );
+};
 
 export function StepMeals({ draft, set }: StepProps) {
   const db = useDB();
-  const pax = Math.max(1, effectivePaxForPricing(draft));
-  const completedOptions = draft.hotel_options.filter((option) => option.selections.length > 0);
-  const [activeKey, setActiveKey] = useState<OptionKey>(completedOptions[0]?.key ?? "A");
-  const option = completedOptions.find((item) => item.key === activeKey) ?? completedOptions[0];
+  const options = draft.hotel_options.filter((option) => option.selections.length > 0);
+  const [activeKey, setActiveKey] = useState<OptionKey>(options[0]?.key ?? "A");
+  const option = options.find((item) => item.key === activeKey) ?? options[0];
   const optionKey = option?.key ?? "A";
-  const selectionMap = draft.meal_selections_by_option?.[optionKey] ?? {};
-
-  const rows = useMemo(
+  const selections = draft.meal_selections_by_option?.[optionKey]
+    ?? (optionKey === "A" ? draft.meal_selections ?? {} : {});
+  const days = useMemo(
     () =>
-      draft.routing.flatMap((day, index) =>
-        cityIdsForDay(day).map((cityId) => ({
-          day: day.day,
+      draft.routing.map((day, index) => {
+        const cityIds = citiesForDay(day, db.cities);
+        return {
+          day,
+          cityIds,
           date: day.date || addDaysISO(draft.start_date, index),
-          cityId,
-          cityName: db.cities.find((city) => city.id === cityId)?.name || day.to_city || "—",
-          overnight: day.city_id === cityId && day.overnight,
-        })),
-      ),
+          route: cityIds
+            .map((id) => db.cities.find((city) => city.id === id)?.name)
+            .filter(Boolean)
+            .join(" → "),
+        };
+      }),
     [draft.routing, draft.start_date, db.cities],
   );
 
-  const calculated = useMemo(
-    () => computeMealDays(draft, db, optionKey),
-    [draft, db, optionKey],
-  );
-  const lunchPerPerson = calculated.rows
-    .filter((row) => row.meal_type === "Lunch")
-    .reduce((sum, row) => sum + row.per_person, 0);
-  const dinnerPerPerson = calculated.rows
-    .filter((row) => row.meal_type === "Dinner")
-    .reduce((sum, row) => sum + row.per_person, 0);
-
-  const setChoice = (day: number, cityId: string, meal: MealKey, choice?: MealChoice) => {
-    const key = `${day}:${cityId}`;
-    const nextOptionMap = { ...selectionMap };
-    const current: MealDaySelection = { ...(nextOptionMap[key] ?? {}) };
-    if (!choice || choice.source === "none") delete current[meal];
-    else current[meal] = choice;
-    if (!current.lunch && !current.dinner) delete nextOptionMap[key];
-    else nextOptionMap[key] = current;
+  const selectedFor = (day: number, meal: MealKey, cityIds?: string[]) => {
+    for (const [key, value] of Object.entries(selections)) {
+      const cityId = key.split(":")[1];
+      if (key.startsWith(`${day}:`) && value[meal] && (!cityIds || cityIds.includes(cityId)))
+        return { cityId, choice: value[meal] };
+    }
+    return { cityId: "", choice: undefined as MealChoice | undefined };
+  };
+  const setMeal = (day: number, cityId: string, meal: MealKey, choice?: MealChoice) => {
+    const next = Object.fromEntries(
+      Object.entries(selections).map(([key, value]) => [key, { ...value }]),
+    ) as Record<string, MealDaySelection>;
+    Object.keys(next).forEach((key) => {
+      if (!key.startsWith(`${day}:`)) return;
+      delete next[key][meal];
+      if (!next[key].lunch && !next[key].dinner) delete next[key];
+    });
+    if (cityId && choice && choice.source !== "none")
+      next[`${day}:${cityId}`] = { ...(next[`${day}:${cityId}`] ?? {}), [meal]: choice };
     set({
-      meal_selections_by_option: {
-        ...(draft.meal_selections_by_option ?? {}),
-        [optionKey]: nextOptionMap,
-      },
-      ...(optionKey === "A" ? { meal_selections: nextOptionMap } : {}),
+      meal_selections_by_option: { ...(draft.meal_selections_by_option ?? {}), [optionKey]: next },
+      ...(optionKey === "A" ? { meal_selections: next } : {}),
     });
   };
 
-  if (!option) {
+  if (!option)
     return (
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">Meals</h2>
         <Card className="p-5 text-sm text-muted-foreground">
-          Complete at least one accommodation option before selecting lunches and dinners.
+          Complete at least one accommodation option first.
         </Card>
       </div>
     );
-  }
+
+  const priced = days.flatMap(({ day, date, cityIds }) => {
+    const stay = day.overnight
+      ? option.selections.find((item) => item.city_id === day.city_id)
+      : undefined;
+    const covered = mealPlanCoverage(stay?.meal_plan);
+    return (["lunch", "dinner"] as const).map((meal) => {
+      const selected = selectedFor(day.day, meal, cityIds);
+      return {
+        day: day.day,
+        date,
+        meal,
+        included: covered[meal],
+        cityId: covered[meal] ? day.city_id : selected.cityId,
+        choice: selected.choice,
+        rate: covered[meal] ? 0 : (selected.choice?.per_person_rate ?? 0),
+      };
+    });
+  });
+  const commercials = (base: number) => {
+    const markup = base * hotelsMarkup(draft);
+    const gst = (base + markup) * hotelsGst(draft);
+    return { base, markup, gst, final: base + markup + gst };
+  };
+  const sharedMealRows = computeMealDays(draft, db, optionKey).rows;
+  const lunch = commercials(
+    sharedMealRows.filter((row) => row.meal_type === "Lunch").reduce((sum, row) => sum + row.per_person, 0),
+  );
+  const dinner = commercials(
+    sharedMealRows.filter((row) => row.meal_type === "Dinner").reduce((sum, row) => sum + row.per_person, 0),
+  );
+  const arrangements = (meal: MealKey) =>
+    priced
+      .filter((row) => row.meal === meal)
+      .map((row) => ({
+        ...row,
+        city: db.cities.find((city) => city.id === row.cityId)?.name || "—",
+        venue: row.included ? "Included in Hotel Plan" : row.choice?.label || "No Meal",
+        type: row.included
+          ? "Included in Hotel Plan"
+          : row.choice?.source === "hotel"
+            ? "Hotel"
+            : row.choice?.source === "restaurant"
+              ? "Restaurant"
+              : "No Meal",
+      }));
+  const lunches = arrangements("lunch");
+  const dinners = arrangements("dinner");
+
+  const selector = (
+    day: number,
+    date: string,
+    cityIds: string[],
+    meal: MealKey,
+    covered: boolean,
+  ) => {
+    if (covered)
+      return <span className="text-xs font-medium text-emerald-700">Included in Hotel Plan</span>;
+    const selected = selectedFor(day, meal, cityIds);
+    const cityId = selected.cityId || cityIds[0] || "";
+    const cityName = db.cities.find((city) => city.id === cityId)?.name || "";
+    const hotels = db.hotels.filter((hotel) => hotel.city_id === cityId);
+    const restaurants = restaurantsForCategory(
+      restaurantsForCityNames(db.restaurants ?? [], [cityName]),
+      option.category,
+    );
+    const value =
+      selected.choice?.source === "hotel"
+        ? `hotel:${selected.choice.hotel_id}`
+        : selected.choice?.source === "restaurant"
+          ? `restaurant:${selected.choice.restaurant_id}`
+          : "none";
+    const choose = (venue: string) => {
+      if (venue === "none") return setMeal(day, cityId, meal);
+      if (venue.startsWith("restaurant:")) {
+        const id = venue.slice(11);
+        const item = db.restaurants.find((row) => row.id === id);
+        return setMeal(day, cityId, meal, {
+          source: "restaurant",
+          restaurant_id: id,
+          label: item?.name || "Restaurant",
+          per_person_rate: item?.price_per_person ?? 0,
+        });
+      }
+      const id = venue.slice(6);
+      const hotel = db.hotels.find((row) => row.id === id);
+      const stay = option.selections.find((row) => row.hotel_id === id);
+      const roomId = stay?.room_id ?? db.room_categories.find((room) => room.hotel_id === id)?.id;
+      const plan = roomId
+        ? findRatePlan(db.rate_plans, roomId, stay?.meal_plan ?? "CP", date)
+        : null;
+      return setMeal(day, cityId, meal, {
+        source: "hotel",
+        hotel_id: id,
+        label: hotel?.name || "Hotel",
+        per_person_rate: meal === "lunch" ? (plan?.lunch_rate ?? 0) : (plan?.dinner_rate ?? 0),
+      });
+    };
+    return (
+      <div className="flex min-w-[340px] gap-2">
+        <Select value={cityId} onValueChange={(id) => setMeal(day, id, meal)}>
+          <SelectTrigger className="h-8 w-32">
+            <SelectValue placeholder="City" />
+          </SelectTrigger>
+          <SelectContent>
+            {cityIds.map((id) => (
+              <SelectItem key={id} value={id}>
+                {db.cities.find((city) => city.id === id)?.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={value} onValueChange={choose}>
+          <SelectTrigger className="h-8 min-w-48 flex-1">
+            <SelectValue placeholder="No Meal" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No Meal</SelectItem>
+            {hotels.map((hotel) => (
+              <SelectItem key={`hotel:${hotel.id}`} value={`hotel:${hotel.id}`}>
+                Hotel: {hotel.name}
+              </SelectItem>
+            ))}
+            {restaurants.map((restaurant) => (
+              <SelectItem key={`restaurant:${restaurant.id}`} value={`restaurant:${restaurant.id}`}>
+                Restaurant: {restaurant.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
+
+  const ArrangementTable = ({
+    title,
+    items,
+  }: {
+    title: string;
+    items: ReturnType<typeof arrangements>;
+  }) => (
+    <Card className="overflow-hidden">
+      <div className="border-b px-3 py-2 text-sm font-semibold">{title}</div>
+      <table className="w-full text-xs">
+        <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+          <tr>
+            <th className="p-2 text-left">Day</th>
+            <th className="p-2 text-left">Date</th>
+            <th className="p-2 text-left">City</th>
+            <th className="p-2 text-left">Hotel/Restaurant</th>
+            <th className="p-2 text-left">Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={`${item.day}-${item.meal}`} className="border-t">
+              <td className="p-2">{item.day}</td>
+              <td className="p-2">{item.date}</td>
+              <td className="p-2">{item.city}</td>
+              <td className="p-2">{item.venue}</td>
+              <td className="p-2">{item.type}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Meals</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Meal rates are always per person. Package calculation multiplies them once by {pax} pax.
-          </p>
-        </div>
-        <Badge variant="outline">{inr(calculated.total)} package meal cost</Badge>
+      <div>
+        <h2 className="text-lg font-semibold">Meals</h2>
+        <p className="text-sm text-muted-foreground">
+          One shared per-person meal engine for Standard and Dynamic accommodation.
+        </p>
       </div>
-
       <Tabs value={optionKey} onValueChange={(value) => setActiveKey(value as OptionKey)}>
         <TabsList className="h-auto flex-wrap justify-start">
-          {completedOptions.map((item) => (
-            <TabsTrigger key={item.key} value={item.key} className="text-xs">
+          {options.map((item) => (
+            <TabsTrigger key={item.key} value={item.key}>
               Option {item.key} · {item.category || item.label || "Hotel"}
             </TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
-
+      <div>
+        <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 1</div>
+        <h3 className="text-sm font-semibold">Meal Selection &amp; Costing</h3>
+      </div>
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-sm">
-            <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
+          <table className="w-full min-w-[1120px] text-xs">
+            <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
               <tr>
-                <th className="px-3 py-3 text-left">Day / place</th>
-                <th className="px-3 py-3 text-left">Hotel plan</th>
-                <th className="px-3 py-3 text-left">Lunch source</th>
-                <th className="px-3 py-3 text-right">PP rate</th>
-                <th className="px-3 py-3 text-left">Dinner source</th>
-                <th className="px-3 py-3 text-right">PP rate</th>
+                <th className="p-2 text-left">Day / Route / Cities Covered</th>
+                <th className="p-2 text-left">Hotel Plan</th>
+                <th className="p-2 text-left">Lunch Arrangement</th>
+                <th className="p-2 text-right">Lunch PP Rate</th>
+                <th className="p-2 text-left">Dinner Arrangement</th>
+                <th className="p-2 text-right">Dinner PP Rate</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
-                const key = `${row.day}:${row.cityId}`;
-                const selected = selectionMap[key] ?? {};
-                const hotelSelection = row.overnight
-                  ? option.selections.find((item) => item.city_id === row.cityId)
+              {days.map(({ day, date, cityIds, route }) => {
+                const stay = day.overnight
+                  ? option.selections.find((item) => item.city_id === day.city_id)
                   : undefined;
-                const coverage = mealPlanCoverage(hotelSelection?.meal_plan);
-                const selectedHotels = option.selections
-                  .map((item) => ({
-                    selection: item,
-                    hotel: db.hotels.find((hotel) => hotel.id === item.hotel_id),
-                  }))
-                  .filter((item) => item.hotel);
-                const restaurants = restaurantsForCategory(
-                  restaurantsForCityNames(db.restaurants ?? [], [row.cityName]),
-                  option.category,
-                );
-
-                const selectValue = (choice?: MealChoice) => {
-                  if (!choice) return "none";
-                  if (choice.source === "hotel") return `hotel:${choice.hotel_id}`;
-                  if (choice.source === "restaurant") return `restaurant:${choice.restaurant_id}`;
-                  return "none";
-                };
-                const handle = (meal: MealKey, value: string) => {
-                  if (value === "none") {
-                    setChoice(row.day, row.cityId, meal, undefined);
-                    return;
-                  }
-                  if (value.startsWith("restaurant:")) {
-                    const id = value.slice("restaurant:".length);
-                    const restaurant = db.restaurants.find((item) => item.id === id);
-                    setChoice(row.day, row.cityId, meal, {
-                      source: "restaurant",
-                      restaurant_id: id,
-                      label: restaurant?.name || "Restaurant",
-                      per_person_rate: restaurant?.price_per_person || 0,
-                    });
-                    return;
-                  }
-                  const id = value.slice("hotel:".length);
-                  const matched = option.selections.find((item) => item.hotel_id === id);
-                  const plan = matched
-                    ? findRatePlan(db.rate_plans, matched.room_id, matched.meal_plan, row.date)
-                    : null;
-                  const hotel = db.hotels.find((item) => item.id === id);
-                  setChoice(row.day, row.cityId, meal, {
-                    source: "hotel",
-                    hotel_id: id,
-                    label: hotel?.name || "Hotel",
-                    per_person_rate:
-                      meal === "lunch" ? plan?.lunch_rate || 0 : plan?.dinner_rate || 0,
-                  });
-                };
-                const choiceRate = (meal: MealKey) => selected[meal]?.per_person_rate ?? 0;
-
-                const selector = (meal: MealKey, covered: boolean) =>
-                  covered ? (
-                    <div className="text-xs font-medium text-emerald-700">Included in hotel plan</div>
-                  ) : (
-                    <Select value={selectValue(selected[meal])} onValueChange={(value) => handle(meal, value)}>
-                      <SelectTrigger className="h-9 min-w-[210px]">
-                        <SelectValue placeholder="No meal" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No meal</SelectItem>
-                        {selectedHotels.map(({ selection, hotel }) => (
-                          <SelectItem key={`hotel:${selection.hotel_id}`} value={`hotel:${selection.hotel_id}`}>
-                            Hotel: {hotel?.name} · {db.cities.find((city) => city.id === hotel?.city_id)?.name || "selected stay"}
-                          </SelectItem>
-                        ))}
-                        {restaurants.map((restaurant) => (
-                          <SelectItem key={`restaurant:${restaurant.id}`} value={`restaurant:${restaurant.id}`}>
-                            Restaurant: {restaurant.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  );
-
+                const coverage = mealPlanCoverage(stay?.meal_plan);
+                const lunchChoice = selectedFor(day.day, "lunch", cityIds).choice;
+                const dinnerChoice = selectedFor(day.day, "dinner", cityIds).choice;
                 return (
-                  <tr key={key} className="border-b last:border-0">
-                    <td className="px-3 py-3">
-                      <div className="font-medium">Day {row.day} · {row.cityName}</div>
-                      <div className="text-xs text-muted-foreground">{row.date}</div>
+                  <tr key={day.day} className="border-t align-top">
+                    <td className="p-2">
+                      <b>
+                        Day {day.day} · {date}
+                      </b>
+                      <div className="text-muted-foreground">{route || "Route not configured"}</div>
                     </td>
-                    <td className="px-3 py-3">
-                      {hotelSelection?.meal_plan ? (
-                        <Badge variant="secondary">{hotelSelection.meal_plan}</Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">No overnight plan</span>
-                      )}
+                    <td className="p-2">{stay?.meal_plan || "No overnight plan"}</td>
+                    <td className="p-2">
+                      {selector(day.day, date, cityIds, "lunch", coverage.lunch)}
                     </td>
-                    <td className="px-3 py-3">{selector("lunch", coverage.lunch)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">
-                      {coverage.lunch ? "Included" : choiceRate("lunch") ? inr(choiceRate("lunch")) : "—"}
+                    <td className="p-2 text-right">
+                      {coverage.lunch
+                        ? "Included"
+                        : lunchChoice?.per_person_rate
+                          ? inr(lunchChoice.per_person_rate)
+                          : "—"}
                     </td>
-                    <td className="px-3 py-3">{selector("dinner", coverage.dinner)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">
-                      {coverage.dinner ? "Included" : choiceRate("dinner") ? inr(choiceRate("dinner")) : "—"}
+                    <td className="p-2">
+                      {selector(day.day, date, cityIds, "dinner", coverage.dinner)}
+                    </td>
+                    <td className="p-2 text-right">
+                      {coverage.dinner
+                        ? "Included"
+                        : dinnerChoice?.per_person_rate
+                          ? inr(dinnerChoice.per_person_rate)
+                          : "—"}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
-            <tfoot className="bg-muted/30 font-semibold">
-              <tr>
-                <td colSpan={3} className="px-3 py-3 text-right">Lunch total per person</td>
-                <td className="px-3 py-3 text-right tabular-nums">{inr(lunchPerPerson)}</td>
-                <td className="px-3 py-3 text-right">Dinner total per person</td>
-                <td className="px-3 py-3 text-right tabular-nums">{inr(dinnerPerPerson)}</td>
-              </tr>
+            <tfoot className="border-t-2 bg-muted/20">
+              {[
+                ["Total Cost Per Person", lunch.base, dinner.base],
+                ["Markup", lunch.markup, dinner.markup],
+                ["GST", lunch.gst, dinner.gst],
+                ["Final Meal Cost Per Person", lunch.final, dinner.final],
+              ].map(([label, l, d]) => (
+                <tr key={String(label)}>
+                  <td colSpan={2} className="p-2 text-right font-medium">
+                    {label}
+                  </td>
+                  <td colSpan={2} className="p-2 text-right">
+                    {inr(Number(l))}
+                  </td>
+                  <td colSpan={2} className="p-2 text-right">
+                    {inr(Number(d))}
+                  </td>
+                </tr>
+              ))}
             </tfoot>
           </table>
         </div>
       </Card>
-
-      <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-xs text-blue-900">
-        AP includes lunch and dinner; MAP includes dinner; CP leaves both available. Sources include
-        the selected journey hotels and restaurants in itinerary cities.
+      <div>
+        <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 2</div>
+        <h3 className="text-sm font-semibold">Meal Arrangement Summary</h3>
       </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ArrangementTable title="Lunch Arrangements" items={lunches} />
+        <ArrangementTable title="Dinner Arrangements" items={dinners} />
+      </div>
+      <Card className="p-3">
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
+          {[
+            ["Total Lunches", lunches.filter((row) => row.type !== "No Meal").length],
+            ["Total Dinners", dinners.filter((row) => row.type !== "No Meal").length],
+            ["Lunches in Hotels", lunches.filter((row) => row.type === "Hotel").length],
+            ["Lunches in Restaurants", lunches.filter((row) => row.type === "Restaurant").length],
+            ["Dinners in Hotels", dinners.filter((row) => row.type === "Hotel").length],
+            ["Dinners in Restaurants", dinners.filter((row) => row.type === "Restaurant").length],
+            ["Lunches Included", lunches.filter((row) => row.included).length],
+            ["Dinners Included", dinners.filter((row) => row.included).length],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded border p-2">
+              <div className="text-[9px] uppercase text-muted-foreground">{label}</div>
+              <div className="text-lg font-semibold">{value}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+      <div>
+        <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 3</div>
+        <h3 className="text-sm font-semibold">Pax-wise Meal Costing</h3>
+      </div>
+      <Card className="overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
+            <tr>
+              <th className="p-2 text-left">Pax</th>
+              <th className="p-2 text-right">Lunch (Per Person)</th>
+              <th className="p-2 text-right">Dinner (Per Person)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {getCostingPaxValues(draft).map((pax) => (
+              <tr key={pax} className="border-t">
+                <td className="p-2 font-medium">{pax}</td>
+                <td className="p-2 text-right">{inr(lunch.final)}</td>
+                <td className="p-2 text-right">{inr(dinner.final)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </div>
   );
 }

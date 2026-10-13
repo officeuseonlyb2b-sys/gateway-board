@@ -18,6 +18,7 @@ import {
   PROGRAM_TYPES, QUERY_TYPES, SOURCE_TYPES,
   type FinalLeadStatus, type MarketSource, type QueryInput, type QueryRecord,
 } from "@/lib/queries/types";
+import { QUERY_FOR_OPTIONS, normalizeQueryFor } from "@/lib/query-for";
 
 const inputCls =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -119,7 +120,10 @@ export function QueryFormDialog({
               </select>
             </Field>
             <Field label="Query For">
-              <Input value={form.query_for} onChange={(e) => set("query_for", e.target.value)} />
+              <select className={inputCls} value={normalizeQueryFor(form.query_for) || ""} onChange={(e) => set("query_for", e.target.value)}>
+                <option value="">Select</option>
+                {QUERY_FOR_OPTIONS.map((value) => <option key={value}>{value}</option>)}
+              </select>
             </Field>
             <Field label="Query Base City">
               <Input value={form.query_base_city} onChange={(e) => set("query_base_city", e.target.value)} />

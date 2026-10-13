@@ -39,7 +39,12 @@ export function SeasonFormDialog({ roomId, open, onOpenChange, seed, existingGro
   const [saving, setSaving] = useState(false);
 
   const [meals, setMeals] = useState<Record<MealPlan, MealRow>>(() => {
-    const init: Record<MealPlan, MealRow> = { CP: emptyMeal(), MAP: emptyMeal(), AP: emptyMeal() };
+    const init: Record<MealPlan, MealRow> = {
+      EP: emptyMeal(),
+      CP: emptyMeal(),
+      MAP: emptyMeal(),
+      AP: emptyMeal(),
+    };
     existingGroup?.forEach((p) => {
       init[p.meal_plan] = {
         double: String(p.double_rate ?? ""),
@@ -106,7 +111,7 @@ export function SeasonFormDialog({ roomId, open, onOpenChange, seed, existingGro
 
     if (rows.length === 0) {
       setSaving(false);
-      return toast.error("Enter rates for at least one meal plan (CP / MAP / AP).");
+      return toast.error("Enter rates for at least one meal plan (EP / CP / MAP / AP).");
     }
 
     db.addRatePlans(rows);

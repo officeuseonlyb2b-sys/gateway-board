@@ -1,6 +1,7 @@
 // Multiple named drafts persisted to localStorage.
 import { useSyncExternalStore } from "react";
 import type { QuoteDraft } from "./wizard/types";
+import { normalizeDraft } from "./wizard/store";
 
 const KEY = "mp_tourism_drafts";
 const LEGACY_KEY = "mp_tourism_draft_quote";
@@ -57,7 +58,7 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
         draft_name: name || list[idx].draft_name || deriveName(state),
         updated_at: now,
         last_step: state.step,
-        wizard_state: state,
+        wizard_state: normalizeDraft(state),
       };
       writeAll(list);
       return id;
@@ -77,7 +78,8 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
 }
 
 export function getDraft(id: string): DraftRecord | null {
-  return read().find((d) => d.id === id) ?? null;
+  const record = read().find((d) => d.id === id);
+  return record ? { ...record, wizard_state: normalizeDraft(record.wizard_state) } : null;
 }
 export function deleteDraft(id: string): void {
   writeAll(read().filter((d) => d.id !== id));
@@ -105,7 +107,7 @@ export function migrateLegacyDraft(): string | null {
   try {
     const raw = localStorage.getItem(LEGACY_KEY);
     if (!raw) return null;
-    const state = JSON.parse(raw) as QuoteDraft;
+    const state = normalizeDraft(JSON.parse(raw) as QuoteDraft);
     const list = read();
     if (list.some((d) => d.wizard_state.updated_at === state.updated_at)) {
       localStorage.removeItem(LEGACY_KEY);

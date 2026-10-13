@@ -63,5 +63,5 @@ export function availableMealPlans(
   const filtered = dateISO ? pool.filter((p) => rangeMatches(p, dateISO)) : pool;
   const set = new Set(filtered.map((p) => p.meal_plan));
   // Preserve canonical order
-  return ["CP", "MAP", "AP"].filter((m) => set.has(m as never));
+  return ["EP", "CP", "MAP", "AP"].filter((m) => set.has(m as never));
 }

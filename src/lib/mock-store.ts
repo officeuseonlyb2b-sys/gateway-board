@@ -26,8 +26,8 @@ export const HOTEL_CATEGORIES: HotelCategory[] = [
   "Excellent Budget",
 ];
 
-export type MealPlan = "CP" | "MAP" | "AP";
-export const MEAL_PLANS: MealPlan[] = ["CP", "MAP", "AP"];
+export type MealPlan = "EP" | "CP" | "MAP" | "AP";
+export const MEAL_PLANS: MealPlan[] = ["EP", "CP", "MAP", "AP"];
 
 export type SupplementType = "fixed" | "per_person";
 

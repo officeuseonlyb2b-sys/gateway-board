@@ -29,11 +29,12 @@ export interface SeasonBlock {
   season_label: string;
   validity_start: string;
   validity_end: string;
+  ep_single: string; ep_double: string;
   cp_single: string; cp_double: string;
   map_single: string; map_double: string;
   ap_single: string; ap_double: string;
   has_quad: boolean;
-  cp_quad: string; map_quad: string; ap_quad: string;
+  ep_quad: string; cp_quad: string; map_quad: string; ap_quad: string;
   extra_bed: string;
   cwb_mode: CwbMode;
   cwb_amount: string;
@@ -56,10 +57,11 @@ export interface RoomBlock {
 
 export const emptySeason = (): SeasonBlock => ({
   season_label: "", validity_start: "", validity_end: "",
+  ep_single: "", ep_double: "",
   cp_single: "", cp_double: "",
   map_single: "", map_double: "",
   ap_single: "", ap_double: "",
-  has_quad: false, cp_quad: "", map_quad: "", ap_quad: "",
+  has_quad: false, ep_quad: "", cp_quad: "", map_quad: "", ap_quad: "",
   extra_bed: "",
   cwb_mode: "amount", cwb_amount: "", cwb_rule: "",
   lunch: "", dinner: "", extra_breakfast: "",
@@ -88,6 +90,7 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
     }
     const seasons: SeasonBlock[] = [];
     for (const grp of groups.values()) {
+      const ep = grp.find((p) => p.meal_plan === "EP");
       const cp = grp.find((p) => p.meal_plan === "CP");
       const map = grp.find((p) => p.meal_plan === "MAP");
       const ap = grp.find((p) => p.meal_plan === "AP");
@@ -96,11 +99,12 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
         season_label: base.season_label ?? "",
         validity_start: base.validity_start,
         validity_end: base.validity_end,
+        ep_single: s(ep?.single_rate), ep_double: s(ep?.double_rate),
         cp_single: s(cp?.single_rate), cp_double: s(cp?.double_rate),
         map_single: s(map?.single_rate), map_double: s(map?.double_rate),
         ap_single: s(ap?.single_rate), ap_double: s(ap?.double_rate),
-        has_quad: !!(cp?.quad_rate || map?.quad_rate || ap?.quad_rate),
-        cp_quad: s(cp?.quad_rate ?? ""), map_quad: s(map?.quad_rate ?? ""), ap_quad: s(ap?.quad_rate ?? ""),
+        has_quad: !!(ep?.quad_rate || cp?.quad_rate || map?.quad_rate || ap?.quad_rate),
+        ep_quad: s(ep?.quad_rate ?? ""), cp_quad: s(cp?.quad_rate ?? ""), map_quad: s(map?.quad_rate ?? ""), ap_quad: s(ap?.quad_rate ?? ""),
         extra_bed: s(base.extra_bed_rate),
         cwb_mode: base.cwb_rule_text ? "rule" : "amount",
         cwb_amount: s(base.cwb_rate ?? ""),
@@ -143,9 +147,9 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
   for (const r of rooms) {
     const room = db.addRoom(hotelId, r.name.trim());
     const plans = r.seasons.flatMap((sn) => {
-      const single = { CP: num(sn.cp_single), MAP: num(sn.map_single), AP: num(sn.ap_single) };
-      const dbl = { CP: num(sn.cp_double), MAP: num(sn.map_double), AP: num(sn.ap_double) };
-      const quad = { CP: numOrNull(sn.cp_quad), MAP: numOrNull(sn.map_quad), AP: numOrNull(sn.ap_quad) };
+      const single = { EP: num(sn.ep_single), CP: num(sn.cp_single), MAP: num(sn.map_single), AP: num(sn.ap_single) };
+      const dbl = { EP: num(sn.ep_double), CP: num(sn.cp_double), MAP: num(sn.map_double), AP: num(sn.ap_double) };
+      const quad = { EP: numOrNull(sn.ep_quad), CP: numOrNull(sn.cp_quad), MAP: numOrNull(sn.map_quad), AP: numOrNull(sn.ap_quad) };
       return MEAL_PLANS.map((mp) => ({
         room_category_id: room.id,
         validity_start: sn.validity_start,
@@ -186,7 +190,9 @@ export function validateRooms(rooms: RoomBlock[]): Record<string, string> {
     r.seasons.forEach((sn, si) => {
       if (!sn.validity_start) err[`s_${ri}_${si}_start`] = "From date required";
       if (!sn.validity_end) err[`s_${ri}_${si}_end`] = "To date required";
-      if (!sn.cp_double.trim()) err[`s_${ri}_${si}_cp_double`] = "CP Double rate required";
+      if (![sn.ep_double, sn.cp_double, sn.map_double, sn.ap_double].some((rate) => rate.trim())) {
+        err[`s_${ri}_${si}_cp_double`] = "Enter a Double rate for at least one meal plan";
+      }
     });
   });
   return err;
@@ -308,24 +314,27 @@ export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
 
               <div className="space-y-2">
                 <div className="text-xs font-medium">Rates for this season</div>
-                <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="grid grid-cols-5 gap-2 text-xs">
                   <div />
+                  <div className="text-center font-semibold">EP</div>
                   <div className="text-center font-semibold">CP</div>
                   <div className="text-center font-semibold">MAP</div>
                   <div className="text-center font-semibold">AP</div>
 
                   <div className="flex items-center">Single (SGL)</div>
+                  <Input value={sn.ep_single} onChange={(e) => setSeason(ri, si, { ep_single: e.target.value })} placeholder="₹" />
                   <Input value={sn.cp_single} onChange={(e) => setSeason(ri, si, { cp_single: e.target.value })} placeholder="₹" />
                   <Input value={sn.map_single} onChange={(e) => setSeason(ri, si, { map_single: e.target.value })} placeholder="₹" />
                   <Input value={sn.ap_single} onChange={(e) => setSeason(ri, si, { ap_single: e.target.value })} placeholder="₹" />
 
                   <div className="flex items-center">Double (DBL) *</div>
+                  <Input value={sn.ep_double} onChange={(e) => setSeason(ri, si, { ep_double: e.target.value })} placeholder="₹" />
                   <Input value={sn.cp_double} onChange={(e) => setSeason(ri, si, { cp_double: e.target.value })} placeholder="₹" />
                   <Input value={sn.map_double} onChange={(e) => setSeason(ri, si, { map_double: e.target.value })} placeholder="₹" />
                   <Input value={sn.ap_double} onChange={(e) => setSeason(ri, si, { ap_double: e.target.value })} placeholder="₹" />
 
                   <div className="flex items-center text-muted-foreground">Triple (TRP)</div>
-                  <div className="col-span-3 flex items-center text-[11px] text-muted-foreground">
+                  <div className="col-span-4 flex items-center text-[11px] text-muted-foreground">
                     Auto-calculated as Double + Extra Bed rate.
                   </div>
                 </div>
@@ -342,8 +351,9 @@ export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
                 </div>
 
                 {sn.has_quad && (
-                  <div className="grid grid-cols-4 gap-2 text-xs">
+                  <div className="grid grid-cols-5 gap-2 text-xs">
                     <div className="flex items-center">Quad (QUAD)</div>
+                    <Input value={sn.ep_quad} onChange={(e) => setSeason(ri, si, { ep_quad: e.target.value })} placeholder="₹ EP" />
                     <Input value={sn.cp_quad} onChange={(e) => setSeason(ri, si, { cp_quad: e.target.value })} placeholder="₹ CP" />
                     <Input value={sn.map_quad} onChange={(e) => setSeason(ri, si, { map_quad: e.target.value })} placeholder="₹ MAP" />
                     <Input value={sn.ap_quad} onChange={(e) => setSeason(ri, si, { ap_quad: e.target.value })} placeholder="₹ AP" />

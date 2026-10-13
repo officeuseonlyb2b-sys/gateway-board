@@ -1,16 +1,17 @@
 import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
-import { effectivePaxForPricing } from "@/lib/wizard/calc";
+import { effectivePaxForPricing, parsePaxRange } from "@/lib/wizard/calc";
 import { uid, dayAllCities, type CityRef, type StepProps } from "../shared";
+import { applyLandCommercials } from "@/lib/wizard/land-pricing";
 
 export function Step12({ draft, set }: StepProps) {
   const d = useDB();
   const traveler = draft.traveler_type ?? "indian";
   const totalPaxCount = effectivePaxForPricing(draft);
+  const paxRange = parsePaxRange(draft);
   // Only the selected traveler category is charged.
   const paxFor = (t: "indian" | "foreign" | "student") =>
     traveler === t ? totalPaxCount : 0;
@@ -94,18 +95,13 @@ export function Step12({ draft, set }: StepProps) {
     const dayCities = dayAllCities(r, d.cities, fromDefault);
     const out: DayRow[] = [];
     dayCities.forEach((c) => {
-      const selectedTitles =
-        r.tours_selected_by_city?.[c.id] ??
-        (r.tour_titles_by_city?.[c.id] ? [r.tour_titles_by_city[c.id]] : []);
-      if (selectedTitles.length === 0) return;
       d.entrance_sites
         .filter(
           (s) =>
             s.is_active &&
             d.entrance_cities.some(
               (ec) => ec.name === c.name && ec.id === s.city_id
-            ) &&
-            selectedTitles.includes(s.site_name)
+            )
         )
         .forEach((s) => out.push({ city: c, site: s }));
     });
@@ -122,9 +118,9 @@ export function Step12({ draft, set }: StepProps) {
       ri === 0
         ? draft.departure_city
         : cityName(draft.routing[ri - 1]?.city_id || "");
-    const routeLabel = `${r.from_city ?? fromDefault ?? "—"} → ${
-      cityName(r.city_id) || r.to_city || "—"
-    }`;
+    const fromLabel = r.from_city || fromDefault || "—";
+    const toLabel = cityName(r.city_id) || r.to_city || "—";
+    const routeLabel = fromLabel === toLabel ? `${toLabel} Local` : `${fromLabel} → ${toLabel}`;
     const rows = dayRows(r, ri);
 
     const siteRows = rows.map((row) => {
@@ -132,9 +128,9 @@ export function Step12({ draft, set }: StepProps) {
       const on = !!line;
       
       // Per‑person rates only (NO PAX MULTIPLIER USED)
-      const indianRate = on ? line.indian_rate : 0;
-      const foreignRate = on ? line.foreign_rate : 0;
-      const studentRate = on ? (line.student_rate ?? 0) : 0;
+      const indianRate = line?.indian_rate ?? row.site.indian_rate;
+      const foreignRate = line?.foreign_rate ?? row.site.foreigner_rate;
+      const studentRate = line?.student_rate ?? row.site.student_rate ?? 0;
       
       return {
         ...row,
@@ -163,6 +159,11 @@ export function Step12({ draft, set }: StepProps) {
       hasRows: siteRows.length > 0,
     };
   });
+  const entranceCommercials = {
+    indian: applyLandCommercials(draft, totalIndianRate, 0.05),
+    foreign: applyLandCommercials(draft, totalForeignRate, 0.05),
+    student: applyLandCommercials(draft, totalStudentRate, 0.05),
+  };
 
   return (
     <div className="space-y-4">
@@ -170,7 +171,7 @@ export function Step12({ draft, set }: StepProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Entrance Fees</h2>
         <Badge variant="secondary" className="text-[10px]">
-          Pax: {totalPaxCount} (Indian · Foreigner · Student)
+          Pax: {paxRange ? `${paxRange.min}–${paxRange.max}` : totalPaxCount} (Indian · Foreigner · Student)
         </Badge>
       </div>
 
@@ -182,9 +183,9 @@ export function Step12({ draft, set }: StepProps) {
               <th className="text-left p-2 w-[60px]">Day</th>
               <th className="text-left p-2 w-[170px]">Route</th>
               <th className="text-left p-2 min-w-[200px]">City + Tour</th>
-              <th className="text-right p-2 w-[180px]">Indian</th>
-              <th className="text-right p-2 w-[180px]">Foreigner</th>
-              <th className="text-right p-2 w-[180px]">Student</th>
+              <th className="text-right p-2 w-[150px]">Indian</th>
+              <th className="text-right p-2 w-[150px]">Foreigner</th>
+              <th className="text-right p-2 w-[150px]">Student</th>
             </tr>
           </thead>
           <tbody>
@@ -238,75 +239,35 @@ export function Step12({ draft, set }: StepProps) {
                           <span className="block text-sm font-medium truncate">
                             {site.site.site_name}
                           </span>
-                          <span className="block text-[10px] text-muted-foreground mt-0.5 space-x-2">
-                            <span
-                              className={cn(
-                                site.indianRate > 0
-                                  ? "text-green-700"
-                                  : "text-amber-500"
-                              )}
-                            >
-                              Indian:{" "}
-                              {site.indianRate > 0
-                                ? `${inr(site.indianRate)}/pp`
-                                : "not set"}
-                            </span>
-                            <span className="text-muted-foreground">·</span>
-                            <span
-                              className={cn(
-                                site.foreignRate > 0
-                                  ? "text-blue-700"
-                                  : "text-amber-500"
-                              )}
-                            >
-                              Foreigner:{" "}
-                              {site.foreignRate > 0
-                                ? `${inr(site.foreignRate)}/pp`
-                                : "not set"}
-                            </span>
-                            <span className="text-muted-foreground">·</span>
-                            <span
-                              className={cn(
-                                site.studentRate > 0
-                                  ? "text-purple-700"
-                                  : "text-muted-foreground"
-                              )}
-                            >
-                              Student:{" "}
-                              {site.studentRate > 0
-                                ? `${inr(site.studentRate)}/pp`
-                                : "—"}
-                            </span>
-                          </span>
                         </span>
                       </label>
                     </td>
 
                     {/* Indian column: ONLY per-person rate displayed (NO PAX MULTIPLIER) */}
                     <td className="p-2 text-right tabular-nums">
-                      {site.on ? (
+                      {site.indianRate > 0 ? (
                         <div className="font-semibold text-green-700">
                           {inr(site.indianRate)}
                         </div>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-[10px] text-amber-600">not set</span>
                       )}
                     </td>
 
                     {/* Foreigner column */}
                     <td className="p-2 text-right tabular-nums">
-                      {site.on ? (
+                      {site.foreignRate > 0 ? (
                         <div className="font-semibold text-blue-700">
                           {inr(site.foreignRate)}
                         </div>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-[10px] text-amber-600">not set</span>
                       )}
                     </td>
 
                     {/* Student column */}
                     <td className="p-2 text-right tabular-nums">
-                      {site.on ? (
+                      {site.studentRate > 0 ? (
                         <div className="font-semibold text-purple-700">
                           {inr(site.studentRate)}
                         </div>
@@ -319,74 +280,51 @@ export function Step12({ draft, set }: StepProps) {
               });
             })}
 
-            {/* 🔥 NEW PER-PERSON COLUMN TOTALS ROW (NO PAX MULTIPLICATION) */}
             <tr className="border-t-2 border-[#E5E7EB] bg-[#F0FDF4]">
               <td
                 colSpan={3}
-                className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground font-semibold"
+                className="p-2 text-right text-[10px] uppercase tracking-wide font-semibold"
               >
-                Total (Per-Person)
+                Base Total (Per Person)
               </td>
-              <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-green-800 text-sm">
-                  {inr(totalIndianRate)}
-                </div>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Indian
-                </div>
+              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalIndianRate)}</td>
+              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalForeignRate)}</td>
+              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalStudentRate)}</td>
+            </tr>
+            <tr className="border-b border-[#E5E7EB] bg-[#F0FDF4]">
+              <td colSpan={3} className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
+                Markup
               </td>
-              <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-blue-800 text-sm">
-                  {inr(totalForeignRate)}
-                </div>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Foreigner
-                </div>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.indian.markup)}</td>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.foreign.markup)}</td>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.student.markup)}</td>
+            </tr>
+            <tr className="border-b-2 border-[#D1D5DB] bg-[#F0FDF4]">
+              <td colSpan={3} className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
+                GST 5%
               </td>
-              <td className="p-2 text-right tabular-nums">
-                <div className="font-bold text-purple-800 text-sm">
-                  {inr(totalStudentRate)}
-                </div>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                  Student
-                </div>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.indian.gst)}</td>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.foreign.gst)}</td>
+              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.student.gst)}</td>
+            </tr>
+            <tr className="bg-[#F0FDF4] font-bold">
+              <td colSpan={3} className="p-2 text-right text-xs uppercase tracking-wide">
+                Final Total Per Person
+              </td>
+              <td className="p-2 text-right text-sm tabular-nums text-green-800">
+                {inr(entranceCommercials.indian.final)}
+              </td>
+              <td className="p-2 text-right text-sm tabular-nums text-blue-800">
+                {inr(entranceCommercials.foreign.final)}
+              </td>
+              <td className="p-2 text-right text-sm tabular-nums text-purple-800">
+                {inr(entranceCommercials.student.final)}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* Summary chips (Per-person totals) */}
-      {(totalIndianRate + totalForeignRate + totalStudentRate) > 0 && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {totalIndianRate > 0 && (
-            <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1">
-              🇮🇳 Indian total: {inr(totalIndianRate)}
-            </span>
-          )}
-          {totalForeignRate > 0 && (
-            <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1">
-              ✈ Foreigner total: {inr(totalForeignRate)}
-            </span>
-          )}
-          {totalStudentRate > 0 && (
-            <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-3 py-1">
-              🎓 Student total: {inr(totalStudentRate)}
-            </span>
-          )}
-          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-3 py-1">
-            👤 Indian/pp: {inr(totalIndianRate)}
-          </span>
-          <span className="bg-sky-50 text-sky-700 border border-sky-200 rounded-full px-3 py-1">
-            👤 Foreigner/pp: {inr(totalForeignRate)}
-          </span>
-          {(totalStudentRate > 0) && (
-            <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-3 py-1">
-              👤 Student/pp: {inr(totalStudentRate)}
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

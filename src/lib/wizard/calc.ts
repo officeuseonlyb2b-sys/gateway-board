@@ -7,20 +7,37 @@ import { addDaysISO } from "@/lib/format";
 export interface OptionTotals {
   key: string;
   label: string;
-  room_net_sgl: number; room_net_dbl: number; room_net_trp: number;
-  gst_rooms_sgl: number; gst_rooms_dbl: number; gst_rooms_trp: number;
+  room_net_sgl: number;
+  room_net_dbl: number;
+  room_net_trp: number;
+  gst_rooms_sgl: number;
+  gst_rooms_dbl: number;
+  gst_rooms_trp: number;
   addons_total: number;
-  markup_sgl: number; markup_dbl: number; markup_trp: number;
-  gst5_sgl: number; gst5_dbl: number; gst5_trp: number;
-  grand_sgl: number; grand_dbl: number; grand_trp: number;
-  per_pax_sgl: number; per_pax_dbl: number; per_pax_trp: number;
+  markup_sgl: number;
+  markup_dbl: number;
+  markup_trp: number;
+  gst5_sgl: number;
+  gst5_dbl: number;
+  gst5_trp: number;
+  grand_sgl: number;
+  grand_dbl: number;
+  grand_trp: number;
+  per_pax_sgl: number;
+  per_pax_dbl: number;
+  per_pax_trp: number;
   rate_matches: number;
   rate_missing: number;
 }
 
 import { findRatePlan } from "./rate-lookup";
 
-function pickPlan(plans: RatePlan[], room_id: string, meal: string, dateISO: string): RatePlan | null {
+function pickPlan(
+  plans: RatePlan[],
+  room_id: string,
+  meal: string,
+  dateISO: string,
+): RatePlan | null {
   return findRatePlan(plans, room_id, meal, dateISO);
 }
 
@@ -38,7 +55,8 @@ export function applyRateOverride(
   const out: RatePlan = { ...plan };
   if (typeof ovr.sgl === "number" && ovr.sgl > 0) out.single_rate = ovr.sgl;
   if (typeof ovr.dbl === "number" && ovr.dbl > 0) out.double_rate = ovr.dbl;
-  if (typeof ovr.trp === "number" && ovr.trp > 0) out.extra_bed_rate = Math.max(0, ovr.trp - out.double_rate);
+  if (typeof ovr.trp === "number" && ovr.trp > 0)
+    out.extra_bed_rate = Math.max(0, ovr.trp - out.double_rate);
   if (typeof ovr.quad === "number" && ovr.quad > 0) out.quad_rate = ovr.quad;
   return out;
 }
@@ -51,7 +69,6 @@ export function planForDay(
   return applyRateOverride(plan, opt.rate_overrides?.[dayNumber]);
 }
 
-
 // GST slab per business rule: effective per-room tariff (meal-inclusive,
 // including extra-bed / mandatory hotel supplements) > ₹7,500 → 18%,
 // otherwise 5%. Applied uniformly for SGL / DBL / TRP and every meal plan,
@@ -61,18 +78,90 @@ export function gstRateFor(net: number): number {
   return net > 7500 ? 0.18 : 0.05;
 }
 
+export interface DynamicAccommodationBreakdown {
+  net: number;
+  supplier_gst: number;
+  total: number;
+  capacity: number;
+  missing: number;
+}
+
+/** Shared totals for the option/day-scoped Dynamic room-combination model. */
+export function dynamicAccommodationBreakdown(
+  draft: QuoteDraft,
+  option: HotelOption,
+  d: DB,
+): DynamicAccommodationBreakdown {
+  const breakdown: DynamicAccommodationBreakdown = {
+    net: 0,
+    supplier_gst: 0,
+    total: 0,
+    capacity: 0,
+    missing: 0,
+  };
+  const dynamicDays = new Set(draft.dynamic_days ?? []);
+  draft.routing.forEach((day, index) => {
+    const isDynamic = draft.allocation_mode === "dynamic" || dynamicDays.has(day.day);
+    if (!day.overnight || !isDynamic) return;
+    const selection = option.selections.find((item) => item.city_id === day.city_id);
+    if (!selection?.hotel_id) {
+      breakdown.missing++;
+      return;
+    }
+    const date = day.date || addDaysISO(draft.start_date, index);
+    (option.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
+      const rooms = Math.max(0, allocation.rooms);
+      if (!allocation.room_id || rooms === 0) {
+        breakdown.missing++;
+        return;
+      }
+      const room = d.room_categories.find((item) => item.id === allocation.room_id);
+      if (!room || room.hotel_id !== selection.hotel_id) {
+        breakdown.missing++;
+        return;
+      }
+      const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date);
+      const masterNet = plan
+        ? allocation.occupancy === "single"
+          ? plan.single_rate
+          : allocation.occupancy === "double"
+            ? plan.double_rate
+            : allocation.occupancy === "triple"
+              ? plan.double_rate + (plan.extra_bed_rate || 0)
+              : (plan.quad_rate ?? 0)
+        : 0;
+      const net = allocation.manual_net_rate ?? masterNet;
+      if (!(net > 0)) {
+        breakdown.missing++;
+        return;
+      }
+      const supplierGst = net * gstRateFor(net) * rooms;
+      breakdown.net += net * rooms;
+      breakdown.supplier_gst += supplierGst;
+      breakdown.total += (net * rooms) + supplierGst;
+      breakdown.capacity += rooms * ({ single: 1, double: 2, triple: 3, quad: 4 } as const)[allocation.occupancy];
+    });
+  });
+  return breakdown;
+}
+
+export function dynamicAccommodationTotal(draft: QuoteDraft, option: HotelOption, d: DB): number {
+  return dynamicAccommodationBreakdown(draft, option, d).total;
+}
+
 export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
+  const additions = (l.extra_costs ?? []).reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   // Per-vehicle "Total" mode overrides per-route day-wise entry with one lump-sum rate.
   if (l.rate_mode === "total") {
-    return (l.total_rate ?? 0) * (l.vehicles || 1) + (l.reporting_cost ?? 0);
+    return (l.total_rate ?? 0) * (l.vehicles || 1) + (l.reporting_cost ?? 0) + additions;
   }
-  if (l.rate_format === "total") return l.total_override ?? 0;
+  if (l.rate_format === "total") return (l.total_override ?? 0) + additions;
   if (l.rate_format === "per_route") {
     const sum = (l.per_route_rates ?? []).reduce((s, r) => s + (Number(r) || 0), 0);
-    return sum * (l.vehicles || 1) + (l.reporting_cost ?? 0);
+    return sum * (l.vehicles || 1) + (l.reporting_cost ?? 0) + additions;
   }
   // "per_day" or "prefilled" or undefined
-  return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0);
+  return l.rate * l.vehicles * l.days + (l.reporting_cost ?? 0) + additions;
 }
 
 // ------------------------------------------------------------
@@ -92,20 +181,27 @@ export interface MealDayRow {
 }
 
 /** Markup / GST percentages, split into Land Part vs Hotels & Meals. */
-export function landMarkup(d: QuoteDraft): number { return (d.land_markup_percent ?? d.markup_percent ?? 0) / 100; }
-export function landGst(d: QuoteDraft): number { return (d.land_gst_percent ?? 5) / 100; }
-export function hotelsMarkup(d: QuoteDraft): number { return (d.hotel_markup_percent ?? d.markup_percent ?? 0) / 100; }
-export function hotelsGst(d: QuoteDraft): number { return (d.hotel_gst_percent ?? 5) / 100; }
+export function landMarkup(d: QuoteDraft): number {
+  return (d.land_markup_percent ?? d.markup_percent ?? 0) / 100;
+}
+export function landGst(d: QuoteDraft): number {
+  return (d.land_gst_percent ?? 5) / 100;
+}
+export function hotelsMarkup(d: QuoteDraft): number {
+  return (d.hotel_markup_percent ?? d.markup_percent ?? 0) / 100;
+}
+export function hotelsGst(d: QuoteDraft): number {
+  return (d.hotel_gst_percent ?? 5) / 100;
+}
 
 /** Meal selections for one accommodation option (falls back to the shared map). */
 export function mealSelectionsFor(
   draft: QuoteDraft,
   optionKey?: string,
 ): Record<string, import("./types").MealDaySelection> {
-  const byOpt = optionKey
-    ? draft.meal_selections_by_option?.[optionKey as import("./types").OptionKey]
-    : undefined;
-  return byOpt ?? draft.meal_selections ?? {};
+  if (!optionKey) return draft.meal_selections ?? {};
+  const byOpt = draft.meal_selections_by_option?.[optionKey as import("./types").OptionKey];
+  return byOpt ?? (optionKey === "A" ? draft.meal_selections ?? {} : {});
 }
 
 /** Meals already included by the selected hotel meal plan. */
@@ -127,8 +223,14 @@ export function computeMealDays(
 
   draft.routing.forEach((day, i) => {
     const date = day.date || addDaysISO(draft.start_date, i);
+    const fromName = day.from_city?.trim().toLowerCase();
+    const fromCityId = d.cities.find((city) =>
+      city.id === day.from_city || city.name.trim().toLowerCase() === fromName,
+    )?.id;
     const cityIds = Array.from(
-      new Set([...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[]),
+      new Set(
+        [fromCityId, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[],
+      ),
     );
     cityIds.forEach((cityId) => {
       const selected = selections[`${day.day}:${cityId}`];
@@ -138,9 +240,10 @@ export function computeMealDays(
       // plan is later changed to MAP/AP. Only the overnight city's selected
       // hotel plan covers meals; excursion-city meals remain independently
       // selectable.
-      const overnightSelection = day.overnight && day.city_id === cityId
-        ? opt?.selections.find((item) => item.city_id === cityId)
-        : undefined;
+      const overnightSelection =
+        day.overnight && day.city_id === cityId
+          ? opt?.selections.find((item) => item.city_id === cityId)
+          : undefined;
       const covered = mealPlanCoverage(overnightSelection?.meal_plan);
       (["lunch", "dinner"] as const).forEach((mealKey) => {
         if (covered[mealKey]) return;
@@ -153,12 +256,14 @@ export function computeMealDays(
           perPerson = choice.per_person_rate ?? restaurant?.price_per_person ?? 0;
           label ||= restaurant?.name || "Restaurant";
         } else if (choice.source === "hotel") {
-          const hs = opt?.selections.find((item) => item.hotel_id === choice.hotel_id)
-            ?? opt?.selections.find((item) => item.city_id === cityId);
+          const hs =
+            opt?.selections.find((item) => item.hotel_id === choice.hotel_id) ??
+            opt?.selections.find((item) => item.city_id === cityId);
           const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date) : null;
-          perPerson = choice.per_person_rate
-            ?? (mealKey === "lunch" ? plan?.lunch_rate : plan?.dinner_rate)
-            ?? 0;
+          perPerson =
+            choice.per_person_rate ??
+            (mealKey === "lunch" ? plan?.lunch_rate : plan?.dinner_rate) ??
+            0;
           label ||= d.hotels.find((hotel) => hotel.id === choice.hotel_id)?.name || "Hotel";
         }
         const rowTotal = perPerson * pax;
@@ -191,15 +296,18 @@ export function computeMealsTotal(
   return computeMealDays(draft, d, optionKey).total;
 }
 
-export function computeAddonsTotal(
-  draft: QuoteDraft,
-  d?: import("@/lib/mock-store").DB,
-): number {
+export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-store").DB): number {
   const t = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
-  const a = draft.activities.reduce((s, l) => s + l.rate * l.qty, 0);
+  const a = draft.activities.reduce(
+    (s, l) => s + (l.inclusion_status === "optional" ? 0 : l.rate * l.qty),
+    0,
+  );
   const e = draft.entrances.reduce(
-    (s, l) => s + l.indian_pax * l.indian_rate + l.foreign_pax * l.foreign_rate
-      + (l.student_pax ?? 0) * (l.student_rate ?? 0),
+    (s, l) =>
+      s +
+      l.indian_pax * l.indian_rate +
+      l.foreign_pax * l.foreign_rate +
+      (l.student_pax ?? 0) * (l.student_rate ?? 0),
     0,
   );
   const g = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);
@@ -212,9 +320,12 @@ export function computeAddonsTotal(
     const selected = miscDay == null ? undefined : draft.costing_selection?.misc?.[miscDay];
     if (selected && !selected.includes(line.id)) return sum;
     const isSlab = (master?.pricing_type ?? master?.unit) === "slab";
-    return sum + (isSlab && master
-      ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
-      : line.rate * line.qty);
+    return (
+      sum +
+      (isSlab && master
+        ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
+        : line.rate * line.qty)
+    );
   }, 0);
   const meals = computeMealsTotal(draft, d);
   // Optional supplements are deliberately excluded from the package total.
@@ -226,13 +337,25 @@ export function computeOptionalTotal(draft: QuoteDraft): number {
   return draft.optionals.reduce((sum, line) => sum + line.rate * line.qty, 0);
 }
 
-
 export function totalPax(draft: QuoteDraft): number {
   return draft.adults + draft.ss + draft.children.length;
 }
 
+/** Dynamic accommodation requires the explicit Exact mode and a positive actual traveller total. */
+export function canUseDynamicAccommodation(draft: QuoteDraft): boolean {
+  return draft.pax_mode === "exact" && totalPax(draft) > 0;
+}
+
 /** True when the admin is costing for a pax RANGE instead of an exact headcount. */
 export function paxRangeActive(draft: QuoteDraft): boolean {
+  if (draft.pax_mode) return draft.pax_mode === "range";
+  if (
+    Number.isInteger(draft.pax_min) &&
+    Number.isInteger(draft.pax_max) &&
+    (draft.pax_min ?? 0) >= 1 &&
+    (draft.pax_max ?? 0) >= (draft.pax_min ?? 0)
+  )
+    return true;
   const r = draft.pax_range;
   return !!r && r !== "auto";
 }
@@ -243,8 +366,13 @@ function normalizeInt(value: number | null | undefined, fallback = 1): number {
 }
 
 export function getQueryPricingPaxRange(
-  query?: Partial<{ min_pax?: number | null; max_pax?: number | null }>,
+  query?: Partial<{
+    min_pax?: number | null;
+    max_pax?: number | null;
+    pax_mode?: "exact" | "range";
+  }>,
 ): { min: number; max: number } | null {
+  if (query?.pax_mode === "exact") return null;
   const minRaw = typeof query?.min_pax === "number" ? query.min_pax : null;
   const maxRaw = typeof query?.max_pax === "number" ? query.max_pax : null;
 
@@ -277,7 +405,8 @@ export function resolveQuotationPricingRange({
   }
 
   const range = linkedQueryRange ?? null;
-  if (range) return { min: Math.max(1, range.min), max: Math.max(Math.max(1, range.min), range.max) };
+  if (range)
+    return { min: Math.max(1, range.min), max: Math.max(Math.max(1, range.min), range.max) };
 
   if (typeof actualPax === "number" && Number.isFinite(actualPax) && actualPax > 0) {
     const safe = Math.max(1, Math.floor(actualPax));
@@ -303,13 +432,62 @@ function parsePaxRangeText(value: string): { min: number; max: number } | null {
 
 /** Parsed { min, max } of an active pax range, else null. */
 export function parsePaxRange(draft: QuoteDraft): { min: number; max: number } | null {
+  if (draft.pax_mode === "exact") return null;
+  if (
+    (!draft.pax_mode || draft.pax_mode === "range") &&
+    Number.isInteger(draft.pax_min) &&
+    Number.isInteger(draft.pax_max) &&
+    (draft.pax_min ?? 0) >= 1 &&
+    (draft.pax_max ?? 0) >= (draft.pax_min ?? 0)
+  ) {
+    return { min: draft.pax_min!, max: draft.pax_max! };
+  }
   const r = draft.pax_range;
   if (!r || r === "auto") return null;
   return parsePaxRangeText(r);
 }
 
+/** Pax rows used by quotation costing matrices (not master pricing slabs). */
+export function getCostingPaxValues(draft: QuoteDraft): number[] {
+  const exactPax =
+    (Number.isFinite(draft.adults) ? draft.adults : 0) +
+    (Number.isFinite(draft.ss) ? draft.ss : 0) +
+    (Array.isArray(draft.children) ? draft.children.length : 0);
+  const validRange = (
+    min: number | undefined,
+    max: number | undefined,
+  ): { min: number; max: number } | null =>
+    Number.isInteger(min) && Number.isInteger(max) && (min ?? 0) >= 1 && (max ?? 0) >= (min ?? 0)
+      ? { min: min!, max: max! }
+      : null;
+
+  const expand = (range: { min: number; max: number }): number[] => {
+    const values: number[] = [];
+    for (let pax = range.min; pax <= range.max; pax++) values.push(pax);
+    return values;
+  };
+
+  if (draft.pax_mode === "range") {
+    const range = validRange(draft.pax_min, draft.pax_max) ?? parsePaxRange(draft);
+    if (range) return expand(range);
+    if (Number.isInteger(exactPax) && exactPax > 0) return [exactPax];
+  } else if (draft.pax_mode === "exact") {
+    if (Number.isInteger(exactPax) && exactPax > 0) return [exactPax];
+  } else {
+    // Legacy drafts may have persisted bounds or an older textual range but
+    // no mode field. Prefer that explicit range before exact traveller counts.
+    const range = validRange(draft.pax_min, draft.pax_max) ?? parsePaxRange(draft);
+    if (range) return expand(range);
+    if (Number.isInteger(exactPax) && exactPax > 0) return [exactPax];
+  }
+
+  // Safe fallback for incomplete legacy drafts; never invent a 1–40 matrix.
+  return [1];
+}
+
 export function deriveTourTypeFromPricingPax(pax: number | null | undefined): "FIT" | "GIT" {
-  const pricingPax = typeof pax === "number" && Number.isFinite(pax) ? Math.max(1, Math.floor(pax)) : 1;
+  const pricingPax =
+    typeof pax === "number" && Number.isFinite(pax) ? Math.max(1, Math.floor(pax)) : 1;
   return pricingPax <= 5 ? "FIT" : "GIT";
 }
 
@@ -322,27 +500,36 @@ export function effectivePaxForPricing(draft: QuoteDraft): number {
   return Math.max(1, totalPax(draft));
 }
 
-export function computeOption(
-  draft: QuoteDraft,
-  opt: HotelOption,
-  d: DB,
-): OptionTotals {
-  let sglNet = 0, dblNet = 0, trpNet = 0;
-  let sglGst = 0, dblGst = 0, trpGst = 0;
-  let matches = 0, missing = 0;
+export function computeOption(draft: QuoteDraft, opt: HotelOption, d: DB): OptionTotals {
+  let sglNet = 0,
+    dblNet = 0,
+    trpNet = 0;
+  let sglGst = 0,
+    dblGst = 0,
+    trpGst = 0;
+  let matches = 0,
+    missing = 0;
 
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
-    if (!sel) { missing++; return; }
+    if (!sel) {
+      missing++;
+      return;
+    }
     const date = addDaysISO(draft.start_date, i);
     const plan = planForDay(opt, day.day, pickPlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
-    if (!plan) { missing++; return; }
+    if (!plan) {
+      missing++;
+      return;
+    }
     matches++;
     const dbl = plan.double_rate;
     const sgl = plan.single_rate;
     const trp = dbl + plan.extra_bed_rate;
-    sglNet += sgl; dblNet += dbl; trpNet += trp;
+    sglNet += sgl;
+    dblNet += dbl;
+    trpNet += trp;
     sglGst += sgl * gstRateFor(sgl);
     dblGst += dbl * gstRateFor(dbl);
     trpGst += trp * gstRateFor(trp);
@@ -372,12 +559,22 @@ export function computeOption(
   return {
     key: opt.key,
     label: opt.label || opt.key,
-    room_net_sgl: sglNet, room_net_dbl: dblNet, room_net_trp: trpNet,
-    gst_rooms_sgl: sglGst, gst_rooms_dbl: dblGst, gst_rooms_trp: trpGst,
+    room_net_sgl: sglNet,
+    room_net_dbl: dblNet,
+    room_net_trp: trpNet,
+    gst_rooms_sgl: sglGst,
+    gst_rooms_dbl: dblGst,
+    gst_rooms_trp: trpGst,
     addons_total: addons,
-    markup_sgl: mkSgl, markup_dbl: mkDbl, markup_trp: mkTrp,
-    gst5_sgl: gst5Sgl, gst5_dbl: gst5Dbl, gst5_trp: gst5Trp,
-    grand_sgl: grandSgl, grand_dbl: grandDbl, grand_trp: grandTrp,
+    markup_sgl: mkSgl,
+    markup_dbl: mkDbl,
+    markup_trp: mkTrp,
+    gst5_sgl: gst5Sgl,
+    gst5_dbl: gst5Dbl,
+    gst5_trp: gst5Trp,
+    grand_sgl: grandSgl,
+    grand_dbl: grandDbl,
+    grand_trp: grandTrp,
     per_pax_sgl: grandSgl,
     per_pax_dbl: grandDbl / 2,
     per_pax_trp: grandTrp / 3,
@@ -391,18 +588,22 @@ export function computeOption(
 // ============================================================
 import type { PersonAllocation, PersonRoomType } from "./types";
 
-
 export interface PersonDayCost {
-  net: number;      // person share of the room tariff for this night
-  gst: number;      // GST amount at slab based on effective room tariff
+  net: number; // person share of the room tariff for this night
+  gst: number; // GST amount at slab based on effective room tariff
 }
 
 // Compute a single person's share for a single day given the resolved plan.
 export function computePersonDayCost(
   room_type: PersonRoomType,
-  plan: { single_rate: number; double_rate: number; extra_bed_rate: number; cwb_rate?: number | null; quad_rate?: number | null },
+  plan: {
+    single_rate: number;
+    double_rate: number;
+    extra_bed_rate: number;
+    cwb_rate?: number | null;
+    quad_rate?: number | null;
+  },
 ): PersonDayCost {
-
   const sgl = plan.single_rate || 0;
   const dbl = plan.double_rate || 0;
   const eb = plan.extra_bed_rate || 0;
@@ -410,13 +611,20 @@ export function computePersonDayCost(
   const trpTariff = dbl + eb;
   const quadTariff = (plan as { quad_rate?: number | null }).quad_rate || dbl + eb * 2;
   switch (room_type) {
-    case "single":    return { net: sgl,        gst: sgl        * gstRateFor(sgl) };
-    case "double":    return { net: dbl / 2,    gst: (dbl / 2)  * gstRateFor(dbl) };
-    case "triple":    return { net: trpTariff / 3, gst: (trpTariff / 3) * gstRateFor(trpTariff) };
-    case "quad":      return { net: quadTariff / 4, gst: (quadTariff / 4) * gstRateFor(quadTariff) };
-    case "extra_bed": return { net: eb,         gst: eb         * gstRateFor(eb) };
-    case "cwb":       return { net: cwb,        gst: cwb        * gstRateFor(cwb) };
-    default:          return { net: 0, gst: 0 };
+    case "single":
+      return { net: sgl, gst: sgl * gstRateFor(sgl) };
+    case "double":
+      return { net: dbl / 2, gst: (dbl / 2) * gstRateFor(dbl) };
+    case "triple":
+      return { net: trpTariff / 3, gst: (trpTariff / 3) * gstRateFor(trpTariff) };
+    case "quad":
+      return { net: quadTariff / 4, gst: (quadTariff / 4) * gstRateFor(quadTariff) };
+    case "extra_bed":
+      return { net: eb, gst: eb * gstRateFor(eb) };
+    case "cwb":
+      return { net: cwb, gst: cwb * gstRateFor(cwb) };
+    default:
+      return { net: 0, gst: 0 };
   }
 }
 
@@ -425,12 +633,12 @@ export interface PersonOptionTotal {
   label: string;
   room_type: PersonRoomType;
   sharing_with: number[];
-  room_net: number;      // sum across nights
+  room_net: number; // sum across nights
   room_gst: number;
-  room_total: number;    // room_net + room_gst
+  room_total: number; // room_net + room_gst
   shared_addons: number; // add-ons split equally
-  markup: number;        // markup% on (room_total + shared_addons)
-  gst5: number;          // 5% on markup
+  markup: number; // markup% on (room_total + shared_addons)
+  gst5: number; // 5% on markup
   grand_total: number;
 }
 
@@ -461,7 +669,8 @@ export function computePersonTotals(
   });
 
   return allocs.map((p) => {
-    let net = 0, gst = 0;
+    let net = 0,
+      gst = 0;
     dayPlans.forEach((plan) => {
       if (!plan) return;
       const c = computePersonDayCost(p.room_type, plan);
@@ -490,12 +699,18 @@ export function computePersonTotals(
 
 export function personRoomTypeLabel(t: PersonRoomType, sharing_with: number[] = []): string {
   switch (t) {
-    case "single":    return "Single Room";
-    case "double":    return sharing_with.length ? `Double (shared)` : "Double";
-    case "triple":    return "Triple Sharing";
-    case "quad":      return "Quad Sharing";
-    case "extra_bed": return "Extra Bed";
-    case "cwb":       return "Child With Bed";
+    case "single":
+      return "Single Room";
+    case "double":
+      return sharing_with.length ? `Double (shared)` : "Double";
+    case "triple":
+      return "Triple Sharing";
+    case "quad":
+      return "Quad Sharing";
+    case "extra_bed":
+      return "Extra Bed";
+    case "cwb":
+      return "Child With Bed";
   }
 }
 
@@ -521,7 +736,10 @@ export function defaultAllocations(count: number): PersonAllocation[] {
 
 export function presetAllSingle(count: number): PersonAllocation[] {
   return Array.from({ length: count }, (_, i) => ({
-    person_id: i + 1, label: `Person ${i + 1}`, room_type: "single" as PersonRoomType, sharing_with: [],
+    person_id: i + 1,
+    label: `Person ${i + 1}`,
+    room_type: "single" as PersonRoomType,
+    sharing_with: [],
   }));
 }
 
@@ -571,12 +789,14 @@ export function normalizeAllocations(
 
 // Look-up per-night room rates for the option (used by preview).
 
-
-
 export interface OptionRateLookup {
   perNight: {
-    sgl: number; dbl: number; extra_bed: number; cwb: number;
-    date: string; city_id: string;
+    sgl: number;
+    dbl: number;
+    extra_bed: number;
+    cwb: number;
+    date: string;
+    city_id: string;
   }[];
   missing: number;
   nights: number;
@@ -591,14 +811,27 @@ export function lookupOptionNightlyRates(
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
-    if (!sel) { missing++; return; }
+    if (!sel) {
+      missing++;
+      return;
+    }
     const date = addDaysISO(draft.start_date, i);
-    const plan = planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
-    if (!plan) { missing++; return; }
+    const plan = planForDay(
+      opt,
+      day.day,
+      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date),
+    );
+    if (!plan) {
+      missing++;
+      return;
+    }
     perNight.push({
-      sgl: plan.single_rate, dbl: plan.double_rate,
-      extra_bed: plan.extra_bed_rate, cwb: (plan as { cwb_rate?: number }).cwb_rate || 0,
-      date, city_id: day.city_id,
+      sgl: plan.single_rate,
+      dbl: plan.double_rate,
+      extra_bed: plan.extra_bed_rate,
+      cwb: (plan as { cwb_rate?: number }).cwb_rate || 0,
+      date,
+      city_id: day.city_id,
     });
   });
   return { perNight, missing, nights: perNight.length };
@@ -653,22 +886,35 @@ export function computeGroupOption(
   d: import("@/lib/mock-store").DB,
   mix: GroupRoomMix,
 ): GroupOptionTotals {
-  let roomNet = 0, roomGst = 0, missing = 0;
+  let roomNet = 0,
+    roomGst = 0,
+    missing = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
-    if (!sel) { missing++; return; }
+    if (!sel) {
+      missing++;
+      return;
+    }
     const date = addDaysISO(draft.start_date, i);
-    const plan = planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
-    if (!plan) { missing++; return; }
+    const plan = planForDay(
+      opt,
+      day.day,
+      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date),
+    );
+    if (!plan) {
+      missing++;
+      return;
+    }
     const sgl = plan.single_rate;
     const dbl = plan.double_rate;
     const trp = dbl + plan.extra_bed_rate;
     // Each room's tariff drives its own GST slab.
     const nightNet = mix.double * dbl + mix.triple * trp + mix.single * sgl;
-    const nightGst = mix.double * dbl * gstRateFor(dbl)
-                   + mix.triple * trp * gstRateFor(trp)
-                   + mix.single * sgl * gstRateFor(sgl);
+    const nightGst =
+      mix.double * dbl * gstRateFor(dbl) +
+      mix.triple * trp * gstRateFor(trp) +
+      mix.single * sgl * gstRateFor(sgl);
     roomNet += nightNet;
     roomGst += nightGst;
   });
@@ -705,7 +951,6 @@ export function mixLabel(mix: GroupRoomMix): string {
   if (mix.single) parts.push(`${mix.single} Single`);
   return parts.join(" + ") || "No rooms";
 }
-
 
 // ============================================================
 // Standard allocation pattern — repeating 1 Single, 2 Double, 3 Triple
@@ -771,13 +1016,17 @@ export function computeDynamicOption(
   d: import("@/lib/mock-store").DB,
 ): { days: DynamicDayCost[]; room_net: number; room_gst: number } {
   const days: DynamicDayCost[] = [];
-  let net = 0, gst = 0;
+  let net = 0,
+    gst = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const mix = draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
+    const mix =
+      draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
     const sel = opt.selections.find((s) => s.city_id === day.city_id);
     const date = addDaysISO(draft.start_date, i);
-    const plan = sel ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date)) : null;
+    const plan = sel
+      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date))
+      : null;
     if (!plan) {
       days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });
       return;
@@ -787,11 +1036,13 @@ export function computeDynamicOption(
     const trp = dbl + plan.extra_bed_rate;
     const quad = (plan as { quad_rate?: number | null }).quad_rate || dbl + plan.extra_bed_rate * 2;
     const dNet = mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad;
-    const dGst = mix.single * sgl * gstRateFor(sgl)
-      + mix.double * dbl * gstRateFor(dbl)
-      + mix.triple * trp * gstRateFor(trp)
-      + mix.quad * quad * gstRateFor(quad);
-    net += dNet; gst += dGst;
+    const dGst =
+      mix.single * sgl * gstRateFor(sgl) +
+      mix.double * dbl * gstRateFor(dbl) +
+      mix.triple * trp * gstRateFor(trp) +
+      mix.quad * quad * gstRateFor(quad);
+    net += dNet;
+    gst += dGst;
     days.push({ day: day.day, city_id: day.city_id, mix, net: dNet, gst: dGst, missing: false });
   });
   return { days, room_net: net, room_gst: gst };

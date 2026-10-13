@@ -2,13 +2,14 @@ import type { DB } from "@/lib/mock-store";
 import { findRatePlan } from "./rate-lookup";
 import { addDaysISO } from "@/lib/format";
 import {
-  dayMixCoversPax,
   effectivePaxForPricing,
   parsePaxRange,
   planForDay,
 } from "./calc";
 import { computeScenario, type ScenarioResult } from "./scenario";
 import type { CostScenario, QuoteDraft } from "./types";
+import { normalizeQueryFor } from "@/lib/query-for";
+import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
 
 export type ValidationSeverity = "blocker" | "warning";
 export interface QuoteValidationIssue {
@@ -42,20 +43,48 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   const pax = effectivePaxForPricing(draft);
   const range = parsePaxRange(draft);
   const overnight = draft.routing.filter((day) => day.overnight);
+  const queryFor = normalizeQueryFor(draft.query_for) || "Package";
   const commercialMode = draft.commercial_mode || "package";
   const requiresAccommodation = commercialMode !== "transport_only";
   const requiresTransport = commercialMode === "transport_only";
+  const escortMode = getEscortPricingMode(draft);
   const included = new Set(
     draft.included_option_keys?.length
       ? draft.included_option_keys
       : draft.hotel_options.map((option) => option.key),
   );
 
-  if (!draft.linked_query_id) {
-    issues.push(issue("QUERY_REQUIRED", "blocker", "Query", "Link this quotation to a Query before finalising."));
-  }
   if (!draft.query_type) {
     issues.push(issue("TYPE_REQUIRED", "blocker", "Type", "Quotation type is missing."));
+  }
+  if (draft.pax_mode === "range") {
+    if (!Number.isInteger(draft.pax_min) || !Number.isInteger(draft.pax_max) || (draft.pax_min ?? 0) < 1 || (draft.pax_max ?? 0) < (draft.pax_min ?? 0)) {
+      issues.push(issue("PAX_RANGE_INVALID", "blocker", "Travel Requirements", "Enter a valid minimum and maximum pax range."));
+    }
+  } else if (draft.children.some((child) => child.age === undefined || child.age < 0 || child.age > 17)) {
+    issues.push(issue("CHILD_AGE_REQUIRED", "blocker", "Travel Requirements", "Every child must have a valid age."));
+  }
+  if (isEscortEnabled(draft) && !escortMode) {
+    issues.push(issue("ESCORT_MODE_REQUIRED", "blocker", "Guide", "Choose Pax Slab / Range or Day-wise Escort pricing."));
+  }
+  if (isEscortEnabled(draft) && escortMode === "pax_range" && (draft.escort_ranges ?? []).some(
+    (escort) => !Number.isInteger(escort.min_pax)
+      || !Number.isInteger(escort.max_pax)
+      || escort.min_pax < 1
+      || escort.max_pax < escort.min_pax,
+  )) {
+    issues.push(issue("ESCORT_RANGE_INVALID", "blocker", "Guide", "Each Escort range must have Min Pax ≥ 1 and Max Pax ≥ Min Pax."));
+  }
+  if (isEscortEnabled(draft) && escortMode === "day_wise"
+    && ((draft.escort_day_min_pax != null && draft.escort_day_min_pax < 1)
+      || (draft.escort_day_min_pax != null && draft.escort_day_max_pax != null && draft.escort_day_max_pax < draft.escort_day_min_pax))) {
+    issues.push(issue("ESCORT_DAY_RANGE_INVALID", "blocker", "Guide", "Enter a valid optional Escort pax applicability range."));
+  }
+  if (queryFor === "Package" && (draft.land_gst_percent !== 5 || draft.hotel_gst_percent !== 5)) {
+    issues.push(issue("PACKAGE_GST_FIXED", "blocker", "Commercial Setup", "Package GST must be fixed at 5%."));
+  }
+  if ((queryFor === "Land Part" && ![5, 18].includes(draft.land_gst_percent ?? 0)) || (queryFor === "Accommodation Part" && ![5, 18].includes(draft.hotel_gst_percent ?? 0))) {
+    issues.push(issue("GST_INVALID", "blocker", "Commercial Setup", "GST must be 5% or 18% for this Query For bucket."));
   }
   if (draft.query_type === "B2B" && !draft.agent.agent_id) {
     issues.push(issue("AGENT_MASTER_REQUIRED", "blocker", "Who", "Select a registered B2B Agent master record."));
@@ -83,8 +112,12 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   if (draft.has_dates !== false && !draft.start_date) {
     issues.push(issue("DATE_REQUIRED", "blocker", "Travel Requirements", "Tour start date is required."));
   }
-  if (!draft.program_name.trim()) {
-    issues.push(issue("PROGRAM_REQUIRED", "blocker", "Program", "Select or create a program."));
+  if (!draft.program_name.trim() && !(draft.program_mode === "new" && draft.save_program_as_new && draft.new_program_name?.trim())) {
+    if (draft.program_mode === "new" && !draft.save_program_as_new) {
+      issues.push(issue("CUSTOM_PROGRAM_REQUIRED", "blocker", "Routing", "Enable saving this finalized customized routing as a new Program and provide its name."));
+    } else {
+      issues.push(issue("PROGRAM_REQUIRED", "blocker", "Program", "Select or create a program."));
+    }
   }
   if (draft.save_program_as_new && !draft.new_program_name?.trim()) {
     issues.push(issue(
@@ -118,8 +151,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
 
   if (requiresAccommodation) selectedOptions.forEach((option) => {
     overnight.forEach((day, index) => {
+      const dynamic = (draft.dynamic_days ?? []).includes(day.day) || draft.allocation_mode === "dynamic";
       const selection = option.selections.find((item) => item.city_id === day.city_id);
-      if (!selection?.hotel_id || !selection.room_id) {
+      if (!selection?.hotel_id || (!dynamic && !selection.room_id)) {
         issues.push(issue(
           `HOTEL_MISSING_${option.key}_${day.day}`,
           "blocker",
@@ -129,12 +163,14 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
         return;
       }
       const date = day.date || addDaysISO(draft.start_date, index);
-      const plan = planForDay(
-        option,
-        day.day,
-        findRatePlan(db.rate_plans, selection.room_id, selection.meal_plan, date),
-      );
-      if (!plan) {
+      const plan = !dynamic && selection?.room_id
+        ? planForDay(
+            option,
+            day.day,
+            findRatePlan(db.rate_plans, selection.room_id, selection.meal_plan, date),
+          )
+        : null;
+      if (!dynamic && !plan) {
         issues.push(issue(
           `RATE_MISSING_${option.key}_${day.day}`,
           "blocker",
@@ -154,7 +190,20 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
         ));
       }
 
-      const dynamic = (draft.dynamic_days ?? []).includes(day.day) || draft.allocation_mode === "dynamic";
+      const allocations = option.dynamic_allocations?.[day.day] ?? [];
+      if (dynamic) {
+        for (const allocation of allocations) {
+          if (allocation.manual_net_rate != null && !allocation.override_reason?.trim()) {
+            issues.push(issue(
+              `DYNAMIC_OVERRIDE_REASON_${option.key}_${day.day}_${allocation.id}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day}: provide a reason for the Dynamic room-rate override.`,
+            ));
+          }
+        }
+      }
+
       if (dynamic) {
         if (range) {
           issues.push(issue(
@@ -164,23 +213,49 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
             "Dynamic room mixes are available only for an exact traveller count, not a pax range.",
           ));
         }
-        const mix = draft.day_room_mix?.[day.day];
-        if (!mix || dayMixCoversPax(mix) !== pax) {
+        const capacityFor = { single: 1, double: 2, triple: 3, quad: 4 } as const;
+        const allocatedCapacity = allocations.reduce(
+          (sum, allocation) => sum + Math.max(0, allocation.rooms) * capacityFor[allocation.occupancy],
+          0,
+        );
+        if (allocatedCapacity < pax) {
           issues.push(issue(
-            `ROOM_MIX_${option.key}_${day.day}`,
+            `DYNAMIC_CAPACITY_${option.key}_${day.day}`,
             "blocker",
             "Accommodation",
-            `Day ${day.day} room mix must cover exactly ${pax} traveller(s).`,
+            `Option ${option.key}, Day ${day.day}: allocated capacity ${allocatedCapacity} is below ${pax} traveller(s).`,
           ));
         }
-        if ((mix?.quad ?? 0) > 0 && !(plan?.quad_rate && plan.quad_rate > 0)) {
-          issues.push(issue(
-            `QUAD_UNAVAILABLE_${option.key}_${day.day}`,
-            "blocker",
-            "Accommodation",
-            `Day ${day.day} uses Quad rooms, but the selected hotel contract has no Quad rate.`,
-          ));
-        }
+        allocations.forEach((allocation) => {
+          const room = db.room_categories.find((item) => item.id === allocation.room_id);
+          if (!allocation.room_id || !room || room.hotel_id !== selection?.hotel_id) {
+            issues.push(issue(
+              `DYNAMIC_ROOM_${option.key}_${day.day}_${allocation.id}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day}: select a room category from the chosen hotel.`,
+            ));
+            return;
+          }
+          const allocationPlan = findRatePlan(db.rate_plans, allocation.room_id, selection.meal_plan, date);
+          const masterNet = allocationPlan
+            ? allocation.occupancy === "single"
+              ? allocationPlan.single_rate
+              : allocation.occupancy === "double"
+                ? allocationPlan.double_rate
+                : allocation.occupancy === "triple"
+                  ? allocationPlan.double_rate + (allocationPlan.extra_bed_rate || 0)
+                  : (allocationPlan.quad_rate ?? 0)
+            : 0;
+          if (!(allocation.manual_net_rate != null && allocation.manual_net_rate > 0) && !(masterNet > 0)) {
+            issues.push(issue(
+              `DYNAMIC_RATE_MISSING_${option.key}_${day.day}_${allocation.id}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day}: no contracted rate is available for this room occupancy.`,
+            ));
+          }
+        });
       }
     });
   });

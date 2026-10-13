@@ -13,13 +13,28 @@ import {
 import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
 import {
-  transportLineTotal, planForDay, gstRateFor, effectivePaxForPricing,
-  landMarkup, landGst, hotelsMarkup, hotelsGst, computeMealDays, parsePaxRange,
+  transportLineTotal,
+  planForDay,
+  gstRateFor,
+  effectivePaxForPricing,
+  getCostingPaxValues,
+  landMarkup,
+  landGst,
+  hotelsMarkup,
+  hotelsGst,
+  computeMealDays,
+  dynamicAccommodationBreakdown,
 } from "./calc";
-import type {
-  QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix,
-} from "./types";
-
+import type { QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix } from "./types";
+import { miscPerPersonForPax, transportOptionRows } from "./land-pricing";
+import {
+  escortDayAppliesToPax,
+  getEscortBaseForPax,
+  getEscortDayCharge,
+  getEscortPricingMode,
+  getEscortRangeBase,
+  isEscortEnabled,
+} from "./guide-pricing";
 
 // ---------------------------------------------------------------- Land part
 
@@ -28,7 +43,7 @@ export interface SheetOption {
   id: string;
   label: string;
   sub?: string;
-  amount: number;     // amount contributed to THIS day when checked
+  amount: number; // amount contributed to THIS day when checked
   per_person_amount?: number; // display-only per-person amount; totals keep using amount
   checked: boolean;
 }
@@ -56,8 +71,8 @@ export interface LandDayRow {
 export interface LandPartSheet {
   rows: LandDayRow[];
   transport_total: number;
-  guide_total: number;        // guides + escorts (column line total)
-  guide_only_total: number;   // non-escort guides
+  guide_total: number; // guides + escorts (column line total)
+  guide_only_total: number; // non-escort guides
   escort_total: number;
   entrances_total: number;
   entrances_per_person_total: number;
@@ -67,8 +82,6 @@ export interface LandPartSheet {
   misc_per_person_total: number;
   grand_total: number;
 }
-
-const ALL_CATS: EntranceCat[] = ["indian", "foreign", "student"];
 
 /** Checked state for a component on a given day (default: checked). */
 export function isPicked(
@@ -93,13 +106,22 @@ export const guideOptId = (lineId: string, lang: string) => `${lineId}::${lang}`
 
 /** Language checkbox state — defaults to the line's own language only. */
 function guideLangPicked(
-  draft: QuoteDraft, day: number, lineId: string, lang: string, defaultLang: string,
+  draft: QuoteDraft,
+  day: number,
+  lineId: string,
+  lang: string,
+  defaultLang: string,
 ): boolean {
   const list = draft.costing_selection?.guide?.[day];
   if (list) return list.includes(guideOptId(lineId, lang));
   return lang === defaultLang;
 }
 
+function guideReportingRate(draft: QuoteDraft, language: GuideLangOpt): number {
+  if (language === "Hindi") return draft.guide_reporting_cost_hindi ?? 0;
+  if (language === "English") return draft.guide_reporting_cost_english ?? 0;
+  return draft.guide_reporting_cost_language ?? 0;
+}
 
 /** Days a line applies to, restricted to the routing days that exist. */
 function targetDays(days: number[] | undefined, all: number[]): number[] {
@@ -107,20 +129,25 @@ function targetDays(days: number[] | undefined, all: number[]): number[] {
   return t.length ? t : [];
 }
 
-export function buildLandPart(
-  draft: QuoteDraft,
-  d: DB,
-  line?: TransportLine,
-): LandPartSheet {
+export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): LandPartSheet {
   const all = draft.routing.map((r) => r.day);
   const cityName = (id?: string) => d.cities.find((c) => c.id === id)?.name || "";
   const dayIndex = new Map(draft.routing.map((r, i) => [r.day, i]));
 
-  const opts: Record<number, {
-    transport: SheetOption[]; guide: SheetOption[]; entrances: SheetOption[];
-    activities: SheetOption[]; misc: SheetOption[];
-  }> = {};
-  all.forEach((day) => { opts[day] = { transport: [], guide: [], entrances: [], activities: [], misc: [] }; });
+  const opts: Record<
+    number,
+    {
+      transport: SheetOption[];
+      guide: SheetOption[];
+      entrances: SheetOption[];
+      activities: SheetOption[];
+      misc: SheetOption[];
+    }
+  > = {};
+  all.forEach((day) => {
+    opts[day] = { transport: [], guide: [], entrances: [], activities: [], misc: [] };
+  });
+  const configuredEscortIds = new Set<string>();
 
   // ------- Transport (one checkbox per vehicle option, per day)
   const lines = line ? [line] : draft.transport;
@@ -138,10 +165,10 @@ export function buildLandPart(
       opts[day].transport.push({
         id: l.id,
         label: vehicle,
-        sub: [
-          l.reporting_cost ? `Reporting ${l.reporting_cost}` : null,
-          l.remarks || null,
-        ].filter(Boolean).join(" · ") || undefined,
+        sub:
+          [l.reporting_cost ? `Reporting ${l.reporting_cost}` : null, l.remarks || null]
+            .filter(Boolean)
+            .join(" · ") || undefined,
         amount,
         checked: isPicked(draft, "transport", day, l.id),
       });
@@ -150,19 +177,22 @@ export function buildLandPart(
 
   // ------- Guides & escorts
   const paxForGuide = Math.max(1, effectivePaxForPricing(draft));
+  const selectedGuideLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     const g = d.guides?.find((x) => x.id === l.guide_id);
     if (l.is_escort) {
       const each = (l.rate * l.guides * l.days) / target.length;
-      target.forEach((day) => opts[day].guide.push({
-        id: l.id,
-        label: "Tour Escorted",
-        sub: g?.tour_program || undefined,
-        amount: each,
-        checked: isPicked(draft, "guide", day, l.id),
-      }));
+      target.forEach((day) =>
+        opts[day].guide.push({
+          id: l.id,
+          label: "Tour Escorted",
+          sub: g?.tour_program || undefined,
+          amount: each,
+          checked: isPicked(draft, "guide", day, l.id),
+        }),
+      );
       return;
     }
     // Every guide line exposes the three language checkboxes (Hindi / English /
@@ -172,6 +202,8 @@ export function buildLandPart(
       : "English";
     target.forEach((day) => {
       GUIDE_LANGS.forEach((lang) => {
+        if (!guideLangPicked(draft, day, l.id, lang, defaultLang)) return;
+        selectedGuideLanguages.add(lang);
         const rate = g ? guideRateForPax(g, paxForGuide, lang as GuideLanguage) : l.rate;
         const amount = ((rate || l.rate) * l.guides * l.days) / target.length;
         opts[day].guide.push({
@@ -185,40 +217,91 @@ export function buildLandPart(
     });
   });
 
+  const guideReportingDay = all[0];
+  if (guideReportingDay != null) {
+    selectedGuideLanguages.forEach((language) => {
+      const amount = guideReportingRate(draft, language);
+      if (!amount) return;
+      opts[guideReportingDay].guide.push({
+        id: guideOptId("guide-reporting", language),
+        label: `${language} Reporting`,
+        amount,
+        checked: true,
+      });
+    });
+  }
 
-  // ------- Entrances (per line, priced by the pax categories checked that day)
+  if (isEscortEnabled(draft) && all.length) {
+    const mode = getEscortPricingMode(draft);
+    if (mode === "pax_range") {
+      const range = (draft.escort_ranges ?? []).find(
+        (item) => paxForGuide >= item.min_pax && paxForGuide <= item.max_pax,
+      );
+      if (range) {
+        const perDay = getEscortRangeBase(draft, range) / all.length;
+        all.forEach((day) => {
+          const id = `configured-escort-range-${range.id}-${day}`;
+          configuredEscortIds.add(id);
+          opts[day].guide.push({
+            id,
+            label: "Tour Escort",
+            sub: range.escort_type,
+            amount: perDay,
+            checked: true,
+          });
+        });
+      }
+    } else if (mode === "day_wise" && escortDayAppliesToPax(draft, paxForGuide)) {
+      const includedDays = all.filter((day) => getEscortDayCharge(draft, day) > 0);
+      const reportingShare = includedDays.length
+        ? (draft.guide_escort_reporting ?? 0) / includedDays.length
+        : 0;
+      includedDays.forEach((day) => {
+        const id = `configured-escort-day-${day}`;
+        configuredEscortIds.add(id);
+        opts[day].guide.push({
+          id,
+          label: "Tour Escort",
+          sub: draft.escort_type || undefined,
+          amount: getEscortDayCharge(draft, day) + reportingShare,
+          checked: true,
+        });
+      });
+    }
+  }
+
+  const paxForLand = Math.max(1, effectivePaxForPricing(draft));
+  const activeEntranceCategory = draft.traveler_type ?? "indian";
+
+  // ------- Entrances (only the quotation's active traveller category)
   draft.entrances.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     target.forEach((day) => {
-      const parts: Record<EntranceCat, number> = {
-        indian: l.indian_pax * l.indian_rate,
-        foreign: l.foreign_pax * l.foreign_rate,
-        student: (l.student_pax ?? 0) * (l.student_rate ?? 0),
-      };
       const rates: Record<EntranceCat, number> = {
         indian: l.indian_rate,
         foreign: l.foreign_rate,
         student: l.student_rate ?? 0,
       };
-      const amount = ALL_CATS.reduce(
-        (s, c) => s + (catPicked(draft, day, c) ? parts[c] : 0), 0) / target.length;
+      const rate = catPicked(draft, day, activeEntranceCategory)
+        ? rates[activeEntranceCategory]
+        : 0;
       opts[day].entrances.push({
         id: l.id,
-        label: l.custom_name || d.entrance_sites?.find((s) => s.id === l.site_id)?.site_name || "Entrance",
-        amount,
-        per_person_amount: ALL_CATS.reduce(
-          (sum, c) => sum + (catPicked(draft, day, c) ? rates[c] : 0),
-          0,
-        ) / target.length,
+        label:
+          l.custom_name ||
+          d.entrance_sites?.find((s) => s.id === l.site_id)?.site_name ||
+          "Entrance",
+        amount: (rate * paxForLand) / target.length,
+        per_person_amount: rate / target.length,
         checked: isPicked(draft, "entrances", day, l.id),
       });
     });
   });
 
   // ------- Activities
-  const paxForLand = Math.max(1, effectivePaxForPricing(draft));
   draft.activities.forEach((l) => {
+    if (l.inclusion_status === "optional") return;
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     const master = l.activity_id
@@ -229,17 +312,19 @@ export function buildLandPart(
       : undefined;
     const total = resolved?.total ?? l.rate * l.qty;
     const each = total / target.length;
-    target.forEach((day) => opts[day].activities.push({
-      id: l.id,
-      label: l.custom_name || master?.activity_name || "Activity",
-      amount: each,
-      per_person_amount: resolved
-        ? resolved.per_person / target.length
-        : l.pricing_mode === "per_person"
-          ? l.rate / target.length
-          : (l.rate * l.qty) / paxForLand / target.length,
-      checked: isPicked(draft, "activities", day, l.id),
-    }));
+    target.forEach((day) =>
+      opts[day].activities.push({
+        id: l.id,
+        label: l.custom_name || master?.activity_name || "Activity",
+        amount: each,
+        per_person_amount: resolved
+          ? resolved.per_person / target.length
+          : l.pricing_mode === "per_person"
+            ? l.rate / target.length
+            : (l.rate * l.qty) / paxForLand / target.length,
+        checked: isPicked(draft, "activities", day, l.id),
+      }),
+    );
   });
 
   // ------- Miscellaneous (consolidated for the whole trip on the first day)
@@ -272,9 +357,10 @@ export function buildLandPart(
 
   const rows: LandDayRow[] = draft.routing.map((day, i) => {
     const tours = Object.values(day.tours_selected_by_city ?? {}).flat();
-    const from = day.from_city && !day.from_city.includes("-")
-      ? day.from_city
-      : cityName(day.from_city) || day.from_city || "";
+    const from =
+      day.from_city && !day.from_city.includes("-")
+        ? day.from_city
+        : cityName(day.from_city) || day.from_city || "";
     const to = cityName(day.to_city_id) || day.to_city || "";
     const o = opts[day.day];
     const transport = sumOn(o.transport);
@@ -287,8 +373,12 @@ export function buildLandPart(
       date: day.date || addDaysISO(draft.start_date, i),
       route: [from, to].filter(Boolean).join(" → ") || "—",
       city: cityName(day.city_id) || "—",
-      tours: tours.length ? tours.join(", ") : (day.tour_title || "—"),
-      transport, guide, entrances, activities, misc,
+      tours: tours.length ? tours.join(", ") : day.tour_title || "—",
+      transport,
+      guide,
+      entrances,
+      activities,
+      misc,
       total: transport + guide + entrances + activities + misc,
       transport_opts: o.transport,
       guide_opts: o.guide,
@@ -311,9 +401,7 @@ export function buildLandPart(
     (total, row) =>
       total +
       row.entrance_opts.reduce(
-        (rowTotal, option) =>
-          rowTotal +
-          (option.checked ? option.per_person_amount ?? 0 : 0),
+        (rowTotal, option) => rowTotal + (option.checked ? (option.per_person_amount ?? 0) : 0),
         0,
       ),
     0,
@@ -321,30 +409,46 @@ export function buildLandPart(
   const activities_total = sum((r) => r.activities);
   const misc_total = sum((r) => r.misc);
   const activities_per_person_total = rows.reduce(
-    (total, row) => total + row.activity_opts.reduce(
-      (rowTotal, option) => rowTotal + (option.checked ? option.per_person_amount ?? 0 : 0),
-      0,
-    ),
+    (total, row) =>
+      total +
+      row.activity_opts.reduce(
+        (rowTotal, option) => rowTotal + (option.checked ? (option.per_person_amount ?? 0) : 0),
+        0,
+      ),
     0,
   );
   const misc_per_person_total = rows.reduce(
-    (total, row) => total + row.misc_opts.reduce(
-      (rowTotal, option) => rowTotal + (option.checked ? option.per_person_amount ?? 0 : 0),
-      0,
-    ),
+    (total, row) =>
+      total +
+      row.misc_opts.reduce(
+        (rowTotal, option) => rowTotal + (option.checked ? (option.per_person_amount ?? 0) : 0),
+        0,
+      ),
     0,
   );
 
-  const escortIds = new Set(draft.guides.filter((g) => g.is_escort).map((g) => g.id));
+  const escortIds = new Set([
+    ...draft.guides.filter((g) => g.is_escort).map((g) => g.id),
+    ...configuredEscortIds,
+  ]);
   const escort_total = rows.reduce(
-    (s, r) => s + r.guide_opts.reduce((a, o) => a + (o.checked && escortIds.has(o.id) ? o.amount : 0), 0), 0);
+    (s, r) =>
+      s + r.guide_opts.reduce((a, o) => a + (o.checked && escortIds.has(o.id) ? o.amount : 0), 0),
+    0,
+  );
 
   return {
-    rows, transport_total, guide_total,
+    rows,
+    transport_total,
+    guide_total,
     guide_only_total: guide_total - escort_total,
     escort_total,
-    entrances_total, entrances_per_person_total, activities_total, activities_per_person_total,
-    misc_total, misc_per_person_total,
+    entrances_total,
+    entrances_per_person_total,
+    activities_total,
+    activities_per_person_total,
+    misc_total,
+    misc_per_person_total,
     grand_total: transport_total + guide_total + entrances_total + activities_total + misc_total,
   };
 }
@@ -374,13 +478,15 @@ export interface HotelNightRow {
   missing?: boolean;
 }
 
-
 export interface HotelMealSheet {
   option_key: string;
   category: string;
   nights: number;
   rows: HotelNightRow[];
-  sgl: number; dbl: number; trp: number; quad: number;
+  sgl: number;
+  dbl: number;
+  trp: number;
+  quad: number;
   /** Net room cost of all Dynamic-mode nights (mix priced), excluded from the flat columns. */
   dynamic_net: number;
 
@@ -408,14 +514,22 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     // Per-person meal totals across every itinerary place on this day.
     const lunchRows = meals.filter((meal) => meal.day === day.day && meal.meal_type === "Lunch");
     const dinnerRows = meals.filter((meal) => meal.day === day.day && meal.meal_type === "Dinner");
-    const lunchSource = lunchRows.map((meal) => meal.label).filter(Boolean).join(" + ") || "—";
-    const dinnerSource = dinnerRows.map((meal) => meal.label).filter(Boolean).join(" + ") || "—";
+    const lunchSource =
+      lunchRows
+        .map((meal) => meal.label)
+        .filter(Boolean)
+        .join(" + ") || "—";
+    const dinnerSource =
+      dinnerRows
+        .map((meal) => meal.label)
+        .filter(Boolean)
+        .join(" + ") || "—";
     const lunchTotal = lunchRows.reduce((sum, meal) => sum + meal.per_person, 0);
     const dinnerTotal = dinnerRows.reduce((sum, meal) => sum + meal.per_person, 0);
 
     const sgl = plan?.single_rate || 0;
     const trp = plan ? dbl + eb : 0;
-    const quad = plan ? (plan.quad_rate || dbl + eb * 2) : 0;
+    const quad = plan ? plan.quad_rate || dbl + eb * 2 : 0;
 
     // Dynamic mode — this night is priced from the allocated room mix.
     const isDynamic = (draft.dynamic_days ?? []).includes(day.day);
@@ -424,25 +538,38 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
       ? mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad
       : 0;
     const mixLabel = mix
-      ? ([
-          [mix.double, "Double"], [mix.triple, "Triple"],
-          [mix.quad, "Quad"], [mix.single, "Single"],
-        ] as [number, string][])
+      ? (
+          [
+            [mix.double, "Double"],
+            [mix.triple, "Triple"],
+            [mix.quad, "Quad"],
+            [mix.single, "Single"],
+          ] as [number, string][]
+        )
           .filter(([n]) => n > 0)
           .map(([n, l]) => `${n} ${l}`)
           .join(" + ") || "No rooms"
       : undefined;
 
     rows.push({
-      day: day.day, date, city, hotel, room,
+      day: day.day,
+      date,
+      city,
+      hotel,
+      room,
       meal_plan: sel?.meal_plan || "—",
-      sgl, dbl, trp, quad,
+      sgl,
+      dbl,
+      trp,
+      quad,
       dynamic: !!mix,
       mix,
       mix_label: mixLabel,
       mix_net: mixNet,
-      lunch_source: lunchSource, lunch_total: lunchTotal,
-      dinner_source: dinnerSource, dinner_total: dinnerTotal,
+      lunch_source: lunchSource,
+      lunch_total: lunchTotal,
+      dinner_source: dinnerSource,
+      dinner_total: dinnerTotal,
       missing: !plan,
     });
   });
@@ -459,8 +586,14 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     trp: sum(flat((r) => r.trp)),
     quad: sum(flat((r) => r.quad)),
     dynamic_net: sum((r) => (r.dynamic ? r.mix_net || 0 : 0)),
-    lunch_total: sum((r) => r.lunch_total),
-    dinner_total: sum((r) => r.dinner_total),
+    // The shared meal engine includes excursion/non-overnight cities too;
+    // hotel-night rows are only a display grouping and must not limit totals.
+    lunch_total: meals
+      .filter((meal) => meal.meal_type === "Lunch")
+      .reduce((total, meal) => total + meal.per_person, 0),
+    dinner_total: meals
+      .filter((meal) => meal.meal_type === "Dinner")
+      .reduce((total, meal) => total + meal.per_person, 0),
   };
 }
 
@@ -469,9 +602,13 @@ export function mixTotals(r: HotelNightRow): { net: number; gst: number; total: 
   const m = r.mix;
   if (!m) return { net: 0, gst: 0, total: 0 };
   const parts: [number, number][] = [
-    [m.single, r.sgl], [m.double, r.dbl], [m.triple, r.trp], [m.quad, r.quad],
+    [m.single, r.sgl],
+    [m.double, r.dbl],
+    [m.triple, r.trp],
+    [m.quad, r.quad],
   ];
-  let net = 0, gst = 0;
+  let net = 0,
+    gst = 0;
   parts.forEach(([count, rate]) => {
     if (!count || !rate) return;
     net += count * rate;
@@ -479,8 +616,6 @@ export function mixTotals(r: HotelNightRow): { net: number; gst: number; total: 
   });
   return { net, gst, total: net + gst };
 }
-
-
 
 // ------------------------------------------------------------- Rate sheet
 
@@ -513,15 +648,7 @@ export interface RateSheetGroup {
 
 /** Pax counts covered by the quotation (pax range, else exact headcount). */
 export function paxScale(draft: QuoteDraft): number[] {
-  const range = parsePaxRange(draft);
-  if (range) {
-    const min = Math.max(1, range.min);
-    const max = Math.max(min, range.max);
-    const out: number[] = [];
-    for (let p = min; p <= max; p++) out.push(p);
-    return out;
-  }
-  return [Math.max(1, effectivePaxForPricing(draft))];
+  return getCostingPaxValues(draft);
 }
 
 /** Apply markup then GST to a net amount. */
@@ -534,6 +661,7 @@ const gross = (net: number, mk: number, gst: number) => {
 function selectedActivityPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): number {
   const routingDays = draft.routing.map((day) => day.day);
   return draft.activities.reduce((sum, line) => {
+    if (line.inclusion_status === "optional") return sum;
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return sum;
     const selectedDays = days.filter((day) => isPicked(draft, "activities", day, line.id)).length;
@@ -562,12 +690,11 @@ function selectedMiscPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): num
     const master = line.item_id
       ? d.miscellaneous_items.find((item) => item.id === line.item_id)
       : undefined;
-    if (line.item_id && (!master || !master.is_active)) return sum;
+    // Legacy master-linked rows keep their captured behavior. New rows are
+    // quotation-owned and resolve from their persisted basis/ranges.
     const perPerson = master
       ? miscRateForPax(master, pax, Math.max(1, draft.nights)).per_person
-      : line.unit === "per_person"
-        ? line.rate
-        : (line.rate * line.qty) / Math.max(1, pax);
+      : miscPerPersonForPax(line, pax);
     return sum + perPerson;
   }, 0);
 }
@@ -580,6 +707,7 @@ function selectedGuideTotalForPax(
   const routingDays = draft.routing.map((day) => day.day);
   let guide = 0;
   let escort = 0;
+  const selectedReportingLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((line) => {
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return;
@@ -595,43 +723,34 @@ function selectedGuideTotalForPax(
     days.forEach((day) => {
       GUIDE_LANGS.forEach((language) => {
         if (!guideLangPicked(draft, day, line.id, language, defaultLanguage)) return;
-        const rate = master
-          ? guideRateForPax(master, pax, language as GuideLanguage)
-          : line.rate;
+        selectedReportingLanguages.add(language);
+        const rate = master ? guideRateForPax(master, pax, language as GuideLanguage) : line.rate;
         guide += (rate * line.guides * line.days) / days.length;
       });
     });
   });
+  selectedReportingLanguages.forEach((language) => {
+    guide += guideReportingRate(draft, language);
+  });
+  escort += getEscortBaseForPax(draft, pax);
   return { guide, escort };
 }
 
 function selectedEntranceTotalForPax(draft: QuoteDraft, pax: number): number {
   const routingDays = draft.routing.map((day) => day.day);
+  const activeCategory = draft.traveler_type ?? "indian";
   return draft.entrances.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return sum;
-    const sourcePax = Math.max(1, line.indian_pax + line.foreign_pax + (line.student_pax ?? 0));
-    const distribution = {
-      indian: line.indian_pax / sourcePax,
-      foreign: line.foreign_pax / sourcePax,
-      student: (line.student_pax ?? 0) / sourcePax,
-    };
     const rates = {
       indian: line.indian_rate,
       foreign: line.foreign_rate,
       student: line.student_rate ?? 0,
     };
     const selectedDays = days.reduce((daySum, day) => {
-      if (!isPicked(draft, "entrances", day, line.id)) return daySum;
-      const totalForDay = ALL_CATS.reduce(
-        (categorySum, category) => categorySum + (
-          catPicked(draft, day, category)
-            ? distribution[category] * pax * rates[category]
-            : 0
-        ),
-        0,
-      );
-      return daySum + totalForDay / days.length;
+      if (!isPicked(draft, "entrances", day, line.id) || !catPicked(draft, day, activeCategory))
+        return daySum;
+      return daySum + (pax * rates[activeCategory]) / days.length;
     }, 0);
     return sum + selectedDays;
   }, 0);
@@ -644,20 +763,31 @@ export function buildRateSheet(
   lines: TransportLine[],
 ): RateSheetGroup[] {
   const paxList = paxScale(draft);
+  const costingPaxSet = new Set(paxList);
+  const transportOptions = transportOptionRows(draft).filter((row) => costingPaxSet.has(row.pax));
   const mode = draft.commercial_mode || "package";
   const includeLand = mode === "package";
   const includeTransport = mode === "package" || mode === "transport_only";
   const includeAccommodation = mode !== "transport_only";
 
   const hotels = buildHotelMealSheet(draft, d, opt);
-  const mk = { land: landMarkup(draft), lg: landGst(draft), h: hotelsMarkup(draft), hg: hotelsGst(draft) };
+  const mk = {
+    land: landMarkup(draft),
+    lg: landGst(draft),
+    h: hotelsMarkup(draft),
+    hg: hotelsGst(draft),
+  };
 
   // Room shares (per person) including room GST slab, then hotels markup/GST.
   // Dynamic nights are priced from their allocated room mix and split across
   // the actual pax count instead of a flat per-category share.
   const actualPax = Math.max(1, effectivePaxForPricing(draft));
+  const dynamicDaySet = new Set(draft.dynamic_days ?? []);
+  const isDynamicDay = (day: number) =>
+    draft.allocation_mode === "dynamic" || dynamicDaySet.has(day);
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
+      if (isDynamicDay(r.day)) return s;
       if (r.dynamic) return s + mixTotals(r).total / actualPax;
       const tariff = pick(r);
       return s + (tariff + tariff * gstRateFor(tariff)) / size;
@@ -665,56 +795,130 @@ export function buildRateSheet(
     return gross(net, mk.h, mk.hg);
   };
 
-  const single = includeAccommodation ? roomShare((r) => r.sgl, 1) : 0;
-  const dbl = includeAccommodation ? roomShare((r) => r.dbl, 2) : 0;
-  const trp = includeAccommodation ? roomShare((r) => r.trp, 3) : 0;
-  const quad = includeAccommodation ? roomShare((r) => r.quad, 4) : 0;
+  const dynamicMode = includeAccommodation && draft.routing.some((day) => day.overnight && isDynamicDay(day.day));
+  const dynamicBase = dynamicMode ? dynamicAccommodationBreakdown(draft, opt, d).total : 0;
+  const dynamicPerPerson = dynamicMode ? gross(dynamicBase / actualPax, mk.h, mk.hg) : 0;
+  const single = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.sgl, 1) : 0;
+  const dbl = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.dbl, 2) : 0;
+  const trp = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.trp, 3) : 0;
+  const quad = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.quad, 4) : 0;
   const lunch = includeAccommodation ? gross(hotels.lunch_total, mk.h, mk.hg) : 0;
   const dinner = includeAccommodation ? gross(hotels.dinner_total, mk.h, mk.hg) : 0;
 
-  const groups = (mode === "accommodation_only" ? [undefined] : lines.length ? lines : [undefined]) as (TransportLine | undefined)[];
+  const groups = (
+    mode === "accommodation_only" ? [undefined] : lines.length ? lines : [undefined]
+  ) as (TransportLine | undefined)[];
 
-  return groups.map((line) => {
-    const land = buildLandPart(draft, d, line);
-    const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
-    const vehicle = mode === "accommodation_only"
-      ? "Accommodation only"
-      : line ? veh?.vehicle_type || "Vehicle" : "No transport";
-    // Only show pax counts that actually fall inside this vehicle's fit range.
-    const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
-    const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;
-    const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
-    const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
-    const rows: RateSheetRow[] = fitting.map((pax) => {
-      const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
-      // Keep each selected transport line independent in the Rate Sheet / Final
-      // Costing. When multiple vehicles exist, each vehicle must retain its own
-      // transport amount instead of being added together into one total.
-      const transportBase = includeTransport
-        ? (line ? transportLineTotal(line) : land.transport_total)
-        : 0;
-      const transport = pp(transportBase);
-      const guideAtPax = includeLand ? selectedGuideTotalForPax(draft, d, pax) : { guide: 0, escort: 0 };
-      const guide = includeLand ? pp(guideAtPax.guide) : 0;
-      const escort = includeLand ? pp(guideAtPax.escort) : 0;
-      const entrances = includeLand ? pp(selectedEntranceTotalForPax(draft, pax)) : 0;
-      const activities = includeLand
-        ? gross(selectedActivityPerPersonForPax(draft, d, pax), mk.land, mk.lg)
-        : 0;
-      const misc = includeLand
-        ? gross(selectedMiscPerPersonForPax(draft, d, pax), mk.land, mk.lg)
-        : 0;
-      const landPP = transport + guide + escort + entrances + activities + misc;
-      const meals = lunch + dinner;
-      return {
-        pax, vehicle, transport, guide, escort, entrances, activities, misc,
-        single, double: dbl, triple: trp, quad, lunch, dinner,
-        pkg_single: landPP + single + meals,
-        pkg_double: landPP + dbl + meals,
-        pkg_triple: landPP + trp + meals,
-        pkg_quad: landPP + quad + meals,
-      };
+  if ((draft.transport_options ?? []).length && mode !== "accommodation_only") {
+    if (!transportOptions.length) return [];
+    const byOption = new Map<string, typeof transportOptions>();
+    transportOptions.forEach((row) =>
+      byOption.set(row.option_id, [...(byOption.get(row.option_id) ?? []), row]),
+    );
+    return Array.from(byOption.entries()).map(([optionId, optionRows]) => {
+      const option = draft.transport_options?.find((item) => item.id === optionId);
+      const vehicle = option?.name || "Transport option";
+      const min = Math.min(...optionRows.map((row) => row.pax));
+      const max = Math.max(...optionRows.map((row) => row.pax));
+      const base = buildRateSheet(
+        {
+          ...draft,
+          transport_options: [],
+          pax_mode: "range",
+          pax_min: min,
+          pax_max: max,
+          pax_range: `${min}-${max}`,
+        },
+        d,
+        opt,
+        [],
+      )[0];
+      const rows = optionRows
+        .map((transportRow) => {
+          const template = base?.rows.find((row) => row.pax === transportRow.pax) ?? base?.rows[0];
+          const transport = includeTransport ? transportRow.per_person : 0;
+          if (!template) return null;
+          const oldTransport = template.transport;
+          return {
+            ...template,
+            pax: transportRow.pax,
+            vehicle,
+            transport,
+            pkg_single: template.pkg_single - oldTransport + transport,
+            pkg_double: template.pkg_double - oldTransport + transport,
+            pkg_triple: template.pkg_triple - oldTransport + transport,
+            pkg_quad: template.pkg_quad - oldTransport + transport,
+          };
+        })
+        .filter(Boolean) as RateSheetRow[];
+      return { vehicle, line_id: optionId, rows };
     });
-    return { vehicle, line_id: line?.id, rows };
-  }).filter((group) => group.rows.length > 0);
+  }
+
+  return groups
+    .map((line) => {
+      const land = buildLandPart(draft, d, line);
+      const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
+      const vehicle =
+        mode === "accommodation_only"
+          ? "Accommodation only"
+          : line
+            ? veh?.vehicle_type || "Vehicle"
+            : "No transport";
+      // Only show pax counts that actually fall inside this vehicle's fit range.
+      const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
+      const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;
+      const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
+      const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
+      const rows: RateSheetRow[] = fitting.map((pax) => {
+        const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
+        // Keep each selected transport line independent in the Rate Sheet / Final
+        // Costing. When multiple vehicles exist, each vehicle must retain its own
+        // transport amount instead of being added together into one total.
+        const transportBase = includeTransport
+          ? line
+            ? transportLineTotal(line)
+            : land.transport_total
+          : 0;
+        const transport = pp(transportBase);
+        const guideAtPax = includeLand
+          ? selectedGuideTotalForPax(draft, d, pax)
+          : { guide: 0, escort: 0 };
+        const guide = includeLand ? gross(guideAtPax.guide / pax, mk.land, 0.05) : 0;
+        const escort = includeLand ? gross(guideAtPax.escort / pax, mk.land, 0.05) : 0;
+        const entrances = includeLand
+          ? gross(selectedEntranceTotalForPax(draft, pax) / pax, mk.land, 0.05)
+          : 0;
+        const activities = includeLand
+          ? gross(selectedActivityPerPersonForPax(draft, d, pax), mk.land, mk.lg)
+          : 0;
+        const misc = includeLand
+          ? gross(selectedMiscPerPersonForPax(draft, d, pax), mk.land, mk.lg)
+          : 0;
+        const landPP = transport + guide + escort + entrances + activities + misc;
+        const meals = lunch + dinner;
+        return {
+          pax,
+          vehicle,
+          transport,
+          guide,
+          escort,
+          entrances,
+          activities,
+          misc,
+          single,
+          double: dbl,
+          triple: trp,
+          quad,
+          lunch,
+          dinner,
+          pkg_single: landPP + single + meals,
+          pkg_double: landPP + dbl + meals,
+          pkg_triple: landPP + trp + meals,
+          pkg_quad: landPP + quad + meals,
+        };
+      });
+      return { vehicle, line_id: line?.id, rows };
+    })
+    .filter((group) => group.rows.length > 0);
 }

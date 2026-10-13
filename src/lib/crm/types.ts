@@ -293,6 +293,9 @@ export interface CrmQuery {
   pax: number;
   adults: number;
   children: number;
+  ss?: number;
+  child_ages?: number[];
+  pax_mode?: "exact" | "range";
   min_pax?: number;
   max_pax?: number;
   costing_basis?: string;

@@ -4,6 +4,7 @@
 import { useSyncExternalStore } from "react";
 
 import { emptyDraft, type QuoteDraft } from "./types";
+import { normalizeQueryFor } from "@/lib/query-for";
 
 const KEY = "mp_tourism_draft_quote";
 const FALLBACK_KEY = "mp_tourism_draft_quote_session";
@@ -14,6 +15,59 @@ let cache: QuoteDraft | null = null;
 let cacheInit = false;
 
 const isBrowser = () => typeof window !== "undefined";
+
+/** Additive migration for drafts created before the standalone/query-for changes. */
+export function normalizeDraft(raw: QuoteDraft): QuoteDraft {
+  const legacyRange = typeof raw.pax_range === "string" && raw.pax_range !== "auto" && raw.pax_range.includes("-");
+  const legacyBounds = Number.isInteger(raw.pax_min)
+    && Number.isInteger(raw.pax_max)
+    && (raw.pax_min ?? 0) >= 1
+    && (raw.pax_max ?? 0) >= (raw.pax_min ?? 0);
+  const legacyEscortMode = raw.escort_ranges?.length
+    ? "pax_range"
+    : Object.values(raw.guide_day_escort ?? {}).some((charge) => charge > 0)
+      ? "day_wise"
+      : undefined;
+  const hotelOptions = (Array.isArray(raw.hotel_options) ? raw.hotel_options : emptyDraft().hotel_options)
+    .map((option) => {
+      if (option.dynamic_allocations) return option;
+      const dynamicDays = new Set(raw.dynamic_days ?? []);
+      if (raw.allocation_mode === "dynamic") {
+        raw.routing.filter((day) => day.overnight).forEach((day) => dynamicDays.add(day.day));
+      }
+      if (!dynamicDays.size) return option;
+      const migrated: NonNullable<QuoteDraft["hotel_options"][number]["dynamic_allocations"]> = {};
+      dynamicDays.forEach((dayNumber) => {
+        const route = raw.routing.find((day) => day.day === dayNumber);
+        const stay = route && option.selections.find((selection) => selection.city_id === route.city_id);
+        const mix = raw.day_room_mix?.[dayNumber];
+        if (!mix) return;
+        migrated[dayNumber] = (["single", "double", "triple", "quad"] as const)
+          .filter((occupancy) => mix[occupancy] > 0)
+          .map((occupancy) => ({
+            id: `legacy-${option.key}-${dayNumber}-${occupancy}`,
+            room_id: stay?.room_id ?? "",
+            occupancy,
+            rooms: mix[occupancy],
+          }));
+      });
+      return { ...option, dynamic_allocations: migrated };
+    });
+  return {
+    ...emptyDraft(),
+    ...raw,
+    hotel_options: hotelOptions,
+    query_for: normalizeQueryFor(raw.query_for),
+    pax_mode: raw.pax_mode || (legacyRange || legacyBounds ? "range" : "exact"),
+    escort_pricing_mode: raw.escort_pricing_mode ?? legacyEscortMode,
+    escort_enabled: raw.escort_enabled ?? Boolean(raw.escort_pricing_mode || legacyEscortMode),
+    children: Array.isArray(raw.children) ? raw.children : [],
+    land_markup_percent: raw.land_markup_percent ?? raw.markup_percent ?? 10,
+    hotel_markup_percent: raw.hotel_markup_percent ?? raw.markup_percent ?? 10,
+    land_gst_percent: raw.land_gst_percent ?? 5,
+    hotel_gst_percent: raw.hotel_gst_percent ?? 5,
+  };
+}
 
 /**
  * Safely read a draft from storage.
@@ -29,7 +83,7 @@ function read(): QuoteDraft | null {
     const fallbackRaw = sessionStorage.getItem(FALLBACK_KEY);
 
     if (fallbackRaw) {
-      return JSON.parse(fallbackRaw) as QuoteDraft;
+      return normalizeDraft(JSON.parse(fallbackRaw) as QuoteDraft);
     }
   } catch {
     // Ignore storage/JSON errors and continue to localStorage.
@@ -39,7 +93,7 @@ function read(): QuoteDraft | null {
   try {
     const raw = localStorage.getItem(KEY);
 
-    return raw ? (JSON.parse(raw) as QuoteDraft) : null;
+    return raw ? normalizeDraft(JSON.parse(raw) as QuoteDraft) : null;
   } catch {
     return null;
   }

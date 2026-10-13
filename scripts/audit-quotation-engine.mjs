@@ -354,6 +354,9 @@ try {
   // Range rows are bounded by both the requested range and each vehicle's
   // actual capacity; an ineligible vehicle must never fall back to all rows.
   const range = baseDraft();
+  range.pax_mode = "range";
+  range.pax_min = 2;
+  range.pax_max = 5;
   range.pax_range = "2-5";
   range.transport = [
     range.transport[0],
@@ -377,13 +380,27 @@ try {
   // Dynamic accommodation is exact-pax only and must cover every traveller.
   const dynamicValid = baseDraft();
   dynamicValid.dynamic_days = [1];
-  dynamicValid.day_room_mix = { 1: { single: 0, double: 1, triple: 0, quad: 0 } };
+  dynamicValid.hotel_options[0].dynamic_allocations = {
+    1: [{ id: "dynamic-double", room_id: "room-1", occupancy: "double", rooms: 1 }],
+  };
   dynamicValid.rate_sheet_rows = { "A|transport-small": [2] };
   assert.equal(validation.validateQuoteForFinalization(dynamicValid, db).blockers.length, 0);
+  const dynamicOverrideWithoutReason = structuredClone(dynamicValid);
+  dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].manual_net_rate = 4500;
+  dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].original_net_rate = 4000;
+  dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].changed_by = "Audit User";
+  dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].changed_at = now;
+  assert.ok(validation.validateQuoteForFinalization(dynamicOverrideWithoutReason, db).blockers.some((item) => item.code.startsWith("DYNAMIC_OVERRIDE_REASON_")));
+  const dynamicOverrideWithReason = structuredClone(dynamicOverrideWithoutReason);
+  dynamicOverrideWithReason.hotel_options[0].dynamic_allocations[1][0].override_reason = "Supplier confirmed updated rate";
+  assert.equal(validation.validateQuoteForFinalization(dynamicOverrideWithReason, db).blockers.length, 0);
   const dynamicMismatch = structuredClone(dynamicValid);
-  dynamicMismatch.day_room_mix[1].double = 2;
-  assert.ok(validation.validateQuoteForFinalization(dynamicMismatch, db).blockers.some((item) => item.code.startsWith("ROOM_MIX_")));
+  dynamicMismatch.hotel_options[0].dynamic_allocations[1] = [];
+  assert.ok(validation.validateQuoteForFinalization(dynamicMismatch, db).blockers.some((item) => item.code.startsWith("DYNAMIC_CAPACITY_")));
   const dynamicRange = structuredClone(dynamicValid);
+  dynamicRange.pax_mode = "range";
+  dynamicRange.pax_min = 2;
+  dynamicRange.pax_max = 5;
   dynamicRange.pax_range = "2-5";
   assert.ok(validation.validateQuoteForFinalization(dynamicRange, db).blockers.some((item) => item.code.startsWith("DYNAMIC_RANGE_")));
   const overrideWithoutReason = baseDraft();

@@ -615,6 +615,9 @@ export interface NewLeadInput {
   email?: string;
   adults?: number;
   children?: number;
+  ss?: number;
+  child_ages?: number[];
+  pax_mode?: "exact" | "range";
   traveler_type?: "indian" | "foreign" | "student";
   travel_type?: string;
   cost_price?: number;
@@ -678,8 +681,11 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     pax: input.pax,
     adults: input.adults ?? input.pax,
     children: input.children ?? 0,
-    min_pax: input.min_pax ?? input.pax,
-    max_pax: input.max_pax ?? input.pax,
+    ss: input.ss ?? 0,
+    child_ages: input.child_ages ?? [],
+    pax_mode: input.pax_mode ?? "range",
+    min_pax: input.pax_mode === "exact" ? undefined : input.min_pax ?? input.pax,
+    max_pax: input.pax_mode === "exact" ? undefined : input.max_pax ?? input.pax,
     costing_basis: input.costing_basis || input.travel_type,
     hotel_category_from: input.hotel_category_from,
     hotel_category_to: input.hotel_category_to,

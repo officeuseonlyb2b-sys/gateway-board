@@ -1,5 +1,6 @@
 // Wizard draft types for the 18-step Tour Quotation Builder.
 import type { MealPlan } from "@/lib/mock-store";
+import type { QueryFor } from "@/lib/query-for";
 
 export type QueryType = "B2B" | "B2C" | "Brochure";
 export type TourType = "FIT" | "GIT" | "Brochure";
@@ -25,7 +26,7 @@ export interface BrochureInfo {
   period_end: string;
 }
 export interface ChildInfo {
-  age: number;
+  age?: number;
 }
 export interface TravelDetail {
   from_city?: string;
@@ -79,26 +80,28 @@ export interface DayTransportDetails {
 
 export interface RoutingDay {
   day: number;
+  /** Optional pre-tour accommodation row. It is deliberately outside tour duration. */
+  is_day_zero?: boolean;
   date: string;
   day_name?: string;
-  city_id: string;          // OVERNIGHT city id — where guests sleep (used by Step 15 hotel lookups)
-  to_city_id?: string;      // DESTINATION city id — primary (kept for backward compat)
-  to_city_ids?: string[];   // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
+  city_id: string; // OVERNIGHT city id — where guests sleep (used by Step 15 hotel lookups)
+  to_city_id?: string; // DESTINATION city id — primary (kept for backward compat)
+  to_city_ids?: string[]; // DESTINATION city ids — multi-select (Same Day Multiple Destinations etc.)
 
-  tour_title?: string;      // selected destination tour title for the row
+  tour_title?: string; // selected destination tour title for the row
   tour_titles_by_city?: Record<string, string>; // legacy single tour per city
   tours_selected_by_city?: Record<string, string[]>; // NEW multi-select: routing city id → array of tour titles
-  from_city?: string;       // free-text / city id, day 1 auto from departure_city
-  to_city?: string;         // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
-  travel_by?: "Road" | "Train" | "Flight" | "Bus" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
-  travel_by_detail?: string;   // optional free-text: vehicle, flight no, train name
-  transport_details?: DayTransportDetails;  // per-day detailed transport info (see Step 9)
-  transport_expanded?: boolean;             // UI state — remembered so re-entry keeps panel open
+  from_city?: string; // free-text / city id, day 1 auto from departure_city
+  to_city?: string; // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
+  travel_by?:
+    "Road" | "Train" | "Flight" | "Bus" | "Self Drive" | "Helicopter" | "Boat" | "Walk" | "Custom";
+  travel_by_detail?: string; // optional free-text: vehicle, flight no, train name
+  transport_details?: DayTransportDetails; // per-day detailed transport info (see Step 9)
+  transport_expanded?: boolean; // UI state — remembered so re-entry keeps panel open
   program: string;
   program_mode: "text" | "select";
   overnight: boolean;
 }
-
 
 export type TransportRateFormat = "per_day" | "total" | "prefilled" | "per_route";
 export type TransportRateMode = "daywise" | "total";
@@ -110,16 +113,31 @@ export interface TransportLine {
   rate: number;
   rate_format?: TransportRateFormat;
   reporting_cost?: number;
-  total_override?: number;   // used when rate_format === "total"
+  total_override?: number; // used when rate_format === "total"
   per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
   remarks?: string;
   rate_mode?: TransportRateMode; // per-vehicle toggle: "daywise" (per_route days) or "total" (one lump-sum rate)
-  total_rate?: number;           // used when rate_mode === "total"
+  total_rate?: number; // used when rate_mode === "total"
+  /** Quotation-only transport additions; never writes to Vehicle Master. */
+  extra_costs?: { id: string; name: string; amount: number }[];
+}
+export interface TransportOptionVehicle {
+  transport_line_id: string;
+  quantity: number;
+}
+/** A combination of independently finalised vehicle alternatives. */
+export interface TransportOption {
+  id: string;
+  name: string;
+  min_pax: number;
+  max_pax: number;
+  vehicles: TransportOptionVehicle[];
 }
 export interface PaxRangePrice {
   from_pax: number;
   to_pax: number;
   rate: number;
+  foc_pax?: number;
 }
 export interface ActivityLine {
   id: string;
@@ -128,8 +146,9 @@ export interface ActivityLine {
   qty: number;
   rate: number;
   pricing_mode?: "per_person" | "slab"; // NEW: chosen pricing mode in Step 10
-  pax_ranges?: PaxRangePrice[];   // Brochure only
-  from_routing_days?: number[];    // day numbers that added this via Step 9
+  pax_ranges?: PaxRangePrice[]; // Brochure only
+  from_routing_days?: number[]; // day numbers that added this via Step 9
+  inclusion_status?: "included" | "optional";
 }
 export interface EntranceLine {
   id: string;
@@ -141,7 +160,7 @@ export interface EntranceLine {
   foreign_rate: number;
   student_pax?: number;
   student_rate?: number;
-  from_routing_days?: number[];    // day numbers that added this via Step 9
+  from_routing_days?: number[]; // day numbers that added this via Step 9
 }
 export interface GuideLine {
   id: string;
@@ -149,10 +168,10 @@ export interface GuideLine {
   days: number;
   guides: number;
   rate: number;
-  is_escort?: boolean;            // true when this line is a Tour Escort add-on
-  pax_ranges?: PaxRangePrice[];   // Brochure only
-  from_routing_days?: number[];   // day numbers this guide is assigned to
-  language?: string;              // selected language for this guide line
+  is_escort?: boolean; // true when this line is a Tour Escort add-on
+  pax_ranges?: PaxRangePrice[]; // Brochure only
+  from_routing_days?: number[]; // day numbers this guide is assigned to
+  language?: string; // selected language for this guide line
 }
 export interface MiscLine {
   id: string;
@@ -161,10 +180,10 @@ export interface MiscLine {
   qty: number;
   rate: number;
   unit: string;
-  pax_ranges?: PaxRangePrice[];   // Brochure only
-  from_routing_days?: number[];    // day numbers that added this via Step 9
+  rate_basis?: "per_person" | "fixed_range" | "foc_range";
+  pax_ranges?: PaxRangePrice[]; // Brochure only
+  from_routing_days?: number[]; // day numbers that added this via Step 9
 }
-
 
 export interface HotelSelection {
   city_id: string;
@@ -183,10 +202,10 @@ export interface DayRoomMix {
   quad: number;
 }
 export interface PersonAllocation {
-  person_id: number;         // stable 1-based id
-  label: string;             // editable, defaults to "Person N"
+  person_id: number; // stable 1-based id
+  label: string; // editable, defaults to "Person N"
   room_type: PersonRoomType;
-  sharing_with: number[];    // other person_ids in the same shared room
+  sharing_with: number[]; // other person_ids in the same shared room
 }
 // Per-day, per-quotation rate override (never mutates the hotel's saved contract rate).
 export interface DayRateOverride {
@@ -195,6 +214,20 @@ export interface DayRateOverride {
   trp?: number;
   quad?: number;
   reason?: string;
+  changed_by?: string;
+  changed_at?: string;
+}
+
+export type DynamicOccupancy = "single" | "double" | "triple" | "quad";
+export interface DynamicRoomAllocation {
+  id: string;
+  room_id: string;
+  occupancy: DynamicOccupancy;
+  rooms: number;
+  /** Quotation-only net-rate override for this exact room combination. */
+  manual_net_rate?: number;
+  original_net_rate?: number;
+  override_reason?: string;
   changed_by?: string;
   changed_at?: string;
 }
@@ -227,8 +260,9 @@ export interface HotelOption {
   pax_allocations?: PersonAllocation[];
   // keyed by routing day number
   rate_overrides?: Record<number, DayRateOverride>;
+  /** Dynamic-mode room combinations, isolated by option and routing day. */
+  dynamic_allocations?: Record<number, DynamicRoomAllocation[]>;
 }
-
 
 /** Pax categories priced on a monument entrance line. */
 export type EntranceCat = "indian" | "foreign" | "student";
@@ -252,6 +286,7 @@ export interface QuoteDraft {
   step: number;
   linked_query_id?: string;
   linked_query_name?: string;
+  query_for?: QueryFor;
   query_type: QueryType | null;
   tour_type?: TourType;
   agent: AgentInfo;
@@ -278,13 +313,14 @@ export interface QuoteDraft {
   adults: number;
   ss: number;
   children: ChildInfo[];
+  pax_mode?: "exact" | "range";
   pax_min?: number;
   pax_max?: number;
 
   /** Traveler category driving Activities / Entrance-fee pricing. */
   traveler_type?: import("@/lib/mock-store").TravelerType;
 
-  categories: string[];      // legacy — no UI, retained for saved-quote fidelity
+  categories: string[]; // legacy — no UI, retained for saved-quote fidelity
   /** Guest's home/origin city. Never used as the programme's first city. */
   home_city?: string;
   /** Explicit programme gateways. `departure_city` remains as a legacy mirror. */
@@ -306,6 +342,7 @@ export interface QuoteDraft {
 
   routing: RoutingDay[];
   transport: TransportLine[];
+  transport_options?: TransportOption[];
   activities: ActivityLine[];
   entrances: EntranceLine[];
   guides: GuideLine[];
@@ -351,11 +388,27 @@ export interface QuoteDraft {
   guide_reporting_cost_language?: number;
   // Per-language reporting cost split by pax category (Indian / Foreigner / Student).
   // Shape: { Hindi: { indian, foreigner, student }, English: {...}, Language: {...} }
-  guide_reporting_by_pax?: Record<string, { indian?: number; foreigner?: number; student?: number }>;
+  guide_reporting_by_pax?: Record<
+    string,
+    { indian?: number; foreigner?: number; student?: number }
+  >;
   guide_tour_disabled_by_day?: Record<number, string[]>;
   guide_day_escort?: Record<number, number>;
+  guide_day_escort_enabled?: Record<number, boolean>;
   guide_remarks?: string;
   guide_escort_reporting?: number;
+  escort_enabled?: boolean;
+  escort_pricing_mode?: "pax_range" | "day_wise";
+  escort_type?: string;
+  escort_day_min_pax?: number;
+  escort_day_max_pax?: number;
+  escort_ranges?: {
+    id: string;
+    min_pax: number;
+    max_pax: number;
+    escort_type: string;
+    charge: number;
+  }[];
   // Optional pax range/slab override — when set, downstream rate lookups
   // (guide, activity, misc, transport, hotel room mixes) use this range
   // instead of the exact headcount. Format: "auto" or "<min>-<max>" / "25+".
@@ -371,7 +424,6 @@ export interface QuoteDraft {
   revision_reason?: string;
   intended_version?: number;
   updated_at: string;
-
 }
 
 /** A full costing scenario = one vehicle + one accommodation option + all add-ons. */
@@ -389,11 +441,11 @@ export interface GroupRoomMix {
   single: number;
 }
 
-
 export const emptyDraft = (): QuoteDraft => ({
   step: 1,
   linked_query_id: undefined,
   linked_query_name: undefined,
+  query_for: undefined,
   query_type: null,
   tour_type: undefined,
   agent: { name: "", agency: "", phone: "", email: "" },
@@ -413,6 +465,7 @@ export const emptyDraft = (): QuoteDraft => ({
   adults: 2,
   ss: 0,
   children: [],
+  pax_mode: "exact",
   pax_min: 1,
   pax_max: 40,
   traveler_type: "indian",
@@ -437,8 +490,8 @@ export const emptyDraft = (): QuoteDraft => ({
   guides: [],
   misc: [],
   hotel_options: [{ key: "A", label: "", category: "", selections: [] }],
-    markup_percent: 10,
-    commercial_mode: "package",
+  markup_percent: 10,
+  commercial_mode: "package",
   land_markup_percent: 10,
   land_gst_percent: 5,
   hotel_markup_percent: 10,
