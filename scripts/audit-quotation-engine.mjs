@@ -12,74 +12,359 @@ try {
   const draftStore = await vite.ssrLoadModule("/src/lib/wizard/store.ts");
   const quoteStore = await vite.ssrLoadModule("/src/lib/quotes-store.ts");
   const validation = await vite.ssrLoadModule("/src/lib/wizard/validation.ts");
+  const queryFor = await vite.ssrLoadModule("/src/lib/query-for.ts");
   const masterPricing = await vite.ssrLoadModule("/src/lib/mock-store.ts");
+  const landEligibility = await vite.ssrLoadModule("/src/lib/wizard/land-eligibility.ts");
+  const guidePricing = await vite.ssrLoadModule("/src/lib/wizard/guide-pricing.ts");
+
+  const packageScope = queryFor.getQuotationScope("Package");
+  const landScope = queryFor.getQuotationScope("Land Part");
+  const accommodationScope = queryFor.getQuotationScope("Accommodation Part");
+  assert.deepEqual(packageScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(packageScope.program, true);
+  assert.equal(packageScope.routing, true);
+  assert.equal(packageScope.landPart, true);
+  assert.equal(packageScope.accommodationPart, true);
+  assert.deepEqual(landScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 9, 10, 11]);
+  assert.equal(landScope.routing, true, "Land Part still requires Routing");
+  assert.equal(landScope.landPart, true);
+  assert.equal(landScope.accommodationPart, false);
+  assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 6, 8, 9, 10, 11]);
+  assert.equal(accommodationScope.program, false);
+  assert.equal(accommodationScope.routing, false, "Accommodation Part does not require Routing");
+  assert.equal(accommodationScope.landPart, false);
+  assert.equal(accommodationScope.accommodationPart, true);
+  assert.equal(queryFor.nextQuotationStep(6, accommodationScope.workflowSteps), 8);
+  assert.equal(queryFor.previousQuotationStep(8, accommodationScope.workflowSteps), 6);
+  assert.equal(queryFor.nextQuotationStep(6, landScope.workflowSteps), 7);
+  assert.equal(queryFor.nextQuotationStep(7, landScope.workflowSteps), 9);
+  assert.equal(queryFor.nextQuotationStep(6, packageScope.workflowSteps), 7);
+  assert.equal(queryFor.nextQuotationStep(7, packageScope.workflowSteps), 8);
+  assert.equal(queryFor.previousQuotationStep(9, packageScope.workflowSteps), 8);
+  assert.equal(queryFor.resolveQuotationStep(7, accommodationScope.workflowSteps), 8);
+  assert.equal(queryFor.resolveQuotationStep(5, accommodationScope.workflowSteps), 6);
 
   const now = "2026-09-22T00:00:00.000Z";
   const db = {
     cities: [{ id: "city-1", name: "Indore" }],
-    hotels: [{
-      id: "hotel-1", city_id: "city-1", name: "Audit Hotel",
-      hotel_category: "3 Star Deluxe", contact_name: "", contact_phone: "", email: "",
-      has_wifi: true, has_pool: false, address: "", created_at: now, updated_at: now,
-    }],
+    hotels: [
+      {
+        id: "hotel-1",
+        city_id: "city-1",
+        name: "Audit Hotel",
+        hotel_category: "3 Star Deluxe",
+        contact_name: "",
+        contact_phone: "",
+        email: "",
+        has_wifi: true,
+        has_pool: false,
+        address: "",
+        created_at: now,
+        updated_at: now,
+      },
+    ],
     room_categories: [{ id: "room-1", hotel_id: "hotel-1", name: "Deluxe", created_at: now }],
-    rate_plans: [{
-      id: "rate-1", room_category_id: "room-1", validity_start: "2026-01-01",
-      validity_end: "2026-12-31", season_label: "Audit", meal_plan: "CP",
-      double_rate: 4000, single_rate: 3000, quad_rate: 7000, extra_bed_rate: 1000,
-      lunch_rate: 200, dinner_rate: 300, created_at: now, updated_at: now,
-    }, {
-      id: "rate-map", room_category_id: "room-1", validity_start: "2026-01-01",
-      validity_end: "2026-12-31", season_label: "Audit", meal_plan: "MAP",
-      double_rate: 4000, single_rate: 3000, quad_rate: 7000, extra_bed_rate: 1000,
-      lunch_rate: 200, dinner_rate: 300, created_at: now, updated_at: now,
-    }, {
-      id: "rate-ap", room_category_id: "room-1", validity_start: "2026-01-01",
-      validity_end: "2026-12-31", season_label: "Audit", meal_plan: "AP",
-      double_rate: 4000, single_rate: 3000, quad_rate: 7000, extra_bed_rate: 1000,
-      lunch_rate: 200, dinner_rate: 300, created_at: now, updated_at: now,
-    }],
+    rate_plans: [
+      {
+        id: "rate-1",
+        room_category_id: "room-1",
+        validity_start: "2026-01-01",
+        validity_end: "2026-12-31",
+        season_label: "Audit",
+        meal_plan: "CP",
+        double_rate: 4000,
+        single_rate: 3000,
+        quad_rate: 7000,
+        extra_bed_rate: 1000,
+        lunch_rate: 200,
+        dinner_rate: 300,
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: "rate-map",
+        room_category_id: "room-1",
+        validity_start: "2026-01-01",
+        validity_end: "2026-12-31",
+        season_label: "Audit",
+        meal_plan: "MAP",
+        double_rate: 4000,
+        single_rate: 3000,
+        quad_rate: 7000,
+        extra_bed_rate: 1000,
+        lunch_rate: 200,
+        dinner_rate: 300,
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: "rate-ap",
+        room_category_id: "room-1",
+        validity_start: "2026-01-01",
+        validity_end: "2026-12-31",
+        season_label: "Audit",
+        meal_plan: "AP",
+        double_rate: 4000,
+        single_rate: 3000,
+        quad_rate: 7000,
+        extra_bed_rate: 1000,
+        lunch_rate: 200,
+        dinner_rate: 300,
+        created_at: now,
+        updated_at: now,
+      },
+    ],
     quotes: [],
-    miscellaneous_items: [{
-      id: "misc-master", name: "Permit", description: "", rate: 500,
-      unit: "fixed", pricing_type: "fixed", is_active: true, created_at: now,
-    }, {
-      id: "amenities", name: "Basic Amenities Kit", description: "", rate: 100,
-      unit: "per_person", pricing_type: "per_person", is_active: true, created_at: now,
-    }, {
-      id: "wet-tissues", name: "M'Water & Wet Tissues", description: "", rate: 600,
-      unit: "per_person", pricing_type: "per_person", is_active: true, created_at: now,
-    }, {
-      id: "inactive-misc", name: "Inactive", description: "", rate: 999,
-      unit: "per_person", pricing_type: "per_person", is_active: false, created_at: now,
-    }],
+    miscellaneous_items: [
+      {
+        id: "misc-master",
+        name: "Permit",
+        description: "",
+        rate: 500,
+        unit: "fixed",
+        pricing_type: "fixed",
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "amenities",
+        name: "Basic Amenities Kit",
+        description: "",
+        rate: 100,
+        unit: "per_person",
+        pricing_type: "per_person",
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "wet-tissues",
+        name: "M'Water & Wet Tissues",
+        description: "",
+        rate: 600,
+        unit: "per_person",
+        pricing_type: "per_person",
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "inactive-misc",
+        name: "Inactive",
+        description: "",
+        rate: 999,
+        unit: "per_person",
+        pricing_type: "per_person",
+        is_active: false,
+        created_at: now,
+      },
+    ],
     entrance_cities: [],
-    entrance_sites: [{
-      id: "site-1", city_id: "city-1", site_name: "Monument", description: "",
-      indian_rate: 100, foreigner_rate: 500, student_rate: 50, is_active: true, created_at: now,
-    }],
+    entrance_sites: [
+      {
+        id: "site-1",
+        city_id: "city-1",
+        site_name: "Monument",
+        description: "",
+        indian_rate: 100,
+        foreigner_rate: 500,
+        student_rate: 50,
+        is_active: true,
+        created_at: now,
+      },
+    ],
     activity_destinations: [{ id: "ad-1", name: "Indore", created_at: now }],
-    activities: [{
-      id: "activity-master", destination_id: "ad-1", activity_name: "Audit Activity",
-      description: "", pricing_type: "per_person", slab_pricing_type: "per_person",
-      price: 1000, unit_label: "per person", is_active: true, created_at: now,
-    }],
-    guides: [{
-      id: "guide-master", name: "Audit Guide", guide_type: "English Guide - Local",
-      destination: "Indore", rate_per_day: 1000, description: "", is_active: true,
-      created_at: now, rate_1_to_5: 1000, rate_6_to_14: 1500, rate_15_plus: 2000,
-      languages: ["English"],
-    }],
-    guide_cities: [], destination_cities: [], destination_tours: [],
-    travel_options: [{
-      id: "small", vehicle_type: "Small Car", description: "", capacity_persons: 4,
-      min_pax: 1, max_pax: 4, rate_per_day: 0, rate_per_km: 0, is_active: true, created_at: now,
-    }, {
-      id: "large", vehicle_type: "Large Vehicle", description: "", capacity_persons: 10,
-      min_pax: 5, max_pax: 10, rate_per_day: 0, rate_per_km: 0, is_active: true, created_at: now,
-    }],
+    activities: [
+      {
+        id: "activity-master",
+        destination_id: "ad-1",
+        activity_name: "Audit Activity",
+        description: "",
+        pricing_type: "per_person",
+        slab_pricing_type: "per_person",
+        price: 1000,
+        unit_label: "per person",
+        is_active: true,
+        created_at: now,
+      },
+    ],
+    guides: [
+      {
+        id: "guide-master",
+        name: "Audit Guide",
+        guide_type: "English Guide - Local",
+        destination: "Indore",
+        rate_per_day: 1000,
+        description: "",
+        is_active: true,
+        created_at: now,
+        rate_1_to_5: 1000,
+        rate_6_to_14: 1500,
+        rate_15_plus: 2000,
+        languages: ["English"],
+      },
+    ],
+    guide_cities: [],
+    destination_cities: [],
+    destination_tours: [],
+    travel_options: [
+      {
+        id: "small",
+        vehicle_type: "Small Car",
+        description: "",
+        capacity_persons: 4,
+        min_pax: 1,
+        max_pax: 4,
+        rate_per_day: 0,
+        rate_per_km: 0,
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "large",
+        vehicle_type: "Large Vehicle",
+        description: "",
+        capacity_persons: 10,
+        min_pax: 5,
+        max_pax: 10,
+        rate_per_day: 0,
+        rate_per_km: 0,
+        is_active: true,
+        created_at: now,
+      },
+    ],
     restaurants: [],
   };
+
+  // Finalized routing is authoritative even when no Programme is selected.
+  // Operational city IDs and Destination master city IDs intentionally differ.
+  const landDb = structuredClone(db);
+  landDb.destination_cities = [{ id: "destination-city-1", name: "Indore", created_at: now }];
+  landDb.destination_tours = [
+    {
+      id: "tour-1",
+      city_id: "destination-city-1",
+      title: "Audit - Tour Fort",
+      created_at: now,
+    },
+  ];
+  landDb.entrance_sites = [
+    {
+      ...landDb.entrance_sites[0],
+      city_id: "destination-city-1",
+      tour_id: "tour-1",
+    },
+  ];
+  landDb.guides = [{ ...landDb.guides[0], city: "Indore", tour_id: "tour-1" }];
+  const selectedRoute = {
+    day: 1,
+    date: now.slice(0, 10),
+    city_id: "city-1",
+    to_city_id: "city-1",
+    to_city_ids: ["city-1"],
+    from_city: "Indore",
+    to_city: "Indore",
+    program: "Custom routing",
+    program_mode: "text",
+    overnight: true,
+    tours_selected_by_city: { "city-1": ["Audit - Tour Fort"] },
+    tour_ids_by_city: { "city-1": ["tour-1"] },
+  };
+  const noProgramDraft = { ...types.emptyDraft(), routing: [selectedRoute] };
+  assert.equal(noProgramDraft.program_id, undefined, "Land eligibility fixture has no Programme");
+  assert.deepEqual(
+    landEligibility.landDayContext(noProgramDraft, selectedRoute, landDb).tourIds,
+    ["tour-1"],
+    "No Programme + selected routing Tour resolves the Tour master ID",
+  );
+  assert.deepEqual(
+    landEligibility
+      .eligibleEntrancesForDay(noProgramDraft, selectedRoute, landDb)
+      .map((row) => row.id),
+    ["site-1"],
+    "Selected Tour ID resolves Entrance eligibility across city ID namespaces",
+  );
+  assert.deepEqual(
+    landEligibility
+      .eligibleGuidesForDay(noProgramDraft, selectedRoute, landDb)
+      .map((row) => row.id),
+    ["guide-master"],
+    "Selected Tour ID resolves Guide eligibility",
+  );
+  assert.deepEqual(
+    landEligibility
+      .eligibleActivitiesForDay(noProgramDraft, selectedRoute, landDb)
+      .map((row) => row.id),
+    ["activity-master"],
+    "Selected Tour destination resolves Activity eligibility",
+  );
+  assert.equal(
+    landEligibility.isSelectedLandServiceValid("guide", "guide-master", 1, noProgramDraft, landDb),
+    true,
+    "Selected Guide remains valid while its Tour is selected",
+  );
+  const removedTourDraft = structuredClone(noProgramDraft);
+  removedTourDraft.routing[0].tours_selected_by_city["city-1"] = [];
+  removedTourDraft.routing[0].tour_ids_by_city["city-1"] = [];
+  assert.equal(
+    landEligibility.isSelectedLandServiceValid(
+      "guide",
+      "guide-master",
+      1,
+      removedTourDraft,
+      landDb,
+    ),
+    false,
+    "Selected Guide becomes invalid when its Tour is removed",
+  );
+  const legacyRoute = {
+    ...selectedRoute,
+    tours_selected_by_city: { "city-1": ["  AUDIT—TOUR (FORT) "] },
+  };
+  delete legacyRoute.tour_ids_by_city;
+  const legacyDraft = { ...types.emptyDraft(), routing: [legacyRoute] };
+  assert.deepEqual(
+    landEligibility.landDayContext(legacyDraft, legacyRoute, landDb).tourIds,
+    ["tour-1"],
+    "Legacy tour titles resolve after safe punctuation and whitespace normalization",
+  );
+
+  const escortDraft = {
+    ...types.emptyDraft(),
+    escort_enabled: true,
+    escort_pricing_mode: "pax_range",
+    routing: [selectedRoute, { ...selectedRoute, day: 2 }],
+    escort_ranges: [
+      { id: "escort-1-15", min_pax: 1, max_pax: 15, escort_type: "English", charge: 0 },
+      { id: "escort-16-25", min_pax: 16, max_pax: 25, escort_type: "English", charge: 0 },
+    ],
+    escort_day_rates_by_slab: {
+      1: { "escort-1-15": 2000, "escort-16-25": 3000 },
+      2: { "escort-1-15": 2500, "escort-16-25": 3500 },
+    },
+  };
+  assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 10), 4500);
+  assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 20), 6500);
+  assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 30), 0);
+  const legacyEscortDraft = structuredClone(escortDraft);
+  legacyEscortDraft.escort_day_rates_by_slab = {};
+  legacyEscortDraft.escort_ranges[0].charge = 4000;
+  assert.equal(
+    guidePricing.getEscortBaseForPax(legacyEscortDraft, 10),
+    4000,
+    "Legacy flat Escort slab charge remains costed until day-wise rates are entered",
+  );
+
+  assert.deepEqual(
+    ["Package", "Land Part", "Accommodation Part"].map((value) => {
+      const scope = queryFor.getQuotationScope(value);
+      return [scope.queryFor, scope.landPart, scope.accommodationPart];
+    }),
+    [
+      ["Package", true, true],
+      ["Land Part", true, false],
+      ["Accommodation Part", false, true],
+    ],
+    "Query For controls the authoritative service scope",
+  );
 
   const baseDraft = () => ({
     ...types.emptyDraft(),
@@ -95,46 +380,113 @@ try {
     tour_start_city: "Indore",
     tour_end_city: "Indore",
     departure_city: "Indore",
-    routing: [{
-      day: 1, date: "2026-09-22", city_id: "city-1", to_city_id: "city-1",
-      to_city_ids: ["city-1"], from_city: "Indore", to_city: "Indore",
-      program: "Arrival", program_mode: "text", overnight: true,
-    }, {
-      day: 2, date: "2026-09-23", city_id: "", from_city: "Indore", to_city: "Indore",
-      program: "Departure", program_mode: "text", overnight: false,
-    }],
-    transport: [{
-      id: "transport-small", travel_id: "small", vehicles: 1, days: 2, rate: 0,
-      rate_format: "per_route", per_route_rates: [10000, 0], reporting_cost: 0,
-    }],
-    activities: [{
-      id: "activity-line", activity_id: "activity-master", qty: 2, rate: 1000,
-      pricing_mode: "per_person", from_routing_days: [1],
-    }],
-    entrances: [{
-      id: "entrance-line", site_id: "site-1", indian_pax: 2, indian_rate: 100,
-      foreign_pax: 0, foreign_rate: 500, student_pax: 0, student_rate: 50,
-      from_routing_days: [1],
-    }],
-    guides: [{
-      id: "guide-line", guide_id: "guide-master", days: 1, guides: 1, rate: 1000,
-      language: "English", from_routing_days: [1],
-    }],
-    misc: [{
-      id: "misc-line", item_id: "misc-master", qty: 1, rate: 500,
-      unit: "fixed", from_routing_days: [1],
-    }],
-    hotel_options: [{
-      key: "A", label: "3 Star Deluxe", category: "3 Star Deluxe",
-      selections: [{ city_id: "city-1", hotel_id: "hotel-1", room_id: "room-1", meal_plan: "CP" }],
-    }],
+    routing: [
+      {
+        day: 1,
+        date: "2026-09-22",
+        city_id: "city-1",
+        to_city_id: "city-1",
+        to_city_ids: ["city-1"],
+        from_city: "Indore",
+        to_city: "Indore",
+        program: "Arrival",
+        program_mode: "text",
+        overnight: true,
+      },
+      {
+        day: 2,
+        date: "2026-09-23",
+        city_id: "",
+        from_city: "Indore",
+        to_city: "Indore",
+        program: "Departure",
+        program_mode: "text",
+        overnight: false,
+      },
+    ],
+    transport: [
+      {
+        id: "transport-small",
+        travel_id: "small",
+        vehicles: 1,
+        days: 2,
+        rate: 0,
+        rate_format: "per_route",
+        per_route_rates: [10000, 0],
+        reporting_cost: 0,
+      },
+    ],
+    activities: [
+      {
+        id: "activity-line",
+        activity_id: "activity-master",
+        qty: 2,
+        rate: 1000,
+        pricing_mode: "per_person",
+        from_routing_days: [1],
+      },
+    ],
+    entrances: [
+      {
+        id: "entrance-line",
+        site_id: "site-1",
+        indian_pax: 2,
+        indian_rate: 100,
+        foreign_pax: 0,
+        foreign_rate: 500,
+        student_pax: 0,
+        student_rate: 50,
+        from_routing_days: [1],
+      },
+    ],
+    guides: [
+      {
+        id: "guide-line",
+        guide_id: "guide-master",
+        days: 1,
+        guides: 1,
+        rate: 1000,
+        language: "English",
+        from_routing_days: [1],
+      },
+    ],
+    misc: [
+      {
+        id: "misc-line",
+        item_id: "misc-master",
+        qty: 1,
+        rate: 500,
+        unit: "fixed",
+        from_routing_days: [1],
+      },
+    ],
+    hotel_options: [
+      {
+        key: "A",
+        label: "3 Star Deluxe",
+        category: "3 Star Deluxe",
+        selections: [
+          { city_id: "city-1", hotel_id: "hotel-1", room_id: "room-1", meal_plan: "CP" },
+        ],
+      },
+    ],
     included_option_keys: ["A"],
     recommended_option: "A",
     meal_selections_by_option: {
       A: {
         "1:city-1": {
-          lunch: { source: "hotel", hotel_id: "hotel-1", label: "Audit Hotel", per_person_rate: 200 },
-          dinner: { source: "hotel", hotel_id: "hotel-1", label: "Audit Hotel", per_person_rate: 300 },
+          lunch: {
+            source: "hotel",
+            hotel_id: "hotel-1",
+            label: "Audit Hotel",
+            per_person_rate: 200,
+          },
+          dinner: {
+            source: "hotel",
+            hotel_id: "hotel-1",
+            label: "Audit Hotel",
+            per_person_rate: 300,
+          },
         },
       },
     },
@@ -144,32 +496,132 @@ try {
     hotel_gst_percent: 5,
   });
 
+  const accommodationOnlyDraft = baseDraft();
+  accommodationOnlyDraft.query_for = "Accommodation Part";
+  accommodationOnlyDraft.commercial_mode = "accommodation_only";
+  const preservedLandData = {
+    routing: structuredClone(accommodationOnlyDraft.routing),
+    transport: structuredClone(accommodationOnlyDraft.transport),
+    activities: structuredClone(accommodationOnlyDraft.activities),
+    entrances: structuredClone(accommodationOnlyDraft.entrances),
+    guides: structuredClone(accommodationOnlyDraft.guides),
+    misc: structuredClone(accommodationOnlyDraft.misc),
+  };
+  const accommodationScenario = scenarioEngine.computeScenario(
+    accommodationOnlyDraft,
+    { id: "accommodation-only", label: "Accommodation only", option_key: "A" },
+    db,
+  );
+  assert.ok(accommodationScenario);
+  assert.equal(accommodationScenario.transport_total, 0);
+  assert.equal(accommodationScenario.guide_total, 0);
+  assert.equal(accommodationScenario.activities_total, 0);
+  assert.equal(accommodationScenario.entrances_total, 0);
+  assert.equal(accommodationScenario.misc_total, 0);
+  assert.ok(accommodationScenario.hotel_total > 0, "Accommodation-only keeps hotel costing");
+  assert.ok(accommodationScenario.meals_total > 0, "Accommodation-only keeps applicable meals");
+  assert.deepEqual(accommodationOnlyDraft.routing, preservedLandData.routing);
+  assert.deepEqual(accommodationOnlyDraft.transport, preservedLandData.transport);
+  assert.deepEqual(accommodationOnlyDraft.activities, preservedLandData.activities);
+  assert.deepEqual(accommodationOnlyDraft.entrances, preservedLandData.entrances);
+  assert.deepEqual(accommodationOnlyDraft.guides, preservedLandData.guides);
+  assert.deepEqual(accommodationOnlyDraft.misc, preservedLandData.misc);
+
+  const accommodationWithoutRouting = {
+    ...accommodationOnlyDraft,
+    routing: [],
+    program_name: "",
+    program_mode: "new",
+    new_program_name: "",
+    save_program_as_new: false,
+  };
+  const accommodationReview = validation.validateQuoteForFinalization(
+    accommodationWithoutRouting,
+    db,
+  );
+  assert.equal(
+    accommodationReview.blockers.some(
+      (item) => item.section === "Routing" || item.section === "Program",
+    ),
+    false,
+    "Routing and Program do not block Accommodation-only readiness/finalization",
+  );
+
+  const switchedBackToPackage = {
+    ...accommodationOnlyDraft,
+    query_for: "Package",
+    commercial_mode: "package",
+  };
+  assert.equal(queryFor.getQuotationScope(switchedBackToPackage.query_for).routing, true);
+  assert.equal(queryFor.getQuotationScope(switchedBackToPackage.query_for).landPart, true);
+  assert.deepEqual(switchedBackToPackage.routing, preservedLandData.routing);
+  assert.deepEqual(switchedBackToPackage.transport, preservedLandData.transport);
+
   const close = (actual, expected, message) =>
-    assert.ok(Math.abs(actual - expected) < 0.001, `${message}: expected ${expected}, received ${actual}`);
+    assert.ok(
+      Math.abs(actual - expected) < 0.001,
+      `${message}: expected ${expected}, received ${actual}`,
+    );
 
   // Shared pricing resolver keeps per-person rates intact and divides group slabs only.
   const perPersonActivity = {
-    ...db.activities[0], price: 1500, indian_price: 1500,
-    slab_pricing_type: "per_person", pricing_slabs: [],
+    ...db.activities[0],
+    price: 1500,
+    indian_price: 1500,
+    slab_pricing_type: "per_person",
+    pricing_slabs: [],
   };
-  close(masterPricing.activityPricingForPax(perPersonActivity, 1).per_person, 1500, "1-pax activity per-person rate");
-  close(masterPricing.activityPricingForPax(perPersonActivity, 2).per_person, 1500, "2-pax activity per-person rate");
+  close(
+    masterPricing.activityPricingForPax(perPersonActivity, 1).per_person,
+    1500,
+    "1-pax activity per-person rate",
+  );
+  close(
+    masterPricing.activityPricingForPax(perPersonActivity, 2).per_person,
+    1500,
+    "2-pax activity per-person rate",
+  );
   const slabActivity = {
-    ...perPersonActivity, slab_pricing_type: "slab",
+    ...perPersonActivity,
+    slab_pricing_type: "slab",
     pricing_slabs: [
       { id: "slab-1", from_pax: 1, to_pax: 4, price: 400, type: "indian" },
       { id: "slab-2", from_pax: 5, to_pax: 8, price: 800, type: "indian" },
     ],
   };
-  close(masterPricing.activityPricingForPax(slabActivity, 1).per_person, 400, "1-pax slab activity per-person rate");
-  close(masterPricing.activityPricingForPax(slabActivity, 2).per_person, 200, "2-pax slab activity per-person rate");
-  close(masterPricing.activityPricingForPax(slabActivity, 4).per_person, 100, "4-pax slab activity per-person rate");
-  close(masterPricing.activityPricingForPax(slabActivity, 5).per_person, 160, "5-pax next slab activity per-person rate");
-  close(masterPricing.miscRateForPax(db.miscellaneous_items[1], 2, 1).per_person, 100, "Amenities per-person rate");
-  close(masterPricing.miscRateForPax(db.miscellaneous_items[2], 2, 1).per_person, 600, "Wet tissues per-person rate");
   close(
-    masterPricing.miscRateForPax(db.miscellaneous_items[1], 2, 1).per_person
-      + masterPricing.miscRateForPax(db.miscellaneous_items[2], 2, 1).per_person,
+    masterPricing.activityPricingForPax(slabActivity, 1).per_person,
+    400,
+    "1-pax slab activity per-person rate",
+  );
+  close(
+    masterPricing.activityPricingForPax(slabActivity, 2).per_person,
+    200,
+    "2-pax slab activity per-person rate",
+  );
+  close(
+    masterPricing.activityPricingForPax(slabActivity, 4).per_person,
+    100,
+    "4-pax slab activity per-person rate",
+  );
+  close(
+    masterPricing.activityPricingForPax(slabActivity, 5).per_person,
+    160,
+    "5-pax next slab activity per-person rate",
+  );
+  close(
+    masterPricing.miscRateForPax(db.miscellaneous_items[1], 2, 1).per_person,
+    100,
+    "Amenities per-person rate",
+  );
+  close(
+    masterPricing.miscRateForPax(db.miscellaneous_items[2], 2, 1).per_person,
+    600,
+    "Wet tissues per-person rate",
+  );
+  close(
+    masterPricing.miscRateForPax(db.miscellaneous_items[1], 2, 1).per_person +
+      masterPricing.miscRateForPax(db.miscellaneous_items[2], 2, 1).per_person,
     700,
     "Combined miscellaneous per-person base",
   );
@@ -190,14 +642,46 @@ try {
 
   // Fixed-number reconciliation: 2 pax, one DBL room, land ₹13,700,
   // meals ₹1,000. Supplier room GST then separate 10%/5% commercial layers.
+  // The shared costing-pax resolver is the source of truth for every Land
+  // costing surface: Exact has one actual traveller-total row; Range expands
+  // only its requested bounds.
+  const exactPax20 = {
+    ...baseDraft(),
+    pax_mode: "exact",
+    adults: 16,
+    ss: 1,
+    children: [{}, {}, {}],
+  };
+  assert.deepEqual(calc.getCostingPaxValues(exactPax20), [20], "Exact 20 has one costing pax");
+  assert.deepEqual(
+    calc.getCostingPaxValues({ ...baseDraft(), pax_mode: "range", pax_min: 1, pax_max: 20 }),
+    Array.from({ length: 20 }, (_, index) => index + 1),
+    "Range 1-20 expands every requested pax",
+  );
+  assert.deepEqual(
+    calc.getCostingPaxValues({ ...baseDraft(), pax_mode: "range", pax_min: 6, pax_max: 10 }),
+    [6, 7, 8, 9, 10],
+    "Range 6-10 preserves its lower bound",
+  );
+
   const exact = baseDraft();
-  const scenario = scenarioEngine.computeScenario(exact, {
-    id: "audit", label: "Audit", option_key: "A", transport_line_id: "transport-small",
-  }, db);
+  const scenario = scenarioEngine.computeScenario(
+    exact,
+    {
+      id: "audit",
+      label: "Audit",
+      option_key: "A",
+      transport_line_id: "transport-small",
+    },
+    db,
+  );
   assert.ok(scenario);
   close(
-    scenario.transport_total + scenario.guide_total + scenario.activities_total
-      + scenario.entrances_total + scenario.misc_total,
+    scenario.transport_total +
+      scenario.guide_total +
+      scenario.activities_total +
+      scenario.entrances_total +
+      scenario.misc_total,
     13700,
     "Land source total",
   );
@@ -205,86 +689,261 @@ try {
   close(scenario.per_person_avg, 10914.75, "Scenario per-person result");
   close(scenario.optionals_total, 0, "No optional selected");
 
+  const accommodationRateSheet = costsheet.buildRateSheet(
+    accommodationOnlyDraft,
+    db,
+    accommodationOnlyDraft.hotel_options[0],
+    accommodationOnlyDraft.transport,
+  );
+  assert.equal(accommodationRateSheet.length, 1);
+  close(
+    accommodationRateSheet[0].rows[0].transport,
+    0,
+    "Accommodation-only rate sheet excludes transport",
+  );
+  close(
+    accommodationRateSheet[0].rows[0].guide,
+    0,
+    "Accommodation-only rate sheet excludes guides/escort",
+  );
+  close(
+    accommodationRateSheet[0].rows[0].entrances,
+    0,
+    "Accommodation-only rate sheet excludes entrances",
+  );
+  close(
+    accommodationRateSheet[0].rows[0].activities,
+    0,
+    "Accommodation-only rate sheet excludes activities",
+  );
+  close(accommodationRateSheet[0].rows[0].misc, 0, "Accommodation-only rate sheet excludes misc");
+  assert.ok(
+    accommodationRateSheet[0].rows[0].double > 0,
+    "Accommodation-only rate sheet retains rooms",
+  );
+  assert.ok(
+    accommodationRateSheet[0].rows[0].lunch > 0,
+    "Accommodation-only rate sheet retains meals",
+  );
+
+  const restoredPackageScenario = scenarioEngine.computeScenario(
+    switchedBackToPackage,
+    {
+      id: "restored-package",
+      label: "Restored Package",
+      option_key: "A",
+      transport_line_id: "transport-small",
+    },
+    db,
+  );
+  assert.ok(restoredPackageScenario);
+  close(
+    restoredPackageScenario.transport_total,
+    scenario.transport_total,
+    "Package transport restores",
+  );
+  close(restoredPackageScenario.guide_total, scenario.guide_total, "Package guides restore");
+  close(
+    restoredPackageScenario.activities_total,
+    scenario.activities_total,
+    "Package activities restore",
+  );
+
   // Two configured per-person activities and misc lines retain their rates at 2 pax.
   const miscActivityDraft = baseDraft();
-  db.activities.push({ ...perPersonActivity, id: "night-sarafa", activity_name: "Night Sarafa Food Market" });
+  db.activities.push({
+    ...perPersonActivity,
+    id: "night-sarafa",
+    activity_name: "Night Sarafa Food Market",
+  });
   db.activities.push({ ...slabActivity, id: "e-rikshaw", activity_name: "E Rikshaw at Indore" });
-  miscActivityDraft.activities = [{
-    id: "sarafa-line", activity_id: "night-sarafa", qty: 2, rate: 1500,
-    pricing_mode: "per_person", from_routing_days: [1],
-  }];
-  miscActivityDraft.misc = [
-    { id: "amenities-line", item_id: "amenities", qty: 2, rate: 100, unit: "per_person", from_routing_days: [1] },
-    { id: "tissues-line", item_id: "wet-tissues", qty: 2, rate: 600, unit: "per_person", from_routing_days: [1] },
+  miscActivityDraft.activities = [
+    {
+      id: "sarafa-line",
+      activity_id: "night-sarafa",
+      qty: 2,
+      rate: 1500,
+      pricing_mode: "per_person",
+      from_routing_days: [1],
+    },
   ];
-  close(costsheet.buildLandPart(miscActivityDraft, db).activities_total, 3000, "Per-person activity group total");
-  close(costsheet.buildLandPart(miscActivityDraft, db).misc_total, 1400, "Selected misc group total");
-  close(calc.computeAddonsTotal(miscActivityDraft, db) - calc.computeAddonsTotal({ ...miscActivityDraft, misc: [] }, db), 1400, "Misc included in Step 8 add-ons");
-  const miscRateSheet = costsheet.buildRateSheet(
-    miscActivityDraft, db, miscActivityDraft.hotel_options[0], miscActivityDraft.transport,
+  miscActivityDraft.misc = [
+    {
+      id: "amenities-line",
+      item_id: "amenities",
+      qty: 2,
+      rate: 100,
+      unit: "per_person",
+      from_routing_days: [1],
+    },
+    {
+      id: "tissues-line",
+      item_id: "wet-tissues",
+      qty: 2,
+      rate: 600,
+      unit: "per_person",
+      from_routing_days: [1],
+    },
+  ];
+  close(
+    costsheet.buildLandPart(miscActivityDraft, db).activities_total,
+    3000,
+    "Per-person activity group total",
   );
-  close(miscRateSheet[0].rows[0].activities, 1732.5, "Per-person activity rate-sheet value incl. markup/GST");
+  close(
+    costsheet.buildLandPart(miscActivityDraft, db).misc_total,
+    1400,
+    "Selected misc group total",
+  );
+  close(
+    calc.computeAddonsTotal(miscActivityDraft, db) -
+      calc.computeAddonsTotal({ ...miscActivityDraft, misc: [] }, db),
+    1400,
+    "Misc included in Step 8 add-ons",
+  );
+  const miscRateSheet = costsheet.buildRateSheet(
+    miscActivityDraft,
+    db,
+    miscActivityDraft.hotel_options[0],
+    miscActivityDraft.transport,
+  );
+  close(
+    miscRateSheet[0].rows[0].activities,
+    1732.5,
+    "Per-person activity rate-sheet value incl. markup/GST",
+  );
   close(miscRateSheet[0].rows[0].misc, 808.5, "Misc per-person rate-sheet value incl. markup/GST");
   const deselectedMisc = {
     ...miscActivityDraft,
     costing_selection: { misc: { 1: [] } },
   };
-  close(costsheet.buildLandPart(deselectedMisc, db).misc_total, 0, "Unchecked misc contributes zero to costing sheet");
   close(
-    calc.computeAddonsTotal(deselectedMisc, db) - calc.computeAddonsTotal({ ...deselectedMisc, misc: [] }, db),
+    costsheet.buildLandPart(deselectedMisc, db).misc_total,
+    0,
+    "Unchecked misc contributes zero to costing sheet",
+  );
+  close(
+    calc.computeAddonsTotal(deselectedMisc, db) -
+      calc.computeAddonsTotal({ ...deselectedMisc, misc: [] }, db),
     0,
     "Unchecked misc contributes zero to addon total",
   );
   const inactiveMiscDraft = {
     ...miscActivityDraft,
-    misc: [{ id: "inactive-line", item_id: "inactive-misc", qty: 2, rate: 999, unit: "per_person", from_routing_days: [1] }],
+    misc: [
+      {
+        id: "inactive-line",
+        item_id: "inactive-misc",
+        qty: 2,
+        rate: 999,
+        unit: "per_person",
+        from_routing_days: [1],
+      },
+    ],
   };
-  close(costsheet.buildLandPart(inactiveMiscDraft, db).misc_total, 0, "Inactive misc excluded from costing");
+  close(
+    costsheet.buildLandPart(inactiveMiscDraft, db).misc_total,
+    0,
+    "Inactive misc excluded from costing",
+  );
 
   const slabActivityDraft = baseDraft();
   db.activities.push({ ...slabActivity, id: "slab-activity", activity_name: "Slab Activity" });
-  slabActivityDraft.activities = [{
-    id: "slab-line", activity_id: "slab-activity", qty: 1, rate: 400,
-    pricing_mode: "slab", from_routing_days: [1],
-  }];
+  slabActivityDraft.activities = [
+    {
+      id: "slab-line",
+      activity_id: "slab-activity",
+      qty: 1,
+      rate: 400,
+      pricing_mode: "slab",
+      from_routing_days: [1],
+    },
+  ];
   const slabRateSheet = costsheet.buildRateSheet(
-    slabActivityDraft, db, slabActivityDraft.hotel_options[0], slabActivityDraft.transport,
+    slabActivityDraft,
+    db,
+    slabActivityDraft.hotel_options[0],
+    slabActivityDraft.transport,
   );
   close(slabRateSheet[0].rows[0].activities, 231, "2-pax slab rate-sheet value incl. markup/GST");
-    const combinedActivityDraft = {
-      ...miscActivityDraft,
-      activities: [
-        ...miscActivityDraft.activities,
-        { id: "rikshaw-line", activity_id: "e-rikshaw", qty: 1, rate: 400, pricing_mode: "slab", from_routing_days: [1] },
-      ],
-    };
-    close(costsheet.buildLandPart(combinedActivityDraft, db).activities_per_person_total, 1700, "Activity base per person combines flat and group slab pricing");
-    const combinedActivityRateSheet = costsheet.buildRateSheet(
-      combinedActivityDraft, db, combinedActivityDraft.hotel_options[0], combinedActivityDraft.transport,
-    );
-    close(combinedActivityRateSheet[0].rows[0].activities, 1963.5, "Combined activity per-person costing incl. existing markup/GST chain");
+  const combinedActivityDraft = {
+    ...miscActivityDraft,
+    activities: [
+      ...miscActivityDraft.activities,
+      {
+        id: "rikshaw-line",
+        activity_id: "e-rikshaw",
+        qty: 1,
+        rate: 400,
+        pricing_mode: "slab",
+        from_routing_days: [1],
+      },
+    ],
+  };
+  close(
+    costsheet.buildLandPart(combinedActivityDraft, db).activities_per_person_total,
+    1700,
+    "Activity base per person combines flat and group slab pricing",
+  );
+  const combinedActivityRateSheet = costsheet.buildRateSheet(
+    combinedActivityDraft,
+    db,
+    combinedActivityDraft.hotel_options[0],
+    combinedActivityDraft.transport,
+  );
+  close(
+    combinedActivityRateSheet[0].rows[0].activities,
+    1963.5,
+    "Combined activity per-person costing incl. existing markup/GST chain",
+  );
 
   // Step 6 resolved per-person values are shared by Step 8, rate sheets, and scenarios,
   // including the next activity slab at 5 pax.
-  for (const [pax, expectedActivityBase] of [[1, 1900], [2, 1700], [5, 1660]]) {
+  for (const [pax, expectedActivityBase] of [
+    [1, 1900],
+    [2, 1700],
+    [5, 1660],
+  ]) {
     const paxDraft = { ...combinedActivityDraft, adults: pax };
     const land = costsheet.buildLandPart(paxDraft, db);
-    close(land.activities_per_person_total, expectedActivityBase, `${pax}-pax Step 8 activity base`);
+    close(
+      land.activities_per_person_total,
+      expectedActivityBase,
+      `${pax}-pax Step 8 activity base`,
+    );
     close(land.misc_per_person_total, 700, `${pax}-pax Step 8 misc base`);
     const sheet = costsheet.buildRateSheet(paxDraft, db, paxDraft.hotel_options[0], []);
-    close(sheet[0].rows[0].activities, expectedActivityBase * 1.1 * 1.05, `${pax}-pax rate-sheet activity final`);
+    close(
+      sheet[0].rows[0].activities,
+      expectedActivityBase * 1.1 * 1.05,
+      `${pax}-pax rate-sheet activity final`,
+    );
     close(sheet[0].rows[0].misc, 700 * 1.1 * 1.05, `${pax}-pax rate-sheet misc final`);
-    const scenarioForPax = scenarioEngine.computeScenario(paxDraft, {
-      id: `pricing-${pax}`, label: "Pricing", option_key: "A",
-    }, db);
-    close(scenarioForPax.persons[0].activities, expectedActivityBase, `${pax}-pax scenario activity base`);
+    const scenarioForPax = scenarioEngine.computeScenario(
+      paxDraft,
+      {
+        id: `pricing-${pax}`,
+        label: "Pricing",
+        option_key: "A",
+      },
+      db,
+    );
+    close(
+      scenarioForPax.persons[0].activities,
+      expectedActivityBase,
+      `${pax}-pax scenario activity base`,
+    );
     close(scenarioForPax.persons[0].misc, 700, `${pax}-pax scenario misc base`);
   }
 
   const slabMisc = {
     ...db.miscellaneous_items[1],
-    id: "slab-misc", name: "chocklets", rate: 600,
-    unit: "fixed", pricing_type: "slab", slab_is_per_person: true,
+    id: "slab-misc",
+    name: "chocklets",
+    rate: 600,
+    unit: "fixed",
+    pricing_type: "slab",
+    slab_is_per_person: true,
     price_ranges: [
       { from_pax: 1, to_pax: 6, price: 600 },
       { from_pax: 7, to_pax: 20, price: 1200 },
@@ -293,7 +952,16 @@ try {
   db.miscellaneous_items.push(slabMisc);
   const miscSlabDraft = {
     ...baseDraft(),
-    misc: [{ id: "misc-slab-line", item_id: slabMisc.id, qty: 1, rate: 400, unit: "fixed", from_routing_days: [1] }],
+    misc: [
+      {
+        id: "misc-slab-line",
+        item_id: slabMisc.id,
+        qty: 1,
+        rate: 400,
+        unit: "fixed",
+        from_routing_days: [1],
+      },
+    ],
   };
   for (const [pax, expectedGroupCost, expectedMiscBase] of [
     [1, 600, 600],
@@ -306,49 +974,110 @@ try {
     const resolved = masterPricing.miscRateForPax(slabMisc, pax, 1);
     close(resolved.total, expectedGroupCost, `${pax}-pax misc slab group total`);
     close(resolved.per_person, expectedMiscBase, `${pax}-pax misc slab per-person rate`);
-    close(costsheet.buildLandPart(paxDraft, db).misc_per_person_total, expectedMiscBase, `${pax}-pax Step 8 slab misc base`);
     close(
-      calc.computeAddonsTotal(paxDraft, db) - calc.computeAddonsTotal({ ...paxDraft, misc: [] }, db),
+      costsheet.buildLandPart(paxDraft, db).misc_per_person_total,
+      expectedMiscBase,
+      `${pax}-pax Step 8 slab misc base`,
+    );
+    close(
+      calc.computeAddonsTotal(paxDraft, db) -
+        calc.computeAddonsTotal({ ...paxDraft, misc: [] }, db),
       expectedGroupCost,
       `${pax}-pax misc slab add-on total`,
     );
     const sheet = costsheet.buildRateSheet(paxDraft, db, paxDraft.hotel_options[0], []);
-    close(sheet[0].rows[0].misc, expectedMiscBase * 1.1 * 1.05, `${pax}-pax rate-sheet slab misc final`);
-    const scenarioForPax = scenarioEngine.computeScenario(paxDraft, {
-      id: `misc-slab-${pax}`, label: "Misc slab", option_key: "A",
-    }, db);
+    close(
+      sheet[0].rows[0].misc,
+      expectedMiscBase * 1.1 * 1.05,
+      `${pax}-pax rate-sheet slab misc final`,
+    );
+    const scenarioForPax = scenarioEngine.computeScenario(
+      paxDraft,
+      {
+        id: `misc-slab-${pax}`,
+        label: "Misc slab",
+        option_key: "A",
+      },
+      db,
+    );
     close(scenarioForPax.persons[0].misc, expectedMiscBase, `${pax}-pax scenario slab misc base`);
   }
 
   const mixedMiscDraft = {
     ...baseDraft(),
     misc: [
-      { id: "amenities-selected", item_id: "amenities", qty: 2, rate: 100, unit: "per_person", from_routing_days: [1] },
-      { id: "tissues-selected", item_id: "wet-tissues", qty: 2, rate: 600, unit: "per_person", from_routing_days: [1] },
-      { id: "chocklets-selected", item_id: slabMisc.id, qty: 1, rate: 600, unit: "fixed", from_routing_days: [1] },
+      {
+        id: "amenities-selected",
+        item_id: "amenities",
+        qty: 2,
+        rate: 100,
+        unit: "per_person",
+        from_routing_days: [1],
+      },
+      {
+        id: "tissues-selected",
+        item_id: "wet-tissues",
+        qty: 2,
+        rate: 600,
+        unit: "per_person",
+        from_routing_days: [1],
+      },
+      {
+        id: "chocklets-selected",
+        item_id: slabMisc.id,
+        qty: 1,
+        rate: 600,
+        unit: "fixed",
+        from_routing_days: [1],
+      },
     ],
   };
-  close(costsheet.buildLandPart(mixedMiscDraft, db).misc_per_person_total, 1000, "2-pax combined misc base per person");
-  const mixedMiscSheet = costsheet.buildRateSheet(mixedMiscDraft, db, mixedMiscDraft.hotel_options[0], []);
+  close(
+    costsheet.buildLandPart(mixedMiscDraft, db).misc_per_person_total,
+    1000,
+    "2-pax combined misc base per person",
+  );
+  const mixedMiscSheet = costsheet.buildRateSheet(
+    mixedMiscDraft,
+    db,
+    mixedMiscDraft.hotel_options[0],
+    [],
+  );
   close(mixedMiscSheet[0].rows[0].misc, 1155, "2-pax combined misc final per person");
-  const mixedMiscScenario = scenarioEngine.computeScenario(mixedMiscDraft, {
-    id: "mixed-misc", label: "Miscellaneous", option_key: "A",
-  }, db);
+  const mixedMiscScenario = scenarioEngine.computeScenario(
+    mixedMiscDraft,
+    {
+      id: "mixed-misc",
+      label: "Miscellaneous",
+      option_key: "A",
+    },
+    db,
+  );
   close(mixedMiscScenario.persons[0].misc, 1000, "2-pax combined misc scenario base per person");
 
   // Optional supplements are visible but never silently enter package totals.
   const withOptional = baseDraft();
   withOptional.optionals = [{ id: "optional", custom_name: "Airfare", qty: 1, rate: 99999 }];
-  const scenarioWithOptional = scenarioEngine.computeScenario(withOptional, {
-    id: "audit-optionals", label: "Audit", option_key: "A", transport_line_id: "transport-small",
-  }, db);
+  const scenarioWithOptional = scenarioEngine.computeScenario(
+    withOptional,
+    {
+      id: "audit-optionals",
+      label: "Audit",
+      option_key: "A",
+      transport_line_id: "transport-small",
+    },
+    db,
+  );
   close(scenarioWithOptional.grand_total, scenario.grand_total, "Optional isolation");
   close(scenarioWithOptional.optionals_total, 99999, "Optional display total");
 
   // Rate-sheet result must reconcile with the scenario for the exact DBL case.
   const rateSheet = costsheet.buildRateSheet(exact, db, exact.hotel_options[0], exact.transport);
   assert.equal(rateSheet.length, 1);
-  assert.deepEqual(rateSheet[0].rows.map((row) => row.pax), [2]);
+  assert.deepEqual(
+    rateSheet[0].rows.map((row) => row.pax),
+    [2],
+  );
   close(rateSheet[0].rows[0].pkg_double, scenario.per_person_avg, "Rate sheet vs scenario");
 
   // Range rows are bounded by both the requested range and each vehicle's
@@ -360,19 +1089,36 @@ try {
   range.pax_range = "2-5";
   range.transport = [
     range.transport[0],
-    { ...range.transport[0], id: "transport-large", travel_id: "large", per_route_rates: [15000, 0] },
+    {
+      ...range.transport[0],
+      id: "transport-large",
+      travel_id: "large",
+      per_route_rates: [15000, 0],
+    },
   ];
   const rangeSheet = costsheet.buildRateSheet(range, db, range.hotel_options[0], range.transport);
-  assert.deepEqual(rangeSheet.find((group) => group.line_id === "transport-small").rows.map((row) => row.pax), [2, 3, 4]);
-  assert.deepEqual(rangeSheet.find((group) => group.line_id === "transport-large").rows.map((row) => row.pax), [5]);
+  assert.deepEqual(
+    rangeSheet.find((group) => group.line_id === "transport-small").rows.map((row) => row.pax),
+    [2, 3, 4],
+  );
+  assert.deepEqual(
+    rangeSheet.find((group) => group.line_id === "transport-large").rows.map((row) => row.pax),
+    [5],
+  );
 
   // Two vehicle options remain independent alternatives, never one sum.
   const exactAlternatives = baseDraft();
   exactAlternatives.transport.push({
-    ...exactAlternatives.transport[0], id: "transport-large", travel_id: "large", per_route_rates: [15000, 0],
+    ...exactAlternatives.transport[0],
+    id: "transport-large",
+    travel_id: "large",
+    per_route_rates: [15000, 0],
   });
   const alternatives = costsheet.buildRateSheet(
-    exactAlternatives, db, exactAlternatives.hotel_options[0], exactAlternatives.transport,
+    exactAlternatives,
+    db,
+    exactAlternatives.hotel_options[0],
+    exactAlternatives.transport,
   );
   assert.equal(alternatives.length, 1, "Large vehicle is correctly excluded for exact 2 pax");
   close(alternatives[0].rows[0].transport, 5775, "Small vehicle independent transport PP");
@@ -390,23 +1136,110 @@ try {
   dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].original_net_rate = 4000;
   dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].changed_by = "Audit User";
   dynamicOverrideWithoutReason.hotel_options[0].dynamic_allocations[1][0].changed_at = now;
-  assert.ok(validation.validateQuoteForFinalization(dynamicOverrideWithoutReason, db).blockers.some((item) => item.code.startsWith("DYNAMIC_OVERRIDE_REASON_")));
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(dynamicOverrideWithoutReason, db)
+      .blockers.some((item) => item.code.startsWith("DYNAMIC_OVERRIDE_REASON_")),
+  );
   const dynamicOverrideWithReason = structuredClone(dynamicOverrideWithoutReason);
-  dynamicOverrideWithReason.hotel_options[0].dynamic_allocations[1][0].override_reason = "Supplier confirmed updated rate";
-  assert.equal(validation.validateQuoteForFinalization(dynamicOverrideWithReason, db).blockers.length, 0);
+  dynamicOverrideWithReason.hotel_options[0].dynamic_allocations[1][0].override_reason =
+    "Supplier confirmed updated rate";
+  assert.equal(
+    validation.validateQuoteForFinalization(dynamicOverrideWithReason, db).blockers.length,
+    0,
+  );
   const dynamicMismatch = structuredClone(dynamicValid);
   dynamicMismatch.hotel_options[0].dynamic_allocations[1] = [];
-  assert.ok(validation.validateQuoteForFinalization(dynamicMismatch, db).blockers.some((item) => item.code.startsWith("DYNAMIC_CAPACITY_")));
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(dynamicMismatch, db)
+      .blockers.some((item) => item.code.startsWith("DYNAMIC_CAPACITY_")),
+  );
+  const splitDynamic = baseDraft();
+  splitDynamic.adults = 10;
+  splitDynamic.dynamic_days = [1];
+  splitDynamic.accommodation_planning_mode = "split_group";
+  splitDynamic.hotel_options = [
+    {
+      ...structuredClone(splitDynamic.hotel_options[0]),
+      key: "A",
+      allocated_pax: 6,
+      dynamic_allocations: {
+        1: [
+          { id: "split-a-double", room_id: "room-1", occupancy: "double", rooms: 2 },
+          { id: "split-a-single", room_id: "room-1", occupancy: "single", rooms: 2 },
+        ],
+      },
+    },
+    {
+      ...structuredClone(splitDynamic.hotel_options[0]),
+      key: "B",
+      allocated_pax: 4,
+      dynamic_allocations: {
+        1: [{ id: "split-b-double", room_id: "room-1", occupancy: "double", rooms: 2 }],
+      },
+    },
+  ];
+  splitDynamic.meal_selections_by_option.B = structuredClone(
+    splitDynamic.meal_selections_by_option.A,
+  );
+  assert.deepEqual(calc.splitAccommodationAllocation(splitDynamic), {
+    total: 10,
+    allocated: 10,
+    remaining: 0,
+    excess: 0,
+  });
+  assert.equal(calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[0]), 6);
+  assert.equal(calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[1]), 4);
+  assert.equal(
+    calc.dynamicAccommodationBreakdown(splitDynamic, splitDynamic.hotel_options[0], db).capacity,
+    6,
+  );
+  assert.equal(
+    calc.dynamicAccommodationBreakdown(splitDynamic, splitDynamic.hotel_options[1], db).capacity,
+    4,
+  );
+  assert.equal(calc.computeMealDays(splitDynamic, db, "A").total, 3000);
+  assert.equal(calc.computeMealDays(splitDynamic, db, "B").total, 2000);
+  const splitRateSheet = costsheet.buildRateSheet(
+    splitDynamic,
+    db,
+    splitDynamic.hotel_options[0],
+    [],
+  );
+  close(splitRateSheet[0].rows[0].double, 2668.05, "Combined split accommodation PP");
+  const incompleteSplit = structuredClone(splitDynamic);
+  incompleteSplit.hotel_options[1].allocated_pax = 0;
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(incompleteSplit, db)
+      .blockers.some((item) => item.code === "ACCOMMODATION_SPLIT_INCOMPLETE"),
+  );
+  const excessiveSplit = structuredClone(splitDynamic);
+  excessiveSplit.hotel_options[1].allocated_pax = 5;
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(excessiveSplit, db)
+      .blockers.some((item) => item.code === "ACCOMMODATION_SPLIT_EXCEEDS_PAX"),
+  );
   const dynamicRange = structuredClone(dynamicValid);
   dynamicRange.pax_mode = "range";
   dynamicRange.pax_min = 2;
   dynamicRange.pax_max = 5;
   dynamicRange.pax_range = "2-5";
-  assert.ok(validation.validateQuoteForFinalization(dynamicRange, db).blockers.some((item) => item.code.startsWith("DYNAMIC_RANGE_")));
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(dynamicRange, db)
+      .blockers.some((item) => item.code.startsWith("DYNAMIC_RANGE_")),
+  );
   const overrideWithoutReason = baseDraft();
   overrideWithoutReason.hotel_options[0].rate_overrides = { 1: { dbl: 4500 } };
   overrideWithoutReason.rate_sheet_rows = { "A|transport-small": [2] };
-  assert.ok(validation.validateQuoteForFinalization(overrideWithoutReason, db).blockers.some((item) => item.code.startsWith("OVERRIDE_REASON_")));
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(overrideWithoutReason, db)
+      .blockers.some((item) => item.code.startsWith("OVERRIDE_REASON_")),
+  );
 
   // Generated records are locked. A correction creates V2 with a mandatory
   // reason, retains V1, and marks it superseded instead of overwriting it.
@@ -418,10 +1251,16 @@ try {
     removeItem: (key) => memory.delete(key),
     clear: () => memory.clear(),
     key: (index) => Array.from(memory.keys())[index] ?? null,
-    get length() { return memory.size; },
+    get length() {
+      return memory.size;
+    },
   };
   draftStore.writeDraft(miscActivityDraft);
-  assert.deepEqual(draftStore.loadDraft().misc, miscActivityDraft.misc, "Selected misc items persist in the saved draft");
+  assert.deepEqual(
+    draftStore.loadDraft().misc,
+    miscActivityDraft.misc,
+    "Selected misc items persist in the saved draft",
+  );
   const v1 = quoteBuilder.buildSavedQuote(baseDraft(), db, "Audit User");
   quoteStore.saveQuote(v1);
   assert.throws(() => quoteStore.saveQuote(v1), /immutable/i);
@@ -435,7 +1274,9 @@ try {
   assert.equal(family.find((quote) => quote.id === v1.id).status, "Superseded");
   assert.equal(quoteStore.latestQuoteForQuery("EMP-AUDIT-001").version, 2);
 
-  console.log("Quotation engine audit passed: commercial, range, meal and immutability assertions.");
+  console.log(
+    "Quotation engine audit passed: commercial, range, meal and immutability assertions.",
+  );
 } finally {
   await vite.close();
 }

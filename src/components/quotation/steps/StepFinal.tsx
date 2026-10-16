@@ -6,11 +6,13 @@ import { addDaysISO, fmtDateShort, inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import { effectivePaxForPricing, computeOptionalTotal } from "@/lib/wizard/calc";
 import { validateQuoteForFinalization } from "@/lib/wizard/validation";
+import { getQuotationScope } from "@/lib/query-for";
 import { FinalRateSheet } from "../CostingSheet";
 import type { StepProps } from "../shared";
 
 export function Step17({ draft }: StepProps) {
   const db = useDB();
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const review = useMemo(() => validateQuoteForFinalization(draft, db), [draft, db]);
   const pax = Math.max(1, effectivePaxForPricing(draft));
   const endDate = addDaysISO(draft.start_date, draft.nights);
@@ -38,12 +40,17 @@ export function Step17({ draft }: StepProps) {
         <div>
           <h2 className="text-lg font-semibold">Internal Final Review</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Audit the Query, itinerary, component totals and commercial calculations before locking a version.
+            Audit the Query, itinerary, component totals and commercial calculations before locking
+            a version.
           </p>
         </div>
         <Badge
           variant="outline"
-          className={review.canFinalize ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"}
+          className={
+            review.canFinalize
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          }
         >
           {review.canFinalize ? "Calculation checks passed" : "Action required"}
         </Badge>
@@ -60,14 +67,25 @@ export function Step17({ draft }: StepProps) {
           </div>
           <div className="mt-3 text-xl font-bold">{draft.program_name || "Programme pending"}</div>
           <div className="mt-1 text-sm text-muted-foreground">
-            {customer || "Recipient pending"} · {fmtDateShort(draft.start_date)} – {fmtDateShort(endDate)} · {draft.nights}N/{draft.nights + 1}D · {pax} pax
+            {customer || "Recipient pending"} · {fmtDateShort(draft.start_date)} –{" "}
+            {fmtDateShort(endDate)} · {draft.nights}N/{draft.nights + 1}D · {pax} pax
           </div>
         </div>
         <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-          <Fact label="Tour gateways" value={`${draft.tour_start_city || draft.departure_city || "—"} → ${draft.tour_end_city || "—"}`} />
+          <Fact
+            label="Tour gateways"
+            value={`${draft.tour_start_city || draft.departure_city || "—"} → ${draft.tour_end_city || "—"}`}
+          />
           <Fact label="Costing scenarios" value={String(review.scenarios.length)} />
-          <Fact label="Manual hotel-rate days" value={String(overrideCount)} warning={overrideCount > 0} />
-          <Fact label="Optional supplements" value={`${draft.optionals.length} · ${inr(optionalTotal)}`} />
+          <Fact
+            label="Manual hotel-rate days"
+            value={String(overrideCount)}
+            warning={overrideCount > 0}
+          />
+          <Fact
+            label="Optional supplements"
+            value={`${draft.optionals.length} · ${inr(optionalTotal)}`}
+          />
         </div>
       </Card>
 
@@ -76,23 +94,39 @@ export function Step17({ draft }: StepProps) {
           <Card key={scenario.id} className="overflow-hidden">
             <div className="border-b bg-muted/30 p-4">
               <div className="text-sm font-semibold">{scenario.option_label}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{scenario.vehicle_label} · {scenario.pax} pax</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {scenario.vehicle_label} · {scenario.pax} pax
+              </div>
             </div>
             <div className="space-y-2 p-4 text-sm">
-              <CostLine label="Hotels incl. supplier GST" value={scenario.hotel_total} />
-              <CostLine label="Transport" value={scenario.transport_total} />
-              <CostLine label="Guide" value={scenario.guide_total} />
-              <CostLine label="Entrances" value={scenario.entrances_total} />
-              <CostLine label="Activities (per person)" value={scenario.persons[0]?.activities ?? 0} />
-              <CostLine label="Miscellaneous (per person)" value={scenario.persons[0]?.misc ?? 0} />
-              <CostLine label="Meals" value={scenario.meals_total} />
+              {scope.accommodationPart && (
+                <CostLine label="Hotels incl. supplier GST" value={scenario.hotel_total} />
+              )}
+              {scope.landPart && (
+                <>
+                  <CostLine label="Transport" value={scenario.transport_total} />
+                  <CostLine label="Guide" value={scenario.guide_total} />
+                  <CostLine label="Entrances" value={scenario.entrances_total} />
+                  <CostLine
+                    label="Activities (per person)"
+                    value={scenario.persons[0]?.activities ?? 0}
+                  />
+                  <CostLine
+                    label="Miscellaneous (per person)"
+                    value={scenario.persons[0]?.misc ?? 0}
+                  />
+                </>
+              )}
+              {scope.accommodationPart && <CostLine label="Meals" value={scenario.meals_total} />}
               <CostLine label="Commercial markup" value={scenario.markup_total} strong />
               <CostLine label="Company GST" value={scenario.gst5_total} strong />
               <div className="mt-3 border-t pt-3">
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <div className="text-xs text-muted-foreground">Average per person</div>
-                    <div className="text-lg font-bold text-primary">{inr(scenario.per_person_avg)}</div>
+                    <div className="text-lg font-bold text-primary">
+                      {inr(scenario.per_person_avg)}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-xs text-muted-foreground">Package total</div>
@@ -102,7 +136,8 @@ export function Step17({ draft }: StepProps) {
               </div>
               {scenario.rate_missing > 0 && (
                 <div className="mt-2 flex items-center gap-1 text-xs text-red-700">
-                  <AlertTriangle className="h-3.5 w-3.5" /> {scenario.rate_missing} accommodation rate(s) missing
+                  <AlertTriangle className="h-3.5 w-3.5" /> {scenario.rate_missing} accommodation
+                  rate(s) missing
                 </div>
               )}
             </div>
@@ -111,7 +146,9 @@ export function Step17({ draft }: StepProps) {
       </div>
 
       {review.scenarios.length === 0 && (
-        <Card className="p-5 text-sm text-muted-foreground">No valid costing scenario is available yet.</Card>
+        <Card className="p-5 text-sm text-muted-foreground">
+          No valid costing scenario is available yet.
+        </Card>
       )}
 
       <details className="rounded-xl border bg-background">
@@ -134,7 +171,8 @@ export function Step17({ draft }: StepProps) {
             <LockKeyhole className="h-4 w-4" /> Generated versions are immutable
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Generation creates a permanent snapshot and audit checksum. Corrections must be made through a new revision with a recorded reason.
+            Generation creates a permanent snapshot and audit checksum. Corrections must be made
+            through a new revision with a recorded reason.
           </p>
         </div>
       </div>
@@ -145,7 +183,9 @@ export function Step17({ draft }: StepProps) {
 function Fact({ label, value, warning }: { label: string; value: string; warning?: boolean }) {
   return (
     <div className="bg-background p-4">
-      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </div>
       <div className={`mt-1 text-sm font-semibold ${warning ? "text-amber-700" : ""}`}>{value}</div>
     </div>
   );
@@ -154,7 +194,9 @@ function Fact({ label, value, warning }: { label: string; value: string; warning
 function CostLine({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
   if (!value && !strong) return null;
   return (
-    <div className={`flex items-center justify-between gap-3 ${strong ? "font-medium" : "text-muted-foreground"}`}>
+    <div
+      className={`flex items-center justify-between gap-3 ${strong ? "font-medium" : "text-muted-foreground"}`}
+    >
       <span>{label}</span>
       <span className="tabular-nums text-foreground">{inr(value)}</span>
     </div>

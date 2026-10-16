@@ -75,12 +75,7 @@ export function TopBar() {
             <User className="h-4 w-4 mr-2" /> My Profile
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              auth.signOut();
-              navigate({ to: "/login" });
-            }}
-          >
+          <DropdownMenuItem onClick={() => void auth.signOut()}>
             <LogOut className="h-4 w-4 mr-2" /> Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>

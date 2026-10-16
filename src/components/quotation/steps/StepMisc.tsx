@@ -51,7 +51,7 @@ export function Step14({ draft, set }: StepProps) {
     });
   const addRange = (item: MiscLine) =>
     patchItem(item.id, {
-      pax_ranges: [...(item.pax_ranges ?? []), { from_pax: 1, to_pax: 1, rate: 0, foc_pax: 0 }],
+      pax_ranges: [...(item.pax_ranges ?? []), { from_pax: 1, to_pax: 1, rate: 0 }],
     });
 
   return (
@@ -77,14 +77,13 @@ export function Step14({ draft, set }: StepProps) {
               <th className="p-2 text-left">Pax Range</th>
               <th className="p-2 text-left">Rate Basis</th>
               <th className="p-2 text-right">Rate</th>
-              <th className="p-2 text-center">FOC Pax</th>
               <th className="p-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {draft.misc.length === 0 && (
               <tr>
-                <td colSpan={7} className="p-5 text-center text-muted-foreground">
+                <td colSpan={6} className="p-5 text-center text-muted-foreground">
                   No miscellaneous items added.
                 </td>
               </tr>
@@ -156,7 +155,7 @@ export function Step14({ draft, set }: StepProps) {
                               ? item.pax_ranges
                               : item.pax_ranges?.length
                                 ? item.pax_ranges
-                                : [{ from_pax: 1, to_pax: 1, rate: 0, foc_pax: 0 }],
+                                : [{ from_pax: 1, to_pax: 1, rate: 0 }],
                         })
                       }
                     >
@@ -165,8 +164,12 @@ export function Step14({ draft, set }: StepProps) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="per_person">Per Person</SelectItem>
-                        <SelectItem value="fixed_range">Fixed Total</SelectItem>
-                        <SelectItem value="foc_range">FOC / Fixed Total</SelectItem>
+                        <SelectItem value="fixed_range">Fixed Total / Pax Range</SelectItem>
+                        {basis === "foc_range" && (
+                          <SelectItem value="foc_range" disabled>
+                            Legacy FOC / Fixed Total
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </td>
@@ -180,20 +183,6 @@ export function Step14({ draft, set }: StepProps) {
                         basis === "per_person"
                           ? patchItem(item.id, { rate: Number(e.target.value) || 0 })
                           : updateRange(item, rangeIndex, { rate: Number(e.target.value) || 0 })
-                      }
-                    />
-                  </td>
-                  <td className="p-2">
-                    <Input
-                      className="mx-auto h-8 w-20 text-center"
-                      type="number"
-                      min={0}
-                      disabled={basis !== "foc_range"}
-                      value={range?.foc_pax || ""}
-                      onChange={(e) =>
-                        updateRange(item, rangeIndex, {
-                          foc_pax: Math.max(0, Number(e.target.value) || 0),
-                        })
                       }
                     />
                   </td>

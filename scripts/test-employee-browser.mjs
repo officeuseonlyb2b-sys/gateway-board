@@ -36,6 +36,10 @@ const rows = [
 ];
 const passwords = new Map([[adminId, adminPassword]]);
 const banned = new Set();
+const refreshTokenOwners = new Map();
+let failNextProfileRead = false;
+let refreshRequestCount = 0;
+let signOutRequestCount = 0;
 let sequence = 0;
 const user = (id) => ({
   id,
@@ -51,14 +55,18 @@ const user = (id) => ({
 });
 const jwt = (id) =>
   `${Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: id, exp: Math.floor(Date.now() / 1000) + 3600, aud: "authenticated", role: "authenticated" })).toString("base64url")}.${Buffer.from("test-signature").toString("base64url")}`;
-const session = (id) => ({
-  access_token: jwt(id),
-  refresh_token: randomUUID(),
-  token_type: "bearer",
-  expires_in: 3600,
-  expires_at: Math.floor(Date.now() / 1000) + 3600,
-  user: user(id),
-});
+const session = (id) => {
+  const refreshToken = randomUUID();
+  refreshTokenOwners.set(refreshToken, id);
+  return {
+    access_token: jwt(id),
+    refresh_token: refreshToken,
+    token_type: "bearer",
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: user(id),
+  };
+};
 function caller(request) {
   try {
     return JSON.parse(
@@ -78,12 +86,24 @@ await context.route("**/*", async (route) => {
   const id = caller(request);
   const body = request.postData() ? request.postDataJSON() : {};
   if (url.pathname === "/auth/v1/token") {
+    if (
+      body.grant_type === "refresh_token" ||
+      url.searchParams.get("grant_type") === "refresh_token"
+    ) {
+      refreshRequestCount++;
+      const owner = refreshTokenOwners.get(body.refresh_token);
+      if (owner && !banned.has(owner)) return respond(session(owner));
+      return respond({ msg: "Invalid refresh token" }, 400);
+    }
     if (body.email !== "admin@mptourism.in" || body.password !== adminPassword)
       return respond({ msg: "Invalid credentials" }, 400);
     return respond(session(adminId));
   }
   if (url.pathname === "/auth/v1/user") return respond(user(id));
-  if (url.pathname === "/auth/v1/logout") return respond({});
+  if (url.pathname === "/auth/v1/logout") {
+    signOutRequestCount++;
+    return respond({});
+  }
   if (url.pathname === "/functions/v1/employee-login") {
     const row = rows.find((row) => row.data.employee_code === body.loginId.trim().toUpperCase());
     if (
@@ -140,9 +160,11 @@ await context.route("**/*", async (route) => {
     return respond({ error: "Unexpected test action" }, 400);
   }
   if (url.pathname === "/rest/v1/crm_employees") {
-    let visible = rows.filter(
-      (row) => id === adminId || (row.data.auth_user_id === id && row.data.active),
-    );
+    if (failNextProfileRead && url.searchParams.has("data->>auth_user_id")) {
+      failNextProfileRead = false;
+      return respond({ message: "Temporary profile network failure" }, 503);
+    }
+    let visible = rows.filter((row) => id === adminId || row.data.auth_user_id === id);
     const filter = url.searchParams.get("data->>auth_user_id");
     if (filter) visible = visible.filter((row) => row.data.auth_user_id === filter.slice(3));
     return respond(visible);
@@ -193,8 +215,18 @@ async function loginAsAdmin() {
   await page.waitForURL("**/admin-console");
 }
 async function logout() {
+  const previousSignOutRequests = signOutRequestCount;
+  const signOutResponse = page.waitForResponse(
+    (response) => response.url().includes("/auth/v1/logout") && response.status() === 200,
+  );
   await page.getByRole("button", { name: "Logout", exact: true }).click();
+  await signOutResponse;
   await page.waitForURL("**/login");
+  assert.equal(
+    signOutRequestCount - previousSignOutRequests,
+    1,
+    "explicit logout should call Supabase once",
+  );
   await waitForLoginReady();
 }
 try {
@@ -219,6 +251,29 @@ try {
       assert.ok(links.includes("/hotels"));
       assert.ok(links.includes("/queries/query-tracker"));
       assert.equal(new Set(links).size, links.length);
+    },
+  );
+  await check(
+    "Temporary employee-profile request failure preserves the authenticated Super Admin session",
+    async () => {
+      failNextProfileRead = true;
+      const failedProfileResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/rest/v1/crm_employees") && response.status() === 503,
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await failedProfileResponse;
+      await page.getByRole("heading", { name: "Admin Console", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/admin-console");
+
+      const recoveredProfileResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/rest/v1/crm_employees") && response.status() === 200,
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await recoveredProfileResponse;
+      await page.getByRole("heading", { name: "Admin Console", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/admin-console");
     },
   );
   await check(
@@ -336,7 +391,31 @@ try {
       assert.ok(!(await page.locator("body").innerText()).includes("@employee.mptourism.in"));
       await page.goto(`${base}/hotels`);
       await page.waitForURL("**/employee-home");
+      const refreshBefore = refreshRequestCount;
+      const expiredSessionPrepared = await page.evaluate(() => {
+        const key = Object.keys(localStorage).find((item) => item.includes("auth-token"));
+        if (!key) return false;
+        const persisted = JSON.parse(localStorage.getItem(key) || "null");
+        if (!persisted || typeof persisted !== "object") return false;
+        persisted.expires_at = Math.floor(Date.now() / 1000) - 60;
+        localStorage.setItem(key, JSON.stringify(persisted));
+        return true;
+      });
+      assert.equal(expiredSessionPrepared, true);
+      const refreshResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/auth/v1/token") &&
+          response.url().includes("grant_type=refresh_token") &&
+          response.request().method() === "POST" &&
+          response.status() === 200,
+      );
       await page.reload();
+      await refreshResponse;
+      assert.ok(
+        refreshRequestCount > refreshBefore,
+        "expired session should rotate its refresh token",
+      );
+      await page.waitForURL("**/employee-home");
       await page.getByRole("heading", { name: "Welcome, Browser fixture" }).waitFor();
       assert.equal(await page.locator('aside nav a[href="/hotels"]').count(), 0);
       await page.setViewportSize({ width: 390, height: 844 });
@@ -411,10 +490,31 @@ try {
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL("**/employee-home");
   });
+  await check("An authoritative employee disable ends the active local session", async () => {
+    const employeeRow = rows.find((row) => row.data.employee_code === "EMP-0001");
+    assert.ok(employeeRow);
+    employeeRow.data.active = false;
+    employeeRow.data.account_status = "Disabled";
+    const profileResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/rest/v1/crm_employees") &&
+        new URL(response.url()).searchParams.has("data->>auth_user_id") &&
+        response.status() === 200,
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await profileResponse;
+    await page.waitForURL("**/login");
+    await waitForLoginReady();
+    assert.equal(new URL(page.url()).pathname, "/login");
+    employeeRow.data.active = true;
+    employeeRow.data.account_status = "Active";
+    await page.waitForTimeout(250);
+    assert.equal(new URL(page.url()).pathname, "/login");
+  });
   await check(
     "Delete removes the Employee Master and Auth login, preserving Super Admin",
     async () => {
-      await logout();
+      if (new URL(page.url()).pathname !== "/login") await logout();
       await loginAsAdmin();
       await page.getByRole("link", { name: "Manage Employees", exact: true }).click();
       await page.getByRole("button", { name: "Delete Employee", exact: true }).click();
@@ -428,6 +528,63 @@ try {
       await page.getByText("Invalid Employee ID or password.", { exact: true }).first().waitFor();
     },
   );
+  await check(
+    "Sales role sessions persist and resolve to their authorized dashboards",
+    async () => {
+      const roleFixtures = [
+        {
+          employeeCode: "EMP-1001",
+          role: "Sales Manager",
+          path: "/queries/sales-control-tower",
+        },
+        {
+          employeeCode: "EMP-1002",
+          role: "Senior Sales Executive",
+          path: "/queries/my-sales-desk",
+        },
+        {
+          employeeCode: "EMP-1003",
+          role: "Sales Executive",
+          path: "/queries/my-sales-desk",
+        },
+      ].map((fixture, index) => {
+        const authId = randomUUID();
+        const password = randomUUID();
+        const rowId = randomUUID();
+        rows.push({
+          id: rowId,
+          data: {
+            id: rowId,
+            name: `${fixture.role} Fixture`,
+            email: `${fixture.employeeCode.toLowerCase()}@employee.mptourism.in`,
+            employee_code: fixture.employeeCode,
+            auth_user_id: authId,
+            role: fixture.role,
+            department: "Sales",
+            unit: index === 0 ? "Test Unit" : undefined,
+            active: true,
+            account_status: "Active",
+            employee_status: "Active",
+            joined_at: new Date().toISOString(),
+          },
+        });
+        passwords.set(authId, password);
+        return { ...fixture, password };
+      });
+
+      for (const fixture of roleFixtures) {
+        await page.getByLabel("Employee ID / Admin Email").fill(fixture.employeeCode);
+        await page.getByLabel("Password", { exact: true }).fill(fixture.password);
+        await page.getByRole("button", { name: "Sign in", exact: true }).click();
+        await page.waitForURL(`**${fixture.path}`);
+        assert.equal(new URL(page.url()).pathname, fixture.path);
+        await page.reload();
+        await page.waitForURL(`**${fixture.path}`);
+        assert.equal(new URL(page.url()).pathname, fixture.path);
+        await logout();
+      }
+    },
+  );
   assert.deepEqual(errors, []);
   if (hydrationWarnings.length)
     console.warn(
@@ -437,6 +594,7 @@ try {
     `Browser tests passed: ${count} test groups. Every Supabase request was intercepted; no live data was used or modified.`,
   );
 } catch (error) {
+  console.error("Browser test failure:", error);
   console.error(
     "Current page:",
     await page
@@ -459,25 +617,28 @@ try {
       })),
   );
   console.error("Overflowing elements:", overflow);
-  const ancestors = await page.locator("table").evaluate((table) => {
-    const result = [];
-    for (let node = table; node && result.length < 10; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      const rect = node.getBoundingClientRect();
-      result.push({
-        tag: node.tagName,
-        className: typeof node.className === "string" ? node.className : "",
-        x: rect.x,
-        width: rect.width,
-        scrollWidth: node.scrollWidth,
-        clientWidth: node.clientWidth,
-        minWidth: style.minWidth,
-        overflowX: style.overflowX,
-        display: style.display,
-      });
-    }
-    return result;
-  });
+  const table = page.locator("table");
+  const ancestors = (await table.count())
+    ? await table.evaluate((node) => {
+        const result = [];
+        for (let element = node; element && result.length < 10; element = element.parentElement) {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          result.push({
+            tag: element.tagName,
+            className: typeof element.className === "string" ? element.className : "",
+            x: rect.x,
+            width: rect.width,
+            scrollWidth: element.scrollWidth,
+            clientWidth: element.clientWidth,
+            minWidth: style.minWidth,
+            overflowX: style.overflowX,
+            display: style.display,
+          });
+        }
+        return result;
+      })
+    : [];
   console.error("Employee table ancestors:", ancestors);
   throw error;
 } finally {

@@ -12,7 +12,7 @@ import {
   type RateSheetExportRow,
 } from "@/lib/wizard/ratesheet-export";
 import { useDB } from "@/lib/mock-store";
-
+import { getQuotationScope } from "@/lib/query-for";
 import {
   landMarkup,
   landGst,
@@ -52,7 +52,15 @@ export function CostingSheet({
   set?: SetDraft;
 }) {
   const d = useDB();
-  const options = draft.hotel_options ?? [];
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  const landOnlyOption: HotelOption = {
+    key: "A",
+    label: "Land Part",
+    selections: [],
+  };
+  const options = scope.accommodationPart
+    ? draft.hotel_options ?? []
+    : [landOnlyOption];
   const [tab, setTab] = useState<string>(options[0]?.key ?? "A");
 
   const land = useMemo<LandPartSheet>(
@@ -60,7 +68,7 @@ export function CostingSheet({
     [draft, d],
   );
 
-  if (options.length === 0) {
+  if (scope.accommodationPart && options.length === 0) {
     return (
       <Card className="p-6 text-sm text-muted-foreground">
         Add at least one Accommodation Option to see the costing sheet.
@@ -84,6 +92,11 @@ export function CostingSheet({
     const map = {
       ...((sel[bucket] as Record<number, string[]>) ?? {}),
     };
+    const entranceRateSelections = {
+      ...(draft.entrance_rate_selection_by_day ?? {}),
+    };
+    const activeEntranceCategory =
+      draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
 
     const daysToUpdate =
       day === -1
@@ -107,12 +120,35 @@ export function CostingSheet({
           ? current.filter((x) => x !== id)
           : [...current, id];
       }
+
+      if (bucket === "entrances") {
+        const existingCategorySelections = entranceRateSelections[dayNum];
+        const byCategory = {
+          indian: existingCategorySelections?.indian ?? [],
+          foreign: existingCategorySelections?.foreign ?? [],
+          student: existingCategorySelections?.student ?? [],
+          ...(entranceRateSelections[dayNum] ?? {}),
+        } as Record<EntranceCat, string[]>;
+        const currentCategory = new Set(
+          existingCategorySelections?.[activeEntranceCategory] ?? checkedByDay[dayNum] ?? [],
+        );
+        if (currentCategory.has(id)) currentCategory.delete(id);
+        else currentCategory.add(id);
+        byCategory[activeEntranceCategory] = [...currentCategory];
+        entranceRateSelections[dayNum] = byCategory;
+        map[dayNum] = Array.from(
+          new Set(Object.values(byCategory).flatMap((ids) => ids ?? [])),
+        );
+      }
     });
 
     (sel as Record<string, unknown>)[bucket] = map;
 
     set({
       costing_selection: sel,
+      ...(bucket === "entrances"
+        ? { entrance_rate_selection_by_day: entranceRateSelections }
+        : {}),
     });
   };
 
@@ -168,59 +204,23 @@ export function CostingSheet({
       ...(sel.guide ?? {}),
     };
 
-    const rowsWithGuides = land.rows.filter(
-      (r) => r.guide_opts.length > 0,
+    const languageOptions = land.rows.flatMap((row) =>
+      row.guide_opts
+        .filter((option) => option.label === lang)
+        .map((option) => ({ row, id: option.id, checked: option.checked })),
     );
-
-    // 检查是否所有行的所有导游前缀都已选中了该语言
-    let allSelected = true;
-    for (const row of rowsWithGuides) {
-      const prefixes = Array.from(new Set(row.guide_opts.map((o) => o.id.split("::")[0])));
-      const current = map[row.day] ?? row.guide_opts.filter((o) => o.checked).map((o) => o.id);
-      const rowHasAll = prefixes.every((p) => current.includes(`${p}::${lang}`));
-      if (!rowHasAll) {
-        allSelected = false;
-        break;
-      }
-    }
-
-    // 如果已经全选了，则本次操作是取消全选；否则是全选
+    if (!languageOptions.length) return;
+    const allSelected = languageOptions.every(({ row, id, checked }) =>
+      (map[row.day] ?? row.guide_opts.filter((option) => option.checked).map((option) => option.id))
+        .includes(id) || checked,
+    );
     const shouldSelect = !allSelected;
-
-    rowsWithGuides.forEach((row) => {
-      const prefixes = Array.from(
-        new Set(
-          row.guide_opts.map(
-            (o) => o.id.split("::")[0],
-          ),
-        ),
-      );
-
-      if (prefixes.length === 0) return;
-
+    languageOptions.forEach(({ row, id }) => {
       const current =
-        map[row.day] ??
-        row.guide_opts
-          .filter((o) => o.checked)
-          .map((o) => o.id);
-
-      const withoutLines = current.filter(
-        (x) =>
-          !prefixes.some(
-            (p) => x.startsWith(`${p}::`),
-          ),
-      );
-
-      if (shouldSelect) {
-        map[row.day] = [
-          ...withoutLines,
-          ...prefixes.map(
-            (p) => `${p}::${lang}`,
-          ),
-        ];
-      } else {
-        map[row.day] = withoutLines;
-      }
+        map[row.day] ?? row.guide_opts.filter((option) => option.checked).map((option) => option.id);
+      map[row.day] = shouldSelect
+        ? Array.from(new Set([...current, id]))
+        : current.filter((item) => item !== id);
     });
 
     (sel as Record<string, unknown>)["guide"] = map;
@@ -275,6 +275,8 @@ export function CostingSheet({
             toggle={toggle}
             toggleCat={toggleCat}
             toggleGuideLangGlobal={toggleGuideLangGlobal}
+            scope={scope}
+            rateSheetOptionKey={scope.landPart && !scope.accommodationPart ? "__land_part__" : o.key}
           />
         </TabsContent>
       ))}
@@ -311,12 +313,16 @@ function Variation({
   toggle,
   toggleCat,
   toggleGuideLangGlobal,
+  scope,
+  rateSheetOptionKey,
 }: {
   draft: QuoteDraft;
   set?: SetDraft;
   d: ReturnType<typeof useDB>;
   opt: HotelOption;
   land: LandPartSheet;
+  scope: ReturnType<typeof getQuotationScope>;
+  rateSheetOptionKey: string;
 } & Handlers) {
   const hotels = useMemo<HotelMealSheet>(
     () =>
@@ -370,22 +376,20 @@ function Variation({
 
       <div className="overflow-x-auto print-stack-wrap">
         <div className="flex gap-4 items-start min-w-max print-stack">
-          <LandPartBlock
-            land={land}
-            pax={pax}
-            pct={landPct}
-            toggle={toggle}
-            toggleCat={toggleCat}
-            toggleGuideLangGlobal={
-              toggleGuideLangGlobal
-            }
-          />
+          {scope.landPart && (
+            <LandPartBlock
+              land={land}
+              pax={pax}
+              pct={landPct}
+              toggle={toggle}
+              toggleCat={toggleCat}
+              toggleGuideLangGlobal={toggleGuideLangGlobal}
+            />
+          )}
 
-          <HotelMealBlock
-            sheet={hotels}
-            pax={pax}
-            pct={hotelPct}
-          />
+          {scope.accommodationPart && (
+            <HotelMealBlock sheet={hotels} pax={pax} pct={hotelPct} />
+          )}
         </div>
       </div>
 
@@ -398,7 +402,7 @@ function Variation({
         db={d}
         draft={draft}
         set={set}
-        optionKey={opt.key}
+        optionKey={rateSheetOptionKey}
         optionLabel={opt.category || opt.label || `Option ${opt.key}`}
       />
     </div>
@@ -714,29 +718,8 @@ function LandPartBlock({
       return false;
     }
 
-    const prefixes =
-      Array.from(
-        new Set(
-          firstRow.guide_opts.map(
-            (o) =>
-              o.id.split("::")[0],
-          ),
-        ),
-      );
-
-    if (prefixes.length === 0) {
-      return false;
-    }
-
-    return prefixes.every(
-      (p) =>
-        firstRow.guide_opts.find(
-          (o) =>
-            o.id ===
-            `${p}::${lang}`,
-        )?.checked ??
-        false,
-    );
+    const options = firstRow.guide_opts.filter((option) => option.label === lang);
+    return options.length > 0 && options.every((option) => option.checked);
   };
 
   return (
@@ -2692,6 +2675,8 @@ function RateSheetBlock({
   title?: string;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
+  const scope = getQuotationScope(draft?.query_for, draft?.commercial_mode);
+  const totalCostColumns = scope.landPart && scope.accommodationPart ? 5 : 1;
   const selectable = !!(
 
     set &&
@@ -2702,6 +2687,12 @@ function RateSheetBlock({
   const showPick =
     selectable &&
     !selectedOnly;
+  const groupColumnCount =
+    (showPick ? 1 : 0) +
+    2 +
+    (scope.landPart ? 6 : 0) +
+    (scope.accommodationPart ? 6 : 0) +
+    totalCostColumns;
 
   const picksFor = (
     g: RateSheetGroup,
@@ -2935,36 +2926,30 @@ function RateSheetBlock({
         <table className="w-full text-xs">
           <thead className="text-[10px] uppercase text-muted-foreground">
             <tr className="bg-muted/60">
-              <th
-                className={thL}
-                colSpan={
-                  showPick
-                    ? 9
-                    : 8
-                }
-              >
-                Land Part
-              </th>
+              {scope.landPart ? (
+                <th className={thL} colSpan={(showPick ? 1 : 0) + 8}>
+                  Land Part
+                </th>
+              ) : (
+                <>
+                  {showPick && <th className={thL} rowSpan={2}>Use</th>}
+                  <th className={thL} rowSpan={2}>Pax</th>
+                  <th className={thL} rowSpan={2}>Vehicle</th>
+                </>
+              )}
 
-              <th
-                className={th}
-                colSpan={6}
-              >
-                Accommodation
-                Part
-              </th>
+              {scope.accommodationPart && (
+                <th className={th} colSpan={6}>Accommodation Part</th>
+              )}
 
-              <th
-                className={th}
-                colSpan={5}
-              >
-                Package Cost
-                (Per Person)
+              <th className={th} colSpan={totalCostColumns}>
+                {scope.queryFor === "Package" ? "Package Cost" : `${scope.queryFor} Total`}
+                <br />(Per Person)
               </th>
             </tr>
 
             <tr className="bg-muted/40">
-              {showPick && (
+              {scope.landPart && showPick && (
                 <th
                   className={thL}
                 >
@@ -2972,81 +2957,41 @@ function RateSheetBlock({
                 </th>
               )}
 
-              <th className={thL}>
-                Pax
-              </th>
+              {scope.landPart && (
+                <>
+                  <th className={thL}>Pax</th>
+                  <th className={thL}>Vehicle</th>
+                  <th className={th}>Transport</th>
+                  <th className={th}>Guide</th>
+                  <th className={th}>Escort</th>
+                  <th className={th}>Entrances</th>
+                  <th className={th}>Activities</th>
+                  <th className={th}>Misc</th>
+                </>
+              )}
 
-              <th className={thL}>
-                Vehicle
-              </th>
+              {scope.accommodationPart && (
+                <>
+                  <th className={th}>Single</th>
+                  <th className={th}>Double</th>
+                  <th className={th}>Triple</th>
+                  <th className={th}>Quad</th>
+                  <th className={th}>Lunch</th>
+                  <th className={th}>Dinner</th>
+                </>
+              )}
 
-              <th className={th}>
-                Transport
-              </th>
-
-              <th className={th}>
-                Guide
-              </th>
-
-              <th className={th}>
-                Escort
-              </th>
-
-              <th className={th}>
-                Entrances
-              </th>
-
-              <th className={th}>
-                Activities
-              </th>
-
-              <th className={th}>
-                Misc
-              </th>
-
-              <th className={th}>
-                Single
-              </th>
-
-              <th className={th}>
-                Double
-              </th>
-
-              <th className={th}>
-                Triple
-              </th>
-
-              <th className={th}>
-                Quad
-              </th>
-
-              <th className={th}>
-                Lunch
-              </th>
-
-              <th className={th}>
-                Dinner
-              </th>
-
-              <th className={th}>
-                Pax
-              </th>
-
-              <th className={th}>
-                Single Occ.
-              </th>
-
-              <th className={th}>
-                Double Sharing
-              </th>
-
-              <th className={th}>
-                Triple Sharing
-              </th>
-
-              <th className={th}>
-                Quad Sharing
-              </th>
+              {scope.landPart && scope.accommodationPart ? (
+                <>
+                  <th className={th}>Pax</th>
+                  <th className={th}>Single Occ.</th>
+                  <th className={th}>Double Sharing</th>
+                  <th className={th}>Triple Sharing</th>
+                  <th className={th}>Quad Sharing</th>
+                </>
+              ) : (
+                <th className={th}>Total</th>
+              )}
             </tr>
           </thead>
 
@@ -3060,6 +3005,8 @@ function RateSheetBlock({
                   }
                   group={g}
                   land={land}
+                  scope={scope}
+                  groupColumnCount={groupColumnCount}
                   db={db}
                   landPct={
                     landPct
@@ -3097,6 +3044,8 @@ function RateSheetBlock({
 function FragmentGroup({
   group: g,
   land,
+  scope,
+  groupColumnCount,
   db,
   landPct,
   showPick,
@@ -3106,6 +3055,8 @@ function FragmentGroup({
 }: {
   group: RateSheetGroup;
   land: LandPartSheet;
+  scope: ReturnType<typeof getQuotationScope>;
+  groupColumnCount: number;
   db: ReturnType<
     typeof useDB
   >;
@@ -3130,11 +3081,7 @@ function FragmentGroup({
       <tr className="border-t bg-primary/5">
         <td
           className="p-1.5 font-semibold"
-          colSpan={
-            showPick
-              ? 20
-              : 19
-          }
+          colSpan={groupColumnCount}
         >
           <div className="flex items-center gap-2">
             {showPick && (
@@ -3167,31 +3114,18 @@ function FragmentGroup({
          */
         const activitiesPerPerson = r.activities;
 
-        const commonLandPerPerson =
-          r.transport +
-          r.guide +
-          r.escort +
-          r.entrances +
-          activitiesPerPerson +
-          r.misc +
-          r.lunch +
-          r.dinner;
-
+        const landPerPerson = scope.landPart
+          ? r.transport + r.guide + r.escort + r.entrances + activitiesPerPerson + r.misc
+          : 0;
+        const mealsPerPerson = scope.accommodationPart ? r.lunch + r.dinner : 0;
         const packageSingle =
-          commonLandPerPerson +
-          r.single;
-
+          landPerPerson + mealsPerPerson + (scope.accommodationPart ? r.single : 0);
         const packageDouble =
-          commonLandPerPerson +
-          r.double;
-
+          landPerPerson + mealsPerPerson + (scope.accommodationPart ? r.double : 0);
         const packageTriple =
-          commonLandPerPerson +
-          r.triple;
-
+          landPerPerson + mealsPerPerson + (scope.accommodationPart ? r.triple : 0);
         const packageQuad =
-          commonLandPerPerson +
-          r.quad;
+          landPerPerson + mealsPerPerson + (scope.accommodationPart ? r.quad : 0);
 
         const rowPicked =
           picked.includes(
@@ -3223,124 +3157,48 @@ function FragmentGroup({
               </td>
             )}
 
-            <td className="p-1.5">
-              {r.pax}
-            </td>
+            {!scope.landPart && (
+              <>
+                <td className="p-1.5">{r.pax}</td>
+                <td className="p-1.5">{r.vehicle}</td>
+              </>
+            )}
 
-            <td className="p-1.5">
-              {r.vehicle}
-            </td>
+            {scope.landPart && (
+              <>
+                <td className="p-1.5">{r.pax}</td>
+                <td className="p-1.5">{r.vehicle}</td>
+                <td className={td}>{inr(r.transport)}</td>
+                <td className={td}>{inr(r.guide)}</td>
+                <td className={td}>{inr(r.escort)}</td>
+                <td className={td}>{inr(r.entrances)}</td>
+                <td className={`${td} font-semibold`}>{inr(activitiesPerPerson)}</td>
+                <td className={td}>{inr(r.misc)}</td>
+              </>
+            )}
 
-            <td className={td}>
-              {inr(
-                r.transport,
-              )}
-            </td>
+            {scope.accommodationPart && (
+              <>
+                <td className={td}>{inr(r.single)}</td>
+                <td className={td}>{inr(r.double)}</td>
+                <td className={td}>{inr(r.triple)}</td>
+                <td className={td}>{inr(r.quad)}</td>
+                <td className={td}>{inr(r.lunch)}</td>
+                <td className={td}>{inr(r.dinner)}</td>
+              </>
+            )}
 
-            <td className={td}>
-              {inr(
-                r.guide,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.escort,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.entrances,
-              )}
-            </td>
-
-            {/* ACTIVITY FINAL PER PERSON */}
-            <td
-              className={`${td} font-semibold`}
-            >
-              {inr(
-                activitiesPerPerson,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.misc,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.single,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.double,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.triple,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.quad,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.lunch,
-              )}
-            </td>
-
-            <td className={td}>
-              {inr(
-                r.dinner,
-              )}
-            </td>
-
-            <td className={td}>
-              {r.pax}
-            </td>
-
-            <td
-              className={`${td} font-semibold`}
-            >
-              {inr(
-                packageSingle,
-              )}
-            </td>
-
-            <td
-              className={`${td} font-semibold`}
-            >
-              {inr(
-                packageDouble,
-              )}
-            </td>
-
-            <td
-              className={`${td} font-semibold`}
-            >
-              {inr(
-                packageTriple,
-              )}
-            </td>
-
-            <td
-              className={`${td} font-semibold`}
-            >
-              {inr(
-                packageQuad,
-              )}
-            </td>
+            {scope.landPart && scope.accommodationPart ? (
+              <>
+                <td className={td}>{r.pax}</td>
+                <td className={`${td} font-semibold`}>{inr(packageSingle)}</td>
+                <td className={`${td} font-semibold`}>{inr(packageDouble)}</td>
+                <td className={`${td} font-semibold`}>{inr(packageTriple)}</td>
+                <td className={`${td} font-semibold`}>{inr(packageQuad)}</td>
+              </>
+            ) : (
+              <td className={`${td} font-semibold`}>{inr(packageSingle)}</td>
+            )}
           </tr>
         );
       })}

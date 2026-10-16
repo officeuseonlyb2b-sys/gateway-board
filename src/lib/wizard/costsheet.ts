@@ -24,9 +24,12 @@ import {
   hotelsGst,
   computeMealDays,
   dynamicAccommodationBreakdown,
+  isSplitAccommodation,
 } from "./calc";
 import type { QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix } from "./types";
 import { miscPerPersonForPax, transportOptionRows } from "./land-pricing";
+import { isSelectedLandServiceValid } from "./land-eligibility";
+import { getQuotationScope } from "@/lib/query-for";
 import {
   escortDayAppliesToPax,
   getEscortBaseForPax,
@@ -99,10 +102,38 @@ export function catPicked(draft: QuoteDraft, day: number, cat: EntranceCat): boo
   return list ? list.includes(cat) : true;
 }
 
-/** The three guide language checkboxes shown on every guide line. */
+export function entranceTourSelected(
+  draft: QuoteDraft,
+  day: number,
+  siteId: string,
+  legacySelected: boolean,
+): boolean {
+  const selectedTours = draft.entrance_tour_selected_by_day?.[day];
+  return selectedTours === undefined ? legacySelected : selectedTours.includes(siteId);
+}
+
+export function entranceRateSelected(
+  draft: QuoteDraft,
+  day: number,
+  lineId: string,
+  category: EntranceCat,
+  legacySelected: boolean,
+): boolean {
+  const selections = draft.entrance_rate_selection_by_day?.[day];
+  return selections === undefined ? legacySelected : (selections[category] ?? []).includes(lineId);
+}
+
+/** Supported language keys for persisted GuideLine alternatives. */
 export const GUIDE_LANGS = ["Hindi", "English", "Language"] as const;
 export type GuideLangOpt = (typeof GUIDE_LANGS)[number];
 export const guideOptId = (lineId: string, lang: string) => `${lineId}::${lang}`;
+
+function guideTourSelected(draft: QuoteDraft, guide: DB["guides"][number] | undefined, day: number) {
+  const selectedTours = draft.guide_tour_selected_by_day?.[day];
+  if (selectedTours === undefined || !guide) return true;
+  const key = `${guide.city ?? guide.destination ?? ""}||${guide.tour_program ?? guide.name}`;
+  return selectedTours.includes(key);
+}
 
 /** Language checkbox state — defaults to the line's own language only. */
 function guideLangPicked(
@@ -148,6 +179,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
     opts[day] = { transport: [], guide: [], entrances: [], activities: [], misc: [] };
   });
   const configuredEscortIds = new Set<string>();
+  const hasConfiguredEscort = isEscortEnabled(draft) && Boolean(getEscortPricingMode(draft));
 
   // ------- Transport (one checkbox per vehicle option, per day)
   const lines = line ? [line] : draft.transport;
@@ -179,10 +211,12 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   const paxForGuide = Math.max(1, effectivePaxForPricing(draft));
   const selectedGuideLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((l) => {
+    if (l.inclusion_status === "optional") return;
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     const g = d.guides?.find((x) => x.id === l.guide_id);
     if (l.is_escort) {
+      if (hasConfiguredEscort) return;
       const each = (l.rate * l.guides * l.days) / target.length;
       target.forEach((day) =>
         opts[day].guide.push({
@@ -195,24 +229,23 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
       );
       return;
     }
-    // Every guide line exposes the three language checkboxes (Hindi / English /
-    // Language). Default: only the language chosen on the Guide step is on.
-    const defaultLang = (GUIDE_LANGS as readonly string[]).includes(l.language || "")
-      ? (l.language as string)
-      : "English";
+    // A Guide step line represents exactly one included language alternative.
+    // Unknown legacy languages are not expanded into a guessed English option.
+    if (!(GUIDE_LANGS as readonly string[]).includes(l.language || "")) return;
+    const defaultLang = l.language as GuideLangOpt;
     target.forEach((day) => {
-      GUIDE_LANGS.forEach((lang) => {
-        if (!guideLangPicked(draft, day, l.id, lang, defaultLang)) return;
-        selectedGuideLanguages.add(lang);
-        const rate = g ? guideRateForPax(g, paxForGuide, lang as GuideLanguage) : l.rate;
-        const amount = ((rate || l.rate) * l.guides * l.days) / target.length;
-        opts[day].guide.push({
-          id: guideOptId(l.id, lang),
-          label: lang,
-          sub: g?.tour_program || g?.name || undefined,
-          amount,
-          checked: guideLangPicked(draft, day, l.id, lang, defaultLang),
-        });
+      if (!guideTourSelected(draft, g, day)) return;
+      const checked = guideLangPicked(draft, day, l.id, defaultLang, defaultLang);
+      const rate = g ? guideRateForPax(g, paxForGuide, defaultLang) : l.rate;
+      if (rate <= 0) return;
+      if (checked) selectedGuideLanguages.add(defaultLang);
+      const amount = (rate * l.guides * l.days) / target.length;
+      opts[day].guide.push({
+        id: guideOptId(l.id, defaultLang),
+        label: defaultLang,
+        sub: g?.tour_program || g?.name || undefined,
+        amount,
+        checked,
       });
     });
   });
@@ -251,6 +284,19 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
           });
         });
       }
+    } else if (mode === "per_person") {
+      const perDay = getEscortBaseForPax(draft, paxForGuide) / all.length;
+      all.forEach((day) => {
+        const id = `configured-escort-person-${day}`;
+        configuredEscortIds.add(id);
+        opts[day].guide.push({
+          id,
+          label: "Tour Escort",
+          sub: draft.escort_type || undefined,
+          amount: perDay,
+          checked: true,
+        });
+      });
     } else if (mode === "day_wise" && escortDayAppliesToPax(draft, paxForGuide)) {
       const includedDays = all.filter((day) => getEscortDayCharge(draft, day) > 0);
       const reportingShare = includedDays.length
@@ -271,21 +317,34 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   }
 
   const paxForLand = Math.max(1, effectivePaxForPricing(draft));
-  const activeEntranceCategory = draft.traveler_type ?? "indian";
+  const activeEntranceCategory =
+    draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
 
   // ------- Entrances (only the quotation's active traveller category)
   draft.entrances.forEach((l) => {
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     target.forEach((day) => {
+      if (!isSelectedLandServiceValid("entrance", l.site_id, day, draft, d)) return;
+      if (!entranceTourSelected(draft, day, l.site_id || l.id, true)) return;
       const rates: Record<EntranceCat, number> = {
         indian: l.indian_rate,
         foreign: l.foreign_rate,
         student: l.student_rate ?? 0,
       };
-      const rate = catPicked(draft, day, activeEntranceCategory)
-        ? rates[activeEntranceCategory]
-        : 0;
+      const rate = rates[activeEntranceCategory];
+      if (rate <= 0) return;
+      const legacySelected = isPicked(draft, "entrances", day, l.id);
+      const checked =
+        entranceTourSelected(draft, day, l.site_id || l.id, true) &&
+        entranceRateSelected(
+          draft,
+          day,
+          l.id,
+          activeEntranceCategory,
+          legacySelected,
+        ) &&
+        catPicked(draft, day, activeEntranceCategory);
       opts[day].entrances.push({
         id: l.id,
         label:
@@ -294,7 +353,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
           "Entrance",
         amount: (rate * paxForLand) / target.length,
         per_person_amount: rate / target.length,
-        checked: isPicked(draft, "entrances", day, l.id),
+        checked,
       });
     });
   });
@@ -312,18 +371,20 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
       : undefined;
     const total = resolved?.total ?? l.rate * l.qty;
     const each = total / target.length;
-    target.forEach((day) =>
-      opts[day].activities.push({
-        id: l.id,
-        label: l.custom_name || master?.activity_name || "Activity",
-        amount: each,
-        per_person_amount: resolved
-          ? resolved.per_person / target.length
-          : l.pricing_mode === "per_person"
-            ? l.rate / target.length
-            : (l.rate * l.qty) / paxForLand / target.length,
-        checked: isPicked(draft, "activities", day, l.id),
-      }),
+    target.forEach(
+      (day) =>
+        isSelectedLandServiceValid("activity", l.activity_id, day, draft, d) &&
+        opts[day].activities.push({
+          id: l.id,
+          label: l.custom_name || master?.activity_name || "Activity",
+          amount: each,
+          per_person_amount: resolved
+            ? resolved.per_person / target.length
+            : l.pricing_mode === "per_person"
+              ? l.rate / target.length
+              : (l.rate * l.qty) / paxForLand / target.length,
+          checked: isPicked(draft, "activities", day, l.id),
+        }),
     );
   });
 
@@ -664,7 +725,11 @@ function selectedActivityPerPersonForPax(draft: QuoteDraft, d: DB, pax: number):
     if (line.inclusion_status === "optional") return sum;
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return sum;
-    const selectedDays = days.filter((day) => isPicked(draft, "activities", day, line.id)).length;
+    const selectedDays = days.filter(
+      (day) =>
+        isSelectedLandServiceValid("activity", line.activity_id, day, draft, d) &&
+        isPicked(draft, "activities", day, line.id),
+    ).length;
     if (!selectedDays) return sum;
     const master = line.activity_id
       ? d.activities.find((activity) => activity.id === line.activity_id)
@@ -709,24 +774,30 @@ function selectedGuideTotalForPax(
   let escort = 0;
   const selectedReportingLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((line) => {
+    if (line.inclusion_status === "optional") return;
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return;
     const master = d.guides?.find((item) => item.id === line.guide_id);
+    const validDays = days.filter(
+      (day) =>
+        isSelectedLandServiceValid("guide", line.guide_id, day, draft, d) &&
+        (line.is_escort || guideTourSelected(draft, master, day)),
+    );
+    if (!line.is_escort && !validDays.length) return;
     if (line.is_escort) {
+      if (isEscortEnabled(draft) && getEscortPricingMode(draft)) return;
       const selected = days.filter((day) => isPicked(draft, "guide", day, line.id)).length;
       escort += line.rate * line.guides * line.days * (selected / days.length);
       return;
     }
-    const defaultLanguage = (GUIDE_LANGS as readonly string[]).includes(line.language || "")
-      ? line.language || "English"
-      : "English";
-    days.forEach((day) => {
-      GUIDE_LANGS.forEach((language) => {
-        if (!guideLangPicked(draft, day, line.id, language, defaultLanguage)) return;
-        selectedReportingLanguages.add(language);
-        const rate = master ? guideRateForPax(master, pax, language as GuideLanguage) : line.rate;
-        guide += (rate * line.guides * line.days) / days.length;
-      });
+    if (!(GUIDE_LANGS as readonly string[]).includes(line.language || "")) return;
+    const language = line.language as GuideLangOpt;
+    validDays.forEach((day) => {
+      if (!guideLangPicked(draft, day, line.id, language, language)) return;
+      const rate = master ? guideRateForPax(master, pax, language as GuideLanguage) : line.rate;
+      if (rate <= 0) return;
+      selectedReportingLanguages.add(language);
+      guide += (rate * line.guides * line.days) / days.length;
     });
   });
   selectedReportingLanguages.forEach((language) => {
@@ -736,9 +807,9 @@ function selectedGuideTotalForPax(
   return { guide, escort };
 }
 
-function selectedEntranceTotalForPax(draft: QuoteDraft, pax: number): number {
+function selectedEntranceTotalForPax(draft: QuoteDraft, d: DB, pax: number): number {
   const routingDays = draft.routing.map((day) => day.day);
-  const activeCategory = draft.traveler_type ?? "indian";
+  const activeCategory = draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
   return draft.entrances.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return sum;
@@ -747,8 +818,21 @@ function selectedEntranceTotalForPax(draft: QuoteDraft, pax: number): number {
       foreign: line.foreign_rate,
       student: line.student_rate ?? 0,
     };
+    if (rates[activeCategory] <= 0) return sum;
     const selectedDays = days.reduce((daySum, day) => {
-      if (!isPicked(draft, "entrances", day, line.id) || !catPicked(draft, day, activeCategory))
+      if (!isSelectedLandServiceValid("entrance", line.site_id, day, draft, d)) return daySum;
+      if (
+        !isPicked(draft, "entrances", day, line.id) ||
+        !entranceTourSelected(draft, day, line.site_id || line.id, true) ||
+        !entranceRateSelected(
+          draft,
+          day,
+          line.id,
+          activeCategory,
+          isPicked(draft, "entrances", day, line.id),
+        ) ||
+        !catPicked(draft, day, activeCategory)
+      )
         return daySum;
       return daySum + (pax * rates[activeCategory]) / days.length;
     }, 0);
@@ -765,10 +849,10 @@ export function buildRateSheet(
   const paxList = paxScale(draft);
   const costingPaxSet = new Set(paxList);
   const transportOptions = transportOptionRows(draft).filter((row) => costingPaxSet.has(row.pax));
-  const mode = draft.commercial_mode || "package";
-  const includeLand = mode === "package";
-  const includeTransport = mode === "package" || mode === "transport_only";
-  const includeAccommodation = mode !== "transport_only";
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  const includeLand = scope.landPart;
+  const includeTransport = scope.landPart;
+  const includeAccommodation = scope.accommodationPart;
 
   const hotels = buildHotelMealSheet(draft, d, opt);
   const mk = {
@@ -782,6 +866,10 @@ export function buildRateSheet(
   // Dynamic nights are priced from their allocated room mix and split across
   // the actual pax count instead of a flat per-category share.
   const actualPax = Math.max(1, effectivePaxForPricing(draft));
+  const splitAccommodation = isSplitAccommodation(draft);
+  const splitOptions = splitAccommodation
+    ? draft.hotel_options.filter((option) => (option.allocated_pax ?? 0) > 0)
+    : [];
   const dynamicDaySet = new Set(draft.dynamic_days ?? []);
   const isDynamicDay = (day: number) =>
     draft.allocation_mode === "dynamic" || dynamicDaySet.has(day);
@@ -795,21 +883,42 @@ export function buildRateSheet(
     return gross(net, mk.h, mk.hg);
   };
 
-  const dynamicMode = includeAccommodation && draft.routing.some((day) => day.overnight && isDynamicDay(day.day));
-  const dynamicBase = dynamicMode ? dynamicAccommodationBreakdown(draft, opt, d).total : 0;
+  const dynamicMode =
+    includeAccommodation && draft.routing.some((day) => day.overnight && isDynamicDay(day.day));
+  const dynamicBase = dynamicMode
+    ? splitAccommodation
+      ? splitOptions.reduce(
+          (sum, option) => sum + dynamicAccommodationBreakdown(draft, option, d).total,
+          0,
+        )
+      : dynamicAccommodationBreakdown(draft, opt, d).total
+    : 0;
   const dynamicPerPerson = dynamicMode ? gross(dynamicBase / actualPax, mk.h, mk.hg) : 0;
   const single = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.sgl, 1) : 0;
   const dbl = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.dbl, 2) : 0;
   const trp = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.trp, 3) : 0;
   const quad = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.quad, 4) : 0;
-  const lunch = includeAccommodation ? gross(hotels.lunch_total, mk.h, mk.hg) : 0;
-  const dinner = includeAccommodation ? gross(hotels.dinner_total, mk.h, mk.hg) : 0;
+  const splitMealPerPerson = (mealType: "Lunch" | "Dinner") =>
+    splitOptions.reduce(
+      (sum, option) =>
+        sum +
+        computeMealDays(draft, d, option.key).rows
+          .filter((row) => row.meal_type === mealType)
+          .reduce((mealSum, row) => mealSum + row.total, 0),
+      0,
+    ) / actualPax;
+  const lunch = includeAccommodation
+    ? gross(splitAccommodation ? splitMealPerPerson("Lunch") : hotels.lunch_total, mk.h, mk.hg)
+    : 0;
+  const dinner = includeAccommodation
+    ? gross(splitAccommodation ? splitMealPerPerson("Dinner") : hotels.dinner_total, mk.h, mk.hg)
+    : 0;
 
   const groups = (
-    mode === "accommodation_only" ? [undefined] : lines.length ? lines : [undefined]
+    !scope.landPart ? [undefined] : lines.length ? lines : [undefined]
   ) as (TransportLine | undefined)[];
 
-  if ((draft.transport_options ?? []).length && mode !== "accommodation_only") {
+  if ((draft.transport_options ?? []).length && scope.landPart) {
     if (!transportOptions.length) return [];
     const byOption = new Map<string, typeof transportOptions>();
     transportOptions.forEach((row) =>
@@ -860,7 +969,7 @@ export function buildRateSheet(
       const land = buildLandPart(draft, d, line);
       const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
       const vehicle =
-        mode === "accommodation_only"
+        !scope.landPart
           ? "Accommodation only"
           : line
             ? veh?.vehicle_type || "Vehicle"
@@ -885,9 +994,13 @@ export function buildRateSheet(
           ? selectedGuideTotalForPax(draft, d, pax)
           : { guide: 0, escort: 0 };
         const guide = includeLand ? gross(guideAtPax.guide / pax, mk.land, 0.05) : 0;
-        const escort = includeLand ? gross(guideAtPax.escort / pax, mk.land, 0.05) : 0;
+        const escortBasePerPerson =
+          isEscortEnabled(draft) && getEscortPricingMode(draft) === "per_person"
+            ? (draft.escort_per_person_rate ?? 0) + (draft.guide_escort_reporting ?? 0) / pax
+            : guideAtPax.escort / pax;
+        const escort = includeLand ? gross(escortBasePerPerson, mk.land, 0.05) : 0;
         const entrances = includeLand
-          ? gross(selectedEntranceTotalForPax(draft, pax) / pax, mk.land, 0.05)
+          ? gross(selectedEntranceTotalForPax(draft, d, pax) / pax, mk.land, 0.05)
           : 0;
         const activities = includeLand
           ? gross(selectedActivityPerPersonForPax(draft, d, pax), mk.land, mk.lg)

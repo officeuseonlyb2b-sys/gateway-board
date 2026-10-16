@@ -91,6 +91,7 @@ export interface RoutingDay {
   tour_title?: string; // selected destination tour title for the row
   tour_titles_by_city?: Record<string, string>; // legacy single tour per city
   tours_selected_by_city?: Record<string, string[]>; // NEW multi-select: routing city id → array of tour titles
+  tour_ids_by_city?: Record<string, string[]>; // stable destination-tour IDs persisted alongside display titles
   from_city?: string; // free-text / city id, day 1 auto from departure_city
   to_city?: string; // mirror of to_city_id/city_id (kept in sync); "Departure" on last day
   travel_by?:
@@ -169,6 +170,7 @@ export interface GuideLine {
   guides: number;
   rate: number;
   is_escort?: boolean; // true when this line is a Tour Escort add-on
+  inclusion_status?: "included" | "optional";
   pax_ranges?: PaxRangePrice[]; // Brochure only
   from_routing_days?: number[]; // day numbers this guide is assigned to
   language?: string; // selected language for this guide line
@@ -262,6 +264,8 @@ export interface HotelOption {
   rate_overrides?: Record<number, DayRateOverride>;
   /** Dynamic-mode room combinations, isolated by option and routing day. */
   dynamic_allocations?: Record<number, DynamicRoomAllocation[]>;
+  /** Accommodation-only subgroup size when Dynamic split planning is enabled. */
+  allocated_pax?: number;
 }
 
 /** Pax categories priced on a monument entrance line. */
@@ -319,6 +323,12 @@ export interface QuoteDraft {
 
   /** Traveler category driving Activities / Entrance-fee pricing. */
   traveler_type?: import("@/lib/mock-store").TravelerType;
+  /** Entrance-only costing category; legacy drafts fall back to traveler_type. */
+  entrance_traveller_category?: EntranceCat;
+  /** Explicit parent Tour/Entrance selections by routing day. */
+  entrance_tour_selected_by_day?: Record<number, string[]>;
+  /** Included Entrance price selections, keyed by routing day and traveller category. */
+  entrance_rate_selection_by_day?: Record<number, Partial<Record<EntranceCat, string[]>>>;
 
   categories: string[]; // legacy — no UI, retained for saved-quote fidelity
   /** Guest's home/origin city. Never used as the programme's first city. */
@@ -365,6 +375,8 @@ export interface QuoteDraft {
   group_room_mix?: GroupRoomMix;
   // Room allocation step (before hotel selection)
   allocation_mode?: AllocationMode;
+  /** Dynamic accommodation options are alternatives by default; split mode combines them. */
+  accommodation_planning_mode?: "whole_group" | "split_group";
   // Dynamic mode: per itinerary day number → room mix chosen manually
   day_room_mix?: Record<number, DayRoomMix>;
   /** Costing sheet — per routing day, which land-part components are included. */
@@ -393,13 +405,18 @@ export interface QuoteDraft {
     { indian?: number; foreigner?: number; student?: number }
   >;
   guide_tour_disabled_by_day?: Record<number, string[]>;
+  /** Explicit per-day parent Tour selections; absent days are normalized from legacy included Guide lines. */
+  guide_tour_selected_by_day?: Record<number, string[]>;
   guide_day_escort?: Record<number, number>;
   guide_day_escort_enabled?: Record<number, boolean>;
+  /** Routing day → Escort slab ID → base rate. Blank/zero means no Escort that day. */
+  escort_day_rates_by_slab?: Record<number, Record<string, number>>;
   guide_remarks?: string;
   guide_escort_reporting?: number;
   escort_enabled?: boolean;
-  escort_pricing_mode?: "pax_range" | "day_wise";
+  escort_pricing_mode?: "per_person" | "pax_range" | "day_wise";
   escort_type?: string;
+  escort_per_person_rate?: number;
   escort_day_min_pax?: number;
   escort_day_max_pax?: number;
   escort_ranges?: {
@@ -407,6 +424,7 @@ export interface QuoteDraft {
     min_pax: number;
     max_pax: number;
     escort_type: string;
+    /** Legacy flat slab charge retained as a fallback until day-wise rates are entered. */
     charge: number;
   }[];
   // Optional pax range/slab override — when set, downstream rate lookups

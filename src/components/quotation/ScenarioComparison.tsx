@@ -14,11 +14,13 @@ import { transportLineTotal } from "@/lib/wizard/calc";
 import type { QuoteDraft, CostScenario, OptionKey } from "@/lib/wizard/types";
 import { uid } from "./shared";
 import { ScenarioRateSheet } from "./CostingSheet";
+import { getQuotationScope } from "@/lib/query-for";
 
 export function ScenarioComparison({
   draft, set,
 }: { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void }) {
   const d = useDB();
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const scenarios = draft.scenarios ?? [];
 
   const vehicleLabel = (lineId?: string) => {
@@ -40,7 +42,7 @@ export function ScenarioComparison({
 
   const addScenario = () => {
     const optKey = (draft.hotel_options[0]?.key || "A") as OptionKey;
-    const line = draft.transport[0];
+    const line = scope.landPart ? draft.transport[0] : undefined;
     set({
       scenarios: [...scenarios, {
         id: uid(),
@@ -57,7 +59,9 @@ export function ScenarioComparison({
         <div>
           <div className="section-label">Scenario Comparison (per person)</div>
           <div className="text-xs text-muted-foreground">
-            Pick a Hotel Category + Vehicle combination — every other cost line is pulled in automatically.
+            {scope.landPart
+              ? "Pick a Hotel Category + Vehicle combination — every other cost line is pulled in automatically."
+              : "Compare accommodation options and applicable meals only."}
           </div>
         </div>
         <Button size="sm" onClick={addScenario} disabled={draft.hotel_options.length === 0}>
@@ -78,10 +82,15 @@ export function ScenarioComparison({
             <Card key={s.id} className="p-3 space-y-3 border-primary/30">
               <div className="flex items-start justify-between gap-2">
                 <div className="text-sm font-semibold text-primary">
-                  {s.label}
+                  {scope.landPart
+                    ? s.label
+                    : draft.hotel_options.find((option) => option.key === s.option_key)?.category ||
+                      `Option ${s.option_key}`}
                   {res && (
                     <span className="block text-xs font-normal text-muted-foreground">
-                      {res.option_label} + {res.vehicle_label} · {res.pax} pax
+                      {scope.landPart
+                        ? `${res.option_label} + ${res.vehicle_label} · ${res.pax} pax`
+                        : `${res.option_label} · ${res.pax} pax`}
                     </span>
                   )}
                 </div>
@@ -91,7 +100,7 @@ export function ScenarioComparison({
                 </Button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className={`grid gap-2 ${scope.landPart ? "grid-cols-2" : "grid-cols-1"}`}>
                 <div>
                   <Label className="text-[10px]">Hotel Category</Label>
                   <Select value={s.option_key} onValueChange={(v) => patch(s.id, { option_key: v as OptionKey })}>
@@ -105,21 +114,23 @@ export function ScenarioComparison({
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label className="text-[10px]">Vehicle</Label>
-                  <Select value={s.transport_line_id ?? "__none"}
-                    onValueChange={(v) => patch(s.id, { transport_line_id: v === "__none" ? undefined : v })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {draft.transport.length === 0 && <SelectItem value="__none">No transport</SelectItem>}
-                      {draft.transport.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {vehicleLabel(t.id)} · {inr(transportLineTotal(t))}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {scope.landPart && (
+                  <div>
+                    <Label className="text-[10px]">Vehicle</Label>
+                    <Select value={s.transport_line_id ?? "__none"}
+                      onValueChange={(v) => patch(s.id, { transport_line_id: v === "__none" ? undefined : v })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {draft.transport.length === 0 && <SelectItem value="__none">No transport</SelectItem>}
+                        {draft.transport.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {vehicleLabel(t.id)} · {inr(transportLineTotal(t))}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
 
               {!res ? (
@@ -153,7 +164,9 @@ export function ScenarioComparison({
               <tr>
                 <th className="text-left p-2">Scenario</th>
                 {results.map((r) => (
-                  <th key={r.id} className="text-right p-2">{r.option_label} + {r.vehicle_label}</th>
+                  <th key={r.id} className="text-right p-2">
+                    {scope.landPart ? `${r.option_label} + ${r.vehicle_label}` : r.option_label}
+                  </th>
                 ))}
               </tr>
             </thead>

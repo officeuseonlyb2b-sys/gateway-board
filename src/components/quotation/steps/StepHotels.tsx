@@ -40,6 +40,10 @@ import {
   hotelsMarkup,
   hotelsGst,
   totalPax,
+  dynamicAccommodationBreakdown,
+  effectiveAccommodationPax,
+  isSplitAccommodation,
+  splitAccommodationAllocation,
 } from "@/lib/wizard/calc";
 import type {
   QuoteDraft,
@@ -83,6 +87,8 @@ export function Step15({ draft, set }: StepProps) {
 
   // Global Mode Toggle (Standard vs Dynamic)
   const isDynamicGlobal = canUseDynamic && (draft.dynamic_days ?? []).length > 0;
+  const isSplitGroup = isDynamicGlobal && isSplitAccommodation(draft);
+  const splitAllocation = splitAccommodationAllocation(draft);
   const setGlobalMode = (isDynamic: boolean) => {
     if (isDynamic) {
       if (!canUseDynamic) return;
@@ -113,7 +119,15 @@ export function Step15({ draft, set }: StepProps) {
     set({
       hotel_options: [
         ...draft.hotel_options,
-        { key: next, label: "", category: "", selections: [], inclusions: [], exclusions: [] },
+        {
+          key: next,
+          label: "",
+          category: "",
+          selections: [],
+          inclusions: [],
+          exclusions: [],
+          allocated_pax: isSplitGroup ? 0 : undefined,
+        },
       ],
     });
     setActiveOpt(next);
@@ -181,6 +195,7 @@ export function Step15({ draft, set }: StepProps) {
             )}
           >
             Option {o.key} · {o.category || "Select Category"}
+            {isSplitGroup && ` · ${o.allocated_pax || 0} Pax`}
           </button>
         ))}
         {draft.hotel_options.length < 4 && (
@@ -265,7 +280,9 @@ export function Step15({ draft, set }: StepProps) {
               canUseDynamic={canUseDynamic}
               exactTravellingPax={exactTravellingPax}
               setGlobalMode={setGlobalMode}
-              paxForMix={paxForMix}
+              paxForMix={effectiveAccommodationPax(draft, activeOption)}
+              isSplitGroup={isSplitGroup}
+              splitAllocation={splitAllocation}
             />
           )}
 
@@ -290,6 +307,14 @@ export function Step15({ draft, set }: StepProps) {
             />
           )}
         </div>
+      )}
+
+      {isSplitGroup && (
+        <AccommodationSplitSummary
+          draft={draft}
+          quotationPax={exactTravellingPax}
+          allocation={splitAllocation}
+        />
       )}
 
       {quickAdd && (
@@ -324,6 +349,73 @@ export function Step15({ draft, set }: StepProps) {
   );
 }
 
+function AccommodationSplitSummary({
+  draft,
+  quotationPax,
+  allocation,
+}: {
+  draft: QuoteDraft;
+  quotationPax: number;
+  allocation: ReturnType<typeof splitAccommodationAllocation>;
+}) {
+  const db = useDB();
+  const options = draft.hotel_options
+    .filter((option) => (option.allocated_pax ?? 0) > 0)
+    .map((option) => {
+      const base = dynamicAccommodationBreakdown(draft, option, db).total;
+      const markup = base * hotelsMarkup(draft);
+      const gst = (base + markup) * hotelsGst(draft);
+      const final = base + markup + gst;
+      return { option, final };
+    });
+  const combined = options.reduce((sum, item) => sum + item.final, 0);
+  return (
+    <Card className="overflow-hidden border-primary/20">
+      <div className="border-b bg-primary/5 px-4 py-3">
+        <h3 className="text-sm font-semibold">Accommodation Split Summary</h3>
+        <p className="text-xs text-muted-foreground">Quotation Travellers: {quotationPax}</p>
+      </div>
+      <div className="divide-y">
+        {options.map(({ option, final }) => (
+          <div
+            key={option.key}
+            className="grid gap-2 p-3 text-xs sm:grid-cols-[1fr_100px_150px_150px]"
+          >
+            <span className="font-medium">
+              Option {option.key} · {option.category || option.label || "Category pending"}
+            </span>
+            <span>{option.allocated_pax} Pax</span>
+            <span className="text-right">Final Total: {inr(final)}</span>
+            <span className="text-right">
+              PP within group: {inr(final / Math.max(1, option.allocated_pax ?? 0))}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-2 border-t bg-muted/20 p-4 text-sm sm:grid-cols-3">
+        <div>
+          <div className="text-xs text-muted-foreground">Allocated</div>
+          <div className="font-semibold">
+            {allocation.allocated} / {allocation.total} Pax
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Combined Accommodation Total</div>
+          <div className="font-semibold">{inr(combined)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">
+            Combined Accommodation Cost Per Quotation Pax
+          </div>
+          <div className="font-semibold text-primary">
+            {inr(combined / Math.max(1, quotationPax))} PP
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ============================================================
 // Accommodation Selection Table (Standard + Dynamic Combined)
 // ============================================================
@@ -340,6 +432,8 @@ function AccommodationSelectionTable({
   exactTravellingPax,
   setGlobalMode,
   paxForMix,
+  isSplitGroup,
+  splitAllocation,
 }: {
   draft: QuoteDraft;
   set: (p: Partial<QuoteDraft>) => void;
@@ -353,6 +447,8 @@ function AccommodationSelectionTable({
   exactTravellingPax: number;
   setGlobalMode: (isDynamic: boolean) => void;
   paxForMix: number;
+  isSplitGroup: boolean;
+  splitAllocation: ReturnType<typeof splitAccommodationAllocation>;
 }) {
   const d = useDB();
   const user = useAuth();
@@ -687,6 +783,69 @@ function AccommodationSelectionTable({
           </span>
         </div>
 
+        {isDynamicGlobal && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Accommodation Planning:
+            </span>
+            <div className="flex overflow-hidden rounded-md border bg-background">
+              <button
+                type="button"
+                onClick={() => set({ accommodation_planning_mode: "whole_group" })}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium",
+                  !isSplitGroup ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+                )}
+              >
+                Whole Group / Alternatives
+              </button>
+              <button
+                type="button"
+                disabled={!canUseDynamic}
+                onClick={() => {
+                  const hasAllocation = draft.hotel_options.some(
+                    (item) => (item.allocated_pax ?? 0) > 0,
+                  );
+                  set({
+                    accommodation_planning_mode: "split_group",
+                    hotel_options: draft.hotel_options.map((item, index) => ({
+                      ...item,
+                      allocated_pax: hasAllocation
+                        ? (item.allocated_pax ?? 0)
+                        : index === 0
+                          ? exactTravellingPax
+                          : 0,
+                    })),
+                  });
+                }}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium",
+                  isSplitGroup ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+                )}
+              >
+                Split Group Across Options
+              </button>
+            </div>
+            {isSplitGroup && (
+              <label className="flex items-center gap-2 text-xs font-medium">
+                Pax for Option {option.key}
+                <Input
+                  type="number"
+                  min={0}
+                  max={exactTravellingPax}
+                  value={option.allocated_pax ?? 0}
+                  onChange={(event) =>
+                    onUpdate({
+                      allocated_pax: Math.max(0, Math.trunc(Number(event.target.value) || 0)),
+                    })
+                  }
+                  className="h-8 w-20 text-right"
+                />
+              </label>
+            )}
+          </div>
+        )}
+
         {/* Quad column is a Dynamic-mode concern only — Standard mode stays
             flat Single / Double / Triple with no room-mix logic. */}
         <div className={cn("flex items-center gap-2 ml-auto", !isDynamicGlobal && "hidden")}>
@@ -700,6 +859,27 @@ function AccommodationSelectionTable({
           </Label>
         </div>
       </div>
+      {isSplitGroup && (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-xs",
+            splitAllocation.excess > 0
+              ? "border-red-200 bg-red-50 text-red-800"
+              : splitAllocation.remaining > 0
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-emerald-200 bg-emerald-50 text-emerald-800",
+          )}
+        >
+          <div className="font-medium">
+            Quotation Travellers: {exactTravellingPax} · This Hotel Option: {paxForMix} Pax
+          </div>
+          {splitAllocation.excess > 0
+            ? `Accommodation allocation exceeds quotation travellers by ${splitAllocation.excess} pax.`
+            : splitAllocation.remaining > 0
+              ? `${splitAllocation.remaining} travellers remain to be allocated to another accommodation option. Allocated: ${splitAllocation.allocated} / ${splitAllocation.total}.`
+              : `Accommodation split complete: ${splitAllocation.allocated} of ${splitAllocation.total} travellers allocated across hotel options.`}
+        </div>
+      )}
       {!canUseDynamic && draft.pax_mode === "range" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Dynamic Mode requires exact travelling pax.

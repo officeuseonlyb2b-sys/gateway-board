@@ -1,8 +1,8 @@
-import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Mail, Lock, Loader2, Hotel } from "lucide-react";
 import { toast } from "sonner";
-import { auth, useAuth, hasSupabaseConfig } from "@/lib/auth-mock";
+import { auth, useAuthLifecycle, hasSupabaseConfig } from "@/lib/auth-mock";
 import { dashboardPathForUser } from "@/lib/crm/access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,12 +21,15 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const user = useAuth();
-  const router = useRouterState();
+  const authState = useAuthLifecycle();
+  const user = authState.user;
 
   useEffect(() => {
-    if (user) navigate({ to: dashboardPathForUser(user) });
-  }, [user, navigate, router.location.pathname]);
+    if (user && authState.profileStatus === "ready") {
+      auth.logRedirect("login route; authenticated profile ready");
+      navigate({ to: dashboardPathForUser(user) });
+    }
+  }, [authState.profileStatus, user, navigate]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -43,7 +46,51 @@ function LoginPage() {
       return;
     }
     toast.success(`Welcome back, ${res.user.name.split(" ")[0]}!`);
-    navigate({ to: dashboardPathForUser(auth.current()) });
+  }
+
+  if (
+    !authState.initialized ||
+    authState.sessionStatus === "loading" ||
+    authState.profileStatus === "loading"
+  ) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-600">
+        Restoring your session…
+      </div>
+    );
+  }
+
+  if (user && authState.profileStatus === "ready") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-600">
+        Opening your workspace…
+      </div>
+    );
+  }
+
+  if (user && (authState.profileStatus === "error" || authState.profileStatus === "denied")) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-lg rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <h1 className="text-xl font-bold">
+            {authState.profileStatus === "denied"
+              ? "Employee access is disabled"
+              : "Session preserved"}
+          </h1>
+          <p role="alert" className="mt-3 text-sm text-slate-600">
+            {authState.profileError || "Employee access details could not be verified."}
+          </p>
+          <div className="mt-6 flex justify-center gap-2">
+            {authState.profileStatus !== "denied" && (
+              <Button onClick={() => void auth.revalidate()}>Retry access check</Button>
+            )}
+            <Button variant="outline" onClick={() => void auth.signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -1,7 +1,10 @@
 // Step 11 — Activities. Day-per-row table with inline city + activity checkboxes.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Plus, Search, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { inr } from "@/lib/format";
 import { useDB, activityPricingForPax } from "@/lib/mock-store";
@@ -12,6 +15,10 @@ import {
   landGst,
 } from "@/lib/wizard/calc";
 import { applyLandCommercials, optionalActivitySellingRows } from "@/lib/wizard/land-pricing";
+import {
+  eligibleActivitiesForDay,
+  isSelectedLandServiceValid,
+} from "@/lib/wizard/land-eligibility";
 import { uid, dayDestInfo, type StepProps } from "../shared";
 
 export function Step11({ draft, set }: StepProps) {
@@ -19,6 +26,8 @@ export function Step11({ draft, set }: StepProps) {
   const traveler = draft.traveler_type ?? "indian";
   const pax = effectivePaxForPricing(draft);
   const costingPaxValues = getCostingPaxValues(draft);
+  const [addForDay, setAddForDay] = useState<number | null>(null);
+  const [activitySearch, setActivitySearch] = useState("");
   // Land Part markup & GST — same treatment as Guide / Entrances / Misc.
   const mkPct = landMarkup(draft);
   const gstPct = landGst(draft);
@@ -81,6 +90,8 @@ export function Step11({ draft, set }: StepProps) {
         },
       ],
     });
+    setAddForDay(null);
+    setActivitySearch("");
   };
 
   // Re-price selected activities when the traveler type (or pax) changes.
@@ -120,11 +131,8 @@ export function Step11({ draft, set }: StepProps) {
     return names.map((n) => ({
       cityName: n,
 
-      activities: d.activities.filter((a) => {
-        if (!a.is_active) return false;
-
+      activities: eligibleActivitiesForDay(draft, r, d).filter((a) => {
         const destName = d.activity_destinations.find((x) => x.id === a.destination_id)?.name;
-
         return destName === n;
       }),
     }));
@@ -141,7 +149,18 @@ export function Step11({ draft, set }: StepProps) {
    * have pricing_mode saved incorrectly.
    */
   const selectedActivities = draft.activities
-    .filter((line) => line.activity_id && line.inclusion_status !== "optional")
+    .filter(
+      (line) =>
+        line.activity_id &&
+        line.inclusion_status !== "optional" &&
+        isSelectedLandServiceValid(
+          "activity",
+          line.activity_id,
+          line.from_routing_days?.[0],
+          draft,
+          d,
+        ),
+    )
     .map((line) => {
       const activity = d.activities.find((candidate) => candidate.id === line.activity_id);
       return activity ? { activity } : null;
@@ -209,7 +228,9 @@ export function Step11({ draft, set }: StepProps) {
 
               const groups = perDayGroups(r);
 
-              const hasAny = groups.some((g) => g.activities.length > 0);
+              const hasAny = groups.some((g) =>
+                g.activities.some((activity) => findLine(activity.id, r.day)),
+              );
 
               return (
                 <tr key={ri} className="border-b border-[#E5E7EB] align-top bg-white">
@@ -222,8 +243,14 @@ export function Step11({ draft, set }: StepProps) {
 
                   <td className="p-2">
                     {!hasAny ? (
-                      <div className="text-[11px] text-muted-foreground italic">
-                        No activities configured for this day's cities.
+                      <div className="space-y-2">
+                        <div className="text-[11px] text-muted-foreground italic">
+                          No activities selected for this day.
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => setAddForDay(r.day)}>
+                          <Plus className="mr-1 h-3.5 w-3.5" />
+                          Add Activity for Day {r.day}
+                        </Button>
                       </div>
                     ) : (
                       <div className="min-w-[880px] space-y-2">
@@ -243,130 +270,141 @@ export function Step11({ draft, set }: StepProps) {
                             </div>
 
                             <div className="space-y-1">
-                              {g.activities.length === 0 ? (
+                              {g.activities.filter((activity) => findLine(activity.id, r.day))
+                                .length === 0 ? (
                                 <div className="text-[11px] text-muted-foreground italic">
                                   No activities.
                                 </div>
                               ) : (
-                                g.activities.map((a) => {
-                                  const line = findLine(a.id, r.day);
+                                g.activities
+                                  .filter((activity) => findLine(activity.id, r.day))
+                                  .map((a) => {
+                                    const line = findLine(a.id, r.day);
 
-                                  const on = !!line;
+                                    const on = !!line;
 
-                                  const { rate, perPerson, slab, isSlab } = slabRate(a);
+                                    const { rate, perPerson, slab, isSlab } = slabRate(a);
 
-                                  const slabMode = isSlab;
+                                    const slabMode = isSlab;
 
-                                  return (
-                                    <div
-                                      key={a.id}
-                                      className={cn(
-                                        "grid grid-cols-[110px_minmax(180px,1.5fr)_105px_minmax(190px,1.4fr)_95px_150px_65px] items-center gap-2 rounded px-2 py-1.5",
-                                        on && "bg-accent/5",
-                                      )}
-                                    >
-                                      <div className="truncate text-[11px] font-medium">
-                                        {g.cityName}
-                                      </div>
-                                      <Checkbox
-                                        checked={on}
-                                        onCheckedChange={() => toggle(a, r.day)}
-                                        className="col-start-7 justify-self-center"
-                                      />
+                                    return (
+                                      <div
+                                        key={a.id}
+                                        className={cn(
+                                          "grid grid-cols-[110px_minmax(180px,1.5fr)_105px_minmax(190px,1.4fr)_95px_150px_65px] items-center gap-2 rounded px-2 py-1.5",
+                                          on && "bg-accent/5",
+                                        )}
+                                      >
+                                        <div className="truncate text-[11px] font-medium">
+                                          {g.cityName}
+                                        </div>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          onClick={() => toggle(a, r.day)}
+                                          className="col-start-7 justify-self-center"
+                                          aria-label={`Delete ${a.activity_name}`}
+                                        >
+                                          <Trash2 className="h-4 w-4 text-destructive" />
+                                        </Button>
 
-                                      <div className="col-start-2 row-start-1 min-w-0">
-                                        <div className="text-sm font-medium truncate">
-                                          {a.activity_name}
+                                        <div className="col-start-2 row-start-1 min-w-0">
+                                          <div className="text-sm font-medium truncate">
+                                            {a.activity_name}
+                                          </div>
+
+                                          <div className="text-[10px] text-muted-foreground">
+                                            {slabMode
+                                              ? slab
+                                                ? `SLAB ${slab.from_pax}-${slab.to_pax}: ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
+                                                : `SLAB · ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
+                                              : `PER PERSON · ${inr(perPerson)}/person`}
+                                          </div>
                                         </div>
 
-                                        <div className="text-[10px] text-muted-foreground">
+                                        <div className="col-start-3 row-start-1 text-[10px] font-medium uppercase">
                                           {slabMode
-                                            ? slab
-                                              ? `SLAB ${slab.from_pax}-${slab.to_pax}: ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
-                                              : `SLAB · ${inr(rate)} total → ${inr(perPerson)}/person for ${pax} pax`
-                                            : `PER PERSON · ${inr(perPerson)}/person`}
+                                            ? "Custom Slabs"
+                                            : a.pricing_type === "per_person"
+                                              ? "Per Person"
+                                              : "Fixed Group"}
                                         </div>
-                                      </div>
 
-                                      <div className="col-start-3 row-start-1 text-[10px] font-medium uppercase">
-                                        {slabMode
-                                          ? "Custom Slabs"
-                                          : a.pricing_type === "per_person"
-                                            ? "Per Person"
-                                            : "Fixed Group"}
-                                      </div>
-
-                                      <div className="col-start-4 row-start-1 text-[10px] text-muted-foreground">
-                                        {slabMode && slab
-                                          ? `${slab.from_pax}-${slab.to_pax} pax`
-                                          : a.pricing_type === "per_person"
-                                            ? `${inr(perPerson)} per person`
-                                            : `${inr(rate)} per group`}
-                                      </div>
-
-                                      {on && line && (
-                                        <div className="col-start-6 row-start-1 flex rounded border p-0.5 text-[10px]">
-                                          <button
-                                            type="button"
-                                            className={cn(
-                                              "rounded px-2 py-1",
-                                              line.inclusion_status !== "optional" &&
-                                                "bg-primary text-primary-foreground",
-                                            )}
-                                            onClick={() =>
-                                              set({
-                                                activities: draft.activities.map((item) =>
-                                                  item.id === line.id
-                                                    ? { ...item, inclusion_status: "included" }
-                                                    : item,
-                                                ),
-                                              })
-                                            }
-                                          >
-                                            Included
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className={cn(
-                                              "rounded px-2 py-1",
-                                              line.inclusion_status === "optional" &&
-                                                "bg-primary text-primary-foreground",
-                                            )}
-                                            onClick={() =>
-                                              set({
-                                                activities: draft.activities.map((item) =>
-                                                  item.id === line.id
-                                                    ? { ...item, inclusion_status: "optional" }
-                                                    : item,
-                                                ),
-                                              })
-                                            }
-                                          >
-                                            Optional
-                                          </button>
+                                        <div className="col-start-4 row-start-1 text-[10px] text-muted-foreground">
+                                          {slabMode && slab
+                                            ? `${slab.from_pax}-${slab.to_pax} pax`
+                                            : a.pricing_type === "per_person"
+                                              ? `${inr(perPerson)} per person`
+                                              : `${inr(rate)} per group`}
                                         </div>
-                                      )}
 
-                                      {/* =================================================
+                                        {on && line && (
+                                          <div className="col-start-6 row-start-1 flex rounded border p-0.5 text-[10px]">
+                                            <button
+                                              type="button"
+                                              className={cn(
+                                                "rounded px-2 py-1",
+                                                line.inclusion_status !== "optional" &&
+                                                  "bg-primary text-primary-foreground",
+                                              )}
+                                              onClick={() =>
+                                                set({
+                                                  activities: draft.activities.map((item) =>
+                                                    item.id === line.id
+                                                      ? { ...item, inclusion_status: "included" }
+                                                      : item,
+                                                  ),
+                                                })
+                                              }
+                                            >
+                                              Included
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className={cn(
+                                                "rounded px-2 py-1",
+                                                line.inclusion_status === "optional" &&
+                                                  "bg-primary text-primary-foreground",
+                                              )}
+                                              onClick={() =>
+                                                set({
+                                                  activities: draft.activities.map((item) =>
+                                                    item.id === line.id
+                                                      ? { ...item, inclusion_status: "optional" }
+                                                      : item,
+                                                  ),
+                                                })
+                                              }
+                                            >
+                                              Optional
+                                            </button>
+                                          </div>
+                                        )}
+
+                                        {/* =================================================
                                             IMPORTANT:
                                             For slab, this is TOTAL.
                                             It is NOT rate × pax.
                                            ================================================= */}
-                                      <div
-                                        className={cn(
-                                          "col-start-5 row-start-1 text-right tabular-nums text-[11px] font-semibold",
-                                          !on && "opacity-40",
-                                        )}
-                                      >
-                                        {on ? inr(rate) : inr(0)}
+                                        <div
+                                          className={cn(
+                                            "col-start-5 row-start-1 text-right tabular-nums text-[11px] font-semibold",
+                                            !on && "opacity-40",
+                                          )}
+                                        >
+                                          {on ? inr(rate) : inr(0)}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })
+                                    );
+                                  })
                               )}
                             </div>
                           </div>
                         ))}
+                        <Button size="sm" variant="outline" onClick={() => setAddForDay(r.day)}>
+                          <Plus className="mr-1 h-3.5 w-3.5" />
+                          Add Activity for Day {r.day}
+                        </Button>
                       </div>
                     )}
                   </td>
@@ -376,6 +414,125 @@ export function Step11({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
+
+      <Dialog
+        open={addForDay != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddForDay(null);
+            setActivitySearch("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Activity for Day {addForDay}</DialogTitle>
+          </DialogHeader>
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              value={activitySearch}
+              onChange={(event) => setActivitySearch(event.target.value)}
+              placeholder="Search eligible activities"
+            />
+          </div>
+          <div className="max-h-[55vh] divide-y overflow-y-auto rounded-md border">
+            {(() => {
+              const route = draft.routing.find((day) => day.day === addForDay);
+              if (!route) return null;
+              const eligible = eligibleActivitiesForDay(draft, route, d).filter(
+                (activity) =>
+                  !findLine(activity.id, route.day) &&
+                  activity.activity_name
+                    .toLowerCase()
+                    .includes(activitySearch.trim().toLowerCase()),
+              );
+              if (!eligible.length)
+                return (
+                  <div className="p-4 text-sm text-muted-foreground">
+                    No eligible activities found for this routing day.
+                  </div>
+                );
+              return eligible.map((activity) => {
+                const pricing = slabRate(activity);
+                const city = d.activity_destinations.find(
+                  (destination) => destination.id === activity.destination_id,
+                )?.name;
+                return (
+                  <button
+                    key={activity.id}
+                    type="button"
+                    onClick={() => toggle(activity, route.day)}
+                    className="grid w-full grid-cols-[120px_1fr_110px] gap-3 p-3 text-left hover:bg-muted/40"
+                  >
+                    <span className="text-xs text-muted-foreground">{city}</span>
+                    <span>
+                      <span className="block text-sm font-medium">{activity.activity_name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {pricing.isSlab
+                          ? "Custom Pax Slabs"
+                          : activity.pricing_type === "per_person"
+                            ? "Per Person"
+                            : "Fixed Group"}
+                      </span>
+                    </span>
+                    <span className="text-right text-xs font-semibold">{inr(pricing.rate)}</span>
+                  </button>
+                );
+              });
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {draft.activities.some(
+        (line) =>
+          line.activity_id &&
+          !isSelectedLandServiceValid(
+            "activity",
+            line.activity_id,
+            line.from_routing_days?.[0],
+            draft,
+            d,
+          ),
+      ) && (
+        <Card className="border-amber-300 bg-amber-50/50 p-3">
+          <div className="text-xs font-semibold text-amber-800">
+            Not applicable to current routing
+          </div>
+          {draft.activities
+            .filter(
+              (line) =>
+                line.activity_id &&
+                !isSelectedLandServiceValid(
+                  "activity",
+                  line.activity_id,
+                  line.from_routing_days?.[0],
+                  draft,
+                  d,
+                ),
+            )
+            .map((line) => (
+              <div key={line.id} className="mt-2 flex items-center justify-between text-xs">
+                <span>
+                  {d.activities.find((activity) => activity.id === line.activity_id)
+                    ?.activity_name || "Historical activity"}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    set({ activities: draft.activities.filter((item) => item.id !== line.id) })
+                  }
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  Delete
+                </Button>
+              </div>
+            ))}
+        </Card>
+      )}
 
       <Card className="p-3">
         <div className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
@@ -469,7 +626,16 @@ export function Step11({ draft, set }: StepProps) {
       )}
 
       {draft.activities.some(
-        (line) => line.activity_id && line.inclusion_status === "optional",
+        (line) =>
+          line.activity_id &&
+          line.inclusion_status === "optional" &&
+          isSelectedLandServiceValid(
+            "activity",
+            line.activity_id,
+            line.from_routing_days?.[0],
+            draft,
+            d,
+          ),
       ) && (
         <Card className="p-4">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -478,7 +644,18 @@ export function Step11({ draft, set }: StepProps) {
           <h3 className="text-sm font-semibold">Optional Activities — For Additional Sale</h3>
           <div className="mt-3 space-y-3">
             {draft.activities
-              .filter((line) => line.activity_id && line.inclusion_status === "optional")
+              .filter(
+                (line) =>
+                  line.activity_id &&
+                  line.inclusion_status === "optional" &&
+                  isSelectedLandServiceValid(
+                    "activity",
+                    line.activity_id,
+                    line.from_routing_days?.[0],
+                    draft,
+                    d,
+                  ),
+              )
               .filter(
                 (line, index, lines) =>
                   lines.findIndex((candidate) => candidate.activity_id === line.activity_id) ===

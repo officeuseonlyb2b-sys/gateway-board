@@ -1,6 +1,6 @@
 import type { QuoteDraft } from "./types";
 
-export type EscortPricingMode = "pax_range" | "day_wise";
+export type EscortPricingMode = "per_person" | "pax_range" | "day_wise";
 
 export function getEscortPricingMode(draft: QuoteDraft): EscortPricingMode | undefined {
   if (draft.escort_pricing_mode) return draft.escort_pricing_mode;
@@ -34,13 +34,31 @@ export function getEscortRangeBase(
   range: NonNullable<QuoteDraft["escort_ranges"]>[number],
 ): number {
   if (!isEscortEnabled(draft) || getEscortPricingMode(draft) !== "pax_range") return 0;
-  return range.charge + (draft.guide_escort_reporting ?? 0);
+  const dayRates = draft.routing.map(
+    (day) => draft.escort_day_rates_by_slab?.[day.day]?.[range.id] ?? 0,
+  );
+  const hasDayRates = dayRates.some((rate) => rate > 0);
+  // Old quotations stored one flat charge on the slab. Preserve that value
+  // until the user enters the new day/slab matrix; never invent a distribution.
+  const base = hasDayRates ? dayRates.reduce((sum, rate) => sum + rate, 0) : (range.charge ?? 0);
+  return base + (draft.guide_escort_reporting ?? 0);
+}
+
+export function getEscortRangeDayCharge(draft: QuoteDraft, day: number, rangeId: string) {
+  return draft.escort_day_rates_by_slab?.[day]?.[rangeId] ?? 0;
+}
+
+export function getEscortPerPersonRate(draft: QuoteDraft): number {
+  return draft.escort_per_person_rate ?? 0;
 }
 
 /** Base Escort amount before Land Part markup/GST for one costing pax. */
 export function getEscortBaseForPax(draft: QuoteDraft, pax: number): number {
   if (!isEscortEnabled(draft)) return 0;
   const mode = getEscortPricingMode(draft);
+  if (mode === "per_person") {
+    return getEscortPerPersonRate(draft) * pax + (draft.guide_escort_reporting ?? 0);
+  }
   if (mode === "pax_range") {
     const range = (draft.escort_ranges ?? []).find(
       (item) => pax >= item.min_pax && pax <= item.max_pax,

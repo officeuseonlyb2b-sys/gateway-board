@@ -9,7 +9,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
 import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
-import { auth, useAuth } from "@/lib/auth-mock";
+import { auth, useAuthLifecycle } from "@/lib/auth-mock";
 import { db } from "@/lib/mock-store";
 import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
 import { startDestinationsSync } from "@/lib/destinations-remote";
@@ -27,13 +27,18 @@ export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
     if (typeof window === "undefined") return;
-    if (!(await auth.ready())) throw redirect({ to: "/login" });
+    const user = await auth.ready();
+    if (!user && auth.lifecycle().sessionStatus === "signed_out") {
+      auth.logRedirect("authenticated route; Supabase confirmed signed out");
+      throw redirect({ to: "/login" });
+    }
   },
   component: AuthenticatedLayout,
 });
 
 function AuthenticatedLayout() {
-  const user = useAuth();
+  const authState = useAuthLifecycle();
+  const user = authState.user;
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const access = useAccessProfile();
@@ -42,8 +47,11 @@ function AuthenticatedLayout() {
   );
 
   useEffect(() => {
-    if (!user) navigate({ to: "/login" });
-  }, [user, navigate]);
+    if (!user && authState.initialized && authState.sessionStatus === "signed_out") {
+      auth.logRedirect("authenticated layout; Supabase confirmed signed out");
+      navigate({ to: "/login" });
+    }
+  }, [authState.initialized, authState.sessionStatus, user, navigate]);
 
   const userId = user?.id;
   const isSuperAdmin = access.canManageCostingMasters;
@@ -87,7 +95,39 @@ function AuthenticatedLayout() {
     navigate({ to: dashboardPathForUser(user) });
   }, [access, navigate, pathname, user]);
 
-  if (!user) return null;
+  if (!authState.initialized || authState.sessionStatus === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-600">
+        Restoring your session…
+      </div>
+    );
+  }
+  if (!user && authState.sessionStatus === "signed_out") return null;
+  if (user && authState.profileStatus === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-600">
+        Verifying your employee access…
+      </div>
+    );
+  }
+  if (user && authState.profileStatus === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-lg rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <h1 className="text-xl font-bold">Your session is still active</h1>
+          <p role="alert" className="mt-3 text-sm text-slate-600">
+            {authState.profileError || "Employee access details are temporarily unavailable."}
+          </p>
+          <div className="mt-6 flex justify-center gap-2">
+            <Button onClick={() => void auth.revalidate()}>Retry access check</Button>
+            <Button variant="outline" onClick={() => void auth.signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!access.accountReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">

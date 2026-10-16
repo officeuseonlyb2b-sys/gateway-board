@@ -1,330 +1,585 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import { effectivePaxForPricing, parsePaxRange } from "@/lib/wizard/calc";
-import { uid, dayAllCities, type CityRef, type StepProps } from "../shared";
 import { applyLandCommercials } from "@/lib/wizard/land-pricing";
+import {
+  eligibleEntrancesForDay,
+  isSelectedLandServiceValid,
+  landDayContext,
+} from "@/lib/wizard/land-eligibility";
+import {
+  catPicked,
+  entranceRateSelected,
+  entranceTourSelected,
+  isPicked,
+} from "@/lib/wizard/costsheet";
+import type { EntranceCat, EntranceLine } from "@/lib/wizard/types";
+import { uid, type StepProps } from "../shared";
 
 export function Step12({ draft, set }: StepProps) {
-  const d = useDB();
-  const traveler = draft.traveler_type ?? "indian";
-  const totalPaxCount = effectivePaxForPricing(draft);
+  const db = useDB();
+  const traveller = draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
+  const totalPax = effectivePaxForPricing(draft);
   const paxRange = parsePaxRange(draft);
-  // Only the selected traveler category is charged.
-  const paxFor = (t: "indian" | "foreign" | "student") =>
-    traveler === t ? totalPaxCount : 0;
-  const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
-
-  const findLine = (siteId: string, day: number) =>
+  const cityName = (id: string) => db.cities.find((city) => city.id === id)?.name || "";
+  const selectedLine = (siteId: string, day: number) =>
     draft.entrances.find(
-      (x) => x.site_id === siteId && (x.from_routing_days ?? []).includes(day)
+      (line) => line.site_id === siteId && (line.from_routing_days ?? []).includes(day),
     );
+  const entrancePicksForDay = (day: number, lines = draft.entrances) =>
+    draft.costing_selection?.entrances?.[day] ??
+    lines
+      .filter(
+        (line) =>
+          line.from_routing_days?.length
+            ? line.from_routing_days.includes(day)
+            : draft.routing.some((route) => route.day === day),
+      )
+      .filter((line) => isPicked(draft, "entrances", day, line.id))
+      .map((line) => line.id);
+  const idsInCategorySelections = (
+    selections: Partial<Record<EntranceCat, string[]>>,
+  ) => Array.from(new Set(Object.values(selections).flatMap((ids) => ids ?? [])));
+  const paxFor = (category: EntranceCat) => (traveller === category ? totalPax : 0);
 
-  const toggle = (s: typeof d.entrance_sites[number], day: number) => {
-    const existing = findLine(s.id, day);
-    if (existing) {
-      set({ entrances: draft.entrances.filter((x) => x.id !== existing.id) });
-    } else {
-      set({
-        entrances: [
-          ...draft.entrances,
-          {
-            id: uid(),
-            site_id: s.id,
-            indian_pax: paxFor("indian"),
-            indian_rate: s.indian_rate,
-            foreign_pax: paxFor("foreign"),
-            foreign_rate: s.foreigner_rate,
-            student_pax: paxFor("student"),
-            student_rate: s.student_rate ?? 0,
-            from_routing_days: [day],
-          },
-        ],
-      });
-    }
-  };
-
-  // Keep rates and pax in sync with master data (pax sync kept for data integrity, but we won't use pax in visuals)
   useEffect(() => {
     let dirty = false;
-    const next = draft.entrances.map((l) => {
-      if (!l.site_id) return l;
-      const s = d.entrance_sites.find((x) => x.id === l.site_id);
-      if (!s) return l;
-      const patched = { ...l };
-      if (s.indian_rate > 0 && patched.indian_rate !== s.indian_rate) {
-        patched.indian_rate = s.indian_rate;
-        dirty = true;
-      }
-      if (s.foreigner_rate > 0 && patched.foreign_rate !== s.foreigner_rate) {
-        patched.foreign_rate = s.foreigner_rate;
-        dirty = true;
-      }
-      const sr = s.student_rate ?? 0;
-      if (sr > 0 && (patched.student_rate ?? 0) !== sr) {
-        patched.student_rate = sr;
-        dirty = true;
-      }
-      if (patched.indian_pax !== paxFor("indian")) {
-        patched.indian_pax = paxFor("indian");
-        dirty = true;
-      }
-      if (patched.foreign_pax !== paxFor("foreign")) {
-        patched.foreign_pax = paxFor("foreign");
-        dirty = true;
-      }
-      if ((patched.student_pax ?? 0) !== paxFor("student")) {
-        patched.student_pax = paxFor("student");
-        dirty = true;
-      }
-      return patched;
-    });
-    if (dirty) set({ entrances: next });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalPaxCount, traveler, d.entrance_sites]);
-
-  type DayRow = { city: CityRef; site: typeof d.entrance_sites[number] };
-
-  const dayRows = (r: typeof draft.routing[number], ri: number): DayRow[] => {
-    const fromDefault =
-      ri === 0
-        ? draft.departure_city
-        : cityName(draft.routing[ri - 1]?.city_id || "");
-    const dayCities = dayAllCities(r, d.cities, fromDefault);
-    const out: DayRow[] = [];
-    dayCities.forEach((c) => {
-      d.entrance_sites
-        .filter(
-          (s) =>
-            s.is_active &&
-            d.entrance_cities.some(
-              (ec) => ec.name === c.name && ec.id === s.city_id
-            )
-        )
-        .forEach((s) => out.push({ city: c, site: s }));
-    });
-    return out;
-  };
-
-  // ✅ TOTALS ARE NOW EXCLUSIVELY PER-PERSON (NO PAX MULTIPLICATION)
-  let totalIndianRate = 0; // sum of per‑person Indian rates across all selected sites
-  let totalForeignRate = 0;
-  let totalStudentRate = 0;
-
-  const dayData = draft.routing.map((r, ri) => {
-    const fromDefault =
-      ri === 0
-        ? draft.departure_city
-        : cityName(draft.routing[ri - 1]?.city_id || "");
-    const fromLabel = r.from_city || fromDefault || "—";
-    const toLabel = cityName(r.city_id) || r.to_city || "—";
-    const routeLabel = fromLabel === toLabel ? `${toLabel} Local` : `${fromLabel} → ${toLabel}`;
-    const rows = dayRows(r, ri);
-
-    const siteRows = rows.map((row) => {
-      const line = findLine(row.site.id, r.day);
-      const on = !!line;
-      
-      // Per‑person rates only (NO PAX MULTIPLIER USED)
-      const indianRate = line?.indian_rate ?? row.site.indian_rate;
-      const foreignRate = line?.foreign_rate ?? row.site.foreigner_rate;
-      const studentRate = line?.student_rate ?? row.site.student_rate ?? 0;
-      
-      return {
-        ...row,
-        on,
-        indianRate,
-        foreignRate,
-        studentRate,
-        line,
+    const entrances = draft.entrances.map((line) => {
+      const site = db.entrance_sites.find((item) => item.id === line.site_id);
+      if (!site) return line;
+      const next = {
+        ...line,
+        indian_rate: site.indian_rate,
+        foreign_rate: site.foreigner_rate,
+        student_rate: site.student_rate ?? 0,
+        indian_pax: paxFor("indian"),
+        foreign_pax: paxFor("foreign"),
+        student_pax: paxFor("student"),
       };
+      if (
+        next.indian_rate !== line.indian_rate ||
+        next.foreign_rate !== line.foreign_rate ||
+        next.student_rate !== line.student_rate ||
+        next.indian_pax !== line.indian_pax ||
+        next.foreign_pax !== line.foreign_pax ||
+        next.student_pax !== line.student_pax
+      )
+        dirty = true;
+      return next;
     });
+    if (dirty) set({ entrances });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPax, traveller, db.entrance_sites]);
 
-    // Update per-person totals globally
-    siteRows.forEach((s) => {
-      if (s.on) {
-        totalIndianRate += s.indianRate;
-        totalForeignRate += s.foreignRate;
-        totalStudentRate += s.studentRate;
-      }
-    });
-
+  const dayData = draft.routing.map((route, routeIndex) => {
+    const fromDefault =
+      routeIndex === 0
+        ? draft.departure_city
+        : cityName(draft.routing[routeIndex - 1]?.city_id || "");
+    const from = route.from_city || fromDefault || "—";
+    const to = cityName(route.city_id) || route.to_city || "—";
+    const context = landDayContext(draft, route, db);
+    const rows = eligibleEntrancesForDay(draft, route, db).map((site) => ({
+      site,
+      line: selectedLine(site.id, route.day),
+      city: db.destination_cities.find((city) => city.id === site.city_id)?.name || "—",
+      tour: db.destination_tours.find((tour) => tour.id === site.tour_id)?.title || site.site_name,
+    }));
     return {
-      r,
-      ri,
-      routeLabel,
-      siteRows,
-      hasRows: siteRows.length > 0,
+      route,
+      routeLabel: from === to ? `${to} Local` : `${from} → ${to}`,
+      tourLabel: context.tourTitles.join(", ") || "No tour selected",
+      rows,
     };
   });
-  const entranceCommercials = {
-    indian: applyLandCommercials(draft, totalIndianRate, 0.05),
-    foreign: applyLandCommercials(draft, totalForeignRate, 0.05),
-    student: applyLandCommercials(draft, totalStudentRate, 0.05),
+
+  const eligibleRows = dayData.flatMap((day) =>
+    day.rows.map((row) => ({ ...row, day: day.route.day, routeLabel: day.routeLabel })),
+  );
+  const selectedRate = useCallback(
+    (site: (typeof db.entrance_sites)[number]) =>
+      traveller === "indian"
+        ? site.indian_rate
+        : traveller === "foreign"
+          ? site.foreigner_rate
+          : (site.student_rate ?? 0),
+    [db, traveller],
+  );
+  const categoryLabel =
+    traveller === "foreign" ? "Foreigner" : traveller === "indian" ? "Indian" : "Student";
+  const makeEntranceLine = (
+    site: (typeof db.entrance_sites)[number],
+    day: number,
+  ): EntranceLine => ({
+    id: uid(),
+    site_id: site.id,
+    indian_pax: paxFor("indian"),
+    indian_rate: site.indian_rate,
+    foreign_pax: paxFor("foreign"),
+    foreign_rate: site.foreigner_rate,
+    student_pax: paxFor("student"),
+    student_rate: site.student_rate ?? 0,
+    from_routing_days: [day],
+  });
+  const isTourSelected = (row: (typeof eligibleRows)[number]) =>
+    entranceTourSelected(draft, row.day, row.site.id, Boolean(row.line));
+  const isPriceSelected = (row: (typeof eligibleRows)[number]) =>
+    Boolean(
+      row.line &&
+        isTourSelected(row) &&
+        entranceRateSelected(
+          draft,
+          row.day,
+          row.line.id,
+          traveller,
+          isPicked(draft, "entrances", row.day, row.line.id) &&
+            catPicked(draft, row.day, traveller),
+        ),
+    );
+  const activePricedRows = eligibleRows.filter((row) => selectedRate(row.site) > 0);
+  const includedRows = activePricedRows.filter(
+    (row) => isTourSelected(row) && isPriceSelected(row),
+  );
+  const optionalRows = activePricedRows.filter(
+    (row) => isTourSelected(row) && !isPriceSelected(row),
+  );
+  const selectablePricedRows = activePricedRows.filter(isTourSelected);
+  const allActivePricesSelected =
+    selectablePricedRows.length > 0 && selectablePricedRows.every(isPriceSelected);
+  const someActivePricesSelected = selectablePricedRows.some(isPriceSelected);
+  const activePriceHeaderState =
+    allActivePricesSelected
+      ? true
+      : someActivePricesSelected
+        ? "indeterminate"
+        : false;
+
+  useEffect(() => {
+    const tourSelections = { ...(draft.entrance_tour_selected_by_day ?? {}) };
+    const rateSelections = { ...(draft.entrance_rate_selection_by_day ?? {}) };
+    let tourSelectionsChanged = false;
+    let rateSelectionsChanged = false;
+    dayData.forEach((day) => {
+      const routeDay = day.route.day;
+      if (tourSelections[routeDay] === undefined) {
+        tourSelections[routeDay] = day.rows
+          .filter((row) => Boolean(row.line))
+          .map((row) => row.site.id);
+        tourSelectionsChanged = true;
+      }
+      if (rateSelections[routeDay] === undefined) {
+        const byCategory: Partial<Record<EntranceCat, string[]>> = {
+          indian: [],
+          foreign: [],
+          student: [],
+        };
+        day.rows.forEach(({ site, line }) => {
+          if (!line || selectedRate(site) <= 0) return;
+          if (
+            isPicked(draft, "entrances", routeDay, line.id) &&
+            catPicked(draft, routeDay, traveller)
+          )
+            byCategory[traveller] = [...(byCategory[traveller] ?? []), line.id];
+        });
+        rateSelections[routeDay] = byCategory;
+        rateSelectionsChanged = true;
+      }
+    });
+    if (tourSelectionsChanged || rateSelectionsChanged)
+      set({
+        ...(tourSelectionsChanged
+          ? { entrance_tour_selected_by_day: tourSelections }
+          : {}),
+        ...(rateSelectionsChanged
+          ? { entrance_rate_selection_by_day: rateSelections }
+          : {}),
+      });
+  }, [draft, dayData, selectedRate, traveller, set]);
+
+  const setTourStatus = (
+    row: (typeof eligibleRows)[number],
+    selected: boolean,
+  ) => {
+    const tourSelections = { ...(draft.entrance_tour_selected_by_day ?? {}) };
+    const selectedTours = new Set(
+      tourSelections[row.day] ??
+        dayData
+          .find((day) => day.route.day === row.day)
+          ?.rows.filter((candidate) => Boolean(candidate.line))
+          .map((candidate) => candidate.site.id) ?? [],
+    );
+    if (selected) selectedTours.add(row.site.id);
+    else selectedTours.delete(row.site.id);
+    tourSelections[row.day] = [...selectedTours];
+
+    const rateSelections = { ...(draft.entrance_rate_selection_by_day ?? {}) };
+    const byCategory = { ...(rateSelections[row.day] ?? {}) };
+    if (!selected && row.line) {
+      (["indian", "foreign", "student"] as EntranceCat[]).forEach((category) => {
+        byCategory[category] = (byCategory[category] ?? []).filter(
+          (lineId) => lineId !== row.line?.id,
+        );
+      });
+    }
+    rateSelections[row.day] = byCategory;
+
+    const costingSelection = { ...(draft.costing_selection ?? {}) };
+    const entrancePicks = { ...(costingSelection.entrances ?? {}) };
+    if (!selected && row.line) {
+      const selectedLineIds = new Set(entrancePicks[row.day] ?? entrancePicksForDay(row.day));
+      selectedLineIds.delete(row.line.id);
+      entrancePicks[row.day] = [...selectedLineIds];
+    }
+    costingSelection.entrances = entrancePicks;
+    set({
+      entrance_tour_selected_by_day: tourSelections,
+      entrance_rate_selection_by_day: rateSelections,
+      costing_selection: costingSelection,
+    });
   };
 
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-lg font-semibold">Entrance Fees</h2>
-        <Badge variant="secondary" className="text-[10px]">
-          Pax: {paxRange ? `${paxRange.min}–${paxRange.max}` : totalPaxCount} (Indian · Foreigner · Student)
-        </Badge>
-      </div>
+  const setEntrancePrice = (
+    row: (typeof eligibleRows)[number],
+    selected: boolean,
+  ) => {
+    if (selectedRate(row.site) <= 0 || !isTourSelected(row)) return;
+    const line = row.line ?? makeEntranceLine(row.site, row.day);
+    const entrances = row.line ? draft.entrances : [...draft.entrances, line];
+    const rateSelections = { ...(draft.entrance_rate_selection_by_day ?? {}) };
+    const byCategory = {
+      indian: [],
+      foreign: [],
+      student: [],
+      ...(rateSelections[row.day] ?? {}),
+    } as Record<EntranceCat, string[]>;
+    const current = new Set(byCategory[traveller] ?? []);
+    if (selected) current.add(line.id);
+    else current.delete(line.id);
+    byCategory[traveller] = [...current];
+    rateSelections[row.day] = byCategory;
 
-      {/* Main table */}
-      <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead className="bg-[#F3F4F6] text-[10px] uppercase text-muted-foreground tracking-wide">
-            <tr className="border-b border-[#E5E7EB]">
-              <th className="text-left p-2 w-[60px]">Day</th>
-              <th className="text-left p-2 w-[170px]">Route</th>
-              <th className="text-left p-2 min-w-[200px]">City + Tour</th>
-              <th className="text-right p-2 w-[150px]">Indian</th>
-              <th className="text-right p-2 w-[150px]">Foreigner</th>
-              <th className="text-right p-2 w-[150px]">Student</th>
-            </tr>
-          </thead>
-          <tbody>
-            {dayData.map((day, dayIdx) => {
-              if (!day.hasRows) {
+    const tourSelections = { ...(draft.entrance_tour_selected_by_day ?? {}) };
+    const selectedTours = new Set(tourSelections[row.day] ?? [row.site.id]);
+    selectedTours.add(row.site.id);
+    tourSelections[row.day] = [...selectedTours];
+
+    const costingSelection = { ...(draft.costing_selection ?? {}) };
+    const entrancePicks = { ...(costingSelection.entrances ?? {}) };
+    const categoryPicks = { ...(costingSelection.entrance_cats ?? {}) };
+    categoryPicks[row.day] = Array.from(
+      new Set([...(categoryPicks[row.day] ?? []), traveller]),
+    );
+    costingSelection.entrance_cats = categoryPicks;
+    entrancePicks[row.day] = idsInCategorySelections(byCategory);
+    costingSelection.entrances = entrancePicks;
+
+    set({
+      entrances,
+      entrance_tour_selected_by_day: tourSelections,
+      entrance_rate_selection_by_day: rateSelections,
+      costing_selection: costingSelection,
+    });
+  };
+
+  const setAllEntrancePrices = (selected: boolean) => {
+    const entrances = [...draft.entrances];
+    const rateSelections = { ...(draft.entrance_rate_selection_by_day ?? {}) };
+    const costingSelection = { ...(draft.costing_selection ?? {}) };
+    const entrancePicks = { ...(costingSelection.entrances ?? {}) };
+    const categoryPicks = { ...(costingSelection.entrance_cats ?? {}) };
+    selectablePricedRows.forEach((row) => {
+      const routeDay = row.day;
+      const existingLine = entrances.find(
+        (line) =>
+          line.site_id === row.site.id &&
+          (line.from_routing_days ?? []).includes(routeDay),
+      );
+      let line = existingLine;
+      if (selected && selectedRate(row.site) > 0 && !line) {
+        line = makeEntranceLine(row.site, routeDay);
+        entrances.push(line);
+      }
+      if (!line) return;
+
+      const storedSelections = rateSelections[routeDay];
+      const byCategory: Record<EntranceCat, string[]> = {
+        indian:
+          storedSelections?.indian ??
+          (line && isPicked(draft, "entrances", routeDay, line.id) && catPicked(draft, routeDay, "indian")
+            ? [line.id]
+            : []),
+        foreign:
+          storedSelections?.foreign ??
+          (line && isPicked(draft, "entrances", routeDay, line.id) && catPicked(draft, routeDay, "foreign")
+            ? [line.id]
+            : []),
+        student:
+          storedSelections?.student ??
+          (line && isPicked(draft, "entrances", routeDay, line.id) && catPicked(draft, routeDay, "student")
+            ? [line.id]
+            : []),
+      };
+      const activeCategoryIds = new Set(byCategory[traveller]);
+      if (selected) activeCategoryIds.add(line.id);
+      else activeCategoryIds.delete(line.id);
+      byCategory[traveller] = [...activeCategoryIds];
+      rateSelections[routeDay] = byCategory;
+      entrancePicks[routeDay] = idsInCategorySelections(byCategory);
+      if (selected && selectedRate(row.site) > 0)
+        categoryPicks[routeDay] = Array.from(
+          new Set([...(categoryPicks[routeDay] ?? []), traveller]),
+        );
+    });
+    costingSelection.entrances = entrancePicks;
+    costingSelection.entrance_cats = categoryPicks;
+    set({
+      entrances,
+      entrance_rate_selection_by_day: rateSelections,
+      costing_selection: costingSelection,
+    });
+  };
+  const includedBase = includedRows.reduce((sum, row) => sum + selectedRate(row.site), 0);
+  const includedCommercial = applyLandCommercials(draft, includedBase, 0.05);
+  const invalidLines = draft.entrances.filter(
+    (line) =>
+      !isSelectedLandServiceValid("entrance", line.site_id, line.from_routing_days?.[0], draft, db),
+  );
+
+  const sheet = (
+    title: string,
+    rows: typeof eligibleRows,
+    empty: string,
+    included: boolean,
+  ) => (
+    <Card className="overflow-hidden">
+      <div className="border-b bg-muted/20 p-3 text-sm font-semibold">{title}</div>
+      {rows.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-xs">
+            <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left">Entrance / Tour</th>
+                <th className="p-2 text-left">City</th>
+                <th className="p-2 text-left">Category</th>
+                <th className="p-2 text-right">Base Rate PP</th>
+                <th className="p-2 text-right">Markup</th>
+                <th className="p-2 text-right">GST 5%</th>
+                <th className="p-2 text-right">{included ? "Final PP" : "Selling Price PP"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const base = selectedRate(row.site);
+                const commercial = applyLandCommercials(draft, base, 0.05);
                 return (
-                  <tr key={dayIdx} className="border-b border-[#E5E7EB]">
-                    <td className="p-2 font-semibold align-top">
-                      Day {day.r.day}
+                  <tr key={`${row.day}-${row.site.id}`} className="border-t">
+                    <td className="p-2 font-medium">
+                      {row.site.site_name}
+                      <span className="block text-[10px] font-normal text-muted-foreground">
+                        Day {row.day} · {row.tour}
+                      </span>
                     </td>
-                    <td className="p-2 text-muted-foreground align-top text-[11px]">
-                      {day.routeLabel}
-                    </td>
-                    <td colSpan={4} className="p-2 text-muted-foreground italic">
-                      No entrance sites for this day's cities.
+                    <td className="p-2">{row.city}</td>
+                    <td className="p-2 capitalize">{traveller === "foreign" ? "Foreigner" : traveller}</td>
+                    <td className="p-2 text-right">{base > 0 ? inr(base) : "—"}</td>
+                    <td className="p-2 text-right">{base > 0 ? inr(commercial.markup) : "—"}</td>
+                    <td className="p-2 text-right">{base > 0 ? inr(commercial.gst) : "—"}</td>
+                    <td className="p-2 text-right font-semibold">
+                      {base > 0 ? inr(commercial.final) : "—"}
                     </td>
                   </tr>
                 );
-              }
+              })}
+            </tbody>
+            {included && (
+              <tfoot className="border-t bg-green-50 font-semibold">
+                <tr>
+                  <td colSpan={3} className="p-2">Included Entrance Total Per Person</td>
+                  <td className="p-2 text-right">{inr(includedCommercial.base)}</td>
+                  <td className="p-2 text-right">{inr(includedCommercial.markup)}</td>
+                  <td className="p-2 text-right">{inr(includedCommercial.gst)}</td>
+                  <td className="p-2 text-right">{inr(includedCommercial.final)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      ) : (
+        <div className="p-4 text-sm italic text-muted-foreground">{empty}</div>
+      )}
+    </Card>
+  );
 
-              const rowSpan = day.siteRows.length;
-              return day.siteRows.map((site, siteIdx) => {
-                const isFirst = siteIdx === 0;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">Entrance Fees</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Entrance Costing For:</span>
+          <div className="flex rounded-md border p-0.5">
+            {(["indian", "foreign", "student"] as EntranceCat[]).map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => set({ entrance_traveller_category: category })}
+                className={`rounded px-3 py-1 text-xs capitalize ${
+                  traveller === category
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {category === "foreign" ? "Foreigner" : category}
+              </button>
+            ))}
+          </div>
+          <Badge variant="secondary" className="text-[10px]">
+            Pax: {paxRange ? `${paxRange.min}–${paxRange.max}` : totalPax}
+          </Badge>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+        <table className="w-full min-w-225 table-fixed border-collapse text-xs">
+          <colgroup>
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "40%" }} />
+            <col style={{ width: "15%" }} />
+          </colgroup>
+          <thead className="bg-[#F3F4F6] text-[10px] uppercase tracking-wide text-muted-foreground">
+            <tr className="border-b border-[#E5E7EB]">
+              <th className="p-2 text-left">Day</th>
+              <th className="p-2 text-left">Route</th>
+              <th className="p-2 text-left">City</th>
+              <th className="p-2 text-left">Tour / Entrance</th>
+              <th className="p-2 text-right">
+                <div>{categoryLabel}</div>
+                <label className="mt-1 flex items-center justify-end gap-1 normal-case">
+                  <Checkbox
+                    checked={activePriceHeaderState}
+                    disabled={selectablePricedRows.length === 0}
+                    onCheckedChange={(checked) => setAllEntrancePrices(checked === true)}
+                    aria-label={`Select All ${categoryLabel} prices`}
+                  />
+                  <span>Select All</span>
+                </label>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {dayData.map((day) => {
+              const rows = day.rows.filter(({ site }) => selectedRate(site) > 0);
+              if (!rows.length)
+                return (
+                  <tr key={day.route.day} className="border-b border-[#E5E7EB]">
+                    <td className="p-2 font-semibold">Day {day.route.day}</td>
+                    <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
+                    <td colSpan={2} className="p-2 italic text-muted-foreground">
+                      No priced entrance sites for this day's selected tours.
+                    </td>
+                    <td className="p-2 text-right text-muted-foreground">—</td>
+                  </tr>
+                );
+              return rows.map((row, rowIndex) => {
+                const activeRate = selectedRate(row.site);
+                const selected = isPriceSelected({
+                  ...row,
+                  day: day.route.day,
+                  routeLabel: day.routeLabel,
+                });
+                const tourSelected = isTourSelected({
+                  ...row,
+                  day: day.route.day,
+                  routeLabel: day.routeLabel,
+                });
                 return (
                   <tr
-                    key={`${dayIdx}-${siteIdx}`}
-                    className="border-b border-[#E5E7EB] align-top bg-white"
+                    key={`${day.route.day}-${row.site.id}`}
+                    className="border-b border-[#E5E7EB] align-top"
                   >
-                    {isFirst && (
-                      <>
-                        <td rowSpan={rowSpan} className="p-2 font-semibold align-top">
-                          Day {day.r.day}
-                        </td>
-                        <td rowSpan={rowSpan} className="p-2 text-muted-foreground text-[11px] align-top">
-                          {day.routeLabel}
-                        </td>
-                      </>
+                    {rowIndex === 0 && (
+                      <td rowSpan={rows.length} className="p-2 font-semibold">
+                        Day {day.route.day}
+                      </td>
                     )}
-                    {/* City + Tour */}
+                    {rowIndex === 0 && (
+                      <td
+                        rowSpan={rows.length}
+                        className="p-2 text-[11px] text-muted-foreground"
+                      >
+                        {day.routeLabel}
+                      </td>
+                    )}
+                    <td className="p-2 text-[11px] text-muted-foreground">{row.city}</td>
                     <td className="p-2">
-                      <label className="flex items-start gap-2 cursor-pointer group">
-                        <Checkbox
-                          checked={site.on}
-                          onCheckedChange={() => toggle(site.site, day.r.day)}
-                          className="mt-0.5"
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-1 shrink-0"
+                          checked={tourSelected}
+                          onChange={(event) =>
+                            setTourStatus(
+                              { ...row, day: day.route.day, routeLabel: day.routeLabel },
+                              event.target.checked,
+                            )
+                          }
+                          aria-label={`Select ${row.tour}`}
                         />
-                        <span className="min-w-0">
-                          <span className="text-[10px] text-muted-foreground">
-                            {site.city.name}
-                          </span>
-                          <span className="block text-sm font-medium truncate">
-                            {site.site.site_name}
-                          </span>
-                        </span>
+                        <div className="min-w-0">
+                          <div className="line-clamp-2 wrap-break-word text-sm font-medium">
+                            {row.tour}
+                          </div>
+                          {row.site.site_name !== row.tour && (
+                            <div className="text-[10px] text-muted-foreground">
+                              {row.site.site_name}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-2 text-right font-semibold tabular-nums">
+                      <label className="inline-flex items-center justify-end gap-1">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={!tourSelected}
+                          onChange={(event) =>
+                            setEntrancePrice(
+                              { ...row, day: day.route.day, routeLabel: day.routeLabel },
+                              event.target.checked,
+                            )
+                          }
+                          aria-label={`Include ${categoryLabel} entrance rate for ${row.tour}`}
+                        />
+                        <span className="text-foreground">{inr(activeRate)}</span>
                       </label>
-                    </td>
-
-                    {/* Indian column: ONLY per-person rate displayed (NO PAX MULTIPLIER) */}
-                    <td className="p-2 text-right tabular-nums">
-                      {site.indianRate > 0 ? (
-                        <div className="font-semibold text-green-700">
-                          {inr(site.indianRate)}
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-amber-600">not set</span>
-                      )}
-                    </td>
-
-                    {/* Foreigner column */}
-                    <td className="p-2 text-right tabular-nums">
-                      {site.foreignRate > 0 ? (
-                        <div className="font-semibold text-blue-700">
-                          {inr(site.foreignRate)}
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-amber-600">not set</span>
-                      )}
-                    </td>
-
-                    {/* Student column */}
-                    <td className="p-2 text-right tabular-nums">
-                      {site.studentRate > 0 ? (
-                        <div className="font-semibold text-purple-700">
-                          {inr(site.studentRate)}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
                     </td>
                   </tr>
                 );
               });
             })}
-
-            <tr className="border-t-2 border-[#E5E7EB] bg-[#F0FDF4]">
-              <td
-                colSpan={3}
-                className="p-2 text-right text-[10px] uppercase tracking-wide font-semibold"
-              >
-                Base Total (Per Person)
-              </td>
-              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalIndianRate)}</td>
-              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalForeignRate)}</td>
-              <td className="p-2 text-right tabular-nums font-semibold">{inr(totalStudentRate)}</td>
-            </tr>
-            <tr className="border-b border-[#E5E7EB] bg-[#F0FDF4]">
-              <td colSpan={3} className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
-                Markup
-              </td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.indian.markup)}</td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.foreign.markup)}</td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.student.markup)}</td>
-            </tr>
-            <tr className="border-b-2 border-[#D1D5DB] bg-[#F0FDF4]">
-              <td colSpan={3} className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
-                GST 5%
-              </td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.indian.gst)}</td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.foreign.gst)}</td>
-              <td className="p-2 text-right tabular-nums">{inr(entranceCommercials.student.gst)}</td>
-            </tr>
-            <tr className="bg-[#F0FDF4] font-bold">
-              <td colSpan={3} className="p-2 text-right text-xs uppercase tracking-wide">
-                Final Total Per Person
-              </td>
-              <td className="p-2 text-right text-sm tabular-nums text-green-800">
-                {inr(entranceCommercials.indian.final)}
-              </td>
-              <td className="p-2 text-right text-sm tabular-nums text-blue-800">
-                {inr(entranceCommercials.foreign.final)}
-              </td>
-              <td className="p-2 text-right text-sm tabular-nums text-purple-800">
-                {inr(entranceCommercials.student.final)}
-              </td>
-            </tr>
           </tbody>
         </table>
       </div>
 
+      {sheet("Included Entrances — Per Person Costing", includedRows, "No entrances included.", true)}
+      {sheet("Optional Entrances — For Additional Sale", optionalRows, "No optional entrances for the current routing.", false)}
+
+      {invalidLines.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50/50 p-3">
+          <div className="text-xs font-semibold text-amber-800">Not applicable to current routing</div>
+          {invalidLines.map((line) => (
+            <div key={line.id} className="mt-2 text-xs">
+              {db.entrance_sites.find((site) => site.id === line.site_id)?.site_name || line.custom_name || "Historical entrance"} — excluded from costing
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   );
 }

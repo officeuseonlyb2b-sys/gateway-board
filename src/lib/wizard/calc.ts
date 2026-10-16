@@ -3,6 +3,8 @@ import type { DB, RatePlan } from "@/lib/mock-store";
 import { miscRateForPax } from "@/lib/mock-store";
 import type { QuoteDraft, HotelOption } from "./types";
 import { addDaysISO } from "@/lib/format";
+import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
+import { getQuotationScope } from "@/lib/query-for";
 
 export interface OptionTotals {
   key: string;
@@ -31,6 +33,7 @@ export interface OptionTotals {
 }
 
 import { findRatePlan } from "./rate-lookup";
+import { isSelectedLandServiceValid } from "./land-eligibility";
 
 function pickPlan(
   plans: RatePlan[],
@@ -138,8 +141,9 @@ export function dynamicAccommodationBreakdown(
       const supplierGst = net * gstRateFor(net) * rooms;
       breakdown.net += net * rooms;
       breakdown.supplier_gst += supplierGst;
-      breakdown.total += (net * rooms) + supplierGst;
-      breakdown.capacity += rooms * ({ single: 1, double: 2, triple: 3, quad: 4 } as const)[allocation.occupancy];
+      breakdown.total += net * rooms + supplierGst;
+      breakdown.capacity +=
+        rooms * ({ single: 1, double: 2, triple: 3, quad: 4 } as const)[allocation.occupancy];
     });
   });
   return breakdown;
@@ -147,6 +151,30 @@ export function dynamicAccommodationBreakdown(
 
 export function dynamicAccommodationTotal(draft: QuoteDraft, option: HotelOption, d: DB): number {
   return dynamicAccommodationBreakdown(draft, option, d).total;
+}
+
+export function isSplitAccommodation(draft: QuoteDraft): boolean {
+  return (
+    draft.accommodation_planning_mode === "split_group" &&
+    draft.pax_mode !== "range" &&
+    (draft.allocation_mode === "dynamic" || (draft.dynamic_days ?? []).length > 0)
+  );
+}
+
+/** Accommodation-only pax target; global quotation/Land pax is never changed. */
+export function effectiveAccommodationPax(draft: QuoteDraft, option: HotelOption): number {
+  return isSplitAccommodation(draft)
+    ? Math.max(0, Math.trunc(option.allocated_pax ?? 0))
+    : Math.max(1, effectivePaxForPricing(draft));
+}
+
+export function splitAccommodationAllocation(draft: QuoteDraft) {
+  const total = Math.max(0, totalPax(draft));
+  const allocated = draft.hotel_options.reduce(
+    (sum, option) => sum + Math.max(0, Math.trunc(option.allocated_pax ?? 0)),
+    0,
+  );
+  return { total, allocated, remaining: Math.max(0, total - allocated), excess: Math.max(0, allocated - total) };
 }
 
 export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
@@ -201,7 +229,7 @@ export function mealSelectionsFor(
 ): Record<string, import("./types").MealDaySelection> {
   if (!optionKey) return draft.meal_selections ?? {};
   const byOpt = draft.meal_selections_by_option?.[optionKey as import("./types").OptionKey];
-  return byOpt ?? (optionKey === "A" ? draft.meal_selections ?? {} : {});
+  return byOpt ?? (optionKey === "A" ? (draft.meal_selections ?? {}) : {});
 }
 
 /** Meals already included by the selected hotel meal plan. */
@@ -215,8 +243,10 @@ export function computeMealDays(
   d: import("@/lib/mock-store").DB,
   optionKey?: string,
 ): { rows: MealDayRow[]; total: number } {
-  const pax = Math.max(1, effectivePaxForPricing(draft));
   const opt = draft.hotel_options?.find((o) => o.key === optionKey) ?? draft.hotel_options?.[0];
+  const pax = opt
+    ? effectiveAccommodationPax(draft, opt)
+    : Math.max(1, effectivePaxForPricing(draft));
   const selections = mealSelectionsFor(draft, optionKey);
   const rows: MealDayRow[] = [];
   let total = 0;
@@ -224,12 +254,14 @@ export function computeMealDays(
   draft.routing.forEach((day, i) => {
     const date = day.date || addDaysISO(draft.start_date, i);
     const fromName = day.from_city?.trim().toLowerCase();
-    const fromCityId = d.cities.find((city) =>
-      city.id === day.from_city || city.name.trim().toLowerCase() === fromName,
+    const fromCityId = d.cities.find(
+      (city) => city.id === day.from_city || city.name.trim().toLowerCase() === fromName,
     )?.id;
     const cityIds = Array.from(
       new Set(
-        [fromCityId, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[],
+        [fromCityId, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(
+          Boolean,
+        ) as string[],
       ),
     );
     cityIds.forEach((cityId) => {
@@ -297,21 +329,53 @@ export function computeMealsTotal(
 }
 
 export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-store").DB): number {
-  const t = draft.transport.reduce((s, l) => s + transportLineTotal(l), 0);
-  const a = draft.activities.reduce(
-    (s, l) => s + (l.inclusion_status === "optional" ? 0 : l.rate * l.qty),
-    0,
-  );
-  const e = draft.entrances.reduce(
-    (s, l) =>
-      s +
-      l.indian_pax * l.indian_rate +
-      l.foreign_pax * l.foreign_rate +
-      (l.student_pax ?? 0) * (l.student_rate ?? 0),
-    0,
-  );
-  const g = draft.guides.reduce((s, l) => s + l.rate * l.guides * l.days, 0);
-  const m = draft.misc.reduce((sum, line) => {
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  const t = scope.landPart
+    ? draft.transport.reduce((s, l) => s + transportLineTotal(l), 0)
+    : 0;
+  const a = scope.landPart ? draft.activities.reduce((sum, line) => {
+    if (line.inclusion_status === "optional") return sum;
+    if (
+      d &&
+      !isSelectedLandServiceValid(
+        "activity",
+        line.activity_id,
+        line.from_routing_days?.[0],
+        draft,
+        d,
+      )
+    )
+      return sum;
+    return sum + line.rate * line.qty;
+  }, 0) : 0;
+  const entranceCategory = draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
+  const entrancePax = effectivePaxForPricing(draft);
+  const e = scope.landPart ? draft.entrances.reduce((sum, line) => {
+    if (
+      d &&
+      !isSelectedLandServiceValid("entrance", line.site_id, line.from_routing_days?.[0], draft, d)
+    )
+      return sum;
+    const rate =
+      entranceCategory === "foreign"
+        ? line.foreign_rate
+        : entranceCategory === "student"
+          ? (line.student_rate ?? 0)
+          : line.indian_rate;
+    return sum + rate * entrancePax;
+  }, 0) : 0;
+  const g = scope.landPart ? draft.guides.reduce((sum, line) => {
+    if (line.is_escort && isEscortEnabled(draft) && getEscortPricingMode(draft)) return sum;
+    if (!line.is_escort && line.inclusion_status === "optional") return sum;
+    if (
+      d &&
+      !line.is_escort &&
+      !isSelectedLandServiceValid("guide", line.guide_id, line.from_routing_days?.[0], draft, d)
+    )
+      return sum;
+    return sum + line.rate * line.guides * line.days;
+  }, 0) : 0;
+  const m = scope.landPart ? draft.misc.reduce((sum, line) => {
     const master = line.item_id
       ? d?.miscellaneous_items.find((item) => item.id === line.item_id)
       : undefined;
@@ -326,8 +390,8 @@ export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-sto
         ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
         : line.rate * line.qty)
     );
-  }, 0);
-  const meals = computeMealsTotal(draft, d);
+  }, 0) : 0;
+  const meals = scope.accommodationPart ? computeMealsTotal(draft, d) : 0;
   // Optional supplements are deliberately excluded from the package total.
   // They are priced and displayed separately in Step 9.
   return t + a + e + g + m + meals;

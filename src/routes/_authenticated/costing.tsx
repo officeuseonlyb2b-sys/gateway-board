@@ -138,7 +138,15 @@ import { Step17 } from "@/components/quotation/steps/StepFinal";
 
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
 import { MarkupGstSettings } from "@/components/quotation/MarkupGstSettings";
-import { QUERY_FOR_OPTIONS, normalizeQueryFor, type QueryFor } from "@/lib/query-for";
+import {
+  QUERY_FOR_OPTIONS,
+  getQuotationScope,
+  nextQuotationStep,
+  normalizeQueryFor,
+  previousQuotationStep,
+  resolveQuotationStep,
+  type QueryFor,
+} from "@/lib/query-for";
 import { mapQueryToQuotationTravellers } from "@/lib/wizard/query-quotation-map";
 
 export const Route = createFileRoute("/_authenticated/costing")({
@@ -153,7 +161,6 @@ export const Route = createFileRoute("/_authenticated/costing")({
 // ============================================================
 // Step definitions — Room Allocation now lives inside Hotels → 15 steps
 // ============================================================
-const TOTAL_STEPS = 11;
 const STEPS: { n: number; label: string; subs?: string[] }[] = [
   { n: 1, label: "Type" },
   { n: 2, label: "Who" },
@@ -161,7 +168,11 @@ const STEPS: { n: number; label: string; subs?: string[] }[] = [
   { n: 4, label: "Program" },
   { n: 5, label: "Routing" },
   { n: 6, label: "Commercial Setup" },
-  { n: 7, label: "Land Part", subs: ["Transport", "Miscellaneous", "Entrances", "Guides", "Activities / Experiences"] },
+  {
+    n: 7,
+    label: "Land Part",
+    subs: ["Transport", "Miscellaneous", "Entrances", "Guides", "Activities / Experiences"],
+  },
   { n: 8, label: "Accommodation Part", subs: ["Hotels", "Meals"] },
   { n: 9, label: "Costing" },
   { n: 10, label: "Optional Supplements" },
@@ -228,11 +239,15 @@ function ensureProgramInMaster(
 ): QuoteDraft {
   const saveCustomizedCopy = draft.program_mode === "existing" && draft.save_program_as_new;
   const shouldCreate = draft.program_mode === "new" || saveCustomizedCopy;
-  const targetName = (saveCustomizedCopy || draft.program_mode === "new" ? draft.new_program_name : draft.program_name)?.trim();
+  const targetName = (
+    saveCustomizedCopy || draft.program_mode === "new" ? draft.new_program_name : draft.program_name
+  )?.trim();
   if (!shouldCreate || !targetName) return draft;
   const requestedCode = (
     (saveCustomizedCopy ? draft.new_program_code : draft.program_code) || nextProgramCode()
-  ).trim().toUpperCase();
+  )
+    .trim()
+    .toUpperCase();
   // A new/customized routing never overwrites a master, even if somebody
   // manually reuses an existing code.
   const conflict = getPrograms().find((program) => program.code === requestedCode);
@@ -412,11 +427,11 @@ function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
   // deliberate Exact selection from the linked Query during reload.
   if (draft.pax_mode === "exact") return draft;
   const validRangeBounds =
-    draft.pax_mode === "range"
-    && Number.isInteger(draft.pax_min)
-    && Number.isInteger(draft.pax_max)
-    && (draft.pax_min ?? 0) >= 1
-    && (draft.pax_max ?? 0) >= (draft.pax_min ?? 0);
+    draft.pax_mode === "range" &&
+    Number.isInteger(draft.pax_min) &&
+    Number.isInteger(draft.pax_max) &&
+    (draft.pax_min ?? 0) >= 1 &&
+    (draft.pax_max ?? 0) >= (draft.pax_min ?? 0);
   const existingRange = draft.pax_range && draft.pax_range !== "auto" ? draft.pax_range.trim() : "";
   const defaultBoundsPlaceholder = draft.pax_min === 1 && draft.pax_max === 40 && !existingRange;
   if (validRangeBounds && !defaultBoundsPlaceholder) return draft;
@@ -453,6 +468,23 @@ function WizardPage() {
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [sub, setSub] = useState(0);
+  const scope = getQuotationScope(draft?.query_for, draft?.commercial_mode);
+  const workflowSteps = scope.workflowSteps;
+  const workflowStepSet = new Set<number>(workflowSteps);
+  const visibleSteps = workflowSteps.map((stepNumber) => STEPS[stepNumber - 1]);
+  const visibleFlowGroups = FLOW_GROUPS.map((group) => ({
+    ...group,
+    steps: group.steps.filter((stepNumber) => workflowStepSet.has(stepNumber)),
+  })).filter((group) => group.steps.length > 0);
+  const step = resolveQuotationStep(draft?.step ?? 1, workflowSteps);
+  const stepPosition = workflowSteps.findIndex((candidate) => candidate === step) + 1;
+
+  useEffect(() => {
+    if (!draft || draft.step === step) return;
+    writeDraft({ ...draft, step });
+    setSub(0);
+  }, [draft, step]);
 
   useEffect(() => {
     if (initialized) return;
@@ -476,7 +508,12 @@ function WizardPage() {
           linked_query_id: query.query_id,
           linked_query_name: query.customer,
           query_for: normalizeQueryFor(query.requirement),
-          commercial_mode: normalizeQueryFor(query.requirement) === "Accommodation Part" ? "accommodation_only" : normalizeQueryFor(query.requirement) === "Land Part" ? "transport_only" : "package",
+          commercial_mode:
+            normalizeQueryFor(query.requirement) === "Accommodation Part"
+              ? "accommodation_only"
+              : normalizeQueryFor(query.requirement) === "Land Part"
+                ? "transport_only"
+                : "package",
           query_type: (isB2B ? "B2B" : "B2C") as QueryType,
           tour_type: isGroup ? "GIT" : "FIT",
           agent: isB2B
@@ -541,7 +578,7 @@ function WizardPage() {
 
   useEffect(() => {
     if (!draft) return;
-    if (draft.step <= 1) {
+    if (step <= 1) {
       setActiveWizard(null);
       return;
     }
@@ -555,23 +592,22 @@ function WizardPage() {
             ? draft.guest.name
             : draft.brochure.theme) ||
         "Untitled",
-      step: draft.step,
+      step,
       savedAt: draft.updated_at,
     });
-  }, [draft, currentDraftId]);
+  }, [draft, currentDraftId, step]);
 
   // Keep a resumable named draft in sync after the recipient is known. The
   // generated quote is written separately and is never used as an editable draft.
   useEffect(() => {
-    if (!initialized || !draft || draft.step < 2) return;
+    if (!initialized || !draft || step < 2) return;
     const timer = window.setTimeout(() => {
-      const id = upsertDraft(draft, currentDraftId ?? undefined);
+      const state = draft.step === step ? draft : { ...draft, step };
+      const id = upsertDraft(state, currentDraftId ?? undefined);
       if (!currentDraftId) setCurrentDraftId(id);
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [draft, initialized, currentDraftId]);
-
-  const [sub, setSub] = useState(0);
+  }, [draft, initialized, currentDraftId, step]);
 
   if (!draft) {
     return (
@@ -581,7 +617,6 @@ function WizardPage() {
     );
   }
 
-  const step = Math.min(draft.step, TOTAL_STEPS);
   const set = (patch: Partial<QuoteDraft>) => {
     const current = loadDraft() ?? draft;
     writeDraft({ ...current, ...patch });
@@ -608,12 +643,16 @@ function WizardPage() {
     const latest = loadDraft() ?? draft;
     const review = validateQuoteForFinalization(latest, dbData);
     if (review.blockers.length) {
-      toast.error(`Resolve ${review.blockers.length} blocker${review.blockers.length === 1 ? "" : "s"} before generating this quote.`);
+      toast.error(
+        `Resolve ${review.blockers.length} blocker${review.blockers.length === 1 ? "" : "s"} before generating this quote.`,
+      );
       return;
     }
     setIsFinalizing(true);
     try {
-      const preparedDraft = ensureProgramInMaster(latest, dbData, user?.name || "Unknown");
+      const preparedDraft = getQuotationScope(latest.query_for, latest.commercial_mode).program
+        ? ensureProgramInMaster(latest, dbData, user?.name || "Unknown")
+        : latest;
       const quote = buildSavedQuoteFromDraft(preparedDraft, dbData, user?.name || "Unknown");
       persistQuote(quote);
       if (preparedDraft.linked_query_id) {
@@ -622,7 +661,9 @@ function WizardPage() {
           await pushCrmSnapshotNow();
         } catch (error) {
           console.error("Linked costing remote sync failed", error);
-          toast.warning("The immutable quote and its Query link were saved locally; remote sync is pending.");
+          toast.warning(
+            "The immutable quote and its Query link were saved locally; remote sync is pending.",
+          );
         }
       }
       if (currentDraftId) deleteDraft(currentDraftId);
@@ -638,7 +679,9 @@ function WizardPage() {
         message: `${quote.tour_title} · ${quote.total_nights}N · revision ${quote.version}`,
         href: "/quotes",
       });
-      toast.success(`${quote.display_number || quote.quote_number} generated. This version is now read-only.`);
+      toast.success(
+        `${quote.display_number || quote.quote_number} generated. This version is now read-only.`,
+      );
     } catch (error) {
       console.error("Quote finalization failed", error);
       toast.error(error instanceof Error ? error.message : "Could not generate the quote.");
@@ -648,13 +691,14 @@ function WizardPage() {
   };
 
   const go = (n: number, subIndex = 0) => {
-    if (n < 1 || n > TOTAL_STEPS) return;
-    if (n > step && !canProceed) return;
+    const targetPosition = workflowSteps.findIndex((candidate) => candidate === n);
+    if (targetPosition < 0) return;
+    if (targetPosition > stepPosition - 1 && !canProceed) return;
     const current = loadDraft() ?? draft;
     const next = { ...current, step: n };
     writeDraft(next);
     setSub(subIndex);
-    if (n > step && n >= 3) {
+    if (targetPosition > stepPosition - 1 && n >= 3) {
       persistToDrafts(next, { silent: true });
     }
   };
@@ -666,7 +710,8 @@ function WizardPage() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    go(step + 1);
+    const nextStep = nextQuotationStep(step, workflowSteps);
+    if (nextStep !== step) go(nextStep);
   };
   const goBack = () => {
     if (subCount > 0 && sub > 0) {
@@ -674,8 +719,10 @@ function WizardPage() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    const prevSubs = STEPS[step - 2]?.subs?.length ?? 0;
-    go(step - 1, prevSubs > 0 ? prevSubs - 1 : 0);
+    const previousStep = previousQuotationStep(step, workflowSteps);
+    if (previousStep === step) return;
+    const prevSubs = STEPS[previousStep - 1]?.subs?.length ?? 0;
+    go(previousStep, prevSubs > 0 ? prevSubs - 1 : 0);
   };
 
   const customerLabel =
@@ -693,7 +740,7 @@ function WizardPage() {
       : draft.has_dates === false
         ? `${draft.nights}N / ${draft.nights + 1}D · dates flexible`
         : `${fmtDateShort(draft.start_date)} – ${fmtDateShort(endDate)}`;
-  const activeFlowGroup = FLOW_GROUPS.find((group) =>
+  const activeFlowGroup = visibleFlowGroups.find((group) =>
     group.steps.some((stepNumber) => stepNumber === step),
   );
 
@@ -788,7 +835,10 @@ function WizardPage() {
           </div>
         </div>
         <div className="grid gap-px overflow-hidden rounded-b-xl border bg-border/60 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
-          <QuoteContextItem label="Current step" value={`${step}. ${STEPS[step - 1].label}`} />
+          <QuoteContextItem
+            label="Current step"
+            value={`${stepPosition}. ${STEPS[step - 1].label}`}
+          />
           <QuoteContextItem label="Travel" value={dateLabel} />
           <QuoteContextItem
             label="Travellers"
@@ -802,18 +852,23 @@ function WizardPage() {
         </div>
 
         <div className="mt-4 rounded-xl border bg-background px-3 py-2 xl:hidden">
-          <ProgressBar step={step} onJump={go} />
+          <ProgressBar step={step} steps={visibleSteps} onJump={go} />
         </div>
 
         <div
           className={cn(
             "mt-5 grid items-start gap-5",
-            isFocusMode
-              ? "grid-cols-[minmax(0,1fr)]"
-              : "xl:grid-cols-[230px_minmax(0,1fr)_280px]",
+            isFocusMode ? "grid-cols-[minmax(0,1fr)]" : "xl:grid-cols-[230px_minmax(0,1fr)_280px]",
           )}
         >
-          {!isFocusMode && <QuotationNavigator step={step} onJump={go} />}
+          {!isFocusMode && (
+            <QuotationNavigator
+              step={step}
+              steps={visibleSteps}
+              groups={visibleFlowGroups}
+              onJump={go}
+            />
+          )}
 
           <main className="min-w-0">
             <Card className="card-elevated overflow-hidden">
@@ -823,7 +878,7 @@ function WizardPage() {
                     {activeFlowGroup?.label || "Quotation workspace"}
                   </div>
                   <div className="text-sm font-semibold text-foreground">
-                    Step {step} of {TOTAL_STEPS} · {STEPS[step - 1].label}
+                    Step {stepPosition} of {workflowSteps.length} · {STEPS[step - 1].label}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -848,7 +903,7 @@ function WizardPage() {
                 </div>
               </div>
               <div className="p-4 sm:p-6">
-                <StepContent draft={draft} set={set} sub={sub} setSub={setSub} />
+                <StepContent draft={draft} set={set} step={step} sub={sub} setSub={setSub} />
                 {step === 10 && (
                   <FinalizationPanel
                     draft={draft}
@@ -861,7 +916,7 @@ function WizardPage() {
             </Card>
 
             <div className="mt-4 flex items-center justify-between rounded-xl border bg-background p-3 shadow-sm">
-              <Button variant="ghost" onClick={goBack} disabled={step === 1 && sub === 0}>
+              <Button variant="ghost" onClick={goBack} disabled={stepPosition === 1 && sub === 0}>
                 <ChevronLeft className="h-4 w-4 mr-1" /> Back
               </Button>
               <div className="hidden text-center text-xs text-muted-foreground sm:block">
@@ -869,7 +924,7 @@ function WizardPage() {
                   ? `${STEPS[step - 1].subs?.[sub] || STEPS[step - 1].label} · ${sub + 1} of ${subCount}`
                   : STEPS[step - 1].label}
               </div>
-              {step < TOTAL_STEPS || sub < subCount - 1 ? (
+              {stepPosition < workflowSteps.length || sub < subCount - 1 ? (
                 <Button onClick={goNext} disabled={!canProceed}>
                   Continue <ChevronRight className="h-4 w-4 ml-1" />
                 </Button>
@@ -888,7 +943,11 @@ function WizardPage() {
           )}
         </div>
       </div>
-      <QuoteViewerDialog quote={savedQuote} open={!!savedQuote} onClose={() => setSavedQuote(null)} />
+      <QuoteViewerDialog
+        quote={savedQuote}
+        open={!!savedQuote}
+        onClose={() => setSavedQuote(null)}
+      />
     </div>
   );
 }
@@ -906,7 +965,19 @@ function QuoteContextItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function QuotationNavigator({ step, onJump }: { step: number; onJump: (n: number) => void }) {
+function QuotationNavigator({
+  step,
+  steps,
+  groups,
+  onJump,
+}: {
+  step: number;
+  steps: { n: number; label: string; subs?: string[] }[];
+  groups: { label: string; description: string; steps: readonly number[] }[];
+  onJump: (n: number) => void;
+}) {
+  const activeIndex = steps.findIndex((item) => item.n === step);
+  const stepPosition = activeIndex + 1;
   return (
     <aside className="sticky top-4 hidden overflow-hidden rounded-xl border bg-background shadow-sm xl:block">
       <div className="border-b px-4 py-3">
@@ -916,15 +987,15 @@ function QuotationNavigator({ step, onJump }: { step: number; onJump: (n: number
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${Math.max(4, (step / TOTAL_STEPS) * 100)}%` }}
+            style={{ width: `${Math.max(4, (stepPosition / steps.length) * 100)}%` }}
           />
         </div>
         <div className="mt-1.5 text-[11px] text-muted-foreground">
-          Step {step} of {TOTAL_STEPS}
+          Step {stepPosition} of {steps.length}
         </div>
       </div>
       <nav className="space-y-1 p-2">
-        {FLOW_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div key={group.label} className="rounded-lg px-1 py-1.5">
             <div className="px-2 pb-1">
               <div className="text-[11px] font-bold text-foreground">{group.label}</div>
@@ -932,10 +1003,11 @@ function QuotationNavigator({ step, onJump }: { step: number; onJump: (n: number
             </div>
             <div className="space-y-0.5">
               {group.steps.map((stepNumber) => {
-                const item = STEPS[stepNumber - 1];
-                const done = step > stepNumber;
+                const item = steps.find((candidate) => candidate.n === stepNumber)!;
+                const itemIndex = steps.findIndex((candidate) => candidate.n === stepNumber);
+                const done = itemIndex < activeIndex;
                 const active = step === stepNumber;
-                const future = stepNumber > step;
+                const future = itemIndex > activeIndex;
                 return (
                   <button
                     key={stepNumber}
@@ -962,7 +1034,7 @@ function QuotationNavigator({ step, onJump }: { step: number; onJump: (n: number
                         future && "border-muted-foreground/20",
                       )}
                     >
-                      {done ? <Check className="h-3 w-3" /> : stepNumber}
+                      {done ? <Check className="h-3 w-3" /> : itemIndex + 1}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-xs font-medium">
                       {item.label}
@@ -982,14 +1054,23 @@ function QuotationNavigator({ step, onJump }: { step: number; onJump: (n: number
 // ============================================================
 // Progress bar
 // ============================================================
-function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => void }) {
+function ProgressBar({
+  step,
+  steps,
+  onJump,
+}: {
+  step: number;
+  steps: { n: number; label: string; subs?: string[] }[];
+  onJump: (n: number) => void;
+}) {
+  const activeIndex = steps.findIndex((item) => item.n === step);
   return (
     <div className="overflow-x-auto">
       <div className="flex items-start gap-0 min-w-max py-2">
-        {STEPS.map((s, i) => {
-          const done = step > s.n;
+        {steps.map((s, i) => {
+          const done = i < activeIndex;
           const active = step === s.n;
-          const isFuture = s.n > step;
+          const isFuture = i > activeIndex;
           const handleClick = () => {
             if (isFuture) {
               toast.info("Complete previous steps first");
@@ -1022,7 +1103,7 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
                       "bg-background border-muted-foreground/30 text-muted-foreground",
                   )}
                 >
-                  {done ? <Check className="h-4 w-4" /> : s.n}
+                  {done ? <Check className="h-4 w-4" /> : i + 1}
                 </div>
                 <span
                   className={cn(
@@ -1033,12 +1114,9 @@ function ProgressBar({ step, onJump }: { step: number; onJump: (n: number) => vo
                   {s.label}
                 </span>
               </button>
-              {i < STEPS.length - 1 && (
+              {i < steps.length - 1 && (
                 <div
-                  className={cn(
-                    "h-[2px] w-4 mt-4",
-                    step > s.n ? "bg-primary" : "bg-muted-foreground/20",
-                  )}
+                  className={cn("h-[2px] w-4 mt-4", done ? "bg-primary" : "bg-muted-foreground/20")}
                 />
               )}
             </div>
@@ -1062,9 +1140,13 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (d.query_type === "Brochure") return !!d.brochure.tour_type;
       return false;
     case 3: {
-      const paxOk = d.pax_mode === "range"
-        ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
-        : d.adults + d.ss + d.children.length >= 1 && d.children.every((child) => child.age !== undefined && child.age >= 0 && child.age <= 17);
+      const paxOk =
+        d.pax_mode === "range"
+          ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
+          : d.adults + d.ss + d.children.length >= 1 &&
+            d.children.every(
+              (child) => child.age !== undefined && child.age >= 0 && child.age <= 17,
+            );
       if (!paxOk) return false;
       if (!d.tour_start_city && !d.departure_city) return false;
       if (!d.tour_end_city) return false;
@@ -1104,15 +1186,16 @@ function validate(d: QuoteDraft, step: number): boolean {
 function StepContent({
   draft,
   set,
+  step,
   sub,
   setSub,
 }: {
   draft: QuoteDraft;
   set: (p: Partial<QuoteDraft>) => void;
+  step: number;
   sub: number;
   setSub: (n: number) => void;
 }) {
-  const step = Math.min(draft.step, TOTAL_STEPS);
   const def = STEPS[step - 1];
   const subs = def?.subs;
 
@@ -1246,7 +1329,8 @@ function Step1({ draft, set }: StepProps) {
   const linkQuery = (queryId: string) => {
     const query = queries.find((item) => item.query_id === queryId);
     if (!query) return;
-    const isB2B = query.customer_type === "B2B Agent" || /b2b|agent|partner/i.test(query.lead_source);
+    const isB2B =
+      query.customer_type === "B2B Agent" || /b2b|agent|partner/i.test(query.lead_source);
     const start = query.travel_start ? new Date(query.travel_start) : null;
     const end = query.travel_end ? new Date(query.travel_end) : null;
     const nights =
@@ -1284,7 +1368,12 @@ function Step1({ draft, set }: StepProps) {
       departure_city: query.tour_start_city || draft.departure_city,
       program_mode: query.program_id ? "existing" : draft.program_mode,
       query_for: normalizeQueryFor(query.requirement) || draft.query_for,
-      commercial_mode: normalizeQueryFor(query.requirement) === "Accommodation Part" ? "accommodation_only" : normalizeQueryFor(query.requirement) === "Land Part" ? "transport_only" : "package",
+      commercial_mode:
+        normalizeQueryFor(query.requirement) === "Accommodation Part"
+          ? "accommodation_only"
+          : normalizeQueryFor(query.requirement) === "Land Part"
+            ? "transport_only"
+            : "package",
       program_id: query.program_id || draft.program_id,
       program_code: query.program_id || draft.program_code,
       program_name: query.program_name || query.destination || draft.program_name,
@@ -1297,12 +1386,27 @@ function Step1({ draft, set }: StepProps) {
       <Card className="border-primary/20 bg-primary/[0.03] p-4">
         <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
           <div>
-            <div className="text-sm font-semibold">Link an existing Query <span className="font-normal text-muted-foreground">(optional)</span></div>
+            <div className="text-sm font-semibold">
+              Link an existing Query{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Leave this blank for a standalone quotation. Linked Queries continue to auto-fill the quotation.
+              Leave this blank for a standalone quotation. Linked Queries continue to auto-fill the
+              quotation.
             </p>
           </div>
-          <Select value={draft.linked_query_id || "__none__"} onValueChange={(value) => value === "__none__" ? set({ linked_query_id: undefined, linked_query_name: undefined, query_for: undefined }) : linkQuery(value)}>
+          <Select
+            value={draft.linked_query_id || "__none__"}
+            onValueChange={(value) =>
+              value === "__none__"
+                ? set({
+                    linked_query_id: undefined,
+                    linked_query_name: undefined,
+                    query_for: undefined,
+                  })
+                : linkQuery(value)
+            }
+          >
             <SelectTrigger className="bg-background">
               <SelectValue placeholder="No Query linked" />
             </SelectTrigger>
@@ -1310,7 +1414,8 @@ function Step1({ draft, set }: StepProps) {
               <SelectItem value="__none__">No Query — standalone quotation</SelectItem>
               {queries.map((query) => (
                 <SelectItem key={query.query_id} value={query.query_id}>
-                  {query.query_id} · {query.customer} · {query.program_name || query.destination || "Programme pending"}
+                  {query.query_id} · {query.customer} ·{" "}
+                  {query.program_name || query.destination || "Programme pending"}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1822,7 +1927,9 @@ function Step4({ draft, set }: StepProps) {
                     <SelectValue placeholder="Choose program…" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__no_program__">No Program / Continue Without Existing Program</SelectItem>
+                    <SelectItem value="__no_program__">
+                      No Program / Continue Without Existing Program
+                    </SelectItem>
                     {visiblePrograms.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.code} · {p.name} · {p.nights}N/{p.days}D ·{" "}
@@ -1959,7 +2066,6 @@ function Step4({ draft, set }: StepProps) {
                     </div>
                   </Card>
                 )}
-
               </div>
             )}
           </div>
@@ -1974,8 +2080,7 @@ function Step4({ draft, set }: StepProps) {
             </label>
             {draft.program_mode === "new" && (
               <div className="mt-2 space-y-4">
-                <div>
-                </div>
+                <div></div>
                 <div>
                   <Label>Program Category</Label>
                   <div className="flex flex-wrap gap-2 mt-1">
@@ -2025,15 +2130,18 @@ function Step9({ draft, set }: StepProps) {
       date: addDaysISO(draft.start_date, index),
       overnight: index < rows.length - 1,
       from_city:
-        index > 0 && rows[index - 1]?.city_id
-          ? cityName(rows[index - 1].city_id)
-          : row.from_city,
+        index > 0 && rows[index - 1]?.city_id ? cityName(rows[index - 1].city_id) : row.from_city,
     }));
   useEffect(() => {
     const need = draft.nights + 1;
     const dayZero = draft.routing.find((row) => row.is_day_zero || row.day === 0);
     const tourRows = draft.routing.filter((row) => !(row.is_day_zero || row.day === 0));
-    if (tourRows.length !== need || draft.routing.some((row, index) => !row.is_day_zero && row.day !== index + 1 - (dayZero ? 1 : 0))) {
+    if (
+      tourRows.length !== need ||
+      draft.routing.some(
+        (row, index) => !row.is_day_zero && row.day !== index + 1 - (dayZero ? 1 : 0),
+      )
+    ) {
       const rows: RoutingDay[] = [];
       for (let i = 0; i < need; i++) {
         const existing = tourRows[i];
@@ -2067,7 +2175,21 @@ function Step9({ draft, set }: StepProps) {
         }
       }
       const normalized = normalizeTourRows(rows);
-      writeDraft({ ...draft, routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized });
+      writeDraft({
+        ...draft,
+        routing: dayZero
+          ? [
+              {
+                ...dayZero,
+                day: 0,
+                is_day_zero: true,
+                date: addDaysISO(draft.start_date, -1),
+                overnight: true,
+              },
+              ...normalized,
+            ]
+          : normalized,
+      });
     }
   }, [draft.nights, draft.start_date, draft.tour_start_city, draft.tour_end_city]);
 
@@ -2092,7 +2214,7 @@ function Step9({ draft, set }: StepProps) {
       day: 0,
       date: addDaysISO(draft.start_date, tourIndex),
       city_id: "",
-      from_city: before ? (cityName(before.city_id) || before.to_city || "") : "",
+      from_city: before ? cityName(before.city_id) || before.to_city || "" : "",
       to_city: "",
       to_city_ids: [],
       program: "",
@@ -2100,26 +2222,72 @@ function Step9({ draft, set }: StepProps) {
       overnight: tourIndex < next.length - 1,
     });
     const normalized = normalizeTourRows(next);
-    set({ routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized, nights: Math.max(1, normalized.length - 1) });
+    set({
+      routing: dayZero
+        ? [
+            {
+              ...dayZero,
+              day: 0,
+              is_day_zero: true,
+              date: addDaysISO(draft.start_date, -1),
+              overnight: true,
+            },
+            ...normalized,
+          ]
+        : normalized,
+      nights: Math.max(1, normalized.length - 1),
+    });
   };
 
   const addDayZero = () => {
     if (draft.routing.some((row) => row.is_day_zero || row.day === 0)) return;
-    set({ routing: [{ day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), city_id: "", to_city_ids: [], program: "", program_mode: "text", overnight: true }, ...draft.routing] });
+    set({
+      routing: [
+        {
+          day: 0,
+          is_day_zero: true,
+          date: addDaysISO(draft.start_date, -1),
+          city_id: "",
+          to_city_ids: [],
+          program: "",
+          program_mode: "text",
+          overnight: true,
+        },
+        ...draft.routing,
+      ],
+    });
   };
 
   const deleteDay = (index: number) => {
     const row = draft.routing[index];
-    const populated = Boolean(row.city_id || row.to_city || row.from_city || row.program || row.travel_by || row.day_name);
+    const populated = Boolean(
+      row.city_id || row.to_city || row.from_city || row.program || row.travel_by || row.day_name,
+    );
     if (populated && !window.confirm(`Delete Day ${row.day}?`)) return;
     if (row.is_day_zero || row.day === 0) {
       set({ routing: draft.routing.filter((_, itemIndex) => itemIndex !== index) });
       return;
     }
     const dayZero = draft.routing.find((item) => item.is_day_zero || item.day === 0);
-    const remaining = draft.routing.filter((item, itemIndex) => itemIndex !== index && !(item.is_day_zero || item.day === 0));
+    const remaining = draft.routing.filter(
+      (item, itemIndex) => itemIndex !== index && !(item.is_day_zero || item.day === 0),
+    );
     const normalized = normalizeTourRows(remaining);
-    set({ routing: dayZero ? [{ ...dayZero, day: 0, is_day_zero: true, date: addDaysISO(draft.start_date, -1), overnight: true }, ...normalized] : normalized, nights: Math.max(1, normalized.length - 1) });
+    set({
+      routing: dayZero
+        ? [
+            {
+              ...dayZero,
+              day: 0,
+              is_day_zero: true,
+              date: addDaysISO(draft.start_date, -1),
+              overnight: true,
+            },
+            ...normalized,
+          ]
+        : normalized,
+      nights: Math.max(1, normalized.length - 1),
+    });
   };
 
   const OVERNIGHT_NONE = "__none__";
@@ -2128,12 +2296,18 @@ function Step9({ draft, set }: StepProps) {
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Day-by-Day Routing</h2>
       <div className="flex flex-wrap gap-2">
-      <Button type="button" variant="outline" size="sm" onClick={addDayZero} disabled={draft.routing.some((row) => row.is_day_zero || row.day === 0)}>
-        <Plus className="mr-1 h-4 w-4" /> Add Day 0
-      </Button>
-      <Button type="button" variant="outline" size="sm" onClick={() => insertDay(0)}>
-        <Plus className="mr-1 h-4 w-4" /> Insert before Day 1
-      </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addDayZero}
+          disabled={draft.routing.some((row) => row.is_day_zero || row.day === 0)}
+        >
+          <Plus className="mr-1 h-4 w-4" /> Add Day 0
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => insertDay(0)}>
+          <Plus className="mr-1 h-4 w-4" /> Insert before Day 1
+        </Button>
       </div>
       <div className="border border-[#E5E7EB] rounded-lg overflow-x-auto">
         <table className="w-full text-sm min-w-[900px] border-collapse">
@@ -2203,11 +2377,15 @@ function Step9({ draft, set }: StepProps) {
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {[...d.cities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((c) => (
-                                <SelectItem key={c.id} value={c.id}>
-                                  {c.name}
-                                </SelectItem>
-                              ))}
+                              {[...d.cities]
+                                .sort((a, b) =>
+                                  a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                                )
+                                .map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         );
@@ -2224,7 +2402,9 @@ function Step9({ draft, set }: StepProps) {
                               : [];
                         const available = d.cities
                           .filter((c) => !selected.includes(c.id))
-                          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+                          .sort((a, b) =>
+                            a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                          );
                         const addCity = (v: string) => {
                           const next = Array.from(new Set([...selected, v]));
                           const primary = next[0];
@@ -2321,11 +2501,15 @@ function Step9({ draft, set }: StepProps) {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
-                            {[...d.cities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.name}
-                              </SelectItem>
-                            ))}
+                            {[...d.cities]
+                              .sort((a, b) =>
+                                a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                              )
+                              .map((c) => (
+                                <SelectItem key={c.id} value={c.id}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                       )}
@@ -2403,13 +2587,20 @@ function Step9({ draft, set }: StepProps) {
                             .sort((a, b) => a.title.localeCompare(b.title));
                         };
                         const selectedMap = r.tours_selected_by_city || {};
-                        const toggle = (cid: string, title: string) => {
+                        const selectedIdMap = r.tour_ids_by_city || {};
+                        const toggle = (cid: string, tour: { id: string; title: string }) => {
                           const list = selectedMap[cid] || [];
-                          const next = list.includes(title)
-                            ? list.filter((t) => t !== title)
-                            : [...list, title];
+                          const idList = selectedIdMap[cid] || [];
+                          const isSelected = list.includes(tour.title) || idList.includes(tour.id);
+                          const next = isSelected
+                            ? list.filter((title) => title !== tour.title)
+                            : [...list, tour.title];
+                          const nextIds = isSelected
+                            ? idList.filter((id) => id !== tour.id)
+                            : [...idList, tour.id];
                           updateRow(i, {
                             tours_selected_by_city: { ...selectedMap, [cid]: next },
+                            tour_ids_by_city: { ...selectedIdMap, [cid]: nextIds },
                           });
                         };
                         if (allIds.length === 0) {
@@ -2463,8 +2654,11 @@ function Step9({ draft, set }: StepProps) {
                                           className="flex items-start gap-2 py-1 px-1 rounded hover:bg-muted cursor-pointer text-xs"
                                         >
                                           <Checkbox
-                                            checked={selected.includes(tour.title)}
-                                            onCheckedChange={() => toggle(cid, tour.title)}
+                                            checked={
+                                              selected.includes(tour.title) ||
+                                              (selectedIdMap[cid] || []).includes(tour.id)
+                                            }
+                                            onCheckedChange={() => toggle(cid, tour)}
                                             className="mt-0.5"
                                           />
                                           <span className="flex-1">{tour.title}</span>
@@ -2481,8 +2675,30 @@ function Step9({ draft, set }: StepProps) {
                     </td>
                     <td className="p-2 align-middle">
                       <div className="flex justify-end gap-1">
-                        {!r.is_day_zero && <button type="button" title={`Add day after Day ${r.day}`} onClick={() => insertDay(draft.routing.filter((row) => !(row.is_day_zero || row.day === 0)).findIndex((row) => row === r) + 1)} className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-muted"><Plus className="h-3.5 w-3.5" /></button>}
-                        <button type="button" title={`Delete Day ${r.day}`} onClick={() => deleteDay(i)} className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                        {!r.is_day_zero && (
+                          <button
+                            type="button"
+                            title={`Add day after Day ${r.day}`}
+                            onClick={() =>
+                              insertDay(
+                                draft.routing
+                                  .filter((row) => !(row.is_day_zero || row.day === 0))
+                                  .findIndex((row) => row === r) + 1,
+                              )
+                            }
+                            className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-muted"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          title={`Delete Day ${r.day}`}
+                          onClick={() => deleteDay(i)}
+                          className="h-8 w-8 inline-flex items-center justify-center rounded-md border hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -2508,22 +2724,69 @@ function Step9({ draft, set }: StepProps) {
                 </React.Fragment>
               );
             })}
-            <tr><td colSpan={9} className="p-0 text-center"><button type="button" className="w-full py-1 text-xs text-primary hover:bg-primary/5" onClick={() => insertDay(draft.routing.filter((row) => !(row.is_day_zero || row.day === 0)).length)}>+ Add day after final day</button></td></tr>
+            <tr>
+              <td colSpan={9} className="p-0 text-center">
+                <button
+                  type="button"
+                  className="w-full py-1 text-xs text-primary hover:bg-primary/5"
+                  onClick={() =>
+                    insertDay(
+                      draft.routing.filter((row) => !(row.is_day_zero || row.day === 0)).length,
+                    )
+                  }
+                >
+                  + Add day after final day
+                </button>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
       <Card className="border-dashed border-primary/30 bg-primary/[0.03] p-4">
         <label className="flex cursor-pointer items-start gap-3">
-          <Checkbox checked={!!draft.save_program_as_new} onCheckedChange={(checked) => set({
-            save_program_as_new: checked === true,
-            new_program_name: checked === true ? draft.new_program_name || `${draft.program_name || "Customized routing"}` : draft.new_program_name,
-          })} className="mt-0.5" />
-          <span><span className="block text-sm font-semibold">Save the customized routing as a new Program</span><span className="block text-xs text-muted-foreground">The selected master program is never overwritten.</span></span>
+          <Checkbox
+            checked={!!draft.save_program_as_new}
+            onCheckedChange={(checked) =>
+              set({
+                save_program_as_new: checked === true,
+                new_program_name:
+                  checked === true
+                    ? draft.new_program_name || `${draft.program_name || "Customized routing"}`
+                    : draft.new_program_name,
+              })
+            }
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-sm font-semibold">
+              Save the customized routing as a new Program
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              The selected master program is never overwritten.
+            </span>
+          </span>
         </label>
-        {draft.save_program_as_new && <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
-          <div><Label>New Program Name</Label><Input value={draft.new_program_name || ""} onChange={(event) => set({ new_program_name: event.target.value })} placeholder="Name the customized program" /></div>
-          <div><Label>New Program Code</Label><Input value={draft.new_program_code || ""} onChange={(event) => set({ new_program_code: event.target.value.toUpperCase() })} placeholder="Auto-generated" className="font-mono" /></div>
-        </div>}
+        {draft.save_program_as_new && (
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
+            <div>
+              <Label>New Program Name</Label>
+              <Input
+                value={draft.new_program_name || ""}
+                onChange={(event) => set({ new_program_name: event.target.value })}
+                placeholder="Name the customized program"
+              />
+            </div>
+            <div>
+              <Label>New Program Code</Label>
+              <Input
+                value={draft.new_program_code || ""}
+                onChange={(event) => set({ new_program_code: event.target.value.toUpperCase() })}
+                placeholder="Auto-generated"
+                className="font-mono"
+              />
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -2603,7 +2866,15 @@ function DayTransportPanel({
           />
         </F>
         <F label="Flight Type">
-          <div className="flex h-8 items-center gap-2"><Switch checked={!!details.is_overnight} onCheckedChange={(checked) => onChange({ is_overnight: checked })} /><span className="text-xs text-muted-foreground">{details.is_overnight ? "Overnight Flight" : "Same Day Flight"}</span></div>
+          <div className="flex h-8 items-center gap-2">
+            <Switch
+              checked={!!details.is_overnight}
+              onCheckedChange={(checked) => onChange({ is_overnight: checked })}
+            />
+            <span className="text-xs text-muted-foreground">
+              {details.is_overnight ? "Overnight Flight" : "Same Day Flight"}
+            </span>
+          </div>
         </F>
       </div>
     );
@@ -2862,21 +3133,25 @@ function Step18({ draft, set }: StepProps) {
   });
   const activitySupplements = Array.from(
     land.rows.reduce((map, row) => {
-      row.activity_opts.filter((item) => !item.checked).forEach((item) => {
-        const current = map.get(item.id) ?? { id: item.id, name: item.label, rate: 0 };
-        current.rate += item.amount;
-        map.set(item.id, current);
-      });
+      row.activity_opts
+        .filter((item) => !item.checked)
+        .forEach((item) => {
+          const current = map.get(item.id) ?? { id: item.id, name: item.label, rate: 0 };
+          current.rate += item.amount;
+          map.set(item.id, current);
+        });
       return map;
     }, new Map<string, { id: string; name: string; rate: number }>()),
   ).map(([, item]) => item);
   const miscSupplements = Array.from(
     land.rows.reduce((map, row) => {
-      row.misc_opts.filter((item) => !item.checked).forEach((item) => {
-        const current = map.get(item.id) ?? { id: item.id, name: item.label, rate: 0 };
-        current.rate += item.amount;
-        map.set(item.id, current);
-      });
+      row.misc_opts
+        .filter((item) => !item.checked)
+        .forEach((item) => {
+          const current = map.get(item.id) ?? { id: item.id, name: item.label, rate: 0 };
+          current.rate += item.amount;
+          map.set(item.id, current);
+        });
       return map;
     }, new Map<string, { id: string; name: string; rate: number }>()),
   ).map(([, item]) => item);
@@ -2885,33 +3160,45 @@ function Step18({ draft, set }: StepProps) {
   // one misleading combined price.
   const guideSupplements = Array.from(
     land.rows.reduce((map, row) => {
-      row.guide_opts.filter((item) => !item.checked).forEach((item) => {
-        const current = map.get(item.label) ?? { name: `${item.label} guide charges`, rate: 0 };
-        current.rate += item.amount;
-        map.set(item.label, current);
-      });
+      row.guide_opts
+        .filter((item) => !item.checked)
+        .forEach((item) => {
+          const current = map.get(item.label) ?? { name: `${item.label} guide charges`, rate: 0 };
+          current.rate += item.amount;
+          map.set(item.label, current);
+        });
       return map;
     }, new Map<string, { name: string; rate: number }>()),
   ).map(([, item]) => item);
   const entranceTotal = land.rows.reduce(
-    (sum, row) => sum + row.entrance_opts
-      .filter((item) => !item.checked)
-      .reduce((itemSum, item) => itemSum + item.amount, 0),
+    (sum, row) =>
+      sum +
+      row.entrance_opts
+        .filter((item) => !item.checked)
+        .reduce((itemSum, item) => itemSum + item.amount, 0),
     0,
   );
   const calculatedSupplements = [
-    ...guideSupplements.map((item) => ({ ...item, note: "Combined across the applicable itinerary days" })),
-    ...(entranceTotal > 0 ? [{
-      name: "Monument entrance charges",
-      rate: entranceTotal,
-      note: "Combined entrance total for the selected traveller category",
-    }] : []),
+    ...guideSupplements.map((item) => ({
+      ...item,
+      note: "Combined across the applicable itinerary days",
+    })),
+    ...(entranceTotal > 0
+      ? [
+          {
+            name: "Monument entrance charges",
+            rate: entranceTotal,
+            note: "Combined entrance total for the selected traveller category",
+          },
+        ]
+      : []),
   ];
   const hasOptional = (name: string, activityId?: string) =>
-    draft.optionals.some((line) => (
-      (activityId && line.activity_id === activityId)
-      || line.custom_name?.toLowerCase() === name.toLowerCase()
-    ));
+    draft.optionals.some(
+      (line) =>
+        (activityId && line.activity_id === activityId) ||
+        line.custom_name?.toLowerCase() === name.toLowerCase(),
+    );
   const addOptional = (name: string, rate: number, activityId?: string) => {
     if (!rate || hasOptional(name, activityId)) return;
     set({
@@ -2932,22 +3219,28 @@ function Step18({ draft, set }: StepProps) {
       <Card className="p-4">
         <div className="section-label mb-2">Activities excluded from the package</div>
         {activitySupplements.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No selected activity was excluded in Step 8.</p>
+          <p className="text-xs text-muted-foreground">
+            No selected activity was excluded in Step 8.
+          </p>
         ) : (
           <ul className="space-y-2">
             {activitySupplements.map((item) => {
               const source = draft.activities.find((line) => line.id === item.id);
-              return <li key={item.id} className="flex justify-between items-center gap-3 text-sm">
-                <span>{item.name} · {inr(item.rate)}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={hasOptional(item.name, source?.activity_id)}
-                  onClick={() => addOptional(item.name, item.rate, source?.activity_id)}
-                >
-                  {hasOptional(item.name, source?.activity_id) ? "Selected" : "Add optional"}
-                </Button>
-              </li>;
+              return (
+                <li key={item.id} className="flex justify-between items-center gap-3 text-sm">
+                  <span>
+                    {item.name} · {inr(item.rate)}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={hasOptional(item.name, source?.activity_id)}
+                    onClick={() => addOptional(item.name, item.rate, source?.activity_id)}
+                  >
+                    {hasOptional(item.name, source?.activity_id) ? "Selected" : "Add optional"}
+                  </Button>
+                </li>
+              );
             })}
           </ul>
         )}
@@ -2955,43 +3248,60 @@ function Step18({ draft, set }: StepProps) {
 
       {(miscSupplements.length > 0 || suggActs.length > 0) && (
         <Card className="p-4 space-y-4">
-          {miscSupplements.length > 0 && <div>
-            <div className="section-label mb-2">Miscellaneous services excluded from the package</div>
-            <ul className="space-y-2">
-              {miscSupplements.map((item) => (
-                <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span>{item.name} · {inr(item.rate)}</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={hasOptional(item.name)}
-                    onClick={() => addOptional(item.name, item.rate)}
-                  >
-                    {hasOptional(item.name) ? "Selected" : "Add optional"}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>}
-          {suggActs.length > 0 && <div>
-            <div className="section-label mb-2">Other itinerary activity suggestions</div>
-            <ul className="space-y-2">
-              {suggActs.map((activity) => {
-                const rate = activityRateForPax(activity, pricingPax);
-                return <li key={activity.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span>{activity.activity_name} · {inr(rate)}</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={hasOptional(activity.activity_name, activity.id)}
-                    onClick={() => addOptional(activity.activity_name, rate, activity.id)}
-                  >
-                    {hasOptional(activity.activity_name, activity.id) ? "Selected" : "Add optional"}
-                  </Button>
-                </li>;
-              })}
-            </ul>
-          </div>}
+          {miscSupplements.length > 0 && (
+            <div>
+              <div className="section-label mb-2">
+                Miscellaneous services excluded from the package
+              </div>
+              <ul className="space-y-2">
+                {miscSupplements.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span>
+                      {item.name} · {inr(item.rate)}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={hasOptional(item.name)}
+                      onClick={() => addOptional(item.name, item.rate)}
+                    >
+                      {hasOptional(item.name) ? "Selected" : "Add optional"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {suggActs.length > 0 && (
+            <div>
+              <div className="section-label mb-2">Other itinerary activity suggestions</div>
+              <ul className="space-y-2">
+                {suggActs.map((activity) => {
+                  const rate = activityRateForPax(activity, pricingPax);
+                  return (
+                    <li
+                      key={activity.id}
+                      className="flex items-center justify-between gap-3 text-sm"
+                    >
+                      <span>
+                        {activity.activity_name} · {inr(rate)}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={hasOptional(activity.activity_name, activity.id)}
+                        onClick={() => addOptional(activity.activity_name, rate, activity.id)}
+                      >
+                        {hasOptional(activity.activity_name, activity.id)
+                          ? "Selected"
+                          : "Add optional"}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </Card>
       )}
 
@@ -3001,25 +3311,30 @@ function Step18({ draft, set }: StepProps) {
           <p className="text-xs text-muted-foreground">
             All calculated guide and entrance services are already included in the package.
           </p>
-        ) : <div className="grid gap-3 md:grid-cols-2">
-          {calculatedSupplements.map((item) => (
-            <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-              <div>
-                <div className="text-sm font-medium">{item.name}</div>
-                <div className="text-xs text-muted-foreground">{item.note}</div>
-                <div className="mt-1 text-sm font-semibold">{inr(item.rate)}</div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!item.rate || hasOptional(item.name)}
-                onClick={() => addOptional(item.name, item.rate)}
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {calculatedSupplements.map((item) => (
+              <div
+                key={item.name}
+                className="flex items-center justify-between gap-3 rounded-lg border p-3"
               >
-                {hasOptional(item.name) ? "Selected" : "Add optional"}
-              </Button>
-            </div>
-          ))}
-        </div>}
+                <div>
+                  <div className="text-sm font-medium">{item.name}</div>
+                  <div className="text-xs text-muted-foreground">{item.note}</div>
+                  <div className="mt-1 text-sm font-semibold">{inr(item.rate)}</div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!item.rate || hasOptional(item.name)}
+                  onClick={() => addOptional(item.name, item.rate)}
+                >
+                  {hasOptional(item.name) ? "Selected" : "Add optional"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <CustomAdd
@@ -3161,6 +3476,7 @@ function FinalizationPanel({
 // ============================================================
 function SummarySidebar({ draft }: { draft: QuoteDraft }) {
   const d = useDB();
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const routingNames = draft.routing
     .filter((r) => r.overnight)
     .map((r) => d.cities.find((c) => c.id === r.city_id)?.name)
@@ -3184,22 +3500,27 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
       : draft.query_type === "B2C"
         ? draft.guest.email || draft.guest.phone
         : draft.brochure.tour_type;
-  const serviceTotal =
-    draft.transport.length +
-    draft.activities.length +
-    draft.entrances.length +
-    draft.guides.length +
-    draft.misc.length;
-  const hotelOptions = draft.hotel_options.filter((option) => option.selections.length > 0).length;
+  const serviceTotal = scope.landPart
+    ? draft.transport.length +
+      draft.activities.length +
+      draft.entrances.length +
+      draft.guides.length +
+      draft.misc.length
+    : 0;
+  const hotelOptions = scope.accommodationPart
+    ? draft.hotel_options.filter((option) => option.selections.length > 0).length
+    : 0;
   const readiness = [
     { label: "Recipient", ready: !!customer },
     {
       label: "Trip brief",
       ready: draft.nights > 0 && (draft.query_type === "Brochure" || totalPax(draft) > 0),
     },
-    { label: "Programme", ready: !!draft.program_name },
-    { label: "Routing", ready: draft.routing.some((day) => day.overnight && !!day.city_id) },
-    { label: "Accommodation", ready: hotelOptions > 0 },
+    ...(scope.program ? [{ label: "Programme", ready: !!draft.program_name }] : []),
+    ...(scope.routing
+      ? [{ label: "Routing", ready: draft.routing.some((day) => day.overnight && !!day.city_id) }]
+      : []),
+    ...(scope.accommodationPart ? [{ label: "Accommodation", ready: hotelOptions > 0 }] : []),
   ];
   const readyCount = readiness.filter((item) => item.ready).length;
 
@@ -3225,7 +3546,9 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
             {draft.tour_type && <Badge variant="secondary">{draft.tour_type}</Badge>}
           </div>
 
-          <SummaryField label="Programme" value={draft.program_name || "Not selected"} />
+          {scope.program && (
+            <SummaryField label="Programme" value={draft.program_name || "Not selected"} />
+          )}
           <SummaryField
             label="Travel"
             value={
@@ -3252,7 +3575,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
                 : `${draft.adults}A · ${draft.ss}SS · ${draft.children.length}C`
             }
           />
-          <SummaryField label="Routing" value={routingNames || "Not prepared"} />
+          {scope.routing && <SummaryField label="Routing" value={routingNames || "Not prepared"} />}
 
           <div className="grid grid-cols-2 gap-2 border-t pt-3">
             <div className="rounded-lg bg-muted/50 p-2.5">
@@ -3328,9 +3651,31 @@ function StepTripBasics({ draft, set }: StepProps) {
         <p className="mt-1 text-xs text-muted-foreground">
           Linked Queries are pre-filled; standalone quotations choose the commercial bucket here.
         </p>
-        <Select value={draft.query_for || ""} onValueChange={(value) => set({ query_for: value as QueryFor, commercial_mode: value === "Accommodation Part" ? "accommodation_only" : value === "Land Part" ? "transport_only" : "package", ...(value === "Package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}) })}>
-          <SelectTrigger className="mt-2 max-w-sm"><SelectValue placeholder="Select Query For" /></SelectTrigger>
-          <SelectContent>{QUERY_FOR_OPTIONS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
+        <Select
+          value={draft.query_for || ""}
+          onValueChange={(value) =>
+            set({
+              query_for: value as QueryFor,
+              commercial_mode:
+                value === "Accommodation Part"
+                  ? "accommodation_only"
+                  : value === "Land Part"
+                    ? "transport_only"
+                    : "package",
+              ...(value === "Package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}),
+            })
+          }
+        >
+          <SelectTrigger className="mt-2 max-w-sm">
+            <SelectValue placeholder="Select Query For" />
+          </SelectTrigger>
+          <SelectContent>
+            {QUERY_FOR_OPTIONS.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </Card>
       <StepPaxType draft={draft} set={set} />
@@ -3400,7 +3745,13 @@ function StepPaxType({ draft, set }: StepProps) {
   const isRangeActive = draft.pax_mode === "range";
 
   const handleAdultsChange = (v: number) => {
-    set({ adults: v, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+    set({
+      adults: v,
+      pax_mode: "exact",
+      pax_min: undefined,
+      pax_max: undefined,
+      pax_range: "auto",
+    });
   };
   const handleSSChange = (v: number) => {
     set({ ss: v, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
@@ -3413,24 +3764,34 @@ function StepPaxType({ draft, set }: StepProps) {
     } else {
       newChildren = draft.children.slice(0, Math.max(0, v));
     }
-    set({ children: newChildren, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+    set({
+      children: newChildren,
+      pax_mode: "exact",
+      pax_min: undefined,
+      pax_max: undefined,
+      pax_range: "auto",
+    });
   };
 
-  const selectExactMode = () => set({ pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+  const selectExactMode = () =>
+    set({ pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
   const selectRangeMode = () => {
-    const min = isRangeActive && Number.isInteger(draft.pax_min) && (draft.pax_min ?? 0) >= 1
-      ? draft.pax_min!
-      : Math.max(1, totPax);
-    const max = isRangeActive && Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min
-      ? draft.pax_max!
-      : min;
+    const min =
+      isRangeActive && Number.isInteger(draft.pax_min) && (draft.pax_min ?? 0) >= 1
+        ? draft.pax_min!
+        : Math.max(1, totPax);
+    const max =
+      isRangeActive && Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min
+        ? draft.pax_max!
+        : min;
     set({ pax_mode: "range", pax_min: min, pax_max: max, pax_range: `${min}-${max}` });
   };
 
   const updateRangeMin = (value: string) => {
     const min = parseInt(value, 10);
     if (!Number.isInteger(min) || min < 1) return;
-    const max = Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min ? draft.pax_max! : min;
+    const max =
+      Number.isInteger(draft.pax_max) && (draft.pax_max ?? 0) >= min ? draft.pax_max! : min;
     set({ pax_mode: "range", pax_min: min, pax_max: max, pax_range: `${min}-${max}` });
   };
 
@@ -3490,7 +3851,13 @@ function StepPaxType({ draft, set }: StepProps) {
               onChange={(e) => {
                 const next = [...draft.children];
                 next[i] = { age: e.target.value === "" ? undefined : parseInt(e.target.value) };
-                  set({ children: next, pax_mode: "exact", pax_min: undefined, pax_max: undefined, pax_range: "auto" });
+                set({
+                  children: next,
+                  pax_mode: "exact",
+                  pax_min: undefined,
+                  pax_max: undefined,
+                  pax_range: "auto",
+                });
               }}
             />
             <span className="text-xs text-muted-foreground">years</span>
@@ -3523,39 +3890,60 @@ function StepPaxType({ draft, set }: StepProps) {
         <div className="pt-2 border-t space-y-3">
           <Label className="text-xs">Traveller input mode</Label>
           <div className="flex items-center gap-3">
-            <Button variant={!isRangeActive ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={selectExactMode}>Exact Travellers</Button>
-            <Button variant={isRangeActive ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={selectRangeMode}>Pax Range</Button>
+            <Button
+              variant={!isRangeActive ? "default" : "outline"}
+              size="sm"
+              className="h-8 text-xs"
+              onClick={selectExactMode}
+            >
+              Exact Travellers
+            </Button>
+            <Button
+              variant={isRangeActive ? "default" : "outline"}
+              size="sm"
+              className="h-8 text-xs"
+              onClick={selectRangeMode}
+            >
+              Pax Range
+            </Button>
           </div>
-          {isRangeActive && <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1">
-              <Label className="text-xs">Min</Label>
-              <Input
-                type="number"
-                min={1}
-                className="w-20"
-                value={isRangeActive ? draft.pax_min ?? "" : ""}
-                onChange={(e) => updateRangeMin(e.target.value)}
-                placeholder="min"
-              />
+          {isRangeActive && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <Label className="text-xs">Min</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  className="w-20"
+                  value={isRangeActive ? (draft.pax_min ?? "") : ""}
+                  onChange={(e) => updateRangeMin(e.target.value)}
+                  placeholder="min"
+                />
+              </div>
+              <span className="text-muted-foreground">–</span>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs">Max</Label>
+                <Input
+                  type="number"
+                  min={draft.pax_min ?? 1}
+                  className="w-20"
+                  value={isRangeActive ? (draft.pax_max ?? "") : ""}
+                  onChange={(e) => updateRangeMax(e.target.value)}
+                  placeholder="max"
+                />
+              </div>
             </div>
-            <span className="text-muted-foreground">–</span>
-            <div className="flex items-center gap-1">
-              <Label className="text-xs">Max</Label>
-              <Input
-                type="number"
-                min={draft.pax_min ?? 1}
-                className="w-20"
-                value={isRangeActive ? draft.pax_max ?? "" : ""}
-                onChange={(e) => updateRangeMax(e.target.value)}
-                placeholder="max"
-              />
-            </div>
-          </div>}
+          )}
           <div className="text-[10px] text-muted-foreground">
             Pricing Pax: {pricingPax}.
             {isRangeActive && (
               <span>
-                {" "}Costing Range: <strong>{draft.pax_min}–{draft.pax_max} Pax</strong>.
+                {" "}
+                Costing Range:{" "}
+                <strong>
+                  {draft.pax_min}–{draft.pax_max} Pax
+                </strong>
+                .
               </span>
             )}
             {!isRangeActive && <span> Using exact traveller total ({totPax} Pax).</span>}
@@ -3615,7 +4003,9 @@ function StepDeparture({ draft, set }: StepProps) {
               set({ home_city: v, guest: { ...draft.guest, city: draft.guest.city || v } })
             }
           />
-          <p className="text-[11px] text-muted-foreground">Home/origin city; not used as Day 1 routing.</p>
+          <p className="text-[11px] text-muted-foreground">
+            Home/origin city; not used as Day 1 routing.
+          </p>
         </div>
         <div className="space-y-1.5">
           <Label>Tour starting city *</Label>
@@ -3631,7 +4021,9 @@ function StepDeparture({ draft, set }: StepProps) {
             value={draft.tour_end_city || ""}
             onChange={(v) => set({ tour_end_city: v })}
           />
-          <p className="text-[11px] text-muted-foreground">Becomes the final routing destination.</p>
+          <p className="text-[11px] text-muted-foreground">
+            Becomes the final routing destination.
+          </p>
         </div>
       </div>
     </div>
@@ -3735,7 +4127,10 @@ function StepTravel({ draft, set }: StepProps) {
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Arrival &amp; Departure</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Arrival and departure may use different transport modes. Travel class is intentionally not required.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Arrival and departure may use different transport modes. Travel class is intentionally not
+          required.
+        </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {(["arrival", "departure"] as const).map((side) => (
@@ -3745,7 +4140,9 @@ function StepTravel({ draft, set }: StepProps) {
               value={side === "arrival" ? draft.arrival_mode || "" : draft.departure_mode || ""}
               onValueChange={(value) => setJourneyMode(side, value)}
             >
-              <SelectTrigger><SelectValue placeholder={`Select ${side} mode`} /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder={`Select ${side} mode`} />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="flight">Flight</SelectItem>
                 <SelectItem value="train">Train</SelectItem>
@@ -3762,100 +4159,110 @@ function StepTravel({ draft, set }: StepProps) {
         <Card className="p-4 space-y-3">
           <div className="font-semibold text-sm flex items-center gap-2">✈ Flight Details</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {draft.arrival_mode === "flight" && <div className="space-y-2">
-              <div className="text-xs uppercase text-muted-foreground">Arrival Flight</div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="Flight No"
-                  value={draft.arrival_flight?.flight_no || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_flight: {
-                        ...(draft.arrival_flight || {}),
-                        flight_no: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  placeholder="From City"
-                  value={draft.arrival_flight?.from_city || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_flight: {
-                        ...(draft.arrival_flight || {}),
-                        from_city: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  type="date"
-                  value={draft.arrival_flight?.date || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_flight: { ...(draft.arrival_flight || {}), date: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  type="time"
-                  value={draft.arrival_flight?.time || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_flight: { ...(draft.arrival_flight || {}), time: e.target.value },
-                    })
-                  }
-                />
+            {draft.arrival_mode === "flight" && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase text-muted-foreground">Arrival Flight</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Flight No"
+                    value={draft.arrival_flight?.flight_no || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_flight: {
+                          ...(draft.arrival_flight || {}),
+                          flight_no: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="From City"
+                    value={draft.arrival_flight?.from_city || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_flight: {
+                          ...(draft.arrival_flight || {}),
+                          from_city: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={draft.arrival_flight?.date || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_flight: { ...(draft.arrival_flight || {}), date: e.target.value },
+                      })
+                    }
+                  />
+                  <Input
+                    type="time"
+                    value={draft.arrival_flight?.time || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_flight: { ...(draft.arrival_flight || {}), time: e.target.value },
+                      })
+                    }
+                  />
+                </div>
               </div>
-            </div>}
-            {draft.departure_mode === "flight" && <div className="space-y-2">
-              <div className="text-xs uppercase text-muted-foreground">Departure Flight</div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="Flight No"
-                  value={draft.departure_flight?.flight_no || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_flight: {
-                        ...(draft.departure_flight || {}),
-                        flight_no: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  placeholder="To City"
-                  value={draft.departure_flight?.to_city || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_flight: {
-                        ...(draft.departure_flight || {}),
-                        to_city: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  type="date"
-                  value={draft.departure_flight?.date || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_flight: { ...(draft.departure_flight || {}), date: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  type="time"
-                  value={draft.departure_flight?.time || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_flight: { ...(draft.departure_flight || {}), time: e.target.value },
-                    })
-                  }
-                />
+            )}
+            {draft.departure_mode === "flight" && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase text-muted-foreground">Departure Flight</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Flight No"
+                    value={draft.departure_flight?.flight_no || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_flight: {
+                          ...(draft.departure_flight || {}),
+                          flight_no: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="To City"
+                    value={draft.departure_flight?.to_city || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_flight: {
+                          ...(draft.departure_flight || {}),
+                          to_city: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={draft.departure_flight?.date || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_flight: {
+                          ...(draft.departure_flight || {}),
+                          date: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    type="time"
+                    value={draft.departure_flight?.time || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_flight: {
+                          ...(draft.departure_flight || {}),
+                          time: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </div>
               </div>
-            </div>}
+            )}
           </div>
         </Card>
       )}
@@ -3864,129 +4271,174 @@ function StepTravel({ draft, set }: StepProps) {
         <Card className="p-4 space-y-3">
           <div className="font-semibold text-sm flex items-center gap-2">🚂 Train Details</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {draft.arrival_mode === "train" && <div className="space-y-2">
-              <div className="text-xs uppercase text-muted-foreground">Arrival Train</div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="Train Name / No"
-                  value={draft.arrival_train?.train_name || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_train: { ...(draft.arrival_train || {}), train_name: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  placeholder="From City"
-                  value={draft.arrival_train?.from_city || ""}
-                  onChange={(e) =>
-                    set({
-                      arrival_train: { ...(draft.arrival_train || {}), from_city: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  type="date"
-                  value={draft.arrival_train?.date || ""}
-                  onChange={(e) =>
-                    set({ arrival_train: { ...(draft.arrival_train || {}), date: e.target.value } })
-                  }
-                />
-                <Input
-                  type="time"
-                  value={draft.arrival_train?.time || ""}
-                  onChange={(e) =>
-                    set({ arrival_train: { ...(draft.arrival_train || {}), time: e.target.value } })
-                  }
-                />
-                <Input
-                  placeholder="PNR"
-                  value={draft.arrival_train?.pnr || ""}
-                  onChange={(e) =>
-                    set({ arrival_train: { ...(draft.arrival_train || {}), pnr: e.target.value } })
-                  }
-                />
+            {draft.arrival_mode === "train" && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase text-muted-foreground">Arrival Train</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Train Name / No"
+                    value={draft.arrival_train?.train_name || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_train: {
+                          ...(draft.arrival_train || {}),
+                          train_name: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="From City"
+                    value={draft.arrival_train?.from_city || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_train: {
+                          ...(draft.arrival_train || {}),
+                          from_city: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={draft.arrival_train?.date || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_train: { ...(draft.arrival_train || {}), date: e.target.value },
+                      })
+                    }
+                  />
+                  <Input
+                    type="time"
+                    value={draft.arrival_train?.time || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_train: { ...(draft.arrival_train || {}), time: e.target.value },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="PNR"
+                    value={draft.arrival_train?.pnr || ""}
+                    onChange={(e) =>
+                      set({
+                        arrival_train: { ...(draft.arrival_train || {}), pnr: e.target.value },
+                      })
+                    }
+                  />
+                </div>
               </div>
-            </div>}
-            {draft.departure_mode === "train" && <div className="space-y-2">
-              <div className="text-xs uppercase text-muted-foreground">Departure Train</div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder="Train Name / No"
-                  value={draft.departure_train?.train_name || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_train: {
-                        ...(draft.departure_train || {}),
-                        train_name: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  placeholder="To City"
-                  value={draft.departure_train?.to_city || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_train: {
-                        ...(draft.departure_train || {}),
-                        to_city: e.target.value,
-                      },
-                    })
-                  }
-                />
-                <Input
-                  type="date"
-                  value={draft.departure_train?.date || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_train: { ...(draft.departure_train || {}), date: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  type="time"
-                  value={draft.departure_train?.time || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_train: { ...(draft.departure_train || {}), time: e.target.value },
-                    })
-                  }
-                />
-                <Input
-                  placeholder="PNR"
-                  value={draft.departure_train?.pnr || ""}
-                  onChange={(e) =>
-                    set({
-                      departure_train: { ...(draft.departure_train || {}), pnr: e.target.value },
-                    })
-                  }
-                />
+            )}
+            {draft.departure_mode === "train" && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase text-muted-foreground">Departure Train</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Train Name / No"
+                    value={draft.departure_train?.train_name || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_train: {
+                          ...(draft.departure_train || {}),
+                          train_name: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="To City"
+                    value={draft.departure_train?.to_city || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_train: {
+                          ...(draft.departure_train || {}),
+                          to_city: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={draft.departure_train?.date || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_train: { ...(draft.departure_train || {}), date: e.target.value },
+                      })
+                    }
+                  />
+                  <Input
+                    type="time"
+                    value={draft.departure_train?.time || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_train: { ...(draft.departure_train || {}), time: e.target.value },
+                      })
+                    }
+                  />
+                  <Input
+                    placeholder="PNR"
+                    value={draft.departure_train?.pnr || ""}
+                    onChange={(e) =>
+                      set({
+                        departure_train: { ...(draft.departure_train || {}), pnr: e.target.value },
+                      })
+                    }
+                  />
+                </div>
               </div>
-            </div>}
+            )}
           </div>
         </Card>
       )}
 
-      {([draft.arrival_mode, draft.departure_mode].some((mode) => mode === "bus" || mode === "road" || mode === "self")) && (
+      {[draft.arrival_mode, draft.departure_mode].some(
+        (mode) => mode === "bus" || mode === "road" || mode === "self",
+      ) && (
         <Card className="p-4">
           <div className="grid gap-4 md:grid-cols-2">
             {(["arrival", "departure"] as const).map((side) => {
               const mode = side === "arrival" ? draft.arrival_mode : draft.departure_mode;
               if (!mode || !["bus", "road", "self"].includes(mode)) return null;
-              const detail = side === "arrival" ? draft.arrival_other || {} : draft.departure_other || {};
+              const detail =
+                side === "arrival" ? draft.arrival_other || {} : draft.departure_other || {};
               const patch = (value: Partial<typeof detail>) =>
-                set(side === "arrival" ? { arrival_other: { ...detail, ...value } } : { departure_other: { ...detail, ...value } });
+                set(
+                  side === "arrival"
+                    ? { arrival_other: { ...detail, ...value } }
+                    : { departure_other: { ...detail, ...value } },
+                );
               return (
                 <div key={side} className="space-y-2 rounded-lg border p-3">
-                  <div className="text-xs font-semibold uppercase text-muted-foreground">{side} · {mode}</div>
-                  <Input placeholder="Service / bus name" value={detail.service_name || ""} onChange={(event) => patch({ service_name: event.target.value })} />
-                  <Input placeholder="Number (if applicable)" value={detail.service_number || ""} onChange={(event) => patch({ service_number: event.target.value })} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input placeholder="From" value={detail.from_city || ""} onChange={(event) => patch({ from_city: event.target.value })} />
-                    <Input placeholder="To" value={detail.to_city || ""} onChange={(event) => patch({ to_city: event.target.value })} />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">
+                    {side} · {mode}
                   </div>
-                  <Input placeholder="Timing / distance / remarks" value={detail.remarks || ""} onChange={(event) => patch({ remarks: event.target.value })} />
+                  <Input
+                    placeholder="Service / bus name"
+                    value={detail.service_name || ""}
+                    onChange={(event) => patch({ service_name: event.target.value })}
+                  />
+                  <Input
+                    placeholder="Number (if applicable)"
+                    value={detail.service_number || ""}
+                    onChange={(event) => patch({ service_number: event.target.value })}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      placeholder="From"
+                      value={detail.from_city || ""}
+                      onChange={(event) => patch({ from_city: event.target.value })}
+                    />
+                    <Input
+                      placeholder="To"
+                      value={detail.to_city || ""}
+                      onChange={(event) => patch({ to_city: event.target.value })}
+                    />
+                  </div>
+                  <Input
+                    placeholder="Timing / distance / remarks"
+                    value={detail.remarks || ""}
+                    onChange={(event) => patch({ remarks: event.target.value })}
+                  />
                 </div>
               );
             })}
