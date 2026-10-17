@@ -24,13 +24,14 @@ import {
 } from "./calc";
 import { buildLandPart } from "./costsheet";
 import { getQuotationScope } from "@/lib/query-for";
-import type {
-  QuoteDraft,
-  HotelOption,
-  DayRoomMix,
-  DynamicOccupancy,
-  PersonRoomType,
-  CostScenario,
+import {
+  hotelSelectionForDay,
+  type QuoteDraft,
+  type HotelOption,
+  type DayRoomMix,
+  type DynamicOccupancy,
+  type PersonRoomType,
+  type CostScenario,
 } from "./types";
 
 export interface ScenarioPersonRow {
@@ -244,7 +245,8 @@ export function computeScenario(
       if (!day.overnight) return;
       if (dynamicMode && (draft.allocation_mode === "dynamic" || dynamicDaySet.has(day.day)))
         return;
-      const sel = opt.selections.find((s) => s.city_id === day.city_id);
+      const sel = hotelSelectionForDay(opt, day);
+      if (sel?.no_hotel) return;
       if (!sel) {
         missing++;
         return;

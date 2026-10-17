@@ -2193,6 +2193,43 @@ function Step9({ draft, set }: StepProps) {
     }
   }, [draft.nights, draft.start_date, draft.tour_start_city, draft.tour_end_city]);
 
+  // The final routing destination is the Trip Basics ending city. Keep it last
+  // while retaining any editable intermediate destinations already on that day.
+  useEffect(() => {
+    if (!draft.tour_end_city) return;
+    const ending = d.cities.find(
+      (city) => city.name.toLowerCase() === draft.tour_end_city?.toLowerCase(),
+    );
+    const tourIndices = draft.routing
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => !(row.is_day_zero || row.day === 0));
+    const lastEntry = tourIndices[tourIndices.length - 1];
+    if (!lastEntry) return;
+    const { row: last, index } = lastEntry;
+    const existing = last.to_city_ids?.length
+      ? last.to_city_ids
+      : last.to_city_id
+        ? [last.to_city_id]
+        : [];
+    const finalId = ending?.id;
+    const nextIds = finalId ? [...existing.filter((id) => id !== finalId), finalId] : existing;
+    const changed =
+      last.to_city !== draft.tour_end_city ||
+      (finalId &&
+        (last.to_city_id !== finalId ||
+          last.city_id !== finalId ||
+          nextIds.length !== existing.length ||
+          nextIds.some((id, itemIndex) => id !== existing[itemIndex])));
+    if (!changed) return;
+    const routing = [...draft.routing];
+    routing[index] = {
+      ...last,
+      to_city: draft.tour_end_city,
+      ...(finalId ? { to_city_id: finalId, to_city_ids: nextIds, city_id: finalId } : {}),
+    };
+    set({ routing });
+  }, [draft.routing, draft.tour_end_city, d.cities, set]);
+
   const updateRow = (i: number, patch: Partial<RoutingDay>) => {
     const next = [...draft.routing];
     next[i] = { ...next[i], ...patch };
@@ -2400,20 +2437,37 @@ function Step9({ draft, set }: StepProps) {
                             : r.to_city_id
                               ? [r.to_city_id]
                               : [];
+                        const finalCity = isLast
+                          ? d.cities.find(
+                              (city) =>
+                                city.name.toLowerCase() === draft.tour_end_city?.toLowerCase(),
+                            )
+                          : undefined;
+                        const finalCityId = finalCity?.id;
                         const available = d.cities
                           .filter((c) => !selected.includes(c.id))
                           .sort((a, b) =>
                             a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
                           );
                         const addCity = (v: string) => {
-                          const next = Array.from(new Set([...selected, v]));
-                          const primary = next[0];
+                          const next =
+                            isLast && finalCityId
+                              ? [
+                                  ...selected.filter((id) => id !== finalCityId && id !== v),
+                                  v,
+                                  finalCityId,
+                                ]
+                              : Array.from(new Set([...selected, v]));
+                          const primary = isLast && finalCityId ? finalCityId : next[0];
                           const shouldMirror =
                             !r.city_id || r.city_id === r.to_city_id || selected.length === 0;
                           updateRow(i, {
                             to_city_ids: next,
                             to_city_id: primary,
-                            to_city: cityName(primary),
+                            to_city:
+                              isLast && draft.tour_end_city
+                                ? draft.tour_end_city
+                                : cityName(primary),
                             ...(isLast
                               ? { city_id: primary }
                               : shouldMirror
@@ -2422,12 +2476,16 @@ function Step9({ draft, set }: StepProps) {
                           });
                         };
                         const removeCity = (id: string) => {
+                          if (isLast && id === finalCityId) return;
                           const next = selected.filter((x) => x !== id);
-                          const primary = next[0] || "";
+                          const primary = isLast && finalCityId ? finalCityId : next[0] || "";
                           updateRow(i, {
                             to_city_ids: next,
                             to_city_id: primary,
-                            to_city: cityName(primary),
+                            to_city:
+                              isLast && draft.tour_end_city
+                                ? draft.tour_end_city
+                                : cityName(primary),
                             ...(isLast ? { city_id: primary } : {}),
                           });
                         };
@@ -2441,14 +2499,16 @@ function Step9({ draft, set }: StepProps) {
                                     className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30"
                                   >
                                     {cityName(id) || id}
-                                    <button
-                                      type="button"
-                                      onClick={() => removeCity(id)}
-                                      className="hover:text-destructive"
-                                      title="Remove"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
+                                    {!(isLast && id === finalCityId) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCity(id)}
+                                        className="hover:text-destructive"
+                                        title="Remove"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    )}
                                   </span>
                                 ))}
                               </div>
@@ -2473,7 +2533,7 @@ function Step9({ draft, set }: StepProps) {
                                 ))}
                               </SelectContent>
                             </Select>
-                            {isLast && selected.length === 0 && (
+                            {isLast && selected.length === 0 && !draft.tour_end_city && (
                               <Input
                                 className="h-7 text-[11px] mt-1"
                                 placeholder="or type departure city"

@@ -54,6 +54,7 @@ import type {
   DynamicOccupancy,
   DynamicRoomAllocation,
 } from "@/lib/wizard/types";
+import { hotelSelectionForDay } from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
@@ -548,7 +549,7 @@ function AccommodationSelectionTable({
     const cityName = d.cities.find((c) => c.id === day.city_id)?.name || day.to_city || "";
     const cityKey = cityName.trim().toLowerCase();
     const catKey = activeCategory.trim().toLowerCase();
-    const sel = option.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(option, day);
 
     const hotelCityName = (h: (typeof d.hotels)[number]) =>
       (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase();
@@ -654,9 +655,10 @@ function AccommodationSelectionTable({
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
-      const others = option.selections.filter((s) => s.city_id !== day.city_id);
+      const others = option.selections.filter((s) => s.routing_day !== day.day);
       const cur = sel || {
         city_id: day.city_id,
+        routing_day: day.day,
         hotel_id: "",
         room_id: "",
         meal_plan: "CP" as MealPlan,
@@ -929,27 +931,57 @@ function AccommodationSelectionTable({
                         <td className="py-3 px-3 text-[#334155]">{r.city}</td>
                         <td className="py-3 px-3 min-w-[180px]">
                           {isMissingHotel ? (
-                            <div className="text-amber-600 text-xs flex items-center gap-1">
-                              <AlertCircle className="h-3 w-3" /> No hotels{" "}
-                              <Button
-                                size="sm"
-                                variant="link"
-                                className="h-auto p-0 text-xs"
-                                onClick={() => onQuickAdd(r.cityId, r.city)}
+                            <div className="space-y-1 text-amber-600 text-xs">
+                              <Select
+                                value={r.sel?.no_hotel ? "__no_hotel__" : ""}
+                                onValueChange={() =>
+                                  r.setSel({
+                                    no_hotel: true,
+                                    hotel_id: "",
+                                    room_id: "",
+                                    meal_plan: "CP",
+                                  })
+                                }
                               >
-                                Add
-                              </Button>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue placeholder="No Hotel" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__no_hotel__">No Hotel</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <div className="flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3" /> No hotels{" "}
+                                <Button
+                                  size="sm"
+                                  variant="link"
+                                  className="h-auto p-0 text-xs"
+                                  onClick={() => onQuickAdd(r.cityId, r.city)}
+                                >
+                                  Add
+                                </Button>
+                              </div>
                             </div>
                           ) : (
                             <>
                               <Select
-                                value={r.selectedHotelId}
-                                onValueChange={(v) => r.setSel({ hotel_id: v, room_id: "" })}
+                                value={r.sel?.no_hotel ? "__no_hotel__" : r.selectedHotelId}
+                                onValueChange={(v) =>
+                                  v === "__no_hotel__"
+                                    ? r.setSel({
+                                        no_hotel: true,
+                                        hotel_id: "",
+                                        room_id: "",
+                                        meal_plan: "CP",
+                                      })
+                                    : r.setSel({ no_hotel: false, hotel_id: v, room_id: "" })
+                                }
                               >
                                 <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full">
                                   <SelectValue placeholder="Select hotel…" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                  <SelectItem value="__no_hotel__">No Hotel</SelectItem>
                                   {r.hotelPool.map((h) => (
                                     <SelectItem key={h.id} value={h.id}>
                                       {h.name}
@@ -976,7 +1008,9 @@ function AccommodationSelectionTable({
                           )}
                         </td>
                         <td className="py-3 px-3 min-w-[140px]">
-                          {r.sel?.hotel_id ? (
+                          {r.sel?.no_hotel ? (
+                            <span className="text-xs text-muted-foreground">â€”</span>
+                          ) : r.sel?.hotel_id ? (
                             <Select
                               value={r.selectedRoomId}
                               onValueChange={(v) => r.setSel({ room_id: v })}
@@ -1000,7 +1034,9 @@ function AccommodationSelectionTable({
                           )}
                         </td>
                         <td className="py-3 px-3 min-w-[100px]">
-                          {r.sel?.room_id ? (
+                          {r.sel?.no_hotel ? (
+                            <span className="text-xs text-muted-foreground">â€”</span>
+                          ) : r.sel?.room_id ? (
                             <Select
                               value={r.selectedMeal}
                               onValueChange={(v) =>
@@ -1737,9 +1773,9 @@ function DynamicAccommodation({
                             room_id: value,
                             manual_net_rate: undefined,
                             original_net_rate: undefined,
-                              override_reason: undefined,
-                              changed_by: undefined,
-                              changed_at: undefined,
+                            override_reason: undefined,
+                            changed_by: undefined,
+                            changed_at: undefined,
                           })
                         }
                       >
@@ -1763,9 +1799,9 @@ function DynamicAccommodation({
                             occupancy: value as DynamicOccupancy,
                             manual_net_rate: undefined,
                             original_net_rate: undefined,
-                              override_reason: undefined,
-                              changed_by: undefined,
-                              changed_at: undefined,
+                            override_reason: undefined,
+                            changed_by: undefined,
+                            changed_at: undefined,
                           })
                         }
                       >
@@ -1792,21 +1828,26 @@ function DynamicAccommodation({
                         value={(allocation.manual_net_rate ?? pricing.masterNet) || ""}
                         placeholder={pricing.masterNet > 0 ? "" : "Rate Not Available"}
                         onChange={(event) => {
-                          const value = event.target.value === "" ? undefined : Number(event.target.value) || undefined;
-                          const audit = value == null
-                            ? {
-                                manual_net_rate: undefined,
-                                original_net_rate: undefined,
-                                override_reason: undefined,
-                                changed_by: undefined,
-                                changed_at: undefined,
-                              }
-                            : {
-                                manual_net_rate: value,
-                                original_net_rate: allocation.original_net_rate ?? pricing.masterNet,
-                                changed_by: user?.name || "Unknown",
-                                changed_at: new Date().toISOString(),
-                              };
+                          const value =
+                            event.target.value === ""
+                              ? undefined
+                              : Number(event.target.value) || undefined;
+                          const audit =
+                            value == null
+                              ? {
+                                  manual_net_rate: undefined,
+                                  original_net_rate: undefined,
+                                  override_reason: undefined,
+                                  changed_by: undefined,
+                                  changed_at: undefined,
+                                }
+                              : {
+                                  manual_net_rate: value,
+                                  original_net_rate:
+                                    allocation.original_net_rate ?? pricing.masterNet,
+                                  changed_by: user?.name || "Unknown",
+                                  changed_at: new Date().toISOString(),
+                                };
                           patchAllocation(row.day, allocation.id, {
                             ...audit,
                           });
@@ -1815,9 +1856,15 @@ function DynamicAccommodation({
                       {allocation.manual_net_rate != null && (
                         <div className="mt-1 space-y-1 text-[9px] text-amber-700">
                           <div>
-                            Original {inr(allocation.original_net_rate ?? pricing.masterNet)} → Revised {inr(allocation.manual_net_rate)}
+                            Original {inr(allocation.original_net_rate ?? pricing.masterNet)} →
+                            Revised {inr(allocation.manual_net_rate)}
                           </div>
-                          <div>Edited by {allocation.changed_by || "Unknown"}{allocation.changed_at ? ` · ${new Date(allocation.changed_at).toLocaleString()}` : ""}</div>
+                          <div>
+                            Edited by {allocation.changed_by || "Unknown"}
+                            {allocation.changed_at
+                              ? ` · ${new Date(allocation.changed_at).toLocaleString()}`
+                              : ""}
+                          </div>
                           <Input
                             className="h-7 w-40 text-[10px]"
                             value={allocation.override_reason ?? ""}

@@ -10,9 +10,21 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { addDaysISO, inr } from "@/lib/format";
 import { restaurantsForCityNames, useDB, type Restaurant } from "@/lib/mock-store";
-import { computeMealDays, getCostingPaxValues, hotelsGst, hotelsMarkup, mealPlanCoverage } from "@/lib/wizard/calc";
+import {
+  computeMealDays,
+  getCostingPaxValues,
+  hotelsGst,
+  hotelsMarkup,
+  mealPlanCoverage,
+} from "@/lib/wizard/calc";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
-import type { MealChoice, MealDaySelection, OptionKey, RoutingDay } from "@/lib/wizard/types";
+import {
+  hotelSelectionForDay,
+  type MealChoice,
+  type MealDaySelection,
+  type OptionKey,
+  type RoutingDay,
+} from "@/lib/wizard/types";
 import type { StepProps } from "../shared";
 
 type MealKey = "lunch" | "dinner";
@@ -41,8 +53,9 @@ export function StepMeals({ draft, set }: StepProps) {
   const [activeKey, setActiveKey] = useState<OptionKey>(options[0]?.key ?? "A");
   const option = options.find((item) => item.key === activeKey) ?? options[0];
   const optionKey = option?.key ?? "A";
-  const selections = draft.meal_selections_by_option?.[optionKey]
-    ?? (optionKey === "A" ? draft.meal_selections ?? {} : {});
+  const selections =
+    draft.meal_selections_by_option?.[optionKey] ??
+    (optionKey === "A" ? (draft.meal_selections ?? {}) : {});
   const days = useMemo(
     () =>
       draft.routing.map((day, index) => {
@@ -84,6 +97,15 @@ export function StepMeals({ draft, set }: StepProps) {
       ...(optionKey === "A" ? { meal_selections: next } : {}),
     });
   };
+  const setMealInclusion = (
+    day: number,
+    cityId: string,
+    meal: MealKey,
+    inclusion_status: "included" | "optional",
+  ) => {
+    const current = selections[`${day}:${cityId}`]?.[meal];
+    if (current) setMeal(day, cityId, meal, { ...current, inclusion_status });
+  };
 
   if (!option)
     return (
@@ -96,9 +118,7 @@ export function StepMeals({ draft, set }: StepProps) {
     );
 
   const priced = days.flatMap(({ day, date, cityIds }) => {
-    const stay = day.overnight
-      ? option.selections.find((item) => item.city_id === day.city_id)
-      : undefined;
+    const stay = day.overnight ? hotelSelectionForDay(option, day) : undefined;
     const covered = mealPlanCoverage(stay?.meal_plan);
     return (["lunch", "dinner"] as const).map((meal) => {
       const selected = selectedFor(day.day, meal, cityIds);
@@ -120,10 +140,14 @@ export function StepMeals({ draft, set }: StepProps) {
   };
   const sharedMealRows = computeMealDays(draft, db, optionKey).rows;
   const lunch = commercials(
-    sharedMealRows.filter((row) => row.meal_type === "Lunch").reduce((sum, row) => sum + row.per_person, 0),
+    sharedMealRows
+      .filter((row) => row.meal_type === "Lunch")
+      .reduce((sum, row) => sum + row.per_person, 0),
   );
   const dinner = commercials(
-    sharedMealRows.filter((row) => row.meal_type === "Dinner").reduce((sum, row) => sum + row.per_person, 0),
+    sharedMealRows
+      .filter((row) => row.meal_type === "Dinner")
+      .reduce((sum, row) => sum + row.per_person, 0),
   );
   const arrangements = (meal: MealKey) =>
     priced
@@ -139,9 +163,17 @@ export function StepMeals({ draft, set }: StepProps) {
             : row.choice?.source === "restaurant"
               ? "Restaurant"
               : "No Meal",
+        inclusion: row.included
+          ? "included"
+          : row.choice?.inclusion_status === "optional"
+            ? "optional"
+            : "included",
       }));
   const lunches = arrangements("lunch");
   const dinners = arrangements("dinner");
+  const mealArrangements = [...lunches, ...dinners].filter((item) => item.type !== "No Meal");
+  const includedMeals = mealArrangements.filter((item) => item.inclusion === "included");
+  const optionalMeals = mealArrangements.filter((item) => item.inclusion === "optional");
 
   const selector = (
     day: number,
@@ -193,7 +225,7 @@ export function StepMeals({ draft, set }: StepProps) {
       });
     };
     return (
-      <div className="flex min-w-[340px] gap-2">
+      <div className="flex min-w-[430px] gap-2">
         <Select value={cityId} onValueChange={(id) => setMeal(day, id, meal)}>
           <SelectTrigger className="h-8 w-32">
             <SelectValue placeholder="City" />
@@ -224,6 +256,22 @@ export function StepMeals({ draft, set }: StepProps) {
             ))}
           </SelectContent>
         </Select>
+        {selected.choice && (
+          <Select
+            value={selected.choice.inclusion_status ?? "included"}
+            onValueChange={(status) =>
+              setMealInclusion(day, cityId, meal, status as "included" | "optional")
+            }
+          >
+            <SelectTrigger className="h-8 w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="included">Included</SelectItem>
+              <SelectItem value="optional">Optional</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
     );
   };
@@ -245,6 +293,8 @@ export function StepMeals({ draft, set }: StepProps) {
             <th className="p-2 text-left">City</th>
             <th className="p-2 text-left">Hotel/Restaurant</th>
             <th className="p-2 text-left">Type</th>
+            <th className="p-2 text-left">Meal</th>
+            <th className="p-2 text-right">Selling PP</th>
           </tr>
         </thead>
         <tbody>
@@ -255,6 +305,10 @@ export function StepMeals({ draft, set }: StepProps) {
               <td className="p-2">{item.city}</td>
               <td className="p-2">{item.venue}</td>
               <td className="p-2">{item.type}</td>
+              <td className="p-2 capitalize">{item.meal}</td>
+              <td className="p-2 text-right">
+                {item.included ? "Included" : inr(commercials(item.rate).final)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -298,9 +352,7 @@ export function StepMeals({ draft, set }: StepProps) {
             </thead>
             <tbody>
               {days.map(({ day, date, cityIds, route }) => {
-                const stay = day.overnight
-                  ? option.selections.find((item) => item.city_id === day.city_id)
-                  : undefined;
+                const stay = day.overnight ? hotelSelectionForDay(option, day) : undefined;
                 const coverage = mealPlanCoverage(stay?.meal_plan);
                 const lunchChoice = selectedFor(day.day, "lunch", cityIds).choice;
                 const dinnerChoice = selectedFor(day.day, "dinner", cityIds).choice;
@@ -365,8 +417,8 @@ export function StepMeals({ draft, set }: StepProps) {
         <h3 className="text-sm font-semibold">Meal Arrangement Summary</h3>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ArrangementTable title="Lunch Arrangements" items={lunches} />
-        <ArrangementTable title="Dinner Arrangements" items={dinners} />
+        <ArrangementTable title="Included Meals" items={includedMeals} />
+        <ArrangementTable title="Optional Meals — For Additional Sale" items={optionalMeals} />
       </div>
       <Card className="p-3">
         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">

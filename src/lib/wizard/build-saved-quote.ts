@@ -23,7 +23,7 @@ import {
 import { computeScenario } from "@/lib/wizard/scenario";
 import { getQuotationScope } from "@/lib/query-for";
 import { buildLandPart, buildRateSheet, type SheetOption } from "@/lib/wizard/costsheet";
-import type { CostScenario, QuoteDraft } from "@/lib/wizard/types";
+import { hotelSelectionForDay, type CostScenario, type QuoteDraft } from "@/lib/wizard/types";
 
 type DB = ReturnType<typeof useDB>;
 
@@ -114,7 +114,7 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
   const selectedMisc = aggregateSelected("misc_opts");
 
   const itinerary = draft.routing.map((day) => {
-    const sel = recOpt?.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(recOpt, day);
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id) : null;
     const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
@@ -127,10 +127,10 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
       day_number: day.day,
       date: day.date,
       city: cityName,
-      hotel_name: hotel?.name || "—",
+      hotel_name: sel?.no_hotel ? "No Hotel" : hotel?.name || "—",
       hotel_category: hotel?.hotel_category || "—",
       room_category: room?.name || "—",
-      meal_plan: sel?.meal_plan || "CP",
+      meal_plan: sel?.no_hotel ? "—" : sel?.meal_plan || "CP",
       season_label: plan?.season_label || "—",
       validity_start: plan?.validity_start || "",
       validity_end: plan?.validity_end || "",

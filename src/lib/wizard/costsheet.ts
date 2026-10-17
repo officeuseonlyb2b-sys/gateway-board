@@ -26,7 +26,14 @@ import {
   dynamicAccommodationBreakdown,
   isSplitAccommodation,
 } from "./calc";
-import type { QuoteDraft, HotelOption, TransportLine, EntranceCat, DayRoomMix } from "./types";
+import {
+  hotelSelectionForDay,
+  type QuoteDraft,
+  type HotelOption,
+  type TransportLine,
+  type EntranceCat,
+  type DayRoomMix,
+} from "./types";
 import { miscPerPersonForPax, transportOptionRows } from "./land-pricing";
 import { isSelectedLandServiceValid } from "./land-eligibility";
 import { getQuotationScope } from "@/lib/query-for";
@@ -128,7 +135,11 @@ export const GUIDE_LANGS = ["Hindi", "English", "Language"] as const;
 export type GuideLangOpt = (typeof GUIDE_LANGS)[number];
 export const guideOptId = (lineId: string, lang: string) => `${lineId}::${lang}`;
 
-function guideTourSelected(draft: QuoteDraft, guide: DB["guides"][number] | undefined, day: number) {
+function guideTourSelected(
+  draft: QuoteDraft,
+  guide: DB["guides"][number] | undefined,
+  day: number,
+) {
   const selectedTours = draft.guide_tour_selected_by_day?.[day];
   if (selectedTours === undefined || !guide) return true;
   const key = `${guide.city ?? guide.destination ?? ""}||${guide.tour_program ?? guide.name}`;
@@ -337,13 +348,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
       const legacySelected = isPicked(draft, "entrances", day, l.id);
       const checked =
         entranceTourSelected(draft, day, l.site_id || l.id, true) &&
-        entranceRateSelected(
-          draft,
-          day,
-          l.id,
-          activeEntranceCategory,
-          legacySelected,
-        ) &&
+        entranceRateSelected(draft, day, l.id, activeEntranceCategory, legacySelected) &&
         catPicked(draft, day, activeEntranceCategory);
       opts[day].entrances.push({
         id: l.id,
@@ -563,7 +568,8 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     if (!day.overnight) return;
     const date = day.date || addDaysISO(draft.start_date, i);
     const city = d.cities.find((c) => c.id === day.city_id)?.name || "—";
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return;
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id)?.name || "—" : "—";
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id)?.name || "—" : "—";
     const plan = sel
@@ -902,8 +908,8 @@ export function buildRateSheet(
     splitOptions.reduce(
       (sum, option) =>
         sum +
-        computeMealDays(draft, d, option.key).rows
-          .filter((row) => row.meal_type === mealType)
+        computeMealDays(draft, d, option.key)
+          .rows.filter((row) => row.meal_type === mealType)
           .reduce((mealSum, row) => mealSum + row.total, 0),
       0,
     ) / actualPax;
@@ -914,9 +920,9 @@ export function buildRateSheet(
     ? gross(splitAccommodation ? splitMealPerPerson("Dinner") : hotels.dinner_total, mk.h, mk.hg)
     : 0;
 
-  const groups = (
-    !scope.landPart ? [undefined] : lines.length ? lines : [undefined]
-  ) as (TransportLine | undefined)[];
+  const groups = (!scope.landPart ? [undefined] : lines.length ? lines : [undefined]) as (
+    TransportLine | undefined
+  )[];
 
   if ((draft.transport_options ?? []).length && scope.landPart) {
     if (!transportOptions.length) return [];
@@ -968,12 +974,11 @@ export function buildRateSheet(
     .map((line) => {
       const land = buildLandPart(draft, d, line);
       const veh = line ? d.travel_options.find((t) => t.id === line.travel_id) : undefined;
-      const vehicle =
-        !scope.landPart
-          ? "Accommodation only"
-          : line
-            ? veh?.vehicle_type || "Vehicle"
-            : "No transport";
+      const vehicle = !scope.landPart
+        ? "Accommodation only"
+        : line
+          ? veh?.vehicle_type || "Vehicle"
+          : "No transport";
       // Only show pax counts that actually fall inside this vehicle's fit range.
       const alloc = VEHICLE_ALLOCATION.find((v) => v.name === veh?.vehicle_type);
       const minFit = veh?.min_pax ?? alloc?.min_pax ?? 1;

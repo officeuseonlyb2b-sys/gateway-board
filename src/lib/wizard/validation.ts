@@ -10,7 +10,7 @@ import {
   splitAccommodationAllocation,
 } from "./calc";
 import { computeScenario, type ScenarioResult } from "./scenario";
-import type { CostScenario, QuoteDraft } from "./types";
+import { hotelSelectionForDay, type CostScenario, type QuoteDraft } from "./types";
 import { normalizeQueryFor, getQuotationScope } from "@/lib/query-for";
 import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
 
@@ -312,7 +312,8 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       overnight.forEach((day, index) => {
         const dynamic =
           (draft.dynamic_days ?? []).includes(day.day) || draft.allocation_mode === "dynamic";
-        const selection = option.selections.find((item) => item.city_id === day.city_id);
+        const selection = hotelSelectionForDay(option, day);
+        if (selection?.no_hotel) return;
         if (!selection?.hotel_id || (!dynamic && !selection.room_id)) {
           issues.push(
             issue(

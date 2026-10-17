@@ -189,9 +189,13 @@ export interface MiscLine {
 
 export interface HotelSelection {
   city_id: string;
+  /** Routing-night key. Legacy selections without it still fall back to city. */
+  routing_day?: number;
   hotel_id: string;
   room_id: string;
   meal_plan: MealPlan;
+  /** Quotation-only, day-specific accommodation opt-out; never a master rate. */
+  no_hotel?: boolean;
   is_fallback?: boolean;
 }
 export type OptionKey = "A" | "B" | "C" | "D";
@@ -240,6 +244,7 @@ export interface DynamicRoomAllocation {
 export type MealSource = "none" | "hotel" | "restaurant";
 export interface MealChoice {
   source: MealSource;
+  inclusion_status?: "included" | "optional";
   hotel_id?: string;
   restaurant_id?: string;
   label?: string;
@@ -266,6 +271,15 @@ export interface HotelOption {
   dynamic_allocations?: Record<number, DynamicRoomAllocation[]>;
   /** Accommodation-only subgroup size when Dynamic split planning is enabled. */
   allocated_pax?: number;
+}
+
+/** Resolve a stay by its routing night, retaining safe support for legacy city-keyed drafts. */
+export function hotelSelectionForDay(option: HotelOption | undefined, day: RoutingDay) {
+  if (!option) return undefined;
+  return (
+    option.selections.find((selection) => selection.routing_day === day.day) ??
+    option.selections.find((selection) => selection.city_id === day.city_id)
+  );
 }
 
 /** Pax categories priced on a monument entrance line. */

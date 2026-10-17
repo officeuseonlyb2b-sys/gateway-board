@@ -640,6 +640,43 @@ try {
   ap.hotel_options[0].selections[0].meal_plan = "AP";
   close(calc.computeMealDays(ap, db, "A").total, 0, "AP must clear stale meal charges");
 
+  const daySpecificHotels = baseDraft();
+  daySpecificHotels.nights = 2;
+  daySpecificHotels.routing = [
+    { ...daySpecificHotels.routing[0], day: 1 },
+    { ...daySpecificHotels.routing[0], day: 2, date: "2026-09-23" },
+    { ...daySpecificHotels.routing[1], day: 3, date: "2026-09-24" },
+  ];
+  daySpecificHotels.hotel_options[0].selections = [
+    { city_id: "city-1", routing_day: 1, hotel_id: "hotel-1", room_id: "room-1", meal_plan: "CP" },
+    { city_id: "city-1", routing_day: 2, hotel_id: "hotel-2", room_id: "room-2", meal_plan: "CP" },
+  ];
+  assert.equal(
+    types.hotelSelectionForDay(daySpecificHotels.hotel_options[0], daySpecificHotels.routing[1])
+      ?.hotel_id,
+    "hotel-2",
+    "Same-city stays resolve by routing night",
+  );
+  const noHotel = baseDraft();
+  noHotel.hotel_options[0].selections[0] = {
+    ...noHotel.hotel_options[0].selections[0],
+    no_hotel: true,
+    hotel_id: "",
+    room_id: "",
+  };
+  assert.equal(
+    calc.computeOption(noHotel, noHotel.hotel_options[0], db).rate_missing,
+    0,
+    "No Hotel contributes no required accommodation rate",
+  );
+  const optionalMeal = baseDraft();
+  optionalMeal.meal_selections_by_option.A["1:city-1"].dinner.inclusion_status = "optional";
+  close(
+    calc.computeMealDays(optionalMeal, db, "A").total,
+    400,
+    "Optional meals stay out of base meal costing",
+  );
+
   // Fixed-number reconciliation: 2 pax, one DBL room, land ₹13,700,
   // meals ₹1,000. Supplier room GST then separate 10%/5% commercial layers.
   // The shared costing-pax resolver is the source of truth for every Land

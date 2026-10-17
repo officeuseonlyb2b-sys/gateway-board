@@ -3,7 +3,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { emptyDraft, type QuoteDraft } from "./types";
+import { emptyDraft, hotelSelectionForDay, type QuoteDraft } from "./types";
 import { normalizeQueryFor } from "@/lib/query-for";
 
 const KEY = "mp_tourism_draft_quote";
@@ -18,41 +18,44 @@ const isBrowser = () => typeof window !== "undefined";
 
 /** Additive migration for drafts created before the standalone/query-for changes. */
 export function normalizeDraft(raw: QuoteDraft): QuoteDraft {
-  const legacyRange = typeof raw.pax_range === "string" && raw.pax_range !== "auto" && raw.pax_range.includes("-");
-  const legacyBounds = Number.isInteger(raw.pax_min)
-    && Number.isInteger(raw.pax_max)
-    && (raw.pax_min ?? 0) >= 1
-    && (raw.pax_max ?? 0) >= (raw.pax_min ?? 0);
+  const legacyRange =
+    typeof raw.pax_range === "string" && raw.pax_range !== "auto" && raw.pax_range.includes("-");
+  const legacyBounds =
+    Number.isInteger(raw.pax_min) &&
+    Number.isInteger(raw.pax_max) &&
+    (raw.pax_min ?? 0) >= 1 &&
+    (raw.pax_max ?? 0) >= (raw.pax_min ?? 0);
   const legacyEscortMode = raw.escort_ranges?.length
     ? "pax_range"
     : Object.values(raw.guide_day_escort ?? {}).some((charge) => charge > 0)
       ? "day_wise"
       : undefined;
-  const hotelOptions = (Array.isArray(raw.hotel_options) ? raw.hotel_options : emptyDraft().hotel_options)
-    .map((option) => {
-      if (option.dynamic_allocations) return option;
-      const dynamicDays = new Set(raw.dynamic_days ?? []);
-      if (raw.allocation_mode === "dynamic") {
-        raw.routing.filter((day) => day.overnight).forEach((day) => dynamicDays.add(day.day));
-      }
-      if (!dynamicDays.size) return option;
-      const migrated: NonNullable<QuoteDraft["hotel_options"][number]["dynamic_allocations"]> = {};
-      dynamicDays.forEach((dayNumber) => {
-        const route = raw.routing.find((day) => day.day === dayNumber);
-        const stay = route && option.selections.find((selection) => selection.city_id === route.city_id);
-        const mix = raw.day_room_mix?.[dayNumber];
-        if (!mix) return;
-        migrated[dayNumber] = (["single", "double", "triple", "quad"] as const)
-          .filter((occupancy) => mix[occupancy] > 0)
-          .map((occupancy) => ({
-            id: `legacy-${option.key}-${dayNumber}-${occupancy}`,
-            room_id: stay?.room_id ?? "",
-            occupancy,
-            rooms: mix[occupancy],
-          }));
-      });
-      return { ...option, dynamic_allocations: migrated };
+  const hotelOptions = (
+    Array.isArray(raw.hotel_options) ? raw.hotel_options : emptyDraft().hotel_options
+  ).map((option) => {
+    if (option.dynamic_allocations) return option;
+    const dynamicDays = new Set(raw.dynamic_days ?? []);
+    if (raw.allocation_mode === "dynamic") {
+      raw.routing.filter((day) => day.overnight).forEach((day) => dynamicDays.add(day.day));
+    }
+    if (!dynamicDays.size) return option;
+    const migrated: NonNullable<QuoteDraft["hotel_options"][number]["dynamic_allocations"]> = {};
+    dynamicDays.forEach((dayNumber) => {
+      const route = raw.routing.find((day) => day.day === dayNumber);
+      const stay = route && hotelSelectionForDay(option, route);
+      const mix = raw.day_room_mix?.[dayNumber];
+      if (!mix) return;
+      migrated[dayNumber] = (["single", "double", "triple", "quad"] as const)
+        .filter((occupancy) => mix[occupancy] > 0)
+        .map((occupancy) => ({
+          id: `legacy-${option.key}-${dayNumber}-${occupancy}`,
+          room_id: stay?.room_id ?? "",
+          occupancy,
+          rooms: mix[occupancy],
+        }));
     });
+    return { ...option, dynamic_allocations: migrated };
+  });
   return {
     ...emptyDraft(),
     ...raw,

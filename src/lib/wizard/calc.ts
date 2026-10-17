@@ -1,7 +1,7 @@
 // Costing calculator — rolls up totals for a single hotel option.
 import type { DB, RatePlan } from "@/lib/mock-store";
 import { miscRateForPax } from "@/lib/mock-store";
-import type { QuoteDraft, HotelOption } from "./types";
+import { hotelSelectionForDay, type QuoteDraft, type HotelOption } from "./types";
 import { addDaysISO } from "@/lib/format";
 import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
 import { getQuotationScope } from "@/lib/query-for";
@@ -106,7 +106,8 @@ export function dynamicAccommodationBreakdown(
   draft.routing.forEach((day, index) => {
     const isDynamic = draft.allocation_mode === "dynamic" || dynamicDays.has(day.day);
     if (!day.overnight || !isDynamic) return;
-    const selection = option.selections.find((item) => item.city_id === day.city_id);
+    const selection = hotelSelectionForDay(option, day);
+    if (selection?.no_hotel) return;
     if (!selection?.hotel_id) {
       breakdown.missing++;
       return;
@@ -174,7 +175,12 @@ export function splitAccommodationAllocation(draft: QuoteDraft) {
     (sum, option) => sum + Math.max(0, Math.trunc(option.allocated_pax ?? 0)),
     0,
   );
-  return { total, allocated, remaining: Math.max(0, total - allocated), excess: Math.max(0, allocated - total) };
+  return {
+    total,
+    allocated,
+    remaining: Math.max(0, total - allocated),
+    excess: Math.max(0, allocated - total),
+  };
 }
 
 export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
@@ -273,14 +279,12 @@ export function computeMealDays(
       // hotel plan covers meals; excursion-city meals remain independently
       // selectable.
       const overnightSelection =
-        day.overnight && day.city_id === cityId
-          ? opt?.selections.find((item) => item.city_id === cityId)
-          : undefined;
+        day.overnight && day.city_id === cityId ? hotelSelectionForDay(opt, day) : undefined;
       const covered = mealPlanCoverage(overnightSelection?.meal_plan);
       (["lunch", "dinner"] as const).forEach((mealKey) => {
         if (covered[mealKey]) return;
         const choice = selected[mealKey];
-        if (!choice || choice.source === "none") return;
+        if (!choice || choice.source === "none" || choice.inclusion_status === "optional") return;
         let perPerson = choice.per_person_rate ?? 0;
         let label = choice.label || "";
         if (choice.source === "restaurant") {
@@ -290,7 +294,7 @@ export function computeMealDays(
         } else if (choice.source === "hotel") {
           const hs =
             opt?.selections.find((item) => item.hotel_id === choice.hotel_id) ??
-            opt?.selections.find((item) => item.city_id === cityId);
+            hotelSelectionForDay(opt, day);
           const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date) : null;
           perPerson =
             choice.per_person_rate ??
@@ -330,67 +334,79 @@ export function computeMealsTotal(
 
 export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-store").DB): number {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const t = scope.landPart
-    ? draft.transport.reduce((s, l) => s + transportLineTotal(l), 0)
+  const t = scope.landPart ? draft.transport.reduce((s, l) => s + transportLineTotal(l), 0) : 0;
+  const a = scope.landPart
+    ? draft.activities.reduce((sum, line) => {
+        if (line.inclusion_status === "optional") return sum;
+        if (
+          d &&
+          !isSelectedLandServiceValid(
+            "activity",
+            line.activity_id,
+            line.from_routing_days?.[0],
+            draft,
+            d,
+          )
+        )
+          return sum;
+        return sum + line.rate * line.qty;
+      }, 0)
     : 0;
-  const a = scope.landPart ? draft.activities.reduce((sum, line) => {
-    if (line.inclusion_status === "optional") return sum;
-    if (
-      d &&
-      !isSelectedLandServiceValid(
-        "activity",
-        line.activity_id,
-        line.from_routing_days?.[0],
-        draft,
-        d,
-      )
-    )
-      return sum;
-    return sum + line.rate * line.qty;
-  }, 0) : 0;
   const entranceCategory = draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
   const entrancePax = effectivePaxForPricing(draft);
-  const e = scope.landPart ? draft.entrances.reduce((sum, line) => {
-    if (
-      d &&
-      !isSelectedLandServiceValid("entrance", line.site_id, line.from_routing_days?.[0], draft, d)
-    )
-      return sum;
-    const rate =
-      entranceCategory === "foreign"
-        ? line.foreign_rate
-        : entranceCategory === "student"
-          ? (line.student_rate ?? 0)
-          : line.indian_rate;
-    return sum + rate * entrancePax;
-  }, 0) : 0;
-  const g = scope.landPart ? draft.guides.reduce((sum, line) => {
-    if (line.is_escort && isEscortEnabled(draft) && getEscortPricingMode(draft)) return sum;
-    if (!line.is_escort && line.inclusion_status === "optional") return sum;
-    if (
-      d &&
-      !line.is_escort &&
-      !isSelectedLandServiceValid("guide", line.guide_id, line.from_routing_days?.[0], draft, d)
-    )
-      return sum;
-    return sum + line.rate * line.guides * line.days;
-  }, 0) : 0;
-  const m = scope.landPart ? draft.misc.reduce((sum, line) => {
-    const master = line.item_id
-      ? d?.miscellaneous_items.find((item) => item.id === line.item_id)
-      : undefined;
-    if (line.item_id && (!master || !master.is_active)) return sum;
-    const miscDay = draft.routing[0]?.day;
-    const selected = miscDay == null ? undefined : draft.costing_selection?.misc?.[miscDay];
-    if (selected && !selected.includes(line.id)) return sum;
-    const isSlab = (master?.pricing_type ?? master?.unit) === "slab";
-    return (
-      sum +
-      (isSlab && master
-        ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
-        : line.rate * line.qty)
-    );
-  }, 0) : 0;
+  const e = scope.landPart
+    ? draft.entrances.reduce((sum, line) => {
+        if (
+          d &&
+          !isSelectedLandServiceValid(
+            "entrance",
+            line.site_id,
+            line.from_routing_days?.[0],
+            draft,
+            d,
+          )
+        )
+          return sum;
+        const rate =
+          entranceCategory === "foreign"
+            ? line.foreign_rate
+            : entranceCategory === "student"
+              ? (line.student_rate ?? 0)
+              : line.indian_rate;
+        return sum + rate * entrancePax;
+      }, 0)
+    : 0;
+  const g = scope.landPart
+    ? draft.guides.reduce((sum, line) => {
+        if (line.is_escort && isEscortEnabled(draft) && getEscortPricingMode(draft)) return sum;
+        if (!line.is_escort && line.inclusion_status === "optional") return sum;
+        if (
+          d &&
+          !line.is_escort &&
+          !isSelectedLandServiceValid("guide", line.guide_id, line.from_routing_days?.[0], draft, d)
+        )
+          return sum;
+        return sum + line.rate * line.guides * line.days;
+      }, 0)
+    : 0;
+  const m = scope.landPart
+    ? draft.misc.reduce((sum, line) => {
+        const master = line.item_id
+          ? d?.miscellaneous_items.find((item) => item.id === line.item_id)
+          : undefined;
+        if (line.item_id && (!master || !master.is_active)) return sum;
+        const miscDay = draft.routing[0]?.day;
+        const selected = miscDay == null ? undefined : draft.costing_selection?.misc?.[miscDay];
+        if (selected && !selected.includes(line.id)) return sum;
+        const isSlab = (master?.pricing_type ?? master?.unit) === "slab";
+        return (
+          sum +
+          (isSlab && master
+            ? miscRateForPax(master, effectivePaxForPricing(draft), Math.max(1, draft.nights)).total
+            : line.rate * line.qty)
+        );
+      }, 0)
+    : 0;
   const meals = scope.accommodationPart ? computeMealsTotal(draft, d) : 0;
   // Optional supplements are deliberately excluded from the package total.
   // They are priced and displayed separately in Step 9.
@@ -576,7 +592,8 @@ export function computeOption(draft: QuoteDraft, opt: HotelOption, d: DB): Optio
 
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
@@ -726,7 +743,8 @@ export function computePersonTotals(
   // Pre-resolve day plans for this option
   const dayPlans = draft.routing.map((day, i) => {
     if (!day.overnight) return null;
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return null;
     if (!sel) return null;
     const date = addDaysISO(draft.start_date, i);
     return planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
@@ -874,7 +892,8 @@ export function lookupOptionNightlyRates(
   let missing = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
@@ -955,7 +974,8 @@ export function computeGroupOption(
     missing = 0;
   draft.routing.forEach((day, i) => {
     if (!day.overnight) return;
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
@@ -1086,7 +1106,8 @@ export function computeDynamicOption(
     if (!day.overnight) return;
     const mix =
       draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
-    const sel = opt.selections.find((s) => s.city_id === day.city_id);
+    const sel = hotelSelectionForDay(opt, day);
+    if (sel?.no_hotel) return;
     const date = addDaysISO(draft.start_date, i);
     const plan = sel
       ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date))

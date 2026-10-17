@@ -131,8 +131,8 @@ export function Step13({ draft, set }: StepProps) {
         line.guide_id === guideId &&
         (line.language === language ||
           (!(GUIDE_LANGUAGES as readonly string[]).includes(line.language || "") &&
-          master !== undefined &&
-          guidePrimaryLanguage(master) === language)) &&
+            master !== undefined &&
+            guidePrimaryLanguage(master) === language)) &&
         lineAppliesToDay(line, day),
     );
     return matching.find((line) => line.inclusion_status !== "optional") ?? matching[0];
@@ -242,46 +242,49 @@ export function Step13({ draft, set }: StepProps) {
       tour: guide.tour_program ?? guide.name,
       guide,
     }));
-    const siteRows = options.map((option) => {
-      const key = makeTourKey(option.city, option.tour);
-      const languageLines = Object.fromEntries(
-        GUIDE_LANGUAGES.map((language) => [
-          language,
-          selectedGuideLine(option.guide.id, route.day, language),
-        ]),
-      ) as Record<GuideLanguage, GuideLine | undefined>;
-      const hasIncludedLanguage = GUIDE_LANGUAGES.some(
-        (language) => languageLines[language]?.inclusion_status !== "optional" && languageLines[language],
+    const siteRows = options
+      .map((option) => {
+        const key = makeTourKey(option.city, option.tour);
+        const languageLines = Object.fromEntries(
+          GUIDE_LANGUAGES.map((language) => [
+            language,
+            selectedGuideLine(option.guide.id, route.day, language),
+          ]),
+        ) as Record<GuideLanguage, GuideLine | undefined>;
+        const hasIncludedLanguage = GUIDE_LANGUAGES.some(
+          (language) =>
+            languageLines[language]?.inclusion_status !== "optional" && languageLines[language],
+        );
+        const explicitTourSelection = draft.guide_tour_selected_by_day?.[route.day];
+        const legacyDisabled = (draft.guide_tour_disabled_by_day?.[route.day] ?? []).includes(key);
+        const isTourSelected = explicitTourSelection
+          ? explicitTourSelection.includes(key)
+          : !legacyDisabled && Boolean(hasIncludedLanguage);
+        const tierRates = Object.fromEntries(
+          GUIDE_LANGUAGES.map((language) => [
+            language,
+            Object.fromEntries(
+              PAX_TIERS.map((tier) => [
+                tier.key,
+                guideMasterRatePax(option.guide, language, tier.pax),
+              ]),
+            ),
+          ]),
+        ) as Record<GuideLanguage, Record<TierKey, number>>;
+        return {
+          ...option,
+          key,
+          languageLines,
+          tierRates,
+          isTourSelected,
+          isSelected: isTourSelected,
+        };
+      })
+      .filter((site) =>
+        GUIDE_LANGUAGES.some((language) =>
+          applicableTiers.some((tier) => site.tierRates[language][tier.key] > 0),
+        ),
       );
-      const explicitTourSelection = draft.guide_tour_selected_by_day?.[route.day];
-      const legacyDisabled = (draft.guide_tour_disabled_by_day?.[route.day] ?? []).includes(key);
-      const isTourSelected = explicitTourSelection
-        ? explicitTourSelection.includes(key)
-        : !legacyDisabled && Boolean(hasIncludedLanguage);
-      const tierRates = Object.fromEntries(
-        GUIDE_LANGUAGES.map((language) => [
-          language,
-          Object.fromEntries(
-            PAX_TIERS.map((tier) => [
-              tier.key,
-              guideMasterRatePax(option.guide, language, tier.pax),
-            ]),
-          ),
-        ]),
-      ) as Record<GuideLanguage, Record<TierKey, number>>;
-      return {
-        ...option,
-        key,
-        languageLines,
-        tierRates,
-        isTourSelected,
-        isSelected: isTourSelected,
-      };
-    }).filter((site) =>
-      GUIDE_LANGUAGES.some((language) =>
-        applicableTiers.some((tier) => site.tierRates[language][tier.key] > 0),
-      ),
-    );
     return {
       route,
       routeLabel,
@@ -341,10 +344,7 @@ export function Step13({ draft, set }: StepProps) {
         const current = guideSelections[day];
         if (!current) return;
         const selectedKey = `${line.id}::${line.language}`;
-        const next = [
-          ...current.filter((key) => !key.startsWith(`${line.id}::`)),
-          selectedKey,
-        ];
+        const next = [...current.filter((key) => !key.startsWith(`${line.id}::`)), selectedKey];
         if (next.length !== current.length || next.some((key, index) => key !== current[index])) {
           guideSelections[day] = next;
           guideSelectionsChanged = true;
@@ -392,10 +392,7 @@ export function Step13({ draft, set }: StepProps) {
   );
   const guideSlabLabel = (pax: number) =>
     pax <= 5 ? "1–5 Pax" : pax <= 14 ? "6–14 Pax" : "15+ Pax";
-  const includedGuideBaseForRow = (
-    row: (typeof includedGuideRows)[number],
-    pax: number,
-  ) => {
+  const includedGuideBaseForRow = (row: (typeof includedGuideRows)[number], pax: number) => {
     const line = row.line;
     const targetDayCount = Math.max(1, line?.from_routing_days?.length ?? draft.routing.length);
     return (
@@ -426,24 +423,33 @@ export function Step13({ draft, set }: StepProps) {
     0,
   );
   const includedGuideCommercial = applyLandCommercials(draft, includedGuideBase, 0.05);
+  const optionalGuideBase = optionalGuideRows.reduce(
+    (sum, row) => sum + includedGuideBaseForRow(row, pricingPax),
+    0,
+  );
+  // Reporting cost has no separate optional bucket in the persisted draft, so
+  // it remains zero rather than duplicating the included reporting charge.
+  const optionalGuideReporting = 0;
+  const optionalGuideCommercial = applyLandCommercials(
+    draft,
+    optionalGuideBase + optionalGuideReporting,
+    0.05,
+  );
   // This is deliberately independent of the language display filter: range
   // costing must use every included guide line, exactly as final costing does.
-  const includedGuideRowsForRange = dayData.flatMap((day) =>
-    day.eligibleRows.flatMap((row) =>
-      GUIDE_LANGUAGES.map((language) => ({
-        ...row,
-        day: day.route.day,
-        routeLabel: day.routeLabel,
-        language,
-        line: row.languageLines[language],
-      })),
-    ),
-  ).filter(
-    (row) =>
-      row.isTourSelected &&
-      row.line &&
-      row.line.inclusion_status !== "optional",
-  );
+  const includedGuideRowsForRange = dayData
+    .flatMap((day) =>
+      day.eligibleRows.flatMap((row) =>
+        GUIDE_LANGUAGES.map((language) => ({
+          ...row,
+          day: day.route.day,
+          routeLabel: day.routeLabel,
+          language,
+          line: row.languageLines[language],
+        })),
+      ),
+    )
+    .filter((row) => row.isTourSelected && row.line && row.line.inclusion_status !== "optional");
   // Shared with the Final Matrix: Exact resolves only the actual traveller
   // total; a Pax Range resolves every pax inside its selected bounds.
   const rangeCostingRows = costingPaxValues.map((pax) => {
@@ -454,7 +460,8 @@ export function Step13({ draft, set }: StepProps) {
       (row) => guideMasterRatePax(row.guide, row.language, pax) > 0,
     );
     const activeLanguages = new Set(priced.map((row) => row.language));
-    const base = priced.reduce((sum, row) => sum + includedGuideBaseForRow(row, pax), 0) +
+    const base =
+      priced.reduce((sum, row) => sum + includedGuideBaseForRow(row, pax), 0) +
       [...activeLanguages].reduce((sum, language) => sum + getReporting(language), 0);
     const commercial = applyLandCommercials(draft, base, 0.05);
     return {
@@ -462,7 +469,8 @@ export function Step13({ draft, set }: StepProps) {
       base,
       commercial,
       unavailable,
-      slabs: [...new Set(priced.map(() => guideSlabLabel(pax)))].join(" / ") || "Rate Not Available",
+      slabs:
+        [...new Set(priced.map(() => guideSlabLabel(pax)))].join(" / ") || "Rate Not Available",
     };
   });
 
@@ -546,8 +554,7 @@ export function Step13({ draft, set }: StepProps) {
     const prefixes = affectedIds.map((id) => `${id}::`);
     const current = selection[day] ?? [];
     const next = current.filter((id) => !prefixes.some((prefix) => id.startsWith(prefix)));
-    if (selectedLanguage && selectedLineId)
-      next.push(`${selectedLineId}::${selectedLanguage}`);
+    if (selectedLanguage && selectedLineId) next.push(`${selectedLineId}::${selectedLanguage}`);
     selection[day] = next;
   };
   const setTourStatus = (
@@ -640,7 +647,8 @@ export function Step13({ draft, set }: StepProps) {
   const isLanguageSelected = (
     site: (typeof dayData)[number]["siteRows"][number],
     language: GuideLanguage,
-  ) => site.languageLines[language]?.inclusion_status !== "optional" && !!site.languageLines[language];
+  ) =>
+    site.languageLines[language]?.inclusion_status !== "optional" && !!site.languageLines[language];
   const setAllForLanguage = (language: GuideLanguage, selected: boolean) => {
     let guides = [...draft.guides];
     const disabledByDay = { ...(draft.guide_tour_disabled_by_day ?? {}) };
@@ -682,9 +690,7 @@ export function Step13({ draft, set }: StepProps) {
           selected ? language : undefined,
           selected ? selectedLine?.id : undefined,
         );
-        disabledByDay[routeDay] = (disabledByDay[routeDay] ?? []).filter(
-          (key) => key !== site.key,
-        );
+        disabledByDay[routeDay] = (disabledByDay[routeDay] ?? []).filter((key) => key !== site.key);
       }),
     );
     set({
@@ -700,7 +706,9 @@ export function Step13({ draft, set }: StepProps) {
         .filter((site) => site.isTourSelected && hasRateForLanguage(site, language))
         .map((site) => ({ site, day: day.route.day })),
     );
-    return available.length > 0 && available.every(({ site }) => isLanguageSelected(site, language));
+    return (
+      available.length > 0 && available.every(({ site }) => isLanguageSelected(site, language))
+    );
   };
 
   const addEditorRange = () =>
@@ -810,55 +818,63 @@ export function Step13({ draft, set }: StepProps) {
         <button
           type="button"
           onClick={() => setServiceView("guides")}
-          className={cn("rounded px-4 py-1.5 text-xs font-medium", serviceView === "guides" && "bg-primary text-primary-foreground")}
+          className={cn(
+            "rounded px-4 py-1.5 text-xs font-medium",
+            serviceView === "guides" && "bg-primary text-primary-foreground",
+          )}
         >
           Guides
         </button>
         <button
           type="button"
           onClick={() => setServiceView("escort")}
-          className={cn("rounded px-4 py-1.5 text-xs font-medium", serviceView === "escort" && "bg-primary text-primary-foreground")}
+          className={cn(
+            "rounded px-4 py-1.5 text-xs font-medium",
+            serviceView === "escort" && "bg-primary text-primary-foreground",
+          )}
         >
           Tour Escort
         </button>
       </div>
 
-      {serviceView === "guides" && <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
-        <table className="w-full min-w-212.5 table-fixed border-collapse text-xs">
-          <colgroup>
-            <col style={{ width: "72px" }} />
-            <col style={{ width: "155px" }} />
-            <col style={{ width: "140px" }} />
-            <col style={{ width: "300px" }} />
-            {visibleLanguages.map((language) => (
-              <col key={language} style={{ width: "135px" }} />
-            ))}
-          </colgroup>
-          <thead className="bg-[#F3F4F6] text-[10px] uppercase tracking-wide text-muted-foreground">
-            <tr className="border-b border-[#E5E7EB]">
-              <th rowSpan={2} className="p-2 text-left">
-                Day
-              </th>
-              <th rowSpan={2} className="p-2 text-left">
-                Route
-              </th>
-              <th rowSpan={2} className="p-2 text-left">
-                City
-              </th>
-              <th rowSpan={2} className="p-2 text-left">
-                Tour
-              </th>
+      {serviceView === "guides" && (
+        <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+          <table className="w-full min-w-212.5 table-fixed border-collapse text-xs">
+            <colgroup>
+              <col style={{ width: "72px" }} />
+              <col style={{ width: "155px" }} />
+              <col style={{ width: "140px" }} />
+              <col style={{ width: "300px" }} />
               {visibleLanguages.map((language) => (
-                <th key={language} className="p-2 text-center">
-                  {languageLabel(language)}
-                </th>
+                <col key={language} style={{ width: "135px" }} />
               ))}
-            </tr>
-            <tr className="border-b border-[#E5E7EB]">
-              {visibleLanguages.map((language) => (
-                <th key={language} className="p-2 text-center">
+            </colgroup>
+            <thead className="bg-[#F3F4F6] text-[10px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-[#E5E7EB]">
+                <th rowSpan={2} className="p-2 text-left">
+                  Day
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  Route
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  City
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  Tour
+                </th>
+                {visibleLanguages.map((language) => (
+                  <th key={language} className="p-2 text-center">
+                    {languageLabel(language)}
+                  </th>
+                ))}
+              </tr>
+              <tr className="border-b border-[#E5E7EB]">
+                {visibleLanguages.map((language) => (
+                  <th key={language} className="p-2 text-center">
                     <div>
-                      {applicableTiers.map((tier) => tier.label.replace(/ Pax$/, "")).join(" / ")} Pax
+                      {applicableTiers.map((tier) => tier.label.replace(/ Pax$/, "")).join(" / ")}{" "}
+                      Pax
                     </div>
                     <label className="mt-1 flex items-center justify-center gap-1 normal-case">
                       <input
@@ -867,138 +883,142 @@ export function Step13({ draft, set }: StepProps) {
                         disabled={
                           !dayData.some((day) =>
                             day.siteRows.some(
-                              (site) =>
-                                site.isTourSelected && hasRateForLanguage(site, language),
+                              (site) => site.isTourSelected && hasRateForLanguage(site, language),
                             ),
                           )
                         }
                         onChange={() =>
-                          setAllForLanguage(
-                            language,
-                            !allLanguageRatesSelected(language),
-                          )
+                          setAllForLanguage(language, !allLanguageRatesSelected(language))
                         }
                         aria-label={`Select All ${languageLabel(language)}`}
                       />
                       <span>Select All</span>
                     </label>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {dayData.map((day) => {
-              if (!day.hasRows) {
-                return (
-                  <tr key={day.route.day} className="border-b border-[#E5E7EB]">
-                    <td className="p-2 font-semibold">Day {day.route.day}</td>
-                    <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
-                    <td colSpan={2 + visibleLanguages.length} className="p-2">
-                      <span className="italic text-muted-foreground">No guides are eligible for this routing day.</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dayData.map((day) => {
+                if (!day.hasRows) {
+                  return (
+                    <tr key={day.route.day} className="border-b border-[#E5E7EB]">
+                      <td className="p-2 font-semibold">Day {day.route.day}</td>
+                      <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
+                      <td colSpan={2 + visibleLanguages.length} className="p-2">
+                        <span className="italic text-muted-foreground">
+                          No guides are eligible for this routing day.
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                }
+                return day.siteRows.map((site, siteIndex) => (
+                  <tr
+                    key={`${day.route.day}-${site.key}`}
+                    className="border-b border-[#E5E7EB] align-top"
+                  >
+                    {siteIndex === 0 && (
+                      <td rowSpan={day.siteRows.length} className="p-2 font-semibold">
+                        Day {day.route.day}
+                      </td>
+                    )}
+                    {siteIndex === 0 && (
+                      <td
+                        rowSpan={day.siteRows.length}
+                        className="p-2 text-[11px] text-muted-foreground"
+                      >
+                        {day.routeLabel}
+                      </td>
+                    )}
+                    <td className="wrap-break-word p-2">
+                      {site.city || <span className="text-muted-foreground">—</span>}
                     </td>
-                  </tr>
-                );
-              }
-              return day.siteRows.map((site, siteIndex) => (
-                <tr
-                  key={`${day.route.day}-${site.key}`}
-                  className="border-b border-[#E5E7EB] align-top"
-                >
-                  {siteIndex === 0 && (
-                    <td rowSpan={day.siteRows.length} className="p-2 font-semibold">
-                      Day {day.route.day}
-                    </td>
-                  )}
-                  {siteIndex === 0 && (
-                    <td rowSpan={day.siteRows.length} className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
-                  )}
-                  <td className="wrap-break-word p-2">
-                    {site.city || <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="p-2">
-                    <div className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        className="mt-1 shrink-0"
-                        checked={site.isTourSelected}
-                        onChange={(event) =>
-                          setTourStatus(day.route.day, site, event.target.checked)
-                        }
-                        aria-label={`Select tour ${site.tour}`}
-                      />
-                      <div className="line-clamp-2 wrap-break-word text-sm font-medium">
-                        {site.tour}
+                    <td className="p-2">
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-1 shrink-0"
+                          checked={site.isTourSelected}
+                          onChange={(event) =>
+                            setTourStatus(day.route.day, site, event.target.checked)
+                          }
+                          aria-label={`Select tour ${site.tour}`}
+                        />
+                        <div className="line-clamp-2 wrap-break-word text-sm font-medium">
+                          {site.tour}
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  {visibleLanguages.map((language) => {
-                    const hasRate = hasRateForLanguage(site, language);
-                    const selected = hasRate && isLanguageSelected(site, language);
-                    return (
-                    <td key={language} className="p-2 text-right tabular-nums">
-                      {hasRate || selected ? (
-                        <label className="inline-flex items-start justify-end gap-1">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            disabled={!site.isTourSelected || (!hasRate && !selected)}
-                            onChange={(event) =>
-                              setGuideLanguageStatus(
-                                day.route.day,
-                                site,
-                                language,
-                                event.target.checked,
-                              )
-                            }
-                            aria-label={`${selected ? "Unselect" : "Select"} ${languageLabel(language)} rate for ${site.tour}`}
-                          />
-                          <span className="text-foreground">
-                            {hasRate
-                              ? applicableTiers.map((tier, tierIndex) => (
-                                  <span key={tier.key}>
-                                    {tierIndex > 0 && (
-                                      <span className="mr-1 text-muted-foreground">/</span>
-                                    )}
-                                    {site.tierRates[language][tier.key] > 0
-                                      ? inr(site.tierRates[language][tier.key])
-                                      : "—"}
-                                  </span>
-                                ))
-                              : "—"}
-                          </span>
-                        </label>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
                     </td>
-                    );
-                  })}
-                </tr>
-              ));
-            })}
+                    {visibleLanguages.map((language) => {
+                      const hasRate = hasRateForLanguage(site, language);
+                      const selected = hasRate && isLanguageSelected(site, language);
+                      return (
+                        <td key={language} className="p-2 text-right tabular-nums">
+                          {hasRate || selected ? (
+                            <label className="inline-flex items-start justify-end gap-1">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                disabled={!site.isTourSelected || (!hasRate && !selected)}
+                                onChange={(event) =>
+                                  setGuideLanguageStatus(
+                                    day.route.day,
+                                    site,
+                                    language,
+                                    event.target.checked,
+                                  )
+                                }
+                                aria-label={`${selected ? "Unselect" : "Select"} ${languageLabel(language)} rate for ${site.tour}`}
+                              />
+                              <span className="text-foreground">
+                                {hasRate
+                                  ? applicableTiers.map((tier, tierIndex) => (
+                                      <span key={tier.key}>
+                                        {tierIndex > 0 && (
+                                          <span className="mr-1 text-muted-foreground">/</span>
+                                        )}
+                                        {site.tierRates[language][tier.key] > 0
+                                          ? inr(site.tierRates[language][tier.key])
+                                          : "—"}
+                                      </span>
+                                    ))
+                                  : "—"}
+                              </span>
+                            </label>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ));
+              })}
 
-            <tr className="border-t bg-muted/10">
-              <td
-                colSpan={4}
-                className="p-2 text-right text-[10px] uppercase text-muted-foreground"
-              >
-                Reporting Cost
-              </td>
-              {visibleLanguages.map((language) => (
-                <td key={language} className="p-2 text-right">
-                  <Input
-                    type="number"
-                    min={0}
-                    value={getReporting(language) || ""}
-                    onChange={(event) => setReporting(language, Number(event.target.value) || 0)}
-                    className="ml-auto h-7 w-28 text-right text-[11px]"
-                  />
+              <tr className="border-t bg-muted/10">
+                <td
+                  colSpan={4}
+                  className="p-2 text-right text-[10px] uppercase text-muted-foreground"
+                >
+                  Reporting Cost
                 </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
-      </div>}
+                {visibleLanguages.map((language) => (
+                  <td key={language} className="p-2 text-right">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={getReporting(language) || ""}
+                      onChange={(event) => setReporting(language, Number(event.target.value) || 0)}
+                      className="ml-auto h-7 w-28 text-right text-[11px]"
+                    />
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {serviceView === "guides" && (
         <>
@@ -1022,7 +1042,9 @@ export function Step13({ draft, set }: StepProps) {
                       const base = includedGuideBaseForRow(row, pricingPax);
                       return (
                         <tr key={`${row.day}-${row.guide.id}-${row.language}`} className="border-t">
-                          <td className="p-2 font-medium">Day {row.day} · {row.tour}</td>
+                          <td className="p-2 font-medium">
+                            Day {row.day} · {row.tour}
+                          </td>
                           <td className="p-2">{languageLabel(row.language)}</td>
                           <td className="p-2">{guideSlabLabel(pricingPax)}</td>
                           <td className="p-2 text-right">{base > 0 ? inr(base) : "—"}</td>
@@ -1035,12 +1057,12 @@ export function Step13({ draft, set }: StepProps) {
                       <td colSpan={3} className="p-2 text-right uppercase">
                         Reporting Cost
                       </td>
-                      <td className="p-2 text-right tabular-nums">
-                        {inr(includedGuideReporting)}
-                      </td>
+                      <td className="p-2 text-right tabular-nums">{inr(includedGuideReporting)}</td>
                     </tr>
                     <tr>
-                      <td colSpan={3} className="p-2 text-right uppercase">Base Total</td>
+                      <td colSpan={3} className="p-2 text-right uppercase">
+                        Base Total
+                      </td>
                       <td className="p-2 text-right tabular-nums">
                         {inr(includedGuideCommercial.base)}
                       </td>
@@ -1054,13 +1076,17 @@ export function Step13({ draft, set }: StepProps) {
                       </td>
                     </tr>
                     <tr>
-                      <td colSpan={3} className="p-2 text-right uppercase">GST 5%</td>
+                      <td colSpan={3} className="p-2 text-right uppercase">
+                        GST 5%
+                      </td>
                       <td className="p-2 text-right tabular-nums">
                         {inr(includedGuideCommercial.gst)}
                       </td>
                     </tr>
                     <tr className="border-t-2 border-green-200 bg-green-100 text-primary">
-                      <td colSpan={3} className="p-2 text-right uppercase">Final Total</td>
+                      <td colSpan={3} className="p-2 text-right uppercase">
+                        Final Total
+                      </td>
                       <td className="p-2 text-right tabular-nums">
                         {inr(includedGuideCommercial.final)}
                       </td>
@@ -1100,7 +1126,9 @@ export function Step13({ draft, set }: StepProps) {
                         <>
                           <td className="p-2">{row.slabs}</td>
                           <td className="p-2 text-right tabular-nums">{inr(row.base)}</td>
-                          <td className="p-2 text-right tabular-nums">{inr(row.commercial.final)}</td>
+                          <td className="p-2 text-right tabular-nums">
+                            {inr(row.commercial.final)}
+                          </td>
                           <td className="p-2 text-right font-semibold tabular-nums">
                             {inr(row.commercial.final / Math.max(1, row.pax))}
                           </td>
@@ -1112,7 +1140,8 @@ export function Step13({ draft, set }: StepProps) {
               </table>
             </div>
             <div className="border-t px-3 py-2 text-[10px] text-muted-foreground">
-              Each row resolves every included guide at that pax, then applies Guide markup and GST once.
+              Each row resolves every included guide at that pax, then applies Guide markup and GST
+              once.
             </div>
           </Card>
 
@@ -1126,163 +1155,207 @@ export function Step13({ draft, set }: StepProps) {
                   const base = guideMasterRatePax(row.guide, row.language, pricingPax);
                   const commercial = applyLandCommercials(draft, base, 0.05);
                   return (
-                    <div key={`${row.day}-${row.guide.id}-${row.language}`} className="grid min-w-[720px] grid-cols-[1fr_repeat(4,110px)] gap-2 p-3 text-xs">
+                    <div
+                      key={`${row.day}-${row.guide.id}-${row.language}`}
+                      className="grid min-w-[720px] grid-cols-[1fr_repeat(4,110px)] gap-2 p-3 text-xs"
+                    >
                       <div>
-                        <div className="font-medium">Day {row.day} · {row.tour}</div>
-                        <div className="text-muted-foreground">{row.city} · {languageLabel(row.language)} · {guideSlabLabel(pricingPax)}</div>
+                        <div className="font-medium">
+                          Day {row.day} · {row.tour}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {row.city} · {languageLabel(row.language)} · {guideSlabLabel(pricingPax)}
+                        </div>
                       </div>
                       <div className="text-right">
-                        Base<br /><b>{base > 0 ? inr(base) : "—"}</b>
+                        Base
+                        <br />
+                        <b>{base > 0 ? inr(base) : "—"}</b>
                       </div>
                       <div className="text-right">
-                        Markup<br /><b>{base > 0 ? inr(commercial.markup) : "—"}</b>
+                        Markup
+                        <br />
+                        <b>{base > 0 ? inr(commercial.markup) : "—"}</b>
                       </div>
                       <div className="text-right">
-                        GST<br /><b>{base > 0 ? inr(commercial.gst) : "—"}</b>
+                        GST
+                        <br />
+                        <b>{base > 0 ? inr(commercial.gst) : "—"}</b>
                       </div>
                       <div className="text-right">
-                        Selling Price<br /><b>{base > 0 ? inr(commercial.final) : "—"}</b>
+                        Selling Price
+                        <br />
+                        <b>{base > 0 ? inr(commercial.final) : "—"}</b>
                       </div>
                     </div>
                   );
                 })}
+                <div className="border-t-2 bg-green-50 p-3 text-xs">
+                  {[
+                    ["Reporting Cost", optionalGuideReporting],
+                    ["Base Total", optionalGuideCommercial.base],
+                    [
+                      `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`,
+                      optionalGuideCommercial.markup,
+                    ],
+                    ["GST 5%", optionalGuideCommercial.gst],
+                    ["Final Total", optionalGuideCommercial.final],
+                  ].map(([label, value], index) => (
+                    <div
+                      key={String(label)}
+                      className={cn(
+                        "flex justify-between py-1",
+                        index === 4 && "border-t font-semibold text-primary",
+                      )}
+                    >
+                      <span className="uppercase">{label}</span>
+                      <span className="tabular-nums">{inr(Number(value))}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
-              <div className="p-4 text-sm italic text-muted-foreground">No optional guides for the current routing.</div>
+              <div className="p-4 text-sm italic text-muted-foreground">
+                No optional guides for the current routing.
+              </div>
             )}
           </Card>
         </>
       )}
 
-      {serviceView === "escort" && <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
-          <div>
-            <h3 className="text-sm font-semibold">Tour Escort</h3>
-            <p className="text-xs text-muted-foreground">
-              Configure pax slabs, then enter an independent Escort rate for each routing day.
-            </p>
+      {serviceView === "escort" && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
+            <div>
+              <h3 className="text-sm font-semibold">Tour Escort</h3>
+              <p className="text-xs text-muted-foreground">
+                Configure pax slabs, then enter an independent Escort rate for each routing day.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant={escortEnabled ? "outline" : "default"}
+              onClick={openEscortEditor}
+            >
+              {escortEnabled ? (
+                <Pencil className="mr-1 h-3.5 w-3.5" />
+              ) : (
+                <Plus className="mr-1 h-3.5 w-3.5" />
+              )}
+              {escortEnabled ? "Edit Tour Escort" : "Add Tour Escort"}
+            </Button>
           </div>
-          <Button
-            size="sm"
-            variant={escortEnabled ? "outline" : "default"}
-            onClick={openEscortEditor}
-          >
-            {escortEnabled ? (
-              <Pencil className="mr-1 h-3.5 w-3.5" />
-            ) : (
-              <Plus className="mr-1 h-3.5 w-3.5" />
-            )}
-            {escortEnabled ? "Edit Tour Escort" : "Add Tour Escort"}
-          </Button>
-        </div>
-        {escortEnabled && escortColumns.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-xs">
-              <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
-                <tr>
-                  <th className="p-2 text-left">Day</th>
-                  <th className="p-2 text-left">Route</th>
-                  <th className="min-w-[220px] p-2 text-left">Tour</th>
-                  {escortColumns.map((column) => (
-                    <th key={column.id} className="min-w-[130px] p-2 text-right">
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dayData.map((day) => {
-                  const context = landDayContext(draft, day.route, db);
-                  return (
-                    <tr key={day.route.day} className="border-t">
-                      <td className="p-2 font-semibold">Day {day.route.day}</td>
-                      <td className="p-2 text-muted-foreground">{day.routeLabel}</td>
-                      <td className="p-2">{context.tourTitles.join(", ") || "—"}</td>
-                      {escortColumns.map((column) => (
-                        <td key={column.id} className="p-2">
-                          <Input
-                            type="number"
-                            min={0}
-                            value={
-                              draft.escort_day_rates_by_slab?.[day.route.day]?.[column.id] || ""
-                            }
-                            onChange={(event) =>
-                              setEscortDayRate(
-                                day.route.day,
-                                column.id,
-                                Number(event.target.value) || 0,
-                              )
-                            }
-                            className="ml-auto h-8 w-28 text-right"
-                            placeholder="No Escort"
-                            aria-label={`Day ${day.route.day} ${column.label} Escort rate`}
-                          />
+          {escortEnabled && escortColumns.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-xs">
+                <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-left">Day</th>
+                    <th className="p-2 text-left">Route</th>
+                    <th className="min-w-[220px] p-2 text-left">Tour</th>
+                    {escortColumns.map((column) => (
+                      <th key={column.id} className="min-w-[130px] p-2 text-right">
+                        {column.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayData.map((day) => {
+                    const context = landDayContext(draft, day.route, db);
+                    return (
+                      <tr key={day.route.day} className="border-t">
+                        <td className="p-2 font-semibold">Day {day.route.day}</td>
+                        <td className="p-2 text-muted-foreground">{day.routeLabel}</td>
+                        <td className="p-2">{context.tourTitles.join(", ") || "—"}</td>
+                        {escortColumns.map((column) => (
+                          <td key={column.id} className="p-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={
+                                draft.escort_day_rates_by_slab?.[day.route.day]?.[column.id] || ""
+                              }
+                              onChange={(event) =>
+                                setEscortDayRate(
+                                  day.route.day,
+                                  column.id,
+                                  Number(event.target.value) || 0,
+                                )
+                              }
+                              className="ml-auto h-8 w-28 text-right"
+                              placeholder="No Escort"
+                              aria-label={`Day ${day.route.day} ${column.label} Escort rate`}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t bg-muted/10">
+                    <td
+                      colSpan={3}
+                      className="p-2 text-right text-[10px] uppercase text-muted-foreground"
+                    >
+                      Escort Reporting Cost
+                    </td>
+                    <td colSpan={escortColumns.length} className="p-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={draft.guide_escort_reporting || ""}
+                        onChange={(event) =>
+                          set({ guide_escort_reporting: Number(event.target.value) || 0 })
+                        }
+                        className="ml-auto h-8 w-28 text-right"
+                      />
+                    </td>
+                  </tr>
+                  {(["base", "markup", "gst", "final"] as const).map((kind) => (
+                    <tr
+                      key={kind}
+                      className={
+                        kind === "final" ? "bg-green-50 font-bold text-primary" : "border-t"
+                      }
+                    >
+                      <td colSpan={3} className="p-2 text-right uppercase">
+                        {kind === "gst"
+                          ? "GST 5%"
+                          : kind === "markup"
+                            ? `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`
+                            : kind === "final"
+                              ? "Final Total"
+                              : "Base Total"}
+                      </td>
+                      {escortCommercials.map((column) => (
+                        <td key={column.id} className="p-2 text-right tabular-nums">
+                          {inr(column.commercial[kind])}
                         </td>
                       ))}
                     </tr>
-                  );
-                })}
-                <tr className="border-t bg-muted/10">
-                  <td
-                    colSpan={3}
-                    className="p-2 text-right text-[10px] uppercase text-muted-foreground"
-                  >
-                    Escort Reporting Cost
-                  </td>
-                  <td colSpan={escortColumns.length} className="p-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      value={draft.guide_escort_reporting || ""}
-                      onChange={(event) =>
-                        set({ guide_escort_reporting: Number(event.target.value) || 0 })
-                      }
-                      className="ml-auto h-8 w-28 text-right"
-                    />
-                  </td>
-                </tr>
-                {(["base", "markup", "gst", "final"] as const).map((kind) => (
-                  <tr
-                    key={kind}
-                    className={kind === "final" ? "bg-green-50 font-bold text-primary" : "border-t"}
-                  >
-                    <td colSpan={3} className="p-2 text-right uppercase">
-                      {kind === "gst"
-                        ? "GST 5%"
-                        : kind === "markup"
-                          ? `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`
-                          : kind === "final"
-                            ? "Final Total"
-                            : "Base Total"}
-                    </td>
-                    {escortCommercials.map((column) => (
-                      <td key={column.id} className="p-2 text-right tabular-nums">
-                        {inr(column.commercial[kind])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {escortRanges.some(
-              (rangeItem) =>
-                rangeItem.charge > 0 &&
-                !draft.routing.some(
-                  (day) => (draft.escort_day_rates_by_slab?.[day.day]?.[rangeItem.id] ?? 0) > 0,
-                ),
-            ) && (
-              <p className="border-t p-3 text-xs text-amber-700">
-                Legacy flat Escort slab charges are preserved and remain costed until day-wise rates
-                are entered for that slab.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="p-4 text-sm text-muted-foreground">
-            Add Tour Escort to configure pax slabs and day-wise rates.
-          </div>
-        )}
-      </Card>}
+                  ))}
+                </tbody>
+              </table>
+              {escortRanges.some(
+                (rangeItem) =>
+                  rangeItem.charge > 0 &&
+                  !draft.routing.some(
+                    (day) => (draft.escort_day_rates_by_slab?.[day.day]?.[rangeItem.id] ?? 0) > 0,
+                  ),
+              ) && (
+                <p className="border-t p-3 text-xs text-amber-700">
+                  Legacy flat Escort slab charges are preserved and remain costed until day-wise
+                  rates are entered for that slab.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 text-sm text-muted-foreground">
+              Add Tour Escort to configure pax slabs and day-wise rates.
+            </div>
+          )}
+        </Card>
+      )}
 
       {serviceView === "escort" && (
         <Card className="overflow-hidden">
@@ -1450,80 +1523,82 @@ export function Step13({ draft, set }: StepProps) {
         </Card>
       )}
 
-      {serviceView === "guides" && optionalGuideRows.length < 0 && draft.guides.some(
-        (line) =>
-          !line.is_escort &&
-          line.inclusion_status === "optional" &&
-          isSelectedLandServiceValid(
-            "guide",
-            line.guide_id,
-            line.from_routing_days?.[0],
-            draft,
-            db,
-          ),
-      ) && (
-        <Card className="order-2 p-4">
-          <h3 className="text-sm font-semibold">Optional Guides — For Additional Sale</h3>
-          <div className="mt-3 space-y-2">
-            {draft.guides
-              .filter(
-                (line) =>
-                  !line.is_escort &&
-                  line.inclusion_status === "optional" &&
-                  isSelectedLandServiceValid(
-                    "guide",
-                    line.guide_id,
-                    line.from_routing_days?.[0],
-                    draft,
-                    db,
-                  ),
-              )
-              .map((line) => {
-                const master = db.guides.find((guide) => guide.id === line.guide_id);
-                const base = master
-                  ? guideRateForPax(master, pricingPax, line.language as GuideLanguage)
-                  : line.rate;
-                const commercial = applyLandCommercials(draft, base, 0.05);
-                return (
-                  <div
-                    key={line.id}
-                    className="grid grid-cols-[1fr_repeat(4,110px)] gap-2 rounded border p-3 text-xs"
-                  >
-                    <div>
-                      <div className="font-medium">{master?.name || "Guide"}</div>
-                      <div className="text-muted-foreground">
-                        {line.language ||
-                          (master ? guidePrimaryLanguage(master) : null) ||
-                          "English"}{" "}
-                        · {pricingPax <= 5 ? "1–5" : pricingPax <= 14 ? "6–14" : "15+"} Pax
+      {serviceView === "guides" &&
+        optionalGuideRows.length < 0 &&
+        draft.guides.some(
+          (line) =>
+            !line.is_escort &&
+            line.inclusion_status === "optional" &&
+            isSelectedLandServiceValid(
+              "guide",
+              line.guide_id,
+              line.from_routing_days?.[0],
+              draft,
+              db,
+            ),
+        ) && (
+          <Card className="order-2 p-4">
+            <h3 className="text-sm font-semibold">Optional Guides — For Additional Sale</h3>
+            <div className="mt-3 space-y-2">
+              {draft.guides
+                .filter(
+                  (line) =>
+                    !line.is_escort &&
+                    line.inclusion_status === "optional" &&
+                    isSelectedLandServiceValid(
+                      "guide",
+                      line.guide_id,
+                      line.from_routing_days?.[0],
+                      draft,
+                      db,
+                    ),
+                )
+                .map((line) => {
+                  const master = db.guides.find((guide) => guide.id === line.guide_id);
+                  const base = master
+                    ? guideRateForPax(master, pricingPax, line.language as GuideLanguage)
+                    : line.rate;
+                  const commercial = applyLandCommercials(draft, base, 0.05);
+                  return (
+                    <div
+                      key={line.id}
+                      className="grid grid-cols-[1fr_repeat(4,110px)] gap-2 rounded border p-3 text-xs"
+                    >
+                      <div>
+                        <div className="font-medium">{master?.name || "Guide"}</div>
+                        <div className="text-muted-foreground">
+                          {line.language ||
+                            (master ? guidePrimaryLanguage(master) : null) ||
+                            "English"}{" "}
+                          · {pricingPax <= 5 ? "1–5" : pricingPax <= 14 ? "6–14" : "15+"} Pax
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        Base
+                        <br />
+                        <b>{inr(base)}</b>
+                      </div>
+                      <div className="text-right">
+                        Markup
+                        <br />
+                        <b>{inr(commercial.markup)}</b>
+                      </div>
+                      <div className="text-right">
+                        GST
+                        <br />
+                        <b>{inr(commercial.gst)}</b>
+                      </div>
+                      <div className="text-right">
+                        Selling
+                        <br />
+                        <b>{inr(commercial.final)}</b>
                       </div>
                     </div>
-                    <div className="text-right">
-                      Base
-                      <br />
-                      <b>{inr(base)}</b>
-                    </div>
-                    <div className="text-right">
-                      Markup
-                      <br />
-                      <b>{inr(commercial.markup)}</b>
-                    </div>
-                    <div className="text-right">
-                      GST
-                      <br />
-                      <b>{inr(commercial.gst)}</b>
-                    </div>
-                    <div className="text-right">
-                      Selling
-                      <br />
-                      <b>{inr(commercial.final)}</b>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </Card>
-      )}
+                  );
+                })}
+            </div>
+          </Card>
+        )}
 
       <Dialog
         open={escortDialogOpen}
@@ -1675,46 +1750,50 @@ export function Step13({ draft, set }: StepProps) {
         </DialogContent>
       </Dialog>
 
-      {false && <Card className="order-1 space-y-3 border-2 border-primary/20 bg-primary/5 p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-primary">Per-Person Cost Breakdown</h3>
-          {range && (
-            <span className="text-[10px] text-muted-foreground">
-              Costing Range: {range?.min}–{range?.max} Pax
-            </span>
-          )}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] border-collapse text-xs">
-            <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
-              <tr>
-                <th className="p-2 text-left">Pax</th>
-                {visibleLanguages.map((language) => (
-                  <th key={language} className="min-w-[100px] p-2 text-right">
-                    {languageLabel(language)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {breakdownData.map((row) => (
-                <tr key={row.pax} className="border-t border-muted-foreground/20">
-                  <td className="p-2 font-medium">{row.pax} Pax</td>
+      {/* Legacy duplicate breakdown intentionally remains disabled while its replacement above is active. */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
+      {false && (
+        <Card className="order-1 space-y-3 border-2 border-primary/20 bg-primary/5 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-primary">Per-Person Cost Breakdown</h3>
+            {range && (
+              <span className="text-[10px] text-muted-foreground">
+                Costing Range: {range?.min}–{range?.max} Pax
+              </span>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px] border-collapse text-xs">
+              <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="p-2 text-left">Pax</th>
                   {visibleLanguages.map((language) => (
-                    <td key={language} className="p-2 text-right tabular-nums">
-                      {row.perLanguage[language] > 0 ? inr(row.perLanguage[language]) : "—"}
-                    </td>
+                    <th key={language} className="min-w-[100px] p-2 text-right">
+                      {languageLabel(language)}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="text-[10px] text-muted-foreground">
-          Each language remains an independent Guide alternative. Per-person amounts use the
-          applicable master slab and include Land markup and Guide GST once.
-        </div>
-      </Card>}
+              </thead>
+              <tbody>
+                {breakdownData.map((row) => (
+                  <tr key={row.pax} className="border-t border-muted-foreground/20">
+                    <td className="p-2 font-medium">{row.pax} Pax</td>
+                    {visibleLanguages.map((language) => (
+                      <td key={language} className="p-2 text-right tabular-nums">
+                        {row.perLanguage[language] > 0 ? inr(row.perLanguage[language]) : "—"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Each language remains an independent Guide alternative. Per-person amounts use the
+            applicable master slab and include Land markup and Guide GST once.
+          </div>
+        </Card>
+      )}
 
       <Card className="order-3 p-3">
         <Label className="text-xs">Remarks (optional)</Label>
