@@ -2,13 +2,8 @@
 // wizard already computes. Nothing here re-derives guide / activity / entrance
 // / misc / transport / hotel figures; they are only grouped per day, per
 // hotel category and per pax so the Costing page can be rendered as a sheet.
-import type { DB, GuideLanguage } from "@/lib/mock-store";
-import {
-  activityPricingForPax,
-  guideRateForPax,
-  miscRateForPax,
-  VEHICLE_ALLOCATION,
-} from "@/lib/mock-store";
+import type { DB } from "@/lib/mock-store";
+import { activityPricingForPax, miscRateForPax, VEHICLE_ALLOCATION } from "@/lib/mock-store";
 
 import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
@@ -44,6 +39,7 @@ import {
   getEscortPricingMode,
   getEscortRangeBase,
   isEscortEnabled,
+  guideRawRateForPax,
 } from "./guide-pricing";
 
 // ---------------------------------------------------------------- Land part
@@ -247,7 +243,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
     target.forEach((day) => {
       if (!guideTourSelected(draft, g, day)) return;
       const checked = guideLangPicked(draft, day, l.id, defaultLang, defaultLang);
-      const rate = g ? guideRateForPax(g, paxForGuide, defaultLang) : l.rate;
+      const rate = guideRawRateForPax(l, g, defaultLang, paxForGuide, paxForGuide) ?? 0;
       if (rate <= 0) return;
       if (checked) selectedGuideLanguages.add(defaultLang);
       const amount = (rate * l.guides * l.days) / target.length;
@@ -776,6 +772,7 @@ function selectedGuideTotalForPax(
   pax: number,
 ): { guide: number; escort: number } {
   const routingDays = draft.routing.map((day) => day.day);
+  const pricingPax = Math.max(1, effectivePaxForPricing(draft));
   let guide = 0;
   let escort = 0;
   const selectedReportingLanguages = new Set<GuideLangOpt>();
@@ -800,8 +797,8 @@ function selectedGuideTotalForPax(
     const language = line.language as GuideLangOpt;
     validDays.forEach((day) => {
       if (!guideLangPicked(draft, day, line.id, language, language)) return;
-      const rate = master ? guideRateForPax(master, pax, language as GuideLanguage) : line.rate;
-      if (rate <= 0) return;
+      const rate = guideRawRateForPax(line, master, language, pax, pricingPax);
+      if (rate == null || rate <= 0) return;
       selectedReportingLanguages.add(language);
       guide += (rate * line.guides * line.days) / days.length;
     });

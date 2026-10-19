@@ -546,7 +546,7 @@ function AccommodationSelectionTable({
 
   // Build the rows
   const rows = overnightRouting.map((day) => {
-    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || day.to_city || "";
+    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "";
     const cityKey = cityName.trim().toLowerCase();
     const catKey = activeCategory.trim().toLowerCase();
     const sel = hotelSelectionForDay(option, day);
@@ -655,7 +655,9 @@ function AccommodationSelectionTable({
     }
 
     const setSel = (patch: Partial<typeof sel> & object) => {
-      const others = option.selections.filter((s) => s.routing_day !== day.day);
+      const others = option.selections.filter(
+        (selection) => selection.routing_day !== day.day || selection.city_id !== day.city_id,
+      );
       const cur = sel || {
         city_id: day.city_id,
         routing_day: day.day,
@@ -663,7 +665,7 @@ function AccommodationSelectionTable({
         room_id: "",
         meal_plan: "CP" as MealPlan,
       };
-      const merged = { ...cur, ...patch };
+      const merged = { ...cur, ...patch, city_id: day.city_id, routing_day: day.day };
       if ("hotel_id" in patch) {
         const h = d.hotels.find((x) => x.id === merged.hotel_id);
         merged.is_fallback = !!h && h.hotel_category !== activeCategory;

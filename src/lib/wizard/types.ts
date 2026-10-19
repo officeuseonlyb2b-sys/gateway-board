@@ -277,8 +277,12 @@ export interface HotelOption {
 export function hotelSelectionForDay(option: HotelOption | undefined, day: RoutingDay) {
   if (!option) return undefined;
   return (
-    option.selections.find((selection) => selection.routing_day === day.day) ??
-    option.selections.find((selection) => selection.city_id === day.city_id)
+    option.selections.find(
+      (selection) => selection.routing_day === day.day && selection.city_id === day.city_id,
+    ) ??
+    option.selections.find(
+      (selection) => selection.routing_day == null && selection.city_id === day.city_id,
+    )
   );
 }
 

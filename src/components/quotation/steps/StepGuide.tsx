@@ -1,5 +1,5 @@
 // Step 13 — Guide charges by routing day, language, and master pricing tier.
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ import {
   getEscortPricingMode,
   getEscortRangeBase,
   isEscortEnabled,
+  guideRawRateForPax,
 } from "@/lib/wizard/guide-pricing";
 import { uid, type StepProps } from "../shared";
 import type { GuideLine, QuoteDraft } from "@/lib/wizard/types";
@@ -97,7 +98,6 @@ export function Step13({ draft, set }: StepProps) {
   const db = useDB();
   const pricingPax = effectivePaxForPricing(draft);
   const costingPaxValues = getCostingPaxValues(draft);
-  const costingRange = parsePaxRange(draft);
   const languageFilter = (draft.guide_language as GuideLanguage | "all") || "all";
   const visibleLanguages = languageFilter === "all" ? GUIDE_LANGUAGES : [languageFilter];
   const escortMode = getEscortPricingMode(draft);
@@ -144,6 +144,23 @@ export function Step13({ draft, set }: StepProps) {
     (draft[reportingKey(language)] as number | undefined) ?? 0;
   const setReporting = (language: GuideLanguage, value: number) =>
     set({ [reportingKey(language)]: value } as Partial<typeof draft>);
+  const guideRateForLine = useCallback(
+    (
+      guide: import("@/lib/mock-store").Guide,
+      language: GuideLanguage,
+      pax: number,
+      line?: GuideLine,
+    ) =>
+      line
+        ? (guideRawRateForPax(line, guide, language, pax, pricingPax) ?? 0)
+        : guideMasterRatePax(guide, language, pax),
+    [pricingPax],
+  );
+  const paxForGuideTier = (tier: (typeof PAX_TIERS)[number]) => {
+    const min = tier.key === "1-5" ? 1 : tier.key === "6-14" ? 6 : 15;
+    const max = tier.key === "1-5" ? 5 : tier.key === "6-14" ? 14 : Number.POSITIVE_INFINITY;
+    return pricingPax >= min && pricingPax <= max ? pricingPax : tier.pax;
+  };
   const closeEscortEditor = () => {
     setEscortDialogOpen(false);
     setEscortEditor(null);
@@ -266,7 +283,12 @@ export function Step13({ draft, set }: StepProps) {
             Object.fromEntries(
               PAX_TIERS.map((tier) => [
                 tier.key,
-                guideMasterRatePax(option.guide, language, tier.pax),
+                guideRateForLine(
+                  option.guide,
+                  language,
+                  paxForGuideTier(tier),
+                  languageLines[language],
+                ),
               ]),
             ),
           ]),
@@ -309,7 +331,7 @@ export function Step13({ draft, set }: StepProps) {
       const hasApplicableRate =
         !!master &&
         !!language &&
-        applicableTiers.some((tier) => guideMasterRatePax(master, language, tier.pax) > 0);
+        applicableTiers.some((tier) => guideRateForLine(master, language, tier.pax, line) > 0);
       if (!hasApplicableRate) {
         guidesChanged = true;
         return { ...line, inclusion_status: "optional" as const };
@@ -364,7 +386,7 @@ export function Step13({ draft, set }: StepProps) {
           }
         : {}),
     });
-  }, [draft, dayData, applicableTiers, db.guides, pricingPax, set]);
+  }, [draft, dayData, applicableTiers, db.guides, guideRateForLine, pricingPax, set]);
 
   const eligibleGuideRows = dayData.flatMap((day) =>
     day.eligibleRows.flatMap((row) =>
@@ -396,7 +418,7 @@ export function Step13({ draft, set }: StepProps) {
     const line = row.line;
     const targetDayCount = Math.max(1, line?.from_routing_days?.length ?? draft.routing.length);
     return (
-      (guideMasterRatePax(row.guide, row.language, pax) *
+      (guideRateForLine(row.guide, row.language, pax, line) *
         Math.max(1, line?.guides ?? 1) *
         Math.max(1, line?.days ?? 1)) /
       targetDayCount
@@ -454,10 +476,10 @@ export function Step13({ draft, set }: StepProps) {
   // total; a Pax Range resolves every pax inside its selected bounds.
   const rangeCostingRows = costingPaxValues.map((pax) => {
     const unavailable = includedGuideRowsForRange.filter(
-      (row) => guideMasterRatePax(row.guide, row.language, pax) <= 0,
+      (row) => guideRateForLine(row.guide, row.language, pax, row.line) <= 0,
     );
     const priced = includedGuideRowsForRange.filter(
-      (row) => guideMasterRatePax(row.guide, row.language, pax) > 0,
+      (row) => guideRateForLine(row.guide, row.language, pax, row.line) > 0,
     );
     const activeLanguages = new Set(priced.map((row) => row.language));
     const base =
@@ -1152,7 +1174,7 @@ export function Step13({ draft, set }: StepProps) {
             {optionalGuideRows.length ? (
               <div className="divide-y">
                 {optionalGuideRows.map((row) => {
-                  const base = guideMasterRatePax(row.guide, row.language, pricingPax);
+                  const base = guideRateForLine(row.guide, row.language, pricingPax, row.line);
                   const commercial = applyLandCommercials(draft, base, 0.05);
                   return (
                     <div

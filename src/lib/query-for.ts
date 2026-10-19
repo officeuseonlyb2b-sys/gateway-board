@@ -31,7 +31,7 @@ export function getQuotationScope(queryFor?: string | null, commercialMode?: str
         ? "Land Part"
         : "Package");
   const program = normalized !== "Accommodation Part";
-  const routing = normalized !== "Accommodation Part";
+  const routing = true;
   const landPart = normalized !== "Accommodation Part";
   const accommodationPart = normalized !== "Land Part";
   const workflowSteps = [

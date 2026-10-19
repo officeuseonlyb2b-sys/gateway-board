@@ -104,7 +104,7 @@ import {
 } from "@/lib/wizard/calc";
 import { computeScenario } from "@/lib/wizard/scenario";
 import { buildLandPart } from "@/lib/wizard/costsheet";
-import { validateQuoteForFinalization } from "@/lib/wizard/validation";
+import { isRoutingReady, validateQuoteForFinalization } from "@/lib/wizard/validation";
 
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
@@ -475,6 +475,11 @@ function WizardPage() {
   const visibleSteps = workflowSteps.map((stepNumber) => STEPS[stepNumber - 1]);
   const visibleFlowGroups = FLOW_GROUPS.map((group) => ({
     ...group,
+    label: !scope.program && group.label === "Program & Routing" ? "Routing" : group.label,
+    description:
+      !scope.program && group.label === "Program & Routing"
+        ? "Overnight cities and day-by-day itinerary"
+        : group.description,
     steps: group.steps.filter((stepNumber) => workflowStepSet.has(stepNumber)),
   })).filter((group) => group.steps.length > 0);
   const step = resolveQuotationStep(draft?.step ?? 1, workflowSteps);
@@ -1161,9 +1166,7 @@ function validate(d: QuoteDraft, step: number): boolean {
       return d.program_mode === "existing" ? !!d.program_id : d.categories.length > 0;
     case 5: {
       // Routing
-      const overnightRows = d.routing.filter((r) => r.overnight);
-      if (overnightRows.length === 0) return false;
-      return overnightRows.some((r) => !!r.city_id);
+      return isRoutingReady(d);
     }
     case 8: {
       // Accommodation Part — Hotels
@@ -3577,10 +3580,10 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
       ready: draft.nights > 0 && (draft.query_type === "Brochure" || totalPax(draft) > 0),
     },
     ...(scope.program ? [{ label: "Programme", ready: !!draft.program_name }] : []),
-    ...(scope.routing
-      ? [{ label: "Routing", ready: draft.routing.some((day) => day.overnight && !!day.city_id) }]
+    ...(scope.routing ? [{ label: "Routing", ready: isRoutingReady(draft) }] : []),
+    ...(scope.accommodationPart
+      ? [{ label: "Accommodation", ready: isRoutingReady(draft) && hotelOptions > 0 }]
       : []),
-    ...(scope.accommodationPart ? [{ label: "Accommodation", ready: hotelOptions > 0 }] : []),
   ];
   const readyCount = readiness.filter((item) => item.ready).length;
 

@@ -29,6 +29,16 @@ export interface QuoteValidationResult {
   scenarios: ScenarioResult[];
 }
 
+export function isRoutingReady(draft: Pick<QuoteDraft, "routing" | "nights">): boolean {
+  const overnight = draft.routing.filter((day) => day.overnight);
+  return (
+    draft.nights > 0 &&
+    draft.routing.length === draft.nights + 1 &&
+    overnight.length === draft.nights &&
+    overnight.every((day) => Boolean(day.city_id))
+  );
+}
+
 const issue = (
   code: string,
   severity: ValidationSeverity,
@@ -251,6 +261,16 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
         "blocker",
         "Routing",
         `${draft.nights} hotel night(s) are required, but ${overnight.length} overnight row(s) are defined.`,
+      ),
+    );
+  }
+  if (scope.routing && overnight.some((day) => !day.city_id)) {
+    issues.push(
+      issue(
+        "OVERNIGHT_CITY_REQUIRED",
+        "blocker",
+        "Routing",
+        "Select an overnight city for every accommodation night.",
       ),
     );
   }

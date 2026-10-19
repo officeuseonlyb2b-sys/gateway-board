@@ -1,7 +1,12 @@
 // Costing calculator — rolls up totals for a single hotel option.
 import type { DB, RatePlan } from "@/lib/mock-store";
 import { miscRateForPax } from "@/lib/mock-store";
-import { hotelSelectionForDay, type QuoteDraft, type HotelOption } from "./types";
+import {
+  hotelSelectionForDay,
+  type DynamicRoomAllocation,
+  type QuoteDraft,
+  type HotelOption,
+} from "./types";
 import { addDaysISO } from "@/lib/format";
 import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
 import { getQuotationScope } from "@/lib/query-for";
@@ -89,39 +94,58 @@ export interface DynamicAccommodationBreakdown {
   missing: number;
 }
 
-/** Shared totals for the option/day-scoped Dynamic room-combination model. */
-export function dynamicAccommodationBreakdown(
+export interface DynamicAccommodationRoomLine {
+  allocation_id: string;
+  day: number;
+  date: string;
+  city_id: string;
+  hotel_id: string;
+  room_id: string;
+  room_name: string;
+  occupancy: DynamicRoomAllocation["occupancy"];
+  rooms: number;
+  capacity: number;
+  net_rate: number;
+  supplier_gst_per_room: number;
+  rate_inclusive_gst: number;
+  line_total: number;
+}
+
+export interface DynamicAccommodationRoomResolution {
+  lines: DynamicAccommodationRoomLine[];
+  missing: number;
+}
+
+/** Resolve the authoritative Dynamic room lines for both totals and review. */
+function resolveDynamicAccommodationRoomLines(
   draft: QuoteDraft,
   option: HotelOption,
   d: DB,
-): DynamicAccommodationBreakdown {
-  const breakdown: DynamicAccommodationBreakdown = {
-    net: 0,
-    supplier_gst: 0,
-    total: 0,
-    capacity: 0,
-    missing: 0,
-  };
+): DynamicAccommodationRoomResolution {
+  const lines: DynamicAccommodationRoomLine[] = [];
+  let missing = 0;
   const dynamicDays = new Set(draft.dynamic_days ?? []);
+  const capacityFor = { single: 1, double: 2, triple: 3, quad: 4 } as const;
+
   draft.routing.forEach((day, index) => {
     const isDynamic = draft.allocation_mode === "dynamic" || dynamicDays.has(day.day);
     if (!day.overnight || !isDynamic) return;
     const selection = hotelSelectionForDay(option, day);
     if (selection?.no_hotel) return;
     if (!selection?.hotel_id) {
-      breakdown.missing++;
+      missing++;
       return;
     }
     const date = day.date || addDaysISO(draft.start_date, index);
     (option.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
       const rooms = Math.max(0, allocation.rooms);
       if (!allocation.room_id || rooms === 0) {
-        breakdown.missing++;
+        missing++;
         return;
       }
       const room = d.room_categories.find((item) => item.id === allocation.room_id);
       if (!room || room.hotel_id !== selection.hotel_id) {
-        breakdown.missing++;
+        missing++;
         return;
       }
       const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date);
@@ -134,20 +158,59 @@ export function dynamicAccommodationBreakdown(
               ? plan.double_rate + (plan.extra_bed_rate || 0)
               : (plan.quad_rate ?? 0)
         : 0;
-      const net = allocation.manual_net_rate ?? masterNet;
-      if (!(net > 0)) {
-        breakdown.missing++;
+      const netRate = allocation.manual_net_rate ?? masterNet;
+      if (!(netRate > 0)) {
+        missing++;
         return;
       }
-      const supplierGst = net * gstRateFor(net) * rooms;
-      breakdown.net += net * rooms;
-      breakdown.supplier_gst += supplierGst;
-      breakdown.total += net * rooms + supplierGst;
-      breakdown.capacity +=
-        rooms * ({ single: 1, double: 2, triple: 3, quad: 4 } as const)[allocation.occupancy];
+      const supplierGstPerRoom = netRate * gstRateFor(netRate);
+      lines.push({
+        allocation_id: allocation.id,
+        day: day.day,
+        date,
+        city_id: day.city_id,
+        hotel_id: selection.hotel_id,
+        room_id: allocation.room_id,
+        room_name: room.name,
+        occupancy: allocation.occupancy,
+        rooms,
+        capacity: rooms * capacityFor[allocation.occupancy],
+        net_rate: netRate,
+        supplier_gst_per_room: supplierGstPerRoom,
+        rate_inclusive_gst: netRate + supplierGstPerRoom,
+        line_total: (netRate + supplierGstPerRoom) * rooms,
+      });
     });
   });
-  return breakdown;
+
+  return { lines, missing };
+}
+
+export function dynamicAccommodationRoomLines(
+  draft: QuoteDraft,
+  option: HotelOption,
+  d: DB,
+): DynamicAccommodationRoomResolution {
+  return resolveDynamicAccommodationRoomLines(draft, option, d);
+}
+
+/** Shared totals for the option/day-scoped Dynamic room-combination model. */
+export function dynamicAccommodationBreakdown(
+  draft: QuoteDraft,
+  option: HotelOption,
+  d: DB,
+): DynamicAccommodationBreakdown {
+  const resolved = resolveDynamicAccommodationRoomLines(draft, option, d);
+  return resolved.lines.reduce<DynamicAccommodationBreakdown>(
+    (breakdown, line) => ({
+      net: breakdown.net + line.net_rate * line.rooms,
+      supplier_gst: breakdown.supplier_gst + line.supplier_gst_per_room * line.rooms,
+      total: breakdown.total + line.line_total,
+      capacity: breakdown.capacity + line.capacity,
+      missing: resolved.missing,
+    }),
+    { net: 0, supplier_gst: 0, total: 0, capacity: 0, missing: resolved.missing },
+  );
 }
 
 export function dynamicAccommodationTotal(draft: QuoteDraft, option: HotelOption, d: DB): number {

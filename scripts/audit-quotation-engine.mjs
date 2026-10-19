@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
@@ -16,6 +18,14 @@ try {
   const masterPricing = await vite.ssrLoadModule("/src/lib/mock-store.ts");
   const landEligibility = await vite.ssrLoadModule("/src/lib/wizard/land-eligibility.ts");
   const guidePricing = await vite.ssrLoadModule("/src/lib/wizard/guide-pricing.ts");
+  const dynamicReview = await vite.ssrLoadModule(
+    "/src/components/quotation/AccommodationDynamicCostingReview.tsx",
+  );
+  const landDaywiseReview = await vite.ssrLoadModule(
+    "/src/components/quotation/LandDaywiseReview.tsx",
+  );
+  const landReview = await vite.ssrLoadModule("/src/lib/wizard/land-review.ts");
+  const landPricing = await vite.ssrLoadModule("/src/lib/wizard/land-pricing.ts");
 
   const packageScope = queryFor.getQuotationScope("Package");
   const landScope = queryFor.getQuotationScope("Land Part");
@@ -29,20 +39,22 @@ try {
   assert.equal(landScope.routing, true, "Land Part still requires Routing");
   assert.equal(landScope.landPart, true);
   assert.equal(landScope.accommodationPart, false);
-  assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 6, 8, 9, 10, 11]);
+  assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 5, 6, 8, 9, 10, 11]);
   assert.equal(accommodationScope.program, false);
-  assert.equal(accommodationScope.routing, false, "Accommodation Part does not require Routing");
+  assert.equal(accommodationScope.routing, true, "Accommodation Part requires Routing context");
   assert.equal(accommodationScope.landPart, false);
   assert.equal(accommodationScope.accommodationPart, true);
+  assert.equal(queryFor.nextQuotationStep(3, accommodationScope.workflowSteps), 5);
+  assert.equal(queryFor.nextQuotationStep(5, accommodationScope.workflowSteps), 6);
   assert.equal(queryFor.nextQuotationStep(6, accommodationScope.workflowSteps), 8);
   assert.equal(queryFor.previousQuotationStep(8, accommodationScope.workflowSteps), 6);
+  assert.equal(queryFor.previousQuotationStep(6, accommodationScope.workflowSteps), 5);
   assert.equal(queryFor.nextQuotationStep(6, landScope.workflowSteps), 7);
   assert.equal(queryFor.nextQuotationStep(7, landScope.workflowSteps), 9);
   assert.equal(queryFor.nextQuotationStep(6, packageScope.workflowSteps), 7);
   assert.equal(queryFor.nextQuotationStep(7, packageScope.workflowSteps), 8);
   assert.equal(queryFor.previousQuotationStep(9, packageScope.workflowSteps), 8);
   assert.equal(queryFor.resolveQuotationStep(7, accommodationScope.workflowSteps), 8);
-  assert.equal(queryFor.resolveQuotationStep(5, accommodationScope.workflowSteps), 6);
 
   const now = "2026-09-22T00:00:00.000Z";
   const db = {
@@ -496,6 +508,719 @@ try {
     hotel_gst_percent: 5,
   });
 
+  assert.equal(validation.isRoutingReady(baseDraft()), true, "Every overnight city is present");
+  const incompleteRoutingDraft = baseDraft();
+  incompleteRoutingDraft.routing[0].city_id = "";
+  assert.equal(validation.isRoutingReady(incompleteRoutingDraft), false);
+
+  const overnightSourceDraft = baseDraft();
+  overnightSourceDraft.routing[0].to_city = "Bhopal";
+  const overnightSourceSheet = costsheet.buildHotelMealSheet(
+    overnightSourceDraft,
+    db,
+    overnightSourceDraft.hotel_options[0],
+  );
+  assert.deepEqual(
+    overnightSourceSheet.rows.map((row) => row.day),
+    [1],
+    "Departure-only Day 2 does not produce a hotel night",
+  );
+  assert.equal(overnightSourceSheet.rows[0].city, "Indore");
+  assert.equal(overnightSourceSheet.rows[0].hotel, "Audit Hotel");
+
+  const sameCitySelectionOption = {
+    key: "A",
+    label: "Independent nights",
+    selections: [
+      {
+        city_id: "city-1",
+        routing_day: 1,
+        hotel_id: "hotel-1",
+        room_id: "room-1",
+        meal_plan: "CP",
+      },
+      {
+        city_id: "city-1",
+        routing_day: 2,
+        hotel_id: "hotel-2",
+        room_id: "room-2",
+        meal_plan: "CP",
+      },
+    ],
+  };
+  const sameCityNightOne = { ...baseDraft().routing[0], day: 1, city_id: "city-1" };
+  const sameCityNightTwo = { ...sameCityNightOne, day: 2 };
+  assert.equal(
+    types.hotelSelectionForDay(sameCitySelectionOption, sameCityNightOne)?.hotel_id,
+    "hotel-1",
+  );
+  assert.equal(
+    types.hotelSelectionForDay(sameCitySelectionOption, sameCityNightTwo)?.hotel_id,
+    "hotel-2",
+  );
+
+  db.cities.push({ id: "city-2", name: "Gwalior" });
+  const changedOvernightCity = { ...sameCityNightOne, city_id: "city-2" };
+  const staleHotelOption = {
+    key: "A",
+    label: "Stale city selection",
+    selections: [
+      {
+        city_id: "city-1",
+        routing_day: 1,
+        hotel_id: "hotel-1",
+        room_id: "room-1",
+        meal_plan: "CP",
+      },
+    ],
+  };
+  assert.equal(
+    types.hotelSelectionForDay(staleHotelOption, changedOvernightCity),
+    undefined,
+    "A hotel saved for the old overnight city is not a valid selection after routing changes",
+  );
+  const staleHotelSheet = costsheet.buildHotelMealSheet(
+    { ...baseDraft(), routing: [changedOvernightCity, baseDraft().routing[1]] },
+    db,
+    staleHotelOption,
+  );
+  assert.equal(staleHotelSheet.rows[0].city, "Gwalior");
+  assert.equal(staleHotelSheet.rows[0].hotel, "—");
+  assert.equal(
+    staleHotelSheet.rows[0].dbl,
+    0,
+    "Stale hotel does not contribute to overnight-city costing",
+  );
+
+  // Step 9 review projections are read-only and retain the authoritative
+  // master slabs. Exact Pax selects an existing slab; it never interpolates.
+  const reviewGuide = db.guides[0];
+  const reviewGuideBefore = structuredClone(reviewGuide);
+  assert.deepEqual(landReview.guideReviewRates(reviewGuide, "English", "ranges", 6), [
+    { label: "1–5", rate: 1000 },
+    { label: "6–14", rate: 1500 },
+    { label: "15+", rate: 2000 },
+  ]);
+  assert.deepEqual(landReview.guideReviewRates(reviewGuide, "English", "exact", 6), [
+    { label: "6 Pax", rate: 1500 },
+  ]);
+  const missingGuideRate = { ...reviewGuide, rate_1_to_5: 0, rate_6_to_14: 0, rate_15_plus: 0 };
+  assert.deepEqual(
+    landReview.guideReviewRates(missingGuideRate, "English", "ranges", 6),
+    [],
+    "Missing review rates remain unavailable instead of becoming a displayed zero",
+  );
+  const guideWithoutAnyRate = {
+    ...missingGuideRate,
+    rate_per_day: 0,
+  };
+  assert.equal(
+    guidePricing.guideRawRateForPax({ rate: 0 }, guideWithoutAnyRate, "English", 6, 6),
+    undefined,
+    "Missing slab and legacy daily fallback remain unavailable",
+  );
+  const displayGuideServices = [
+    { id: "guide-hindi-included", language: "Hindi", rate: 1000, inclusion: "included" },
+    { id: "guide-hindi-optional", language: "Hindi", rate: 1010, inclusion: "optional" },
+    { id: "guide-english-included", language: "English", rate: 1110, inclusion: "included" },
+    { id: "guide-english-optional", language: "English", rate: 1120, inclusion: "optional" },
+    { id: "guide-other-included", language: "Language", rate: 1220, inclusion: "included" },
+    { id: "guide-other-optional", language: "Language", rate: 1230, inclusion: "optional" },
+  ];
+  const renderedReviewDb = {
+    ...db,
+    destination_cities: [{ id: "destination-city-1", name: "Indore", created_at: now }],
+    destination_tours: [
+      { id: "tour-1", city_id: "destination-city-1", title: "AM HDCT", created_at: now },
+    ],
+    guides: displayGuideServices.map(({ id, language, rate }) => ({
+      ...reviewGuide,
+      id,
+      city: "Indore",
+      tour_program: "AM HDCT",
+      tour_id: "tour-1",
+      languages: [language],
+      language_rates: {
+        [language]: {
+          rate_1_to_5: rate,
+          rate_6_to_14: rate + 500,
+          rate_15_plus: rate + 1000,
+        },
+      },
+    })),
+    entrance_sites: [
+      {
+        id: "entry-included",
+        city_id: "destination-city-1",
+        tour_id: "tour-1",
+        site_name: "Included Entrance",
+        indian_rate: 100,
+        foreigner_rate: 500,
+        student_rate: 50,
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "entry-optional",
+        city_id: "destination-city-1",
+        tour_id: "tour-1",
+        site_name: "Optional Entrance",
+        indian_rate: 550,
+        foreigner_rate: 650,
+        student_rate: 60,
+        is_active: true,
+        created_at: now,
+      },
+      {
+        id: "entry-tour-off",
+        city_id: "destination-city-1",
+        tour_id: "tour-1",
+        site_name: "Tour Off Entrance",
+        indian_rate: 999,
+        foreigner_rate: 999,
+        student_rate: 999,
+        is_active: true,
+        created_at: now,
+      },
+    ],
+    activities: [
+      {
+        ...db.activities[0],
+        id: "activity-included",
+        activity_name: "Included Activity",
+        price: 1234,
+      },
+      {
+        ...db.activities[0],
+        id: "activity-optional",
+        activity_name: "Optional Activity",
+        price: 1500,
+      },
+    ],
+  };
+  const displayDraft = {
+    ...baseDraft(),
+    adults: 2,
+    routing: [
+      {
+        ...baseDraft().routing[0],
+        tour_ids_by_city: { "city-1": ["tour-1"] },
+      },
+      baseDraft().routing[1],
+    ],
+    guides: displayGuideServices.map(({ id, language, rate, inclusion }) => ({
+      id: `${id}-line`,
+      guide_id: id,
+      days: 1,
+      guides: 1,
+      rate,
+      language,
+      inclusion_status: inclusion,
+      from_routing_days: [1],
+    })),
+    guide_tour_selected_by_day: { 1: ["Indore||AM HDCT"] },
+    entrances: [
+      {
+        id: "entrance-line-included",
+        site_id: "entry-included",
+        indian_pax: 2,
+        indian_rate: 100,
+        foreign_pax: 0,
+        foreign_rate: 500,
+        student_pax: 0,
+        student_rate: 50,
+        from_routing_days: [1],
+      },
+      {
+        id: "entrance-line-optional",
+        site_id: "entry-optional",
+        indian_pax: 2,
+        indian_rate: 550,
+        foreign_pax: 0,
+        foreign_rate: 650,
+        student_pax: 0,
+        student_rate: 60,
+        from_routing_days: [1],
+      },
+      {
+        id: "entrance-line-off",
+        site_id: "entry-tour-off",
+        indian_pax: 2,
+        indian_rate: 999,
+        foreign_pax: 0,
+        foreign_rate: 999,
+        student_pax: 0,
+        student_rate: 999,
+        from_routing_days: [1],
+      },
+    ],
+    entrance_tour_selected_by_day: { 1: ["entry-included", "entry-optional"] },
+    entrance_rate_selection_by_day: { 1: { indian: ["entrance-line-included"] } },
+    activities: [
+      {
+        id: "activity-line-included",
+        activity_id: "activity-included",
+        qty: 1,
+        rate: 1234,
+        pricing_mode: "slab",
+        inclusion_status: "included",
+        from_routing_days: [1],
+      },
+      {
+        id: "activity-line-optional",
+        activity_id: "activity-optional",
+        qty: 1,
+        rate: 1500,
+        pricing_mode: "slab",
+        inclusion_status: "optional",
+        from_routing_days: [1],
+      },
+    ],
+    costing_selection: {
+      guide: {
+        1: displayGuideServices
+          .filter(({ inclusion }) => inclusion === "included")
+          .map(({ id, language }) => `${id}-line::${language}`),
+      },
+      entrances: { 1: ["entrance-line-included"] },
+      entrance_cats: { 1: ["indian"] },
+      activities: { 1: [] },
+    },
+  };
+  const displayFilters = {
+    transport: false,
+    hindi: true,
+    english: true,
+    otherLanguage: true,
+    escort: false,
+    indian: true,
+    foreign: true,
+    student: true,
+    activities: true,
+    misc: true,
+    guideIncluded: true,
+    guideOptional: true,
+    entranceIncluded: true,
+    entranceOptional: true,
+    activityIncluded: true,
+    activityOptional: true,
+    miscIncluded: true,
+    paxDisplay: "ranges",
+    exactPax: 2,
+  };
+  assert.equal(
+    guidePricing.guideRawRateForPax(
+      { rate: 0 },
+      renderedReviewDb.guides.find((guide) => guide.id === "guide-other-included"),
+      "Language",
+      2,
+      2,
+    ),
+    1220,
+    "Other Language raw rate fixture resolves from the configured master language",
+  );
+  const displayDraftBeforeRender = structuredClone(displayDraft);
+  const originalMasterDb = masterPricing.db.get();
+  masterPricing.db.hydrateAll(renderedReviewDb);
+  const renderedReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: displayFilters,
+    }),
+  );
+  for (const heading of [">Hindi</th>", ">English</th>", ">Other Language</th>"]) {
+    assert.ok(renderedReview.includes(heading), `Rendered review includes ${heading}`);
+  }
+  assert.ok(
+    renderedReview.indexOf(">Hindi</th>") < renderedReview.indexOf("1–5 Pax") &&
+      renderedReview.indexOf("1–5 Pax") < renderedReview.indexOf(">Included</th>") &&
+      renderedReview.indexOf(">English</th>") < renderedReview.indexOf(">Other Language</th>") &&
+      renderedReview.indexOf(">Other Language</th>") < renderedReview.indexOf("6–14 Pax") &&
+      renderedReview.indexOf("6–14 Pax") < renderedReview.indexOf("15+ Pax") &&
+      renderedReview.indexOf("15+ Pax") < renderedReview.indexOf(">Included</th>") &&
+      renderedReview.indexOf(">Included</th>") < renderedReview.indexOf(">Optional</th>"),
+    "Rendered Guide headings align language → slab → Included/Optional header rows",
+  );
+  for (const rate of [
+    "₹1,000",
+    "₹1,010",
+    "₹1,110",
+    "₹1,120",
+    "₹1,220",
+    "₹1,230",
+    "₹100",
+    "₹550",
+    "₹1,234",
+    "₹1,500",
+    "₹500",
+  ]) {
+    assert.ok(renderedReview.includes(rate), `Rendered review includes raw price ${rate}`);
+  }
+  assert.ok(
+    !renderedReview.includes("₹999"),
+    "Tour OFF Entrance rates are absent from review rows",
+  );
+  assert.ok(renderedReview.includes("Miscellaneous · Included"));
+  const onlyEnglishReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, hindi: false, otherLanguage: false },
+    }),
+  );
+  assert.ok(onlyEnglishReview.includes(">English</th>"));
+  assert.ok(!onlyEnglishReview.includes(">Hindi</th>"));
+  assert.ok(!onlyEnglishReview.includes(">Other Language</th>"));
+  const hindiEnglishReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, otherLanguage: false },
+    }),
+  );
+  assert.ok(
+    hindiEnglishReview.includes(">Hindi</th>") && hindiEnglishReview.includes(">English</th>"),
+  );
+  assert.ok(!hindiEnglishReview.includes(">Other Language</th>"));
+  const otherLanguageOnlyReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, hindi: false, english: false },
+    }),
+  );
+  assert.ok(otherLanguageOnlyReview.includes(">Other Language</th>"));
+  assert.ok(
+    !otherLanguageOnlyReview.includes(">Hindi</th>") &&
+      !otherLanguageOnlyReview.includes(">English</th>"),
+  );
+  const tourOffGuideReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: { ...displayDraft, guide_tour_selected_by_day: { 1: [] } },
+      filters: displayFilters,
+    }),
+  );
+  const tourOffGuidePosition = tourOffGuideReview.indexOf("AM HDCT");
+  const tourOffGuideRow = tourOffGuideReview.slice(
+    tourOffGuideReview.lastIndexOf("<tr", tourOffGuidePosition),
+    tourOffGuideReview.indexOf("</tr>", tourOffGuidePosition) + 5,
+  );
+  const guideCellsWhenTourOff = tourOffGuideRow.split("</td>").slice(5, 23).join("</td>");
+  assert.ok(
+    !guideCellsWhenTourOff.includes("₹"),
+    "Tour OFF has neither Included nor Optional Guide values",
+  );
+
+  const includedGuideOnly = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, guideOptional: false },
+    }),
+  );
+  assert.equal((includedGuideOnly.match(/>Included<\/th>/g) ?? []).length, 13);
+  assert.equal((includedGuideOnly.match(/>Optional<\/th>/g) ?? []).length, 4);
+  const optionalGuideOnly = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, guideIncluded: false },
+    }),
+  );
+  assert.equal((optionalGuideOnly.match(/>Included<\/th>/g) ?? []).length, 4);
+  assert.equal((optionalGuideOnly.match(/>Optional<\/th>/g) ?? []).length, 13);
+  const noGuidePricing = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, guideIncluded: false, guideOptional: false },
+    }),
+  );
+  assert.ok(!noGuidePricing.includes(">Hindi</th>") && !noGuidePricing.includes(">English</th>"));
+
+  const entranceTableHead = renderedReview.match(/<thead[^>]*>[\s\S]*?<\/thead>/)?.[0] ?? "";
+  assert.ok(
+    entranceTableHead.includes(">Indian</th>") && entranceTableHead.includes(">Foreigner</th>"),
+    `Rendered Entrance headings: ${entranceTableHead}`,
+  );
+  assert.ok(entranceTableHead.includes(">Student</th>"));
+  const indianOnlyReview = renderToStaticMarkup(
+    createElement(landDaywiseReview.LandDaywiseReview, {
+      draft: displayDraft,
+      filters: { ...displayFilters, foreign: false, student: false },
+    }),
+  );
+  const indianOnlyHeader = indianOnlyReview.match(/<thead[^>]*>[\s\S]*?<\/thead>/)?.[0] ?? "";
+  assert.ok(indianOnlyHeader.includes(">Indian</th>"));
+  assert.ok(
+    !indianOnlyHeader.includes(">Foreigner</th>") && !indianOnlyHeader.includes(">Student</th>"),
+  );
+  const activityHeaderStart = renderedReview.indexOf(">Activities / Experiences</th>");
+  const activityHeader = renderedReview.slice(
+    activityHeaderStart,
+    renderedReview.indexOf("</thead>", activityHeaderStart),
+  );
+  assert.ok(activityHeader.includes(">Included</th>") && activityHeader.includes(">Optional</th>"));
+  masterPricing.db.hydrateAll(originalMasterDb);
+  assert.deepEqual(
+    displayDraft,
+    displayDraftBeforeRender,
+    "Review display filters do not mutate saved draft data",
+  );
+  assert.deepEqual(reviewGuide, reviewGuideBefore, "Review slab projection does not mutate data");
+  assert.equal(
+    landReview.savedQuoteRawRate(
+      {
+        rate: 1500,
+        pax_ranges: [
+          { from_pax: 1, to_pax: 5, rate: 1000 },
+          { from_pax: 6, to_pax: 14, rate: 1500 },
+        ],
+      },
+      6,
+    ),
+    1500,
+    "Review raw rate comes from the saved quotation slab",
+  );
+  assert.equal(
+    landReview.savedQuoteRawRate({ rate: 650 }, 2),
+    650,
+    "Saved flat quotation rates remain raw before commercials",
+  );
+  const savedGuideSnapshot = {
+    rate: 0,
+    pax_ranges: [
+      { from_pax: 1, to_pax: 5, rate: 1000 },
+      { from_pax: 6, to_pax: 10, rate: 1500 },
+      { from_pax: 11, to_pax: 15, rate: 2000 },
+    ],
+  };
+  for (const [pax, expected] of [
+    [1, 1000],
+    [5, 1000],
+    [6, 1500],
+    [10, 1500],
+    [11, 2000],
+    [15, 2000],
+    [16, 2000],
+  ]) {
+    assert.equal(
+      guidePricing.guideRawRateForPax(savedGuideSnapshot, reviewGuide, "English", pax, 14),
+      expected,
+      `Guide saved snapshot resolves the correct raw rate at ${pax} pax`,
+    );
+  }
+  assert.equal(
+    guidePricing.guideRawRateForPax({ rate: 1250 }, reviewGuide, "English", 6, 6),
+    1250,
+    "Saved quotation rate wins at its pricing pax",
+  );
+  assert.equal(
+    guidePricing.guideRawRateForPax({ rate: 0 }, reviewGuide, "English", 11, 6),
+    1500,
+    "Authoritative Guide resolver is the fallback when no saved slab covers pax",
+  );
+  for (const [pax, expected] of [
+    [1, 1000],
+    [5, 1000],
+    [6, 1500],
+    [10, 1500],
+    [11, 1500],
+    [14, 1500],
+    [15, 2000],
+  ]) {
+    assert.equal(
+      guidePricing.guideRawRateForPax({ rate: 1000 }, reviewGuide, "English", pax, 14),
+      pax === 14 ? 1000 : expected,
+      `Range mode resolves the Guide's applicable master slab at ${pax} pax`,
+    );
+  }
+  assert.equal(
+    guidePricing.guideRawRateForPax({ rate: 0 }, undefined, "English", 6, 1),
+    undefined,
+    "Guide rates missing from both saved quote and master remain unavailable",
+  );
+  const exactGuideDraft = { ...baseDraft(), pax_mode: "exact", adults: 16 };
+  assert.deepEqual(calc.getCostingPaxValues(exactGuideDraft), [16]);
+  const exactGuideRaw = guidePricing.guideRawRateForPax(
+    { rate: 3500 },
+    reviewGuide,
+    "English",
+    16,
+    16,
+  );
+  assert.equal(exactGuideRaw, 3500, "Exact mode resolves only the applicable 16-pax raw rate");
+  assert.equal(exactGuideRaw / 16, 218.75, "Exact Guide per-person base divides by actual pax");
+  const exactGuideMatrixDraft = {
+    ...exactGuideDraft,
+    guides: [{ ...baseDraft().guides[0], rate: 3500 }],
+  };
+  const exactGuideMatrixRows = costsheet
+    .buildRateSheet(exactGuideMatrixDraft, db, exactGuideMatrixDraft.hotel_options[0], [])
+    .flatMap((group) => group.rows);
+  assert.deepEqual(
+    exactGuideMatrixRows.map((row) => row.pax),
+    [16],
+    "Exact Guide costing generates only the exact traveller row",
+  );
+  assert.ok(
+    Math.abs(
+      exactGuideMatrixRows[0].guide -
+        landPricing.applyLandCommercials(exactGuideMatrixDraft, 3500 / 16, 0.05).final,
+    ) < 0.01,
+    "Exact Guide package PP divides the finalized group slab by exact pax once",
+  );
+  const combinedGuideCommercial = landPricing.applyLandCommercials(
+    { ...baseDraft(), land_markup_percent: 10, land_gst_percent: 5 },
+    3500 + 3000,
+  );
+  assert.deepEqual(
+    combinedGuideCommercial,
+    { base: 6500, markup: 650, gst: 357.5, final: 7507.5 },
+    "Combined included Guides receive markup and GST once on their aggregate base",
+  );
+  assert.deepEqual(
+    landPricing.applyLandCommercials(
+      { ...baseDraft(), land_markup_percent: 10, land_gst_percent: 5 },
+      650,
+    ),
+    { base: 650, markup: 65, gst: 35.75, final: 750.75 },
+    "Review summary applies Land markup and GST exactly once",
+  );
+
+  const reviewTransportDraft = baseDraft();
+  const reviewTransportOption = {
+    id: "review-option",
+    name: "Audit transport",
+    min_pax: 1,
+    max_pax: 10,
+    vehicles: [{ transport_line_id: "transport-small", quantity: 1 }],
+  };
+  const transportCommercial = landPricing.applyLandCommercials(
+    reviewTransportDraft,
+    calc.transportLineTotal(reviewTransportDraft.transport[0]),
+  );
+  assert.equal(
+    landPricing.transportOptionTotal(reviewTransportDraft, reviewTransportOption),
+    transportCommercial.final,
+    "Step 9 transport final equals the authoritative transport final",
+  );
+  const matrixBeforeReviewFilter = costsheet.buildRateSheet(
+    reviewTransportDraft,
+    db,
+    reviewTransportDraft.hotel_options[0],
+    reviewTransportDraft.transport,
+  );
+  landReview.guideReviewRates(reviewGuide, "English", "exact", 10);
+  const matrixAfterReviewFilter = costsheet.buildRateSheet(
+    reviewTransportDraft,
+    db,
+    reviewTransportDraft.hotel_options[0],
+    reviewTransportDraft.transport,
+  );
+  assert.deepEqual(
+    matrixAfterReviewFilter,
+    matrixBeforeReviewFilter,
+    "Review filters do not change Commercial Matrix outputs",
+  );
+  const guideRangeDraft = {
+    ...baseDraft(),
+    pax_mode: "range",
+    pax_min: 1,
+    pax_max: 14,
+    guides: [{ ...baseDraft().guides[0], rate: 1000 }],
+  };
+  const guideRangeRows = costsheet
+    .buildRateSheet(guideRangeDraft, db, guideRangeDraft.hotel_options[0], [])
+    .flatMap((group) => group.rows);
+  assert.deepEqual(
+    guideRangeRows.map((row) => row.pax),
+    Array.from({ length: 14 }, (_, index) => index + 1),
+    "Range Guide costing emits one independent Commercial Matrix row per pax",
+  );
+  for (const [pax, rawRate] of [
+    [5, 1000],
+    [6, 1500],
+    [14, 1000],
+  ]) {
+    const row = guideRangeRows.find((item) => item.pax === pax);
+    assert.ok(row);
+    assert.ok(
+      Math.abs(
+        row.guide - landPricing.applyLandCommercials(guideRangeDraft, rawRate / pax, 0.05).final,
+      ) < 0.01,
+      `Commercial Matrix Guide PP at ${pax} pax uses raw slab ${rawRate} and existing commercials once`,
+    );
+  }
+  const optionalGuideDraft = {
+    ...reviewTransportDraft,
+    guides: reviewTransportDraft.guides.map((line) => ({
+      ...line,
+      inclusion_status: "optional",
+    })),
+  };
+  const optionalGuideRow = costsheet
+    .buildRateSheet(
+      optionalGuideDraft,
+      db,
+      optionalGuideDraft.hotel_options[0],
+      optionalGuideDraft.transport,
+    )
+    .flatMap((group) => group.rows)
+    .find((row) => row.pax === 2);
+  assert.equal(optionalGuideRow?.guide, 0, "Optional Guide remains outside package costing");
+  const optionalActivityDraft = {
+    ...reviewTransportDraft,
+    activities: reviewTransportDraft.activities.map((line) => ({
+      ...line,
+      inclusion_status: "optional",
+    })),
+  };
+  const optionalActivityMatrixRow = costsheet
+    .buildRateSheet(
+      optionalActivityDraft,
+      db,
+      optionalActivityDraft.hotel_options[0],
+      optionalActivityDraft.transport,
+    )
+    .flatMap((group) => group.rows)
+    .find((row) => row.pax === 2);
+  assert.equal(
+    optionalActivityMatrixRow?.activities,
+    0,
+    "Optional Activity remains outside package costing",
+  );
+  const optionalEntranceDraft = {
+    ...reviewTransportDraft,
+    entrance_rate_selection_by_day: { 1: { indian: [] } },
+    costing_selection: {
+      ...(reviewTransportDraft.costing_selection ?? {}),
+      entrance_cats: { 1: ["indian"] },
+    },
+  };
+  const optionalEntranceMatrixRow = costsheet
+    .buildRateSheet(
+      optionalEntranceDraft,
+      db,
+      optionalEntranceDraft.hotel_options[0],
+      optionalEntranceDraft.transport,
+    )
+    .flatMap((group) => group.rows)
+    .find((row) => row.pax === 2);
+  assert.equal(
+    optionalEntranceMatrixRow?.entrances,
+    0,
+    "Unselected Entrance rate remains outside package costing",
+  );
+  const standardHotelSheet = costsheet.buildHotelMealSheet(
+    reviewTransportDraft,
+    db,
+    reviewTransportDraft.hotel_options[0],
+  );
+  const standardMatrixRow = matrixBeforeReviewFilter[0].rows.find((row) => row.pax === 2);
+  const standardDoubleSupplierShare = standardHotelSheet.rows.reduce(
+    (sum, row) => sum + (row.dbl + row.dbl * calc.gstRateFor(row.dbl)) / 2,
+    0,
+  );
+  assert.ok(
+    Math.abs(standardMatrixRow.double - standardDoubleSupplierShare * 1.1 * 1.05) < 0.01,
+    "Standard accommodation PP uses the same hotel calculation source",
+  );
+
   const accommodationOnlyDraft = baseDraft();
   accommodationOnlyDraft.query_for = "Accommodation Part";
   accommodationOnlyDraft.commercial_mode = "accommodation_only";
@@ -520,6 +1245,70 @@ try {
   assert.equal(accommodationScenario.misc_total, 0);
   assert.ok(accommodationScenario.hotel_total > 0, "Accommodation-only keeps hotel costing");
   assert.ok(accommodationScenario.meals_total > 0, "Accommodation-only keeps applicable meals");
+  const noHotelDraft = {
+    ...accommodationOnlyDraft,
+    nights: 2,
+    routing: [
+      { ...accommodationOnlyDraft.routing[0], day: 1, overnight: true },
+      {
+        ...accommodationOnlyDraft.routing[0],
+        day: 2,
+        date: "2026-09-23",
+        overnight: true,
+      },
+      {
+        ...accommodationOnlyDraft.routing[1],
+        day: 3,
+        date: "2026-09-24",
+        overnight: false,
+      },
+    ],
+    hotel_options: [
+      {
+        ...accommodationOnlyDraft.hotel_options[0],
+        selections: [
+          {
+            city_id: "city-1",
+            routing_day: 1,
+            hotel_id: "hotel-1",
+            room_id: "room-1",
+            meal_plan: "CP",
+          },
+          {
+            city_id: "city-1",
+            routing_day: 2,
+            hotel_id: "",
+            room_id: "",
+            meal_plan: "CP",
+            no_hotel: true,
+          },
+        ],
+      },
+    ],
+  };
+  const noHotelDataBefore = structuredClone({
+    routing: noHotelDraft.routing,
+    selections: noHotelDraft.hotel_options[0].selections,
+  });
+  const noHotelSheet = costsheet.buildHotelMealSheet(
+    noHotelDraft,
+    db,
+    noHotelDraft.hotel_options[0],
+  );
+  const noHotelScenario = scenarioEngine.computeScenario(
+    noHotelDraft,
+    { id: "no-hotel-night", label: "No Hotel Night", option_key: "A" },
+    db,
+  );
+  assert.ok(noHotelScenario);
+  assert.equal(noHotelSheet.rows.length, 1, "No Hotel night is not costed as an accommodation row");
+  assert.equal(noHotelSheet.rows[0].day, 1, "The selected hotel on Night 1 remains present");
+  assert.equal(noHotelScenario.hotel_total, accommodationScenario.hotel_total);
+  assert.deepEqual(
+    { routing: noHotelDraft.routing, selections: noHotelDraft.hotel_options[0].selections },
+    noHotelDataBefore,
+    "No Hotel does not delete routing or other nightly selections",
+  );
   assert.deepEqual(accommodationOnlyDraft.routing, preservedLandData.routing);
   assert.deepEqual(accommodationOnlyDraft.transport, preservedLandData.transport);
   assert.deepEqual(accommodationOnlyDraft.activities, preservedLandData.activities);
@@ -540,11 +1329,14 @@ try {
     db,
   );
   assert.equal(
-    accommodationReview.blockers.some(
-      (item) => item.section === "Routing" || item.section === "Program",
-    ),
+    accommodationReview.blockers.some((item) => item.section === "Routing"),
+    true,
+    "Missing Routing blocks Accommodation-only readiness/finalization",
+  );
+  assert.equal(
+    accommodationReview.blockers.some((item) => item.section === "Program"),
     false,
-    "Routing and Program do not block Accommodation-only readiness/finalization",
+    "Standalone Accommodation does not require a master Program",
   );
 
   const switchedBackToPackage = {
@@ -1166,6 +1958,82 @@ try {
   dynamicValid.hotel_options[0].dynamic_allocations = {
     1: [{ id: "dynamic-double", room_id: "room-1", occupancy: "double", rooms: 1 }],
   };
+  const dynamicRoomResolution = calc.dynamicAccommodationRoomLines(
+    dynamicValid,
+    dynamicValid.hotel_options[0],
+    db,
+  );
+  assert.equal(dynamicRoomResolution.lines.length, 1);
+  assert.deepEqual(
+    {
+      room: dynamicRoomResolution.lines[0].room_name,
+      occupancy: dynamicRoomResolution.lines[0].occupancy,
+      quantity: dynamicRoomResolution.lines[0].rooms,
+      capacity: dynamicRoomResolution.lines[0].capacity,
+    },
+    { room: "Deluxe", occupancy: "double", quantity: 1, capacity: 2 },
+  );
+  close(dynamicRoomResolution.lines[0].net_rate, 4000, "Dynamic review Net matches StepHotels");
+  close(
+    dynamicRoomResolution.lines[0].supplier_gst_per_room,
+    200,
+    "Dynamic review supplier GST matches StepHotels",
+  );
+  close(
+    dynamicRoomResolution.lines[0].rate_inclusive_gst,
+    4200,
+    "Dynamic review incl-GST rate matches StepHotels",
+  );
+  close(
+    dynamicRoomResolution.lines[0].line_total,
+    4200,
+    "Dynamic review line total matches StepHotels",
+  );
+  const dynamicBreakdown = calc.dynamicAccommodationBreakdown(
+    dynamicValid,
+    dynamicValid.hotel_options[0],
+    db,
+  );
+  close(dynamicBreakdown.net, 4000, "Dynamic shared resolver net total");
+  close(dynamicBreakdown.supplier_gst, 200, "Dynamic shared resolver GST total");
+  close(dynamicBreakdown.total, 4200, "Dynamic shared resolver StepHotels total");
+  assert.equal(dynamicBreakdown.capacity, 2);
+  const standardBeforeDynamicReview = costsheet.buildRateSheet(
+    { ...dynamicValid, allocation_mode: "standard", dynamic_days: [] },
+    db,
+    dynamicValid.hotel_options[0],
+    dynamicValid.transport,
+  );
+  assert.equal(standardBeforeDynamicReview[0].rows[0].double > 0, true);
+  calc.dynamicAccommodationRoomLines(dynamicValid, dynamicValid.hotel_options[0], db);
+  assert.deepEqual(
+    costsheet.buildRateSheet(
+      { ...dynamicValid, allocation_mode: "standard", dynamic_days: [] },
+      db,
+      dynamicValid.hotel_options[0],
+      dynamicValid.transport,
+    ),
+    standardBeforeDynamicReview,
+    "Dynamic review resolution leaves Standard accommodation matrix outputs unchanged",
+  );
+
+  const dynamicNoHotel = structuredClone(dynamicValid);
+  dynamicNoHotel.hotel_options[0].selections[0].no_hotel = true;
+  const noHotelDynamicResolution = calc.dynamicAccommodationRoomLines(
+    dynamicNoHotel,
+    dynamicNoHotel.hotel_options[0],
+    db,
+  );
+  assert.equal(
+    noHotelDynamicResolution.lines.length,
+    0,
+    "No Hotel renders no fabricated room lines",
+  );
+  assert.equal(
+    calc.dynamicAccommodationBreakdown(dynamicNoHotel, dynamicNoHotel.hotel_options[0], db).total,
+    0,
+    "No Hotel night contributes zero accommodation cost",
+  );
   dynamicValid.rate_sheet_rows = { "A|transport-small": [2] };
   assert.equal(validation.validateQuoteForFinalization(dynamicValid, db).blockers.length, 0);
   const dynamicOverrideWithoutReason = structuredClone(dynamicValid);
@@ -1228,6 +2096,24 @@ try {
   });
   assert.equal(calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[0]), 6);
   assert.equal(calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[1]), 4);
+  const optionAReviewLines = calc.dynamicAccommodationRoomLines(
+    splitDynamic,
+    splitDynamic.hotel_options[0],
+    db,
+  ).lines;
+  const optionBReviewLines = calc.dynamicAccommodationRoomLines(
+    splitDynamic,
+    splitDynamic.hotel_options[1],
+    db,
+  ).lines;
+  assert.equal(
+    optionAReviewLines.reduce((sum, line) => sum + line.capacity, 0),
+    6,
+  );
+  assert.equal(
+    optionBReviewLines.reduce((sum, line) => sum + line.capacity, 0),
+    4,
+  );
   assert.equal(
     calc.dynamicAccommodationBreakdown(splitDynamic, splitDynamic.hotel_options[0], db).capacity,
     6,
@@ -1238,6 +2124,46 @@ try {
   );
   assert.equal(calc.computeMealDays(splitDynamic, db, "A").total, 3000);
   assert.equal(calc.computeMealDays(splitDynamic, db, "B").total, 2000);
+  const optionADynamicTotal = calc.dynamicAccommodationBreakdown(
+    splitDynamic,
+    splitDynamic.hotel_options[0],
+    db,
+  ).total;
+  const optionBDynamicTotal = calc.dynamicAccommodationBreakdown(
+    splitDynamic,
+    splitDynamic.hotel_options[1],
+    db,
+  ).total;
+  assert.notEqual(
+    optionADynamicTotal,
+    optionBDynamicTotal,
+    "Dynamic accommodation alternatives stay independent",
+  );
+  const accommodationSellingFactor =
+    (1 + calc.hotelsMarkup(splitDynamic)) * (1 + calc.hotelsGst(splitDynamic));
+  const optionAFinalPp =
+    (optionADynamicTotal * accommodationSellingFactor +
+      calc.computeMealDays(splitDynamic, db, "A").total * accommodationSellingFactor) /
+    calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[0]);
+  const optionBFinalPp =
+    (optionBDynamicTotal * accommodationSellingFactor +
+      calc.computeMealDays(splitDynamic, db, "B").total * accommodationSellingFactor) /
+    calc.effectiveAccommodationPax(splitDynamic, splitDynamic.hotel_options[1]);
+  close(optionAFinalPp, 3407.25, "Option A dynamic Accommodation + selected Meals PP");
+  close(optionBFinalPp, 3003, "Option B dynamic Accommodation + selected Meals PP");
+  assert.notEqual(
+    optionAFinalPp,
+    optionBFinalPp,
+    "Each option uses its own Dynamic accommodation pax",
+  );
+  const reviewDraftBeforeToggle = structuredClone(splitDynamic);
+  const visibleAfterFilter = dynamicReview.toggleDynamicReviewOption(["A", "B"], "A", false);
+  assert.deepEqual(visibleAfterFilter, ["B"]);
+  assert.deepEqual(
+    splitDynamic,
+    reviewDraftBeforeToggle,
+    "Review option display toggle does not mutate saved data",
+  );
   const splitRateSheet = costsheet.buildRateSheet(
     splitDynamic,
     db,

@@ -1,6 +1,42 @@
-import type { QuoteDraft } from "./types";
+import {
+  guideConfiguredLanguages,
+  guideRateForPax,
+  type Guide,
+  type GuideLanguage,
+} from "@/lib/mock-store";
+import type { GuideLine, QuoteDraft } from "./types";
 
 export type EscortPricingMode = "per_person" | "pax_range" | "day_wise";
+
+/** Resolve a raw Guide rate without replacing a saved quote snapshot with mutable master data. */
+export function guideRawRateForPax(
+  line: Pick<GuideLine, "rate" | "pax_ranges">,
+  guide: Guide | undefined,
+  language: GuideLanguage,
+  pax: number,
+  pricingPax: number,
+): number | undefined {
+  if (pax === pricingPax && line.rate > 0) return line.rate;
+
+  const savedSlab = line.pax_ranges?.find(
+    (range) => pax >= range.from_pax && pax <= range.to_pax,
+  )?.rate;
+  if (savedSlab != null && savedSlab > 0) return savedSlab;
+  if (!guide) return undefined;
+
+  const configuredLanguages = guideConfiguredLanguages(guide);
+  const typedLanguage = guide.guide_type.startsWith("Hindi")
+    ? "Hindi"
+    : guide.guide_type.startsWith("English")
+      ? "English"
+      : undefined;
+  if (configuredLanguages.length && !configuredLanguages.includes(language)) return undefined;
+  if (!configuredLanguages.length && typedLanguage && language !== typedLanguage) return undefined;
+  if (!configuredLanguages.length && !typedLanguage) return undefined;
+
+  const resolved = guideRateForPax(guide, pax, language);
+  return resolved > 0 ? resolved : undefined;
+}
 
 export function getEscortPricingMode(draft: QuoteDraft): EscortPricingMode | undefined {
   if (draft.escort_pricing_mode) return draft.escort_pricing_mode;
