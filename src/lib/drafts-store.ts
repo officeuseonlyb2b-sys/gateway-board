@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import type { QuoteDraft } from "./wizard/types";
 import { normalizeDraft } from "./wizard/store";
+import { getQuotationScope } from "./query-for";
 
 const KEY = "mp_tourism_drafts";
 const LEGACY_KEY = "mp_tourism_draft_quote";
@@ -15,21 +16,62 @@ export interface DraftRecord {
   wizard_state: QuoteDraft;
 }
 
+/** Resolve persisted reach history into the active Query For flow. */
+export function completedStepForScope(record: DraftRecord | null, state: QuoteDraft): number {
+  if (!record) return state.step;
+  const previousScope = getQuotationScope(
+    record.wizard_state.query_for,
+    record.wizard_state.commercial_mode,
+  );
+  const currentScope = getQuotationScope(state.query_for, state.commercial_mode);
+  if (previousScope.queryFor === currentScope.queryFor)
+    return Math.max(record.last_step, state.step);
+
+  let commonPrefixLength = 0;
+  while (
+    commonPrefixLength < previousScope.workflowSteps.length &&
+    commonPrefixLength < currentScope.workflowSteps.length &&
+    previousScope.workflowSteps[commonPrefixLength] ===
+      currentScope.workflowSteps[commonPrefixLength]
+  ) {
+    commonPrefixLength++;
+  }
+  const lastPreviouslyReachedIndex = previousScope.workflowSteps.reduce(
+    (lastReached, step, index) => (step <= record.last_step ? index : lastReached),
+    -1,
+  );
+  const lastCommonReachedIndex = Math.min(commonPrefixLength - 1, lastPreviouslyReachedIndex);
+  return lastCommonReachedIndex >= 0 ? currentScope.workflowSteps[lastCommonReachedIndex] : 0;
+}
+
 const isBrowser = () => typeof window !== "undefined";
 const listeners = new Set<() => void>();
 let cache: DraftRecord[] = [];
 let inited = false;
 
 function read(): DraftRecord[] {
-  if (!isBrowser()) return [];
+  if (!isBrowser()) {
+    return [];
+  }
   try {
     const list = JSON.parse(localStorage.getItem(KEY) || "[]") as DraftRecord[];
     return Array.isArray(list) ? list : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
-function refresh() { cache = read(); inited = true; }
-function emit() { refresh(); listeners.forEach((l) => l()); }
-function getSnapshot(): DraftRecord[] { if (!inited) refresh(); return cache; }
+function refresh() {
+  cache = read();
+  inited = true;
+}
+function emit() {
+  refresh();
+  listeners.forEach((l) => l());
+}
+function getSnapshot(): DraftRecord[] {
+  if (!inited) refresh();
+  return cache;
+}
 
 function writeAll(list: DraftRecord[]) {
   if (!isBrowser()) return;
@@ -37,7 +79,9 @@ function writeAll(list: DraftRecord[]) {
   emit();
 }
 
-function uid() { return "d_" + Math.random().toString(36).slice(2, 10); }
+function uid() {
+  return "d_" + Math.random().toString(36).slice(2, 10);
+}
 
 function deriveName(state: QuoteDraft): string {
   if (state.program_name) return state.program_name;
@@ -57,7 +101,7 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
         ...list[idx],
         draft_name: name || list[idx].draft_name || deriveName(state),
         updated_at: now,
-        last_step: state.step,
+        last_step: completedStepForScope(list[idx], state),
         wizard_state: normalizeDraft(state),
       };
       writeAll(list);
@@ -88,11 +132,16 @@ export function renameDraft(id: string, name: string): void {
   const list = read().map((d) => (d.id === id ? { ...d, draft_name: name } : d));
   writeAll(list);
 }
-export function loadDrafts(): DraftRecord[] { return read(); }
+export function loadDrafts(): DraftRecord[] {
+  return read();
+}
 
 export function useDrafts(): DraftRecord[] {
   return useSyncExternalStore(
-    (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
     getSnapshot,
     () => [],
   );
@@ -116,5 +165,7 @@ export function migrateLegacyDraft(): string | null {
     const id = upsertDraft(state, undefined, deriveName(state));
     localStorage.removeItem(LEGACY_KEY);
     return id;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

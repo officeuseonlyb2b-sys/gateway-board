@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { inr } from "@/lib/format";
@@ -10,7 +10,7 @@ import type { HotelOption, QuoteDraft } from "@/lib/wizard/types";
 type SetDraft = (patch: Partial<QuoteDraft>) => void;
 type MatrixRow = { key: string; groupKey: string; row: RateSheetRow };
 
-export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
   const db = useDB();
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   // The matrix display mode is independent from the Accommodation editor's
@@ -18,7 +18,49 @@ export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set
   const matrixMode = "standard" as const;
   const standardPricingDraft = useMemo<QuoteDraft>(
     () => ({ ...draft, allocation_mode: "standard", dynamic_days: [] }),
-    [draft],
+    // Matrix row selection is display state, not a costing input. Listing the
+    // pricing fields keeps checkbox clicks from rebuilding every rate sheet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      draft.routing,
+      draft.transport,
+      draft.transport_options,
+      draft.guides,
+      draft.entrances,
+      draft.activities,
+      draft.misc,
+      draft.hotel_options,
+      draft.meal_selections,
+      draft.meal_selections_by_option,
+      draft.costing_selection,
+      draft.adults,
+      draft.ss,
+      draft.children,
+      draft.pax_mode,
+      draft.pax_min,
+      draft.pax_max,
+      draft.pax_range,
+      draft.traveler_type,
+      draft.group_room_mix,
+      draft.markup_percent,
+      draft.land_markup_percent,
+      draft.land_gst_percent,
+      draft.hotel_markup_percent,
+      draft.hotel_gst_percent,
+      draft.escort_enabled,
+      draft.escort_pricing_mode,
+      draft.escort_per_person_rate,
+      draft.escort_ranges,
+      draft.escort_day_rates_by_slab,
+      draft.guide_day_escort,
+      draft.guide_day_escort_enabled,
+      draft.guide_reporting_by_pax,
+      draft.guide_reporting_cost,
+      draft.guide_reporting_cost_hindi,
+      draft.guide_reporting_cost_english,
+      draft.guide_reporting_cost_language,
+      draft.guide_escort_reporting,
+    ],
   );
   const options = useMemo<HotelOption[]>(() => {
     if (!scope.accommodationPart) return [{ key: "A", label: "Land Part", selections: [] }];
@@ -51,26 +93,39 @@ export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set
       ),
     [primary],
   );
-  const optionRow = (optionKey: string, matrixRow: MatrixRow) =>
-    sheets
-      .find((sheet) => sheet.option.key === optionKey)
-      ?.groups.find((group) => (group.line_id ?? group.vehicle) === matrixRow.groupKey)
-      ?.rows.find((row) => row.pax === matrixRow.row.pax);
-  const vehicleLabel = (matrixRow: MatrixRow) => {
-    const transportOption = draft.transport_options?.find(
-      (option) => option.id === matrixRow.groupKey,
+  const rowByOptionGroupPax = useMemo(() => {
+    const lookup = new Map<string, RateSheetRow>();
+    sheets.forEach(({ option, groups }) =>
+      groups.forEach((group) =>
+        group.rows.forEach((row) =>
+          lookup.set(`${option.key}|${group.line_id ?? group.vehicle}|${row.pax}`, row),
+        ),
+      ),
     );
-    if (!transportOption) return matrixRow.row.vehicle;
-    const parts = transportOption.vehicles.flatMap((selection) => {
-      const line = draft.transport.find((item) => item.id === selection.transport_line_id);
-      const vehicle = line
-        ? db.travel_options.find((item) => item.id === line.travel_id)?.vehicle_type
-        : undefined;
-      const quantity = Math.max(1, selection.quantity || 1);
-      return vehicle ? [`${quantity} ${vehicle}`] : [];
-    });
-    return parts.length ? parts.join(" + ") : matrixRow.row.vehicle;
-  };
+    return lookup;
+  }, [sheets]);
+  const vehicleLabelByGroup = useMemo(() => {
+    const transportById = new Map(draft.transport.map((line) => [line.id, line]));
+    const vehicleByTravelId = new Map(
+      db.travel_options.map((item) => [item.id, item.vehicle_type]),
+    );
+    return new Map(
+      rows.map((matrixRow) => {
+        const transportOption = draft.transport_options?.find(
+          (option) => option.id === matrixRow.groupKey,
+        );
+        const parts = transportOption?.vehicles.flatMap((selection) => {
+          const line = transportById.get(selection.transport_line_id);
+          const vehicle = line ? vehicleByTravelId.get(line.travel_id) : undefined;
+          return vehicle ? [`${Math.max(1, selection.quantity || 1)} ${vehicle}`] : [];
+        });
+        return [
+          matrixRow.groupKey,
+          parts?.length ? parts.join(" + ") : matrixRow.row.vehicle,
+        ] as const;
+      }),
+    );
+  }, [rows, draft.transport_options, draft.transport, db.travel_options]);
   const isSelected = (matrixRow: MatrixRow) => {
     const key = `${options[0]?.key ?? "A"}|${matrixRow.groupKey}`;
     return (draft.rate_sheet_rows?.[key] ?? []).includes(matrixRow.row.pax);
@@ -244,7 +299,7 @@ export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set
                         />
                       </td>
                       <td className="whitespace-normal font-medium leading-snug">
-                        {vehicleLabel(matrixRow)}
+                        {vehicleLabelByGroup.get(matrixRow.groupKey)}
                       </td>
                       <td className="p-2 text-right font-medium">{land.pax}</td>
                       {[
@@ -262,7 +317,9 @@ export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set
                       {options
                         .filter((option) => scope.accommodationPart)
                         .map((option) => {
-                          const value = optionRow(option.key, matrixRow);
+                          const value = rowByOptionGroupPax.get(
+                            `${option.key}|${matrixRow.groupKey}|${matrixRow.row.pax}`,
+                          );
                           return value ? (
                             <>
                               <td className="p-2 text-right tabular-nums">{inr(value.lunch)}</td>
@@ -301,3 +358,8 @@ export function CommercialPackageMatrix({ draft, set }: { draft: QuoteDraft; set
     </div>
   );
 }
+
+export const CommercialPackageMatrix = memo(
+  CommercialPackageMatrixImpl,
+  (previous, next) => previous.draft === next.draft,
+);

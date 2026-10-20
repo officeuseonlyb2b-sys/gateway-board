@@ -41,7 +41,8 @@ import { auth } from "@/lib/auth-mock";
 import { useBranding } from "@/lib/branding";
 import { useDraftCount } from "@/lib/drafts-store";
 import { useUnreadCount } from "@/lib/notifications-store";
-import { useAccessProfile } from "@/lib/crm/access";
+import { useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
+import { useEmployees } from "@/lib/crm/store";
 import type { AppRole } from "@/lib/crm/types";
 
 interface Item {
@@ -49,7 +50,7 @@ interface Item {
   to?: string;
   icon: typeof LayoutDashboard;
   disabled?: boolean;
-  badgeKey?: "drafts" | "notifications";
+  badgeKey?: "drafts" | "notifications" | "queryReviews" | "quotationReviews" | "assistance";
   /** A second contextual entry may intentionally open an existing shared page. */
   allowDuplicatePath?: boolean;
   managerOnly?: boolean;
@@ -391,7 +392,31 @@ function salesSections(role: AppRole): Section[] | null {
   const manager = ["Assistant Manager", "Sales Manager", "Sales Head"].includes(role);
   const senior = role === "Senior Sales Executive";
   const executive = role === "Sales Executive";
+  const reviewSupportRole = role === "Sales Manager" || senior || executive;
   if (!manager && !senior && !executive) return null;
+  const reviewSupportSection: Section = {
+    label: "Review & Support",
+    items: [
+      {
+        label: "Queries for Review",
+        to: "/queries/review",
+        icon: ClipboardCheck,
+        badgeKey: "queryReviews",
+      },
+      {
+        label: "Quotations for Review",
+        to: "/queries/quotation-review",
+        icon: FileText,
+        badgeKey: "quotationReviews",
+      },
+      {
+        label: "Assisted Queries",
+        to: "/queries/assisted",
+        icon: Handshake,
+        badgeKey: "assistance",
+      },
+    ],
+  };
 
   if (manager) {
     return [
@@ -414,6 +439,7 @@ function salesSections(role: AppRole): Section[] | null {
           { label: "Tasks & Calendar", to: "/tasks/calendar", icon: CalendarCheck2 },
         ],
       },
+      ...(reviewSupportRole ? [reviewSupportSection] : []),
       relationshipSection,
       quotationSection,
       resourcesSection,
@@ -449,17 +475,8 @@ function salesSections(role: AppRole): Section[] | null {
       ],
     },
   ];
-  if (senior) {
-    sections.push({
-      label: "Review & Support",
-      items: [
-        { label: "Queries for Review", to: "/queries/review", icon: ClipboardCheck },
-        { label: "Quotations for Review", to: "/queries/quotation-review", icon: FileText },
-        { label: "Assisted Queries", to: "/queries/assisted", icon: Handshake },
-      ],
-    });
-  }
   sections.push(
+    ...(reviewSupportRole ? [reviewSupportSection] : []),
     relationshipSection,
     quotationSection,
     resourcesSection,
@@ -501,8 +518,63 @@ export function AppSidebar() {
 
   const brand = useBranding();
   const draftCount = useDraftCount();
+  const access = useAccessProfile();
+  const accessibleQueries = useAccessibleQueries();
+  const employees = useEmployees();
+  const employeeId = access.employee?.id;
+  const teamOwners = new Set(
+    employees
+      .filter(
+        (employee) =>
+          employee.department === "Sales" &&
+          employee.unit === access.unit &&
+          employee.active &&
+          employee.account_status === "Active" &&
+          employee.employee_status !== "Exited",
+      )
+      .flatMap((employee) => [employee.id, employee.name]),
+  );
+  const relevantQuery = (owner?: string) => access.canManageTeam && teamOwners.has(owner || "");
+  const activeReview = (status: string) =>
+    ["Requested", "Assigned", "In Review", "Pending Review", "Under Review"].includes(status);
+  const queryReviewCount = accessibleQueries.reduce(
+    (count, query) =>
+      count +
+      (query.review_support?.query_reviews || []).filter(
+        (review) =>
+          (review.reviewer_employee_id === employeeId ||
+            review.requested_by_employee_id === employeeId ||
+            relevantQuery(query.owner)) &&
+          activeReview(review.status),
+      ).length,
+    0,
+  );
+  const quotationReviewCount = accessibleQueries.reduce(
+    (count, query) =>
+      count +
+      (query.review_support?.quotation_reviews || []).filter(
+        (review) =>
+          (review.reviewer_employee_id === employeeId ||
+            review.requested_by_employee_id === employeeId ||
+            relevantQuery(query.owner)) &&
+          activeReview(review.status),
+      ).length,
+    0,
+  );
+  const assistanceCount = accessibleQueries.reduce(
+    (count, query) =>
+      count +
+      (query.review_support?.assistance || []).filter(
+        (item) =>
+          (item.assistant_employee_id === employeeId ||
+            item.assigned_by_employee_id === employeeId ||
+            relevantQuery(query.owner)) &&
+          ["Requested", "Assigned", "In Progress"].includes(item.status),
+      ).length,
+    0,
+  );
   const unread = useUnreadCount();
-  const { role: currentRole, canManageTeam: isManager } = useAccessProfile();
+  const { role: currentRole, canManageTeam: isManager } = access;
   const employeeSections: Section[] = [
     {
       label: "Personal",
@@ -563,6 +635,10 @@ export function AppSidebar() {
     if (key === "notifications") {
       return unread;
     }
+
+    if (key === "queryReviews") return queryReviewCount;
+    if (key === "quotationReviews") return quotationReviewCount;
+    if (key === "assistance") return assistanceCount;
 
     return 0;
   };

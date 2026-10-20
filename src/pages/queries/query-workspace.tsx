@@ -38,14 +38,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
+import { isSalesRole, useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
 import { durationLabel, queryClock } from "@/lib/crm/insights";
 import {
   assignmentHistory,
   logLeadActivity,
   scheduleFollowup,
   assignQueryAssistance,
+  addAssistanceContribution,
   requestQueryReview,
+  requestQuotationReview,
+  setAssistanceStatus,
+  setReviewStatus,
+  updateReviewChecklist,
   setQueryStage,
   useCrmEvents,
   useEmployees,
@@ -119,6 +124,8 @@ export default function QueryWorkspace() {
   const [assistantId, setAssistantId] = useState("");
   const [supportDue, setSupportDue] = useState("");
   const [supportNote, setSupportNote] = useState("");
+  const [supportPriority, setSupportPriority] = useState<"Normal" | "High" | "Urgent">("Normal");
+  const [assistanceArea, setAssistanceArea] = useState("Costing");
   const events = useMemo(
     () =>
       allEvents
@@ -133,7 +140,18 @@ export default function QueryWorkspace() {
   const linkedDrafts = allDrafts
     .filter((draft) => draft.wizard_state.linked_query_id === query?.query_id)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-
+  const ownsQuery = Boolean(
+    access.employee &&
+    ([query?.owner].includes(access.employee.id) || [query?.owner].includes(access.employee.name)),
+  );
+  const queryOwnerEmployee = employees.find(
+    (employee) => employee.id === query?.owner || employee.name === query?.owner,
+  );
+  const canRequestSupport =
+    ownsQuery ||
+    (access.role === "Sales Manager" &&
+      queryOwnerEmployee?.department === "Sales" &&
+      queryOwnerEmployee.unit === access.unit);
   if (!query)
     return (
       <div className="p-8">
@@ -205,17 +223,30 @@ export default function QueryWorkspace() {
     query.destination;
   const lifecycleAt = (label: string) => query.lifecycle.find((step) => step.label === label)?.at;
   const clock = queryClock(query);
-  const seniorReviewers = employees.filter(
-    (employee) => employee.active !== false && employee.role === "Senior Sales Executive",
-  );
+  const seniorReviewers = employees.filter((employee) => {
+    if (
+      employee.id === access.employee?.id ||
+      employee.active === false ||
+      employee.account_status !== "Active" ||
+      employee.employee_status === "Exited" ||
+      employee.department !== "Sales" ||
+      employee.unit !== access.unit
+    )
+      return false;
+    if (access.role === "Sales Executive")
+      return ["Senior Sales Executive", "Sales Manager"].includes(employee.role);
+    if (access.role === "Senior Sales Executive") return employee.role === "Sales Manager";
+    return ["Senior Sales Executive", "Sales Manager"].includes(employee.role);
+  });
   const requestReview = () => {
-    if (!reviewerId || !supportDue || !supportNote.trim())
-      return toast.error("Reviewer, due date and instructions are required.");
+    if (!reviewerId || !supportNote.trim())
+      return toast.error("Reviewer and instructions are required.");
     requestQueryReview(query.query_id, {
       reviewerEmployeeId: reviewerId,
       requestedByEmployeeId: access.employee?.id || actor,
-      dueAt: new Date(supportDue).toISOString(),
+      dueAt: supportDue ? new Date(supportDue).toISOString() : undefined,
       instructions: supportNote.trim(),
+      priority: supportPriority,
     });
     setReviewerId("");
     setSupportDue("");
@@ -223,14 +254,15 @@ export default function QueryWorkspace() {
     toast.success("Query review assigned.");
   };
   const assignAssistance = () => {
-    if (!assistantId || !supportDue || !supportNote.trim())
-      return toast.error("Assistant, due date and reason are required.");
+    if (!assistantId || !supportNote.trim())
+      return toast.error("Assistant and reason are required.");
     assignQueryAssistance(query.query_id, {
       assistantEmployeeId: assistantId,
       assignedByEmployeeId: access.employee?.id || actor,
-      dueAt: new Date(supportDue).toISOString(),
+      dueAt: supportDue ? new Date(supportDue).toISOString() : undefined,
       reason: supportNote.trim(),
-      areas: ["General support"],
+      areas: [assistanceArea],
+      priority: supportPriority,
     });
     setAssistantId("");
     setSupportDue("");
@@ -394,25 +426,31 @@ export default function QueryWorkspace() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button className="bg-white text-teal-800" onClick={() => setActivityOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Action
-              </Button>
-              <NewTaskDialog
-                queryId={query.query_id}
-                trigger={
-                  <Button variant="outline" className="border-white/40 bg-transparent text-white">
-                    Add Task
-                  </Button>
-                }
-              />
-              <Button
-                variant="outline"
-                className="border-white/40 bg-transparent text-white"
-                onClick={() => setStatusOpen(true)}
-              >
-                Update Stage
-              </Button>
+              {ownsQuery && (
+                <Button className="bg-white text-teal-800" onClick={() => setActivityOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Action
+                </Button>
+              )}
+              {ownsQuery && (
+                <NewTaskDialog
+                  queryId={query.query_id}
+                  trigger={
+                    <Button variant="outline" className="border-white/40 bg-transparent text-white">
+                      Add Task
+                    </Button>
+                  }
+                />
+              )}
+              {ownsQuery && (
+                <Button
+                  variant="outline"
+                  className="border-white/40 bg-transparent text-white"
+                  onClick={() => setStatusOpen(true)}
+                >
+                  Update Stage
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -432,14 +470,14 @@ export default function QueryWorkspace() {
           </Fact>
           <Fact label="Costing basis">{query.costing_basis || query.travel_type}</Fact>
           <Fact label="Owner">
-            {access.canAssign ? (
+            {access.canAssign && ownsQuery ? (
               <ReassignQuery queryId={query.query_id} owner={query.owner} />
             ) : (
               query.owner || "Awaiting Assignment"
             )}
           </Fact>
         </div>
-        {access.canManageTeam && (
+        {isSalesRole(access.role) && canRequestSupport && (
           <Card>
             <CardContent className="grid gap-4 p-4 md:grid-cols-[1fr_220px_220px_220px] md:items-end">
               <div>
@@ -491,7 +529,43 @@ export default function QueryWorkspace() {
                 </Button>
               </div>
               <div className="space-y-2">
-                <Label>Due date &amp; instructions</Label>
+                <Label>Priority, due date &amp; instructions</Label>
+                <Select
+                  value={supportPriority}
+                  onValueChange={(value) => setSupportPriority(value as typeof supportPriority)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["Normal", "High", "Urgent"].map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={assistanceArea} onValueChange={setAssistanceArea}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      "Routing",
+                      "Programme",
+                      "Costing",
+                      "Hotels",
+                      "Transport",
+                      "Guide/Entrance/Activities",
+                      "Client handling",
+                      "Other",
+                    ].map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   type="datetime-local"
                   value={supportDue}
@@ -506,6 +580,219 @@ export default function QueryWorkspace() {
             </CardContent>
           </Card>
         )}
+        {[
+          ...(query.review_support?.query_reviews || []).map((assignment) => ({
+            kind: "query" as const,
+            assignment,
+          })),
+          ...(query.review_support?.quotation_reviews || []).map((assignment) => ({
+            kind: "quotation" as const,
+            assignment,
+          })),
+        ]
+          .filter(({ assignment }) => assignment.reviewer_employee_id === access.employee?.id)
+          .map(({ kind, assignment }) => (
+            <Card key={assignment.id} className="border-teal-200 bg-teal-50/40">
+              <CardContent className="flex flex-col justify-between gap-3 p-4 md:flex-row md:items-center">
+                <div className="space-y-2">
+                  <p className="font-semibold">
+                    REVIEW MODE ·{" "}
+                    {kind === "query"
+                      ? "Query"
+                      : `Quotation V${"quotation_version" in assignment ? assignment.quotation_version : ""}`}
+                  </p>
+                  <p className="text-sm text-slate-600">
+                    {assignment.instructions || "No instructions"} · {assignment.status}
+                  </p>
+                  {assignment.checklist.length > 0 && (
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      {assignment.checklist.map((item, index) => (
+                        <label
+                          key={item.label}
+                          className="flex items-center justify-between gap-2 text-xs"
+                        >
+                          <span>{item.label}</span>
+                          <select
+                            className="rounded border bg-white px-1 py-0.5"
+                            value={item.status}
+                            disabled={assignment.status !== "In Review"}
+                            onChange={(event) =>
+                              updateReviewChecklist(
+                                query.query_id,
+                                kind,
+                                assignment.id,
+                                assignment.checklist.map((entry, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                        ...entry,
+                                        status: event.target.value as typeof entry.status,
+                                      }
+                                    : entry,
+                                ),
+                                access.employee?.id || actor,
+                              )
+                            }
+                          >
+                            {["Pending", "Pass", "Issue", "Not Applicable"].map((status) => (
+                              <option key={status}>{status}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!["Approved", "Returned", "Cancelled"].includes(assignment.status) && (
+                  <div className="flex flex-wrap gap-2">
+                    {assignment.status !== "In Review" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setReviewStatus(
+                            query.query_id,
+                            kind,
+                            assignment.id,
+                            "In Review",
+                            access.employee?.id || actor,
+                          )
+                        }
+                      >
+                        Start Review
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() =>
+                            setReviewStatus(
+                              query.query_id,
+                              kind,
+                              assignment.id,
+                              "Approved",
+                              access.employee?.id || actor,
+                            )
+                          }
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            const note = window.prompt("Correction instructions:");
+                            if (note?.trim())
+                              setReviewStatus(
+                                query.query_id,
+                                kind,
+                                assignment.id,
+                                "Returned",
+                                access.employee?.id || actor,
+                                note,
+                              );
+                          }}
+                        >
+                          Return for Correction
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        {(query.review_support?.assistance || [])
+          .filter((assignment) => assignment.assistant_employee_id === access.employee?.id)
+          .map((assignment) => (
+            <Card key={assignment.id} className="border-blue-200 bg-blue-50/40">
+              <CardContent className="flex flex-col justify-between gap-3 p-4 md:flex-row md:items-center">
+                <div>
+                  <p className="font-semibold">ASSISTANCE MODE</p>
+                  <p className="text-sm text-slate-600">
+                    Owner: {query.owner} · Requested help: {assignment.areas.join(", ")} ·{" "}
+                    {assignment.status}
+                  </p>
+                  {assignment.contributions.map((item) => (
+                    <p key={item.id} className="text-xs text-slate-500">
+                      {item.employee_name}: {item.note}
+                    </p>
+                  ))}
+                </div>
+                {!["Completed", "Cancelled"].includes(assignment.status) && (
+                  <div className="flex flex-wrap gap-2">
+                    {assignment.status === "Requested" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setAssistanceStatus(
+                            query.query_id,
+                            assignment.id,
+                            "Assigned",
+                            access.employee?.id || actor,
+                          )
+                        }
+                      >
+                        Accept Assistance
+                      </Button>
+                    ) : assignment.status === "Assigned" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setAssistanceStatus(
+                            query.query_id,
+                            assignment.id,
+                            "In Progress",
+                            access.employee?.id || actor,
+                          )
+                        }
+                      >
+                        Start Assistance
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const note = window.prompt("Contribution / update:");
+                            if (note?.trim())
+                              addAssistanceContribution(query.query_id, assignment.id, {
+                                id: crypto.randomUUID(),
+                                at: new Date().toISOString(),
+                                employee_id: access.employee?.id || actor,
+                                employee_name: access.employee?.name || actor,
+                                area: assignment.areas[0],
+                                note,
+                              });
+                          }}
+                        >
+                          Add Update
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            const summary = window.prompt("What was done?");
+                            if (summary?.trim())
+                              setAssistanceStatus(
+                                query.query_id,
+                                assignment.id,
+                                "Completed",
+                                access.employee?.id || actor,
+                                summary,
+                              );
+                          }}
+                        >
+                          Complete
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
         <div className="flex gap-1 overflow-x-auto rounded-xl border bg-white px-3 pt-2">
           {TABS.map((item) => (
             <button
@@ -648,9 +935,11 @@ export default function QueryWorkspace() {
                   <p className="mt-1 text-sm text-slate-500">
                     {query.followup_note || query.next_action}
                   </p>
-                  <Button className="mt-4" onClick={() => setActivityOpen(true)}>
-                    Log & schedule
-                  </Button>
+                  {ownsQuery && (
+                    <Button className="mt-4" onClick={() => setActivityOpen(true)}>
+                      Log & schedule
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -727,14 +1016,16 @@ export default function QueryWorkspace() {
                   Every saved linked Costing is retained as a Query version.
                 </p>
               </div>
-              <Button
-                onClick={() => navigate({ to: "/costing", search: { queryId: query.query_id } })}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Create linked costing
-              </Button>
+              {ownsQuery && (
+                <Button
+                  onClick={() => navigate({ to: "/costing", search: { queryId: query.query_id } })}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create linked costing
+                </Button>
+              )}
             </div>
-            {linkedDrafts.length > 0 && (
+            {ownsQuery && linkedDrafts.length > 0 && (
               <Card className="border-amber-200 bg-amber-50/40">
                 <CardHeader>
                   <CardTitle className="text-base">Quotation drafts in progress</CardTitle>
@@ -782,48 +1073,80 @@ export default function QueryWorkspace() {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        const blob = new Blob([JSON.stringify(version.quote, null, 2)], {
-                          type: "application/json",
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `${query.query_id}-costing-v${version.version}.json`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        const reason = window.prompt(
-                          `Reason for revising ${version.quote.display_number || version.quote.quote_number}:`,
-                        );
-                        if (!reason?.trim()) return;
-                        try {
-                          const revision = quoteToRevisionDraft(version.quote, reason);
-                          const draftId = upsertDraft(
-                            revision,
-                            undefined,
-                            `${version.quote.quote_number} · Revision V${revision.intended_version}`,
-                          );
-                          writeDraft(revision);
-                          navigate({ to: "/costing", search: { id: draftId } });
-                        } catch (error) {
-                          toast.error(
-                            error instanceof Error ? error.message : "Could not create revision",
-                          );
-                        }
-                      }}
-                    >
-                      <FileText className="mr-2 h-4 w-4" />
-                      Create revision
-                    </Button>
+                    {canRequestSupport && (
+                      <>
+                        <Button
+                          variant="outline"
+                          disabled={!reviewerId || !supportNote.trim()}
+                          onClick={() => {
+                            try {
+                              requestQuotationReview(query.query_id, {
+                                quotationId: version.quote.id,
+                                quotationVersion: version.version,
+                                reviewerEmployeeId: reviewerId,
+                                requestedByEmployeeId: access.employee?.id || actor,
+                                dueAt: supportDue ? new Date(supportDue).toISOString() : undefined,
+                                instructions: supportNote.trim(),
+                                priority: supportPriority,
+                              });
+                              toast.success(`Quotation V${version.version} sent for review.`);
+                            } catch (error) {
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Could not request review.",
+                              );
+                            }
+                          }}
+                        >
+                          Request Review
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const blob = new Blob([JSON.stringify(version.quote, null, 2)], {
+                              type: "application/json",
+                            });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `${query.query_id}-costing-v${version.version}.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            const reason = window.prompt(
+                              `Reason for revising ${version.quote.display_number || version.quote.quote_number}:`,
+                            );
+                            if (!reason?.trim()) return;
+                            try {
+                              const revision = quoteToRevisionDraft(version.quote, reason);
+                              const draftId = upsertDraft(
+                                revision,
+                                undefined,
+                                `${version.quote.quote_number} · Revision V${revision.intended_version}`,
+                              );
+                              writeDraft(revision);
+                              navigate({ to: "/costing", search: { id: draftId } });
+                            } catch (error) {
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Could not create revision",
+                              );
+                            }
+                          }}
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          Create revision
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -874,10 +1197,12 @@ export default function QueryWorkspace() {
                 <p className="mt-2 text-sm text-slate-500">
                   {query.followup_note || query.next_action}
                 </p>
-                <Button className="mt-5" onClick={() => setActivityOpen(true)}>
-                  <CalendarClock className="mr-2 h-4 w-4" />
-                  Log outcome & schedule next
-                </Button>
+                {ownsQuery && (
+                  <Button className="mt-5" onClick={() => setActivityOpen(true)}>
+                    <CalendarClock className="mr-2 h-4 w-4" />
+                    Log outcome & schedule next
+                  </Button>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -898,15 +1223,17 @@ export default function QueryWorkspace() {
                     </p>
                   </div>
                 ))}
-                <NewTaskDialog
-                  queryId={query.query_id}
-                  trigger={
-                    <Button variant="outline">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add task
-                    </Button>
-                  }
-                />
+                {ownsQuery && (
+                  <NewTaskDialog
+                    queryId={query.query_id}
+                    trigger={
+                      <Button variant="outline">
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add task
+                      </Button>
+                    }
+                  />
+                )}
               </CardContent>
             </Card>
           </div>

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   GUIDE_LANGUAGES,
   guideConfiguredLanguages,
@@ -158,7 +159,7 @@ export function LandDaywiseReview({
   filters: LandReviewFilters;
 }) {
   const db = useDB();
-  const sheet = buildLandPart(draft, db);
+  const sheet = useMemo(() => buildLandPart(draft, db), [draft, db]);
   const pricingPax = Math.max(1, effectivePaxForPricing(draft));
   const languageEnabled = (language: GuideLanguage) =>
     language === "Hindi"

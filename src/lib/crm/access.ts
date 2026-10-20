@@ -98,6 +98,8 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
     "/queries/analytics",
   ];
   if (common.includes(path)) return true;
+  if (["/queries/review", "/queries/quotation-review", "/queries/assisted"].includes(path))
+    return ["Sales Executive", "Senior Sales Executive", "Sales Manager"].includes(profile.role);
   // The existing Query Workspace route is shared by all Sales roles. The
   // workspace itself resolves the query through useAccessibleQueries, so this
   // only permits navigation to a record the employee is otherwise allowed to see.
@@ -109,8 +111,6 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
       "/queries/executive-workload",
       "/sales-team",
     ].includes(path);
-  if (profile.role === "Senior Sales Executive")
-    return ["/queries/review", "/queries/quotation-review", "/queries/assisted"].includes(path);
   return false;
 }
 
@@ -177,12 +177,25 @@ export function useAccessibleQueries() {
   if (profile.role === "Super Admin") return queries;
   const employee = profile.employee;
   const own = (query: (typeof queries)[number]) =>
-    [query.owner, query.created_by, query.last_updated_by].includes(employee.id) ||
-    [query.owner, query.created_by, query.last_updated_by].includes(employee.name) ||
+    [query.owner].includes(employee.id) ||
+    [query.owner].includes(employee.name) ||
     Boolean(
       query.shared_with_employee_ids?.includes(employee.id) ||
-      query.reviewer_employee_ids?.includes(employee.id) ||
-      query.assistance_employee_ids?.includes(employee.id),
+      query.review_support?.query_reviews?.some(
+        (review) =>
+          review.requested_by_employee_id === employee.id ||
+          (review.reviewer_employee_id === employee.id && review.status !== "Cancelled"),
+      ) ||
+      query.review_support?.quotation_reviews?.some(
+        (review) =>
+          review.requested_by_employee_id === employee.id ||
+          (review.reviewer_employee_id === employee.id && review.status !== "Cancelled"),
+      ) ||
+      query.review_support?.assistance?.some(
+        (assignment) =>
+          assignment.assigned_by_employee_id === employee.id ||
+          (assignment.assistant_employee_id === employee.id && assignment.status !== "Cancelled"),
+      ),
     );
   if (profile.role !== "Sales Manager") return queries.filter(own);
   const team = new Set(
@@ -190,5 +203,12 @@ export function useAccessibleQueries() {
       .filter((candidate) => candidate.department === "Sales" && candidate.unit === employee.unit)
       .flatMap((candidate) => [candidate.id, candidate.name]),
   );
-  return queries.filter((query) => own(query) || !query.owner || team.has(query.owner));
+  return queries.filter(
+    (query) =>
+      own(query) ||
+      team.has(query.owner) ||
+      (!query.owner &&
+        (query.primary_unit === employee.unit ||
+          Boolean(employee.unit && query.participating_units?.includes(employee.unit)))),
+  );
 }

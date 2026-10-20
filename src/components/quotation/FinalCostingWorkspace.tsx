@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { addDaysISO, inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
@@ -76,7 +77,7 @@ function Context({ draft }: { draft: QuoteDraft }) {
     .map((day) => city(day.city_id) || day.to_city)
     .filter(Boolean)
     .join(" → ");
-  const pax = getCostingPaxValues(draft);
+  const pax = useMemo(() => getCostingPaxValues(draft), [draft]);
   const rows = [
     ["Client / Travel Partner", draft.agent?.agency || draft.agent?.name || "—"],
     ["Query / Quotation", draft.linked_query_id || "Draft quotation"],
@@ -118,7 +119,7 @@ function Context({ draft }: { draft: QuoteDraft }) {
 
 function LandReview({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const sheet = buildLandPart(draft, db);
+  const sheet = useMemo(() => buildLandPart(draft, db), [draft, db]);
   const totals = [
     ["Transport", sheet.transport_total],
     ["Guides", sheet.guide_only_total],
@@ -232,6 +233,20 @@ function StandardAccommodationReview({
   options: HotelOption[];
 }) {
   const db = useDB();
+  const standardDraft = useMemo(
+    () => ({ ...draft, allocation_mode: "standard" as const, dynamic_days: [] }),
+    [draft],
+  );
+  const rates = useMemo(
+    () =>
+      new Map(
+        options.map((option) => [
+          option.key,
+          buildRateSheet(standardDraft, db, option, []).flatMap((group) => group.rows)[0],
+        ]),
+      ),
+    [options, standardDraft, db],
+  );
   return (
     <div className="space-y-3">
       <StayPlan draft={draft} options={options} />
@@ -250,12 +265,7 @@ function StandardAccommodationReview({
             </thead>
             <tbody>
               {options.map((option) => {
-                const rate = buildRateSheet(
-                  { ...draft, allocation_mode: "standard", dynamic_days: [] },
-                  db,
-                  option,
-                  [],
-                ).flatMap((group) => group.rows)[0];
+                const rate = rates.get(option.key);
                 return (
                   <tr key={option.key}>
                     <td>
@@ -274,12 +284,7 @@ function StandardAccommodationReview({
         </div>
         <div className="grid gap-px border-t bg-slate-200 sm:grid-cols-3">
           {options.flatMap((option) => {
-            const rate = buildRateSheet(
-              { ...draft, allocation_mode: "standard", dynamic_days: [] },
-              db,
-              option,
-              [],
-            ).flatMap((group) => group.rows)[0];
+            const rate = rates.get(option.key);
             const meals = (rate?.lunch ?? 0) + (rate?.dinner ?? 0);
             return [
               ["SGL", rate?.single],
@@ -429,14 +434,18 @@ function DynamicAccommodationReview({
 
 function LandCommercialMatrix({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const fake: HotelOption = { key: "A", label: "Land", selections: [] };
-  const rows = buildRateSheet(
-    { ...draft, allocation_mode: "standard", dynamic_days: [] },
-    db,
-    fake,
-    draft.transport,
-  ).flatMap((group) => group.rows.map((row) => ({ group, row })));
-  const meals = computeMealDays(draft, db, "A").rows;
+  const { rows, meals } = useMemo(() => {
+    const fake: HotelOption = { key: "A", label: "Land", selections: [] };
+    return {
+      rows: buildRateSheet(
+        { ...draft, allocation_mode: "standard", dynamic_days: [] },
+        db,
+        fake,
+        draft.transport,
+      ).flatMap((group) => group.rows.map((row) => ({ group, row }))),
+      meals: computeMealDays(draft, db, "A").rows,
+    };
+  }, [draft, db]);
   const lunch =
     meals
       .filter((item) => item.meal_type === "Lunch")
@@ -584,7 +593,7 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
   );
 }
 
-export function FinalCostingWorkspace({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function FinalCostingWorkspaceImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const dynamic = draft.allocation_mode === "dynamic" || (draft.dynamic_days ?? []).length > 0;
   const options = draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4);
@@ -664,3 +673,8 @@ export function FinalCostingWorkspace({ draft, set }: { draft: QuoteDraft; set: 
     </div>
   );
 }
+
+export const FinalCostingWorkspace = memo(
+  FinalCostingWorkspaceImpl,
+  (previous, next) => previous.draft === next.draft,
+);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { addDaysISO, inr } from "@/lib/format";
 import {
@@ -309,7 +309,7 @@ function Masthead({ draft }: { draft: QuoteDraft }) {
 
 function TripInformation({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const pax = getCostingPaxValues(draft);
+  const pax = useMemo(() => getCostingPaxValues(draft), [draft]);
   const route = draft.routing
     .map((day) => db.cities.find((city) => city.id === day.city_id)?.name || day.to_city)
     .filter(Boolean)
@@ -357,7 +357,7 @@ function TripInformation({ draft }: { draft: QuoteDraft }) {
 
 function DaywiseLand({ draft, filters }: { draft: QuoteDraft; filters: LandReviewFilters }) {
   const db = useDB();
-  const sheet = buildLandPart(draft, db);
+  const sheet = useMemo(() => buildLandPart(draft, db), [draft, db]);
   const markup = landMarkup(draft);
   const gstRate = landGst(draft);
   const guideColumns = [
@@ -829,9 +829,35 @@ function LandReview({ draft }: { draft: QuoteDraft }) {
 
 function AccommodationReview({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const options = draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4);
-  const nights = draft.routing.filter((day) => day.overnight);
-  const standardDraft = { ...draft, allocation_mode: "standard" as const, dynamic_days: [] };
+  const options = useMemo(
+    () => draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4),
+    [draft.hotel_options],
+  );
+  const nights = useMemo(() => draft.routing.filter((day) => day.overnight), [draft.routing]);
+  const standardDraft = useMemo(
+    () => ({ ...draft, allocation_mode: "standard" as const, dynamic_days: [] }),
+    [draft],
+  );
+  const optionCosting = useMemo(
+    () =>
+      new Map(
+        options.map((option) => {
+          const hotelSheet = buildHotelMealSheet(standardDraft, db, option);
+          const rateRow = buildRateSheet(standardDraft, db, option, draft.transport).flatMap(
+            (group) => group.rows,
+          )[0];
+          return [
+            option.key,
+            {
+              hotelSheet,
+              hotelNightByDay: new Map(hotelSheet.rows.map((row) => [row.day, row])),
+              rateRow,
+            },
+          ] as const;
+        }),
+      ),
+    [options, standardDraft, db, draft.transport],
+  );
   return (
     <div aria-label="3. Accommodation & Meals — Hotel Verification">
       <Section number={3} title="Accommodation & Meals — Hotel Verification">
@@ -945,8 +971,7 @@ function AccommodationReview({ draft }: { draft: QuoteDraft }) {
                           dbl != null ? dbl + (plan?.extra_bed_rate || 0) : undefined,
                         ];
                         const coverage = mealPlanCoverage(selection?.meal_plan);
-                        const hotelSheet = buildHotelMealSheet(standardDraft, db, option);
-                        const night = hotelSheet.rows.find((row) => row.day === day.day);
+                        const night = optionCosting.get(option.key)?.hotelNightByDay.get(day.day);
                         const meal = (included: boolean, value?: number) =>
                           included ? (
                             <span className="rounded-sm bg-[#eaf8ef] px-1 py-0.5 font-semibold text-emerald-800">
@@ -1013,13 +1038,9 @@ function AccommodationReview({ draft }: { draft: QuoteDraft }) {
                     >
                       <td>{label}</td>
                       {options.flatMap((option) => {
-                        const sheet = buildHotelMealSheet(standardDraft, db, option);
-                        const row = buildRateSheet(
-                          standardDraft,
-                          db,
-                          option,
-                          draft.transport,
-                        ).flatMap((group) => group.rows)[0];
+                        const costing = optionCosting.get(option.key);
+                        if (!costing) return [];
+                        const { hotelSheet: sheet, rateRow: row } = costing;
                         const supplier = [
                           sheet.sgl,
                           sheet.dbl,
@@ -1069,7 +1090,7 @@ function AccommodationReview({ draft }: { draft: QuoteDraft }) {
   );
 }
 
-export function PackageStandardCostingReview({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function PackageStandardCostingReviewImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
   const optionalCount = draft.activities.filter(
     (line) => line.inclusion_status === "optional",
   ).length;
@@ -1095,3 +1116,8 @@ export function PackageStandardCostingReview({ draft, set }: { draft: QuoteDraft
     </div>
   );
 }
+
+export const PackageStandardCostingReview = memo(
+  PackageStandardCostingReviewImpl,
+  (previous, next) => previous.draft === next.draft,
+);

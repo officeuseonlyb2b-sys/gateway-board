@@ -4,10 +4,16 @@
 import { useSyncExternalStore } from "react";
 import type {
   ActivityItem,
+  AssistanceAssignment,
   CrmEvent,
   CrmQuery,
   CrmTask,
   Employee,
+  AssistanceContribution,
+  QuotationReviewAssignment,
+  ReviewChecklistItem,
+  ReviewPriority,
+  ReviewStatus,
   QueryReviewAssignment,
   Stage,
 } from "./types";
@@ -245,13 +251,16 @@ const PASSIVE_EVENTS = new Set([
   "lead_viewed",
 ]);
 
-function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+function logEvent(
+  e: Omit<CrmEvent, "id" | "at"> & { at?: string },
+  options: { updateQueryActivity?: boolean } = {},
+) {
   const at = e.at ?? iso(new Date());
   events = [
     { id: "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), at, ...e },
     ...events,
   ];
-  if (e.query_id && !PASSIVE_EVENTS.has(e.type)) {
+  if (options.updateQueryActivity !== false && e.query_id && !PASSIVE_EVENTS.has(e.type)) {
     queries = queries.map((q) =>
       q.query_id === e.query_id
         ? {
@@ -269,6 +278,10 @@ function logEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
         : q,
     );
   }
+}
+
+function logWorkflowEvent(e: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
+  logEvent(e, { updateQueryActivity: false });
 }
 
 export function recordActivity(input: Omit<CrmEvent, "id" | "at"> & { at?: string }) {
@@ -497,28 +510,44 @@ export function requestQueryReview(
     requestedByEmployeeId: string;
     dueAt?: string;
     instructions?: string;
+    priority?: ReviewPriority;
   },
 ) {
   if (!inited) load();
   const query = getCrmQuery(queryId);
   if (!query) throw new Error("Query not found.");
+  const requestedAt = iso(new Date());
   const assignment: QueryReviewAssignment = {
     id: crypto.randomUUID(),
     reviewer_employee_id: input.reviewerEmployeeId,
     requested_by_employee_id: input.requestedByEmployeeId,
-    requested_at: iso(new Date()),
+    created_at: requestedAt,
+    requested_at: requestedAt,
     due_at: input.dueAt,
+    reason: input.instructions,
     instructions: input.instructions,
-    status: "Pending Review",
-    checklist: [],
+    priority: input.priority ?? "Normal",
+    status: "Requested",
+    assignment_history: [
+      {
+        employee_id: input.reviewerEmployeeId,
+        assigned_by_employee_id: input.requestedByEmployeeId,
+        assigned_at: requestedAt,
+      },
+    ],
+    checklist: [
+      "Query details checked",
+      "Pax/travel details checked",
+      "Routing checked",
+      "Programme checked",
+      "Commercial requirement checked",
+      "Follow-up/action checked",
+    ].map((label) => ({ label, status: "Pending" as const })),
   };
   queries = queries.map((item) =>
     item.id === query.id
       ? {
           ...item,
-          reviewer_employee_ids: [
-            ...new Set([...(item.reviewer_employee_ids || []), input.reviewerEmployeeId]),
-          ],
           review_support: {
             ...item.review_support,
             query_reviews: [...(item.review_support?.query_reviews || []), assignment],
@@ -526,12 +555,12 @@ export function requestQueryReview(
         }
       : item,
   );
-  logEvent({
+  logWorkflowEvent({
     type: "note_added",
     by: input.requestedByEmployeeId,
     at: assignment.requested_at,
     title: "Query review requested",
-    detail: `Review assignment ${assignment.id}`,
+    detail: `Review requested from ${employees.find((employee) => employee.id === input.reviewerEmployeeId)?.name || input.reviewerEmployeeId}. Assignment ${assignment.id}`,
     query_id: query.query_id,
     lead_id: query.lead_id,
   });
@@ -547,29 +576,38 @@ export function assignQueryAssistance(
     dueAt?: string;
     reason?: string;
     areas: string[];
+    priority?: ReviewPriority;
   },
 ) {
   if (!inited) load();
   const query = getCrmQuery(queryId);
   if (!query) throw new Error("Query not found.");
+  const assignedAt = iso(new Date());
   const assignment = {
     id: crypto.randomUUID(),
     assistant_employee_id: input.assistantEmployeeId,
     assigned_by_employee_id: input.assignedByEmployeeId,
-    assigned_at: iso(new Date()),
+    created_at: assignedAt,
+    assigned_at: assignedAt,
     due_at: input.dueAt,
     reason: input.reason,
+    instructions: input.reason,
+    priority: input.priority ?? "Normal",
     areas: input.areas,
-    status: "Assigned" as const,
+    status: "Requested" as const,
+    assignment_history: [
+      {
+        employee_id: input.assistantEmployeeId,
+        assigned_by_employee_id: input.assignedByEmployeeId,
+        assigned_at: assignedAt,
+      },
+    ],
     contributions: [],
   };
   queries = queries.map((item) =>
     item.id === query.id
       ? {
           ...item,
-          assistance_employee_ids: [
-            ...new Set([...(item.assistance_employee_ids || []), input.assistantEmployeeId]),
-          ],
           review_support: {
             ...item.review_support,
             assistance: [...(item.review_support?.assistance || []), assignment],
@@ -577,17 +615,426 @@ export function assignQueryAssistance(
         }
       : item,
   );
-  logEvent({
+  logWorkflowEvent({
     type: "note_added",
     by: input.assignedByEmployeeId,
     at: assignment.assigned_at,
     title: "Assistance assigned",
-    detail: `Assistance assignment ${assignment.id}`,
+    detail: `Assistance assigned to ${employees.find((employee) => employee.id === input.assistantEmployeeId)?.name || input.assistantEmployeeId}. Assignment ${assignment.id}`,
     query_id: query.query_id,
     lead_id: query.lead_id,
   });
   persist();
   return assignment;
+}
+
+function updateReviewAssignment(
+  queryId: string,
+  kind: "query" | "quotation",
+  assignmentId: string,
+  updater: (
+    assignment: QueryReviewAssignment | QuotationReviewAssignment,
+  ) => QueryReviewAssignment | QuotationReviewAssignment,
+) {
+  const key = kind === "query" ? "query_reviews" : "quotation_reviews";
+  let updated: QueryReviewAssignment | QuotationReviewAssignment | undefined;
+  queries = queries.map((query) => {
+    if (query.id !== queryId && query.query_id !== queryId) return query;
+    const assignments = query.review_support?.[key] ?? [];
+    return {
+      ...query,
+      review_support: {
+        ...query.review_support,
+        [key]: assignments.map((assignment) => {
+          if (assignment.id !== assignmentId) return assignment;
+          updated = updater(assignment);
+          return updated;
+        }),
+      },
+    };
+  });
+  if (!updated) throw new Error("Review request not found.");
+  return updated;
+}
+
+export function updateReviewChecklist(
+  queryId: string,
+  kind: "query" | "quotation",
+  assignmentId: string,
+  checklist: ReviewChecklistItem[],
+  by: string,
+) {
+  const assignment = getCrmQuery(queryId)?.review_support?.[
+    kind === "query" ? "query_reviews" : "quotation_reviews"
+  ]?.find((item) => item.id === assignmentId);
+  if (!assignment || assignment.reviewer_employee_id !== by || assignment.status !== "In Review")
+    throw new Error("Only the assigned reviewer may update an active review checklist.");
+  updateReviewAssignment(queryId, kind, assignmentId, (assignment) => ({
+    ...assignment,
+    checklist,
+  }));
+  logWorkflowEvent({
+    type: "note_added",
+    by,
+    title: `${kind === "query" ? "Query" : "Quotation"} review checklist updated`,
+    query_id: getCrmQuery(queryId)?.query_id,
+  });
+  persist();
+}
+
+export function setReviewStatus(
+  queryId: string,
+  kind: "query" | "quotation",
+  assignmentId: string,
+  status: ReviewStatus,
+  by: string,
+  note?: string,
+) {
+  if (status === "Returned" && !note?.trim()) throw new Error("Return instructions are required.");
+  const now = iso(new Date());
+  const currentQuery = getCrmQuery(queryId);
+  const key = kind === "query" ? "query_reviews" : "quotation_reviews";
+  const current = currentQuery?.review_support?.[key]?.find((item) => item.id === assignmentId);
+  if (!current) throw new Error("Review request not found.");
+  const activeStatuses = ["Requested", "Assigned", "In Review", "Pending Review", "Under Review"];
+  if (["In Review", "Approved", "Returned"].includes(status) && current.reviewer_employee_id !== by)
+    throw new Error("Only the assigned reviewer may act on this review.");
+  if (status === "Cancelled" && current.requested_by_employee_id !== by)
+    throw new Error("Only the requester may cancel this review.");
+  if (status === "Cancelled" && !activeStatuses.includes(current.status))
+    throw new Error("Only an active review request can be cancelled.");
+  if (status === "In Review" && !activeStatuses.includes(current.status))
+    throw new Error("Only an active review request can be started.");
+  if (["Approved", "Returned"].includes(status) && current.status !== "In Review")
+    throw new Error("Start the review before approving or returning it.");
+  const updated = updateReviewAssignment(queryId, kind, assignmentId, (assignment) => ({
+    ...assignment,
+    status,
+    started_at: status === "In Review" ? assignment.started_at || now : assignment.started_at,
+    completed_at: ["Approved", "Returned", "Cancelled"].includes(status)
+      ? now
+      : assignment.completed_at,
+    decision_note: note?.trim() || assignment.decision_note,
+    review_notes: note?.trim() || assignment.review_notes,
+    decided_at: ["Approved", "Returned", "Cancelled"].includes(status)
+      ? now
+      : assignment.decided_at,
+  }));
+  const query = getCrmQuery(queryId);
+  logWorkflowEvent({
+    type: "note_added",
+    by,
+    at: now,
+    title: `${kind === "query" ? "Query" : "Quotation"} review ${status.toLowerCase()}`,
+    detail: note?.trim(),
+    query_id: query?.query_id,
+    lead_id: query?.lead_id,
+  });
+  persist();
+  return updated;
+}
+
+export function requestQuotationReview(
+  queryId: string,
+  input: {
+    quotationId: string;
+    quotationVersion: number;
+    reviewerEmployeeId: string;
+    requestedByEmployeeId: string;
+    dueAt?: string;
+    instructions?: string;
+    priority?: ReviewPriority;
+  },
+) {
+  if (!inited) load();
+  const query = getCrmQuery(queryId);
+  if (!query) throw new Error("Query not found.");
+  const version = query.costing_versions?.find(
+    (item) => item.version === input.quotationVersion && item.quote.id === input.quotationId,
+  );
+  if (!version) throw new Error("Saved quotation version not found.");
+  const requestedAt = iso(new Date());
+  const assignment: QuotationReviewAssignment = {
+    id: crypto.randomUUID(),
+    quotation_id: input.quotationId,
+    quotation_version: input.quotationVersion,
+    quotation_snapshot: clone(version),
+    reviewer_employee_id: input.reviewerEmployeeId,
+    requested_by_employee_id: input.requestedByEmployeeId,
+    created_at: requestedAt,
+    requested_at: requestedAt,
+    due_at: input.dueAt,
+    reason: input.instructions,
+    instructions: input.instructions,
+    priority: input.priority ?? "Normal",
+    status: "Requested",
+    assignment_history: [
+      {
+        employee_id: input.reviewerEmployeeId,
+        assigned_by_employee_id: input.requestedByEmployeeId,
+        assigned_at: requestedAt,
+      },
+    ],
+    checklist: [],
+  };
+  queries = queries.map((item) =>
+    item.id === query.id
+      ? {
+          ...item,
+          review_support: {
+            ...item.review_support,
+            quotation_reviews: [...(item.review_support?.quotation_reviews || []), assignment],
+          },
+        }
+      : item,
+  );
+  logWorkflowEvent({
+    type: "note_added",
+    by: input.requestedByEmployeeId,
+    title: `Quotation V${input.quotationVersion} review requested`,
+    detail: input.instructions,
+    query_id: query.query_id,
+    lead_id: query.lead_id,
+  });
+  persist();
+  return assignment;
+}
+
+export function setAssistanceStatus(
+  queryId: string,
+  assignmentId: string,
+  status: AssistanceAssignment["status"],
+  by: string,
+  summary?: string,
+) {
+  if (status === "Completed" && !summary?.trim())
+    throw new Error("A completion summary is required.");
+  const current = getCrmQuery(queryId)?.review_support?.assistance?.find(
+    (assignment) => assignment.id === assignmentId,
+  );
+  if (!current) throw new Error("Assistance request not found.");
+  if (
+    ["Assigned", "In Progress", "Completed"].includes(status) &&
+    current.assistant_employee_id !== by
+  )
+    throw new Error("Only the assigned helper may update this assistance request.");
+  if (status === "Cancelled" && current.assigned_by_employee_id !== by)
+    throw new Error("Only the requester may cancel this assistance request.");
+  if (status === "Cancelled" && !["Requested", "Assigned", "In Progress"].includes(current.status))
+    throw new Error("Only active assistance can be cancelled.");
+  if (status === "In Progress" && !["Assigned", "In Progress"].includes(current.status))
+    throw new Error("Accept assistance before starting it.");
+  if (status === "Assigned" && current.status !== "Requested")
+    throw new Error("Only requested assistance can be accepted.");
+  if (status === "Completed" && current.status !== "In Progress")
+    throw new Error("Start assistance before completing it.");
+  const now = iso(new Date());
+  let found = false;
+  queries = queries.map((query) => {
+    if (query.id !== queryId && query.query_id !== queryId) return query;
+    return {
+      ...query,
+      review_support: {
+        ...query.review_support,
+        assistance: (query.review_support?.assistance || []).map((assignment) => {
+          if (assignment.id !== assignmentId) return assignment;
+          found = true;
+          return {
+            ...assignment,
+            status,
+            started_at:
+              status === "In Progress" ? assignment.started_at || now : assignment.started_at,
+            completion_summary: summary?.trim() || assignment.completion_summary,
+            completed_by_employee_id:
+              status === "Completed" ? by : assignment.completed_by_employee_id,
+            completed_at: status === "Completed" ? now : assignment.completed_at,
+          };
+        }),
+      },
+    };
+  });
+  if (!found) throw new Error("Assistance request not found.");
+  const query = getCrmQuery(queryId);
+  logWorkflowEvent({
+    type: "note_added",
+    by,
+    at: now,
+    title: `Assistance ${status.toLowerCase()}`,
+    detail: summary?.trim(),
+    query_id: query?.query_id,
+    lead_id: query?.lead_id,
+  });
+  persist();
+}
+
+export function reassignReviewSupport(
+  queryId: string,
+  kind: "query" | "quotation" | "assistance",
+  assignmentId: string,
+  newEmployeeId: string,
+  by: string,
+) {
+  if (!inited) load();
+  const query = getCrmQuery(queryId);
+  const actor = employees.find((employee) => employee.id === by);
+  const owner = employees.find(
+    (employee) => employee.id === query?.owner || employee.name === query?.owner,
+  );
+  const target = employees.find((employee) => employee.id === newEmployeeId);
+  if (!query || !actor || !target) throw new Error("Query or employee not found.");
+  if (actor.role !== "Sales Manager" && actor.role !== "Super Admin")
+    throw new Error("Only a Sales Manager can reassign team workflow.");
+  if (
+    actor.role !== "Super Admin" &&
+    (!owner || owner.department !== "Sales" || owner.unit !== actor.unit)
+  )
+    throw new Error("This Query is outside your authorized team scope.");
+  if (
+    !target.active ||
+    target.account_status !== "Active" ||
+    target.employee_status === "Exited" ||
+    target.department !== "Sales" ||
+    !["Senior Sales Executive", "Sales Manager"].includes(target.role) ||
+    (actor.role !== "Super Admin" && target.unit !== actor.unit)
+  )
+    throw new Error("Select an active Senior Sales Executive or Manager in your team.");
+  const currentReview =
+    kind === "query"
+      ? query.review_support?.query_reviews?.find((item) => item.id === assignmentId)
+      : kind === "quotation"
+        ? query.review_support?.quotation_reviews?.find((item) => item.id === assignmentId)
+        : undefined;
+  const currentAssignee =
+    kind === "assistance"
+      ? query.review_support?.assistance?.find((item) => item.id === assignmentId)
+          ?.assistant_employee_id
+      : currentReview?.reviewer_employee_id;
+  if (!currentAssignee) throw new Error("Workflow assignment not found.");
+  if (currentAssignee === newEmployeeId) throw new Error("Choose a different assignee.");
+
+  const now = iso(new Date());
+  let previousAssignee: string | undefined;
+  let found = false;
+  const reviewSupport = { ...query.review_support };
+  const reassignReview = <T extends QueryReviewAssignment | QuotationReviewAssignment>(
+    assignment: T,
+  ): T => {
+    if (assignment.id !== assignmentId) return assignment;
+    if (["Approved", "Returned", "Cancelled"].includes(assignment.status))
+      throw new Error("Completed review cannot be reassigned.");
+    found = true;
+    previousAssignee = assignment.reviewer_employee_id;
+    return {
+      ...assignment,
+      reviewer_employee_id: newEmployeeId,
+      status: "Assigned",
+      started_at: undefined,
+      completed_at: undefined,
+      decided_at: undefined,
+      decision_note: undefined,
+      checklist: assignment.checklist.map((item) => ({ ...item, status: "Pending" as const })),
+      assignment_history: [
+        ...(assignment.assignment_history || [
+          {
+            employee_id: assignment.reviewer_employee_id,
+            assigned_by_employee_id: assignment.requested_by_employee_id,
+            assigned_at: assignment.requested_at,
+          },
+        ]),
+        { employee_id: newEmployeeId, assigned_by_employee_id: by, assigned_at: now },
+      ],
+    } as T;
+  };
+  if (kind === "assistance") {
+    reviewSupport.assistance = (reviewSupport.assistance || []).map((assignment) => {
+      if (assignment.id !== assignmentId) return assignment;
+      if (["Completed", "Cancelled"].includes(assignment.status))
+        throw new Error("Completed assistance cannot be reassigned.");
+      found = true;
+      previousAssignee = assignment.assistant_employee_id;
+      return {
+        ...assignment,
+        assistant_employee_id: newEmployeeId,
+        status: "Assigned",
+        started_at: undefined,
+        assignment_history: [
+          ...(assignment.assignment_history || [
+            {
+              employee_id: assignment.assistant_employee_id,
+              assigned_by_employee_id: assignment.assigned_by_employee_id,
+              assigned_at: assignment.assigned_at,
+            },
+          ]),
+          { employee_id: newEmployeeId, assigned_by_employee_id: by, assigned_at: now },
+        ],
+      };
+    });
+  } else if (kind === "query") {
+    reviewSupport.query_reviews = (reviewSupport.query_reviews || []).map(reassignReview);
+  } else {
+    reviewSupport.quotation_reviews = (reviewSupport.quotation_reviews || []).map(reassignReview);
+  }
+  if (!found) throw new Error("Workflow assignment not found.");
+
+  const updated = {
+    ...query,
+    review_support: reviewSupport,
+  };
+  queries = queries.map((item) => (item.id === query.id ? updated : item));
+  logWorkflowEvent({
+    type: "note_added",
+    by,
+    at: now,
+    title: `${kind === "assistance" ? "Assistance" : `${kind} review`} reassigned`,
+    detail: `${previousAssignee || "Unassigned"} → ${newEmployeeId}`,
+    query_id: query.query_id,
+    lead_id: query.lead_id,
+  });
+  persist();
+}
+
+export function addAssistanceContribution(
+  queryId: string,
+  assignmentId: string,
+  contribution: AssistanceContribution,
+) {
+  const assignment = getCrmQuery(queryId)?.review_support?.assistance?.find(
+    (item) => item.id === assignmentId,
+  );
+  if (
+    !assignment ||
+    assignment.assistant_employee_id !== contribution.employee_id ||
+    assignment.status !== "In Progress"
+  )
+    throw new Error("Only the assigned helper may add updates to in-progress assistance.");
+  let found = false;
+  queries = queries.map((query) => {
+    if (query.id !== queryId && query.query_id !== queryId) return query;
+    return {
+      ...query,
+      review_support: {
+        ...query.review_support,
+        assistance: (query.review_support?.assistance || []).map((assignment) => {
+          if (assignment.id !== assignmentId) return assignment;
+          found = true;
+          return {
+            ...assignment,
+            contributions: [...assignment.contributions, contribution],
+          };
+        }),
+      },
+    };
+  });
+  if (!found) throw new Error("Assistance request not found.");
+  logWorkflowEvent({
+    type: "note_added",
+    by: contribution.employee_id,
+    at: contribution.at,
+    title: "Assistance contribution added",
+    detail: contribution.note,
+    query_id: getCrmQuery(queryId)?.query_id,
+  });
+  persist();
 }
 
 export interface NewLeadInput {
@@ -684,8 +1131,8 @@ export function createLead(input: NewLeadInput): { query: CrmQuery; assigned_to:
     ss: input.ss ?? 0,
     child_ages: input.child_ages ?? [],
     pax_mode: input.pax_mode ?? "range",
-    min_pax: input.pax_mode === "exact" ? undefined : input.min_pax ?? input.pax,
-    max_pax: input.pax_mode === "exact" ? undefined : input.max_pax ?? input.pax,
+    min_pax: input.pax_mode === "exact" ? undefined : (input.min_pax ?? input.pax),
+    max_pax: input.pax_mode === "exact" ? undefined : (input.max_pax ?? input.pax),
     costing_basis: input.costing_basis || input.travel_type,
     hotel_category_from: input.hotel_category_from,
     hotel_category_to: input.hotel_category_to,
@@ -988,6 +1435,38 @@ export function setQueryStage(
   if (!current) return;
   if (stage === "Lost" && !closure?.reason?.trim()) {
     throw new Error("A Lost reason is required before closing this query.");
+  }
+  if (stage === "Quotation Sent") {
+    const latestVersion = Math.max(
+      0,
+      ...(current.costing_versions || []).map((item) => item.version),
+    );
+    const quotationReviews = (current.review_support?.quotation_reviews || [])
+      .filter((review) => review.quotation_version <= latestVersion)
+      .sort((left, right) => left.requested_at.localeCompare(right.requested_at));
+    const currentVersionReview = quotationReviews
+      .filter((review) => review.quotation_version === latestVersion)
+      .at(-1);
+    const activeReview = quotationReviews.some(
+      (review) =>
+        review.quotation_version === latestVersion &&
+        ["Requested", "Assigned", "In Review", "Pending Review", "Under Review"].includes(
+          review.status,
+        ),
+    );
+    const returnedPriorVersion = quotationReviews.some(
+      (review) => review.quotation_version < latestVersion && review.status === "Returned",
+    );
+    if (activeReview || currentVersionReview?.status === "Returned") {
+      throw new Error(
+        `Quotation V${latestVersion} is not cleared for sending until its review is approved or cancelled.`,
+      );
+    }
+    if (returnedPriorVersion && currentVersionReview?.status !== "Approved") {
+      throw new Error(
+        `Quotation V${latestVersion} must be approved after the previous version was returned.`,
+      );
+    }
   }
   if (current.assignment_status !== "Assigned" && stage !== "Lost") {
     throw new Error("Assign the query before moving it through the Sales lifecycle.");

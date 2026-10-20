@@ -191,25 +191,51 @@ export interface CostingVersion {
 }
 
 export type ReviewStatus =
-  "Pending Review" | "Under Review" | "Approved" | "Returned" | "Cancelled";
-export type AssistanceStatus = "Assigned" | "In Progress" | "Completed" | "Cancelled";
+  | "Requested"
+  | "Assigned"
+  | "In Review"
+  | "Approved"
+  | "Returned"
+  | "Cancelled"
+  // Legacy values remain readable and are normalized in the UI.
+  | "Pending Review"
+  | "Under Review";
+export type ReviewPriority = "Normal" | "High" | "Urgent";
+export type AssistanceStatus = "Requested" | "Assigned" | "In Progress" | "Completed" | "Cancelled";
 export interface ReviewChecklistItem {
   label: string;
   status: "Pending" | "Pass" | "Issue" | "Not Applicable";
   note?: string;
 }
+export interface ReviewAssignmentHistory {
+  employee_id: string;
+  assigned_by_employee_id: string;
+  assigned_at: string;
+}
 export interface QueryReviewAssignment {
   id: string;
   reviewer_employee_id: string;
   requested_by_employee_id: string;
+  created_at?: string;
   requested_at: string;
   due_at?: string;
+  reason?: string;
   instructions?: string;
+  priority?: ReviewPriority;
   status: ReviewStatus;
+  review_notes?: string;
+  assignment_history?: ReviewAssignmentHistory[];
+  started_at?: string;
+  completed_at?: string;
   checklist: ReviewChecklistItem[];
   decision_note?: string;
   decided_at?: string;
   cancelled_reason?: string;
+}
+export interface QuotationReviewAssignment extends QueryReviewAssignment {
+  quotation_id: string;
+  quotation_version: number;
+  quotation_snapshot: CostingVersion;
 }
 export interface AssistanceContribution {
   id: string;
@@ -223,11 +249,17 @@ export interface AssistanceAssignment {
   id: string;
   assistant_employee_id: string;
   assigned_by_employee_id: string;
+  created_at?: string;
   assigned_at: string;
   due_at?: string;
   reason?: string;
+  instructions?: string;
+  priority?: ReviewPriority;
   areas: string[];
   status: AssistanceStatus;
+  assignment_history?: ReviewAssignmentHistory[];
+  started_at?: string;
+  completed_by_employee_id?: string;
   contributions: AssistanceContribution[];
   completion_summary?: string;
   completed_at?: string;
@@ -235,6 +267,7 @@ export interface AssistanceAssignment {
 }
 export interface ReviewSupport {
   query_reviews?: QueryReviewAssignment[];
+  quotation_reviews?: QuotationReviewAssignment[];
   assistance?: AssistanceAssignment[];
 }
 

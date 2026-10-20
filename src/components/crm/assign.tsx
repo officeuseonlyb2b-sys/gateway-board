@@ -45,7 +45,10 @@ export function OwnerSelect({
   placeholder?: string;
   className?: string;
 }) {
-  const employees = useEmployees().filter(isSalesAssignmentEligible);
+  const profile = useAccessProfile();
+  const employees = useEmployees()
+    .filter(isSalesAssignmentEligible)
+    .filter((employee) => employee.id !== profile.employee?.id);
   return (
     <Select value={value || undefined} onValueChange={onChange}>
       <SelectTrigger className={className}>

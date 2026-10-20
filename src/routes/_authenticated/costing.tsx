@@ -55,7 +55,13 @@ import {
 } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
 import { useDraft, writeDraft, clearDraft, initDraft, loadDraft } from "@/lib/wizard/store";
-import { upsertDraft, getDraft, deleteDraft, migrateLegacyDraft } from "@/lib/drafts-store";
+import {
+  upsertDraft,
+  getDraft,
+  deleteDraft,
+  migrateLegacyDraft,
+  completedStepForScope,
+} from "@/lib/drafts-store";
 import { addNotification } from "@/lib/notifications-store";
 import type {
   QuoteDraft,
@@ -484,12 +490,36 @@ function WizardPage() {
   })).filter((group) => group.steps.length > 0);
   const step = resolveQuotationStep(draft?.step ?? 1, workflowSteps);
   const stepPosition = workflowSteps.findIndex((candidate) => candidate === step) + 1;
+  const activeDraftRecord = currentDraftId ? getDraft(currentDraftId) : null;
+  const reachedThroughStep = draft ? completedStepForScope(activeDraftRecord, draft) : step;
+  const reachedPosition = workflowSteps.reduce(
+    (lastReached, workflowStep, index) =>
+      workflowStep <= reachedThroughStep ? index : lastReached,
+    -1,
+  );
+  const persistedScopeChanged = Boolean(
+    draft &&
+    activeDraftRecord &&
+    getQuotationScope(
+      activeDraftRecord.wizard_state.query_for,
+      activeDraftRecord.wizard_state.commercial_mode,
+    ).queryFor !== scope.queryFor,
+  );
 
   useEffect(() => {
-    if (!draft || draft.step === step) return;
-    writeDraft({ ...draft, step });
+    if (!draft) return;
+    const firstUnreachedPosition = workflowSteps.findIndex(
+      (workflowStep) => workflowStep > reachedThroughStep,
+    );
+    const rewindForNewScope =
+      persistedScopeChanged &&
+      firstUnreachedPosition >= 0 &&
+      stepPosition - 1 > firstUnreachedPosition;
+    const safeStep = rewindForNewScope ? workflowSteps[firstUnreachedPosition] : step;
+    if (draft.step === safeStep) return;
+    writeDraft({ ...draft, step: safeStep });
     setSub(0);
-  }, [draft, step]);
+  }, [draft, step, stepPosition, workflowSteps, reachedThroughStep, persistedScopeChanged]);
 
   useEffect(() => {
     if (initialized) return;
@@ -605,7 +635,7 @@ function WizardPage() {
   // Keep a resumable named draft in sync after the recipient is known. The
   // generated quote is written separately and is never used as an editable draft.
   useEffect(() => {
-    if (!initialized || !draft || step < 2) return;
+    if (!initialized || !draft || (step < 2 && !currentDraftId)) return;
     const timer = window.setTimeout(() => {
       const state = draft.step === step ? draft : { ...draft, step };
       const id = upsertDraft(state, currentDraftId ?? undefined);
@@ -628,6 +658,16 @@ function WizardPage() {
   };
 
   const canProceed = validate(draft, step);
+  const canNavigateTo = (targetStep: number) => {
+    const targetPosition = workflowSteps.findIndex((workflowStep) => workflowStep === targetStep);
+    if (targetPosition < 0) return false;
+    const currentPosition = stepPosition - 1;
+    return (
+      targetPosition === currentPosition ||
+      targetPosition <= reachedPosition ||
+      (targetPosition === currentPosition + 1 && canProceed)
+    );
+  };
 
   const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
     const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
@@ -698,7 +738,7 @@ function WizardPage() {
   const go = (n: number, subIndex = 0) => {
     const targetPosition = workflowSteps.findIndex((candidate) => candidate === n);
     if (targetPosition < 0) return;
-    if (targetPosition > stepPosition - 1 && !canProceed) return;
+    if (!canNavigateTo(n)) return;
     const current = loadDraft() ?? draft;
     const next = { ...current, step: n };
     writeDraft(next);
@@ -857,7 +897,13 @@ function WizardPage() {
         </div>
 
         <div className="mt-4 rounded-xl border bg-background px-3 py-2 xl:hidden">
-          <ProgressBar step={step} steps={visibleSteps} onJump={go} />
+          <ProgressBar
+            step={step}
+            steps={visibleSteps}
+            reachedThroughStep={reachedThroughStep}
+            canProceed={canProceed}
+            onJump={go}
+          />
         </div>
 
         <div
@@ -871,6 +917,8 @@ function WizardPage() {
               step={step}
               steps={visibleSteps}
               groups={visibleFlowGroups}
+              reachedThroughStep={reachedThroughStep}
+              canProceed={canProceed}
               onJump={go}
             />
           )}
@@ -974,15 +1022,23 @@ function QuotationNavigator({
   step,
   steps,
   groups,
+  reachedThroughStep,
+  canProceed,
   onJump,
 }: {
   step: number;
   steps: { n: number; label: string; subs?: string[] }[];
   groups: { label: string; description: string; steps: readonly number[] }[];
+  reachedThroughStep: number;
+  canProceed: boolean;
   onJump: (n: number) => void;
 }) {
   const activeIndex = steps.findIndex((item) => item.n === step);
   const stepPosition = activeIndex + 1;
+  const reachedIndex = steps.reduce(
+    (lastReached, item, index) => (item.n <= reachedThroughStep ? index : lastReached),
+    -1,
+  );
   return (
     <aside className="sticky top-4 hidden overflow-hidden rounded-xl border bg-background shadow-sm xl:block">
       <div className="border-b px-4 py-3">
@@ -1010,16 +1066,23 @@ function QuotationNavigator({
               {group.steps.map((stepNumber) => {
                 const item = steps.find((candidate) => candidate.n === stepNumber)!;
                 const itemIndex = steps.findIndex((candidate) => candidate.n === stepNumber);
-                const done = itemIndex < activeIndex;
+                const done = itemIndex <= reachedIndex && itemIndex !== activeIndex;
                 const active = step === stepNumber;
-                const future = itemIndex > activeIndex;
+                const validNext = itemIndex === activeIndex + 1 && canProceed;
+                const locked = !active && !done && !validNext;
                 return (
                   <button
                     key={stepNumber}
                     type="button"
+                    disabled={locked}
+                    aria-current={active ? "step" : undefined}
                     onClick={() => {
-                      if (future) {
+                      if (locked) {
                         toast.info("Complete the current step before moving forward");
+                        return;
+                      }
+                      if (active) {
+                        window.scrollTo({ top: 0, behavior: "smooth" });
                         return;
                       }
                       onJump(stepNumber);
@@ -1028,7 +1091,8 @@ function QuotationNavigator({
                       "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition",
                       active && "bg-primary text-primary-foreground shadow-sm",
                       done && "text-primary hover:bg-primary/5",
-                      future && "cursor-not-allowed text-muted-foreground/55",
+                      validNext && "cursor-pointer text-foreground hover:bg-muted/50",
+                      locked && "cursor-not-allowed text-muted-foreground/55",
                     )}
                   >
                     <span
@@ -1036,7 +1100,7 @@ function QuotationNavigator({
                         "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold",
                         active && "border-primary-foreground/40 bg-primary-foreground/10",
                         done && "border-primary/30 bg-primary/5",
-                        future && "border-muted-foreground/20",
+                        locked && "border-muted-foreground/20",
                       )}
                     >
                       {done ? <Check className="h-3 w-3" /> : itemIndex + 1}
@@ -1062,22 +1126,31 @@ function QuotationNavigator({
 function ProgressBar({
   step,
   steps,
+  reachedThroughStep,
+  canProceed,
   onJump,
 }: {
   step: number;
   steps: { n: number; label: string; subs?: string[] }[];
+  reachedThroughStep: number;
+  canProceed: boolean;
   onJump: (n: number) => void;
 }) {
   const activeIndex = steps.findIndex((item) => item.n === step);
+  const reachedIndex = steps.reduce(
+    (lastReached, item, index) => (item.n <= reachedThroughStep ? index : lastReached),
+    -1,
+  );
   return (
     <div className="overflow-x-auto">
       <div className="flex items-start gap-0 min-w-max py-2">
         {steps.map((s, i) => {
-          const done = i < activeIndex;
+          const done = i <= reachedIndex && i !== activeIndex;
           const active = step === s.n;
-          const isFuture = i > activeIndex;
+          const validNext = i === activeIndex + 1 && canProceed;
+          const locked = !active && !done && !validNext;
           const handleClick = () => {
-            if (isFuture) {
+            if (locked) {
               toast.info("Complete previous steps first");
               return;
             }
@@ -1091,10 +1164,12 @@ function ProgressBar({
             <div key={s.n} className="flex items-start">
               <button
                 type="button"
+                disabled={locked}
+                aria-current={active ? "step" : undefined}
                 onClick={handleClick}
                 className={cn(
                   "flex flex-col items-center gap-1 min-w-[68px] group",
-                  isFuture ? "cursor-not-allowed" : "cursor-pointer",
+                  locked ? "cursor-not-allowed" : "cursor-pointer",
                 )}
               >
                 <div
@@ -4625,29 +4700,36 @@ function PaxRow({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
+  const [inputValue, setInputValue] = useState(String(value));
+  useEffect(() => setInputValue(String(value)), [value]);
+
+  const commitValue = () => {
+    const parsed = Number.parseInt(inputValue, 10);
+    const next = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    setInputValue(String(next));
+    onChange(next);
+  };
+
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm">{label}</span>
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => onChange(Math.max(0, value - 1))}
+      <div className="w-20">
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          value={inputValue}
+          className="text-center"
           disabled={disabled}
-        >
-          −
-        </Button>
-        <Input value={value} readOnly className="w-14 text-center" disabled={disabled} />
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => onChange(value + 1)}
-          disabled={disabled}
-        >
-          +
-        </Button>
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setInputValue(nextValue);
+            if (nextValue === "") return;
+            const parsed = Number.parseInt(nextValue, 10);
+            if (Number.isInteger(parsed) && parsed >= 0) onChange(parsed);
+          }}
+          onBlur={commitValue}
+        />
       </div>
     </div>
   );

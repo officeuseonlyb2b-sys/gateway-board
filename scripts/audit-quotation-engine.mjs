@@ -12,6 +12,7 @@ try {
   const types = await vite.ssrLoadModule("/src/lib/wizard/types.ts");
   const quoteBuilder = await vite.ssrLoadModule("/src/lib/wizard/build-saved-quote.ts");
   const draftStore = await vite.ssrLoadModule("/src/lib/wizard/store.ts");
+  const namedDraftStore = await vite.ssrLoadModule("/src/lib/drafts-store.ts");
   const quoteStore = await vite.ssrLoadModule("/src/lib/quotes-store.ts");
   const validation = await vite.ssrLoadModule("/src/lib/wizard/validation.ts");
   const queryFor = await vite.ssrLoadModule("/src/lib/query-for.ts");
@@ -507,6 +508,53 @@ try {
     hotel_markup_percent: 10,
     hotel_gst_percent: 5,
   });
+
+  const reachedDraftRecord = {
+    id: "draft-progress",
+    draft_name: "Progress audit",
+    created_at: now,
+    updated_at: now,
+    last_step: 11,
+    wizard_state: {
+      ...baseDraft(),
+      query_for: "Package",
+      commercial_mode: "package",
+      step: 5,
+    },
+  };
+  assert.equal(
+    namedDraftStore.completedStepForScope(reachedDraftRecord, {
+      ...reachedDraftRecord.wizard_state,
+      step: 4,
+    }),
+    11,
+    "Moving backward in the same scope preserves the reached-step high-water mark",
+  );
+  assert.equal(
+    namedDraftStore.completedStepForScope(reachedDraftRecord, {
+      ...reachedDraftRecord.wizard_state,
+      query_for: "Accommodation Part",
+      commercial_mode: "accommodation_only",
+      step: 9,
+    }),
+    3,
+    "Switching Query For does not unlock steps after the scopes first diverge",
+  );
+  assert.equal(
+    namedDraftStore.completedStepForScope(
+      {
+        ...reachedDraftRecord,
+        wizard_state: {
+          ...reachedDraftRecord.wizard_state,
+          query_for: "Land Part",
+          commercial_mode: "transport_only",
+        },
+      },
+      { ...reachedDraftRecord.wizard_state, query_for: "Package", commercial_mode: "package" },
+    ),
+    7,
+    "Scope history carries forward only steps completed in the common flow prefix",
+  );
 
   assert.equal(validation.isRoutingReady(baseDraft()), true, "Every overnight city is present");
   const incompleteRoutingDraft = baseDraft();
