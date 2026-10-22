@@ -18,9 +18,9 @@ import { Progress } from "@/components/ui/progress";
 import { useAccessibleQueries } from "@/lib/crm/access";
 import { attentionFor, durationLabel, hoursBetween } from "@/lib/crm/insights";
 import { useCrmTasks, useEmployees } from "@/lib/crm/store";
+import { isKolkataToday } from "@/lib/crm/dates";
 
-const today = (value?: string) =>
-  value && new Date(value).toDateString() === new Date().toDateString();
+const today = isKolkataToday;
 const openStage = (stage: string) => !["Won", "Lost"].includes(stage);
 
 export default function SalesControlTower() {

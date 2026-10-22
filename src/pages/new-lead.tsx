@@ -13,11 +13,12 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { createLead } from "@/lib/crm/store";
-import { pushCrmSnapshotNow } from "@/lib/crm/crm-remote";
+import { saveCrmQueryNow } from "@/lib/crm/crm-remote";
 import { useAuth } from "@/lib/auth-mock";
 import { useAgents, usePrograms } from "@/lib/wizard/agents-store";
 import { findClientByIdentity, upsertClientFromQuery, useClients } from "@/lib/crm/clients-store";
 import { QUERY_FOR_OPTIONS } from "@/lib/query-for";
+import { useAccessProfile } from "@/lib/crm/access";
 
 // Exact data extracted from screenshots
 const LEAD_SOURCES = ["B2B", "B2C", "B2B2B"];
@@ -84,6 +85,7 @@ const HOTEL_CATEGORIES = [
 export default function NewQuery() {
   const navigate = useNavigate();
   const user = useAuth();
+  const access = useAccessProfile();
   const agents = useAgents();
   const clients = useClients();
   const programmes = usePrograms();
@@ -156,7 +158,11 @@ export default function NewQuery() {
       return;
     }
     const childrenCount = Math.max(0, Number(exactChildren) || 0);
-    if (paxMode === "exact" && (childAges.length !== childrenCount || childAges.some((age) => age === "" || Number(age) < 0 || Number(age) > 17))) {
+    if (
+      paxMode === "exact" &&
+      (childAges.length !== childrenCount ||
+        childAges.some((age) => age === "" || Number(age) < 0 || Number(age) > 17))
+    ) {
       toast.error("Enter an age for every child.");
       return;
     }
@@ -168,12 +174,13 @@ export default function NewQuery() {
     // They are populated from the linked Costing/Quotation when it is saved.
     const minPaxValue = minPax ? Math.max(1, Number(minPax)) : undefined;
     const maxPaxValue = maxPax ? Math.max(1, Number(maxPax)) : undefined;
-    const exactPax = Math.max(0, Number(exactAdults) || 0) + Math.max(0, Number(exactSs) || 0) + childrenCount;
+    const exactPax =
+      Math.max(0, Number(exactAdults) || 0) + Math.max(0, Number(exactSs) || 0) + childrenCount;
     if (paxMode === "exact" && exactPax < 1) {
       toast.error("Enter at least one traveller.");
       return;
     }
-    const pax = paxMode === "exact" ? exactPax : maxPaxValue ?? minPaxValue ?? 0;
+    const pax = paxMode === "exact" ? exactPax : (maxPaxValue ?? minPaxValue ?? 0);
     const matchedAgent = agents.find((agent) => agent.id === selectedAgentId);
     if (isB2B && !matchedAgent) {
       toast.error("The selected B2B Agent is no longer available. Please select it again.");
@@ -186,6 +193,10 @@ export default function NewQuery() {
       city: queryBaseCity,
     });
     try {
+      const currentEmployee = access.employee;
+      if (!currentEmployee) {
+        throw new Error("Your linked CRM employee profile is still unavailable. Please retry.");
+      }
       if (!isB2B) {
         matchedClient = upsertClientFromQuery({
           name: contactPerson,
@@ -198,7 +209,7 @@ export default function NewQuery() {
           active: true,
         });
       }
-      createLead({
+      const created = createLead({
         lead_source: marketSource || sourceType || "Direct",
         customer: isB2B
           ? matchedAgent?.agency || sourcePartner
@@ -212,7 +223,7 @@ export default function NewQuery() {
         destination: selectedProgramme?.name || tourStartCity || queryBaseCity || tourEndCity,
         priority: "Normal",
         requirement: queryFor,
-        created_by: user?.name || "Sales Desk",
+        created_by: currentEmployee.id || currentEmployee.name || user?.name || "Sales Desk",
         customer_type: isB2B ? "B2B Agent" : "B2C Client",
         agent_id: matchedAgent?.id,
         agent_contact_id: isB2B ? selectedAgentContactId : undefined,
@@ -250,11 +261,13 @@ export default function NewQuery() {
             : undefined,
       });
       try {
-        await pushCrmSnapshotNow();
+        const saveResult = await saveCrmQueryNow(created.query.id);
+        if (!saveResult.ok) throw saveResult.error;
         toast.success("Query created and sent to the Assignment Desk");
       } catch (syncError) {
         console.error("Query created locally but cloud sync failed", syncError);
-        toast.warning("Query created locally, but cloud sync failed.");
+        toast.error("Query was kept locally, but could not be saved to the cloud. Please retry.");
+        return;
       }
       navigate({ to: "/queries/query-tracker" });
     } catch (error) {
@@ -686,20 +699,93 @@ export default function NewQuery() {
                 Pax &amp; Traveller Details
               </h2>
               <div className="flex gap-2 mb-4">
-                <Button type="button" variant={paxMode === "exact" ? "default" : "outline"} onClick={() => setPaxMode("exact")}>Exact Travellers</Button>
-                <Button type="button" variant={paxMode === "range" ? "default" : "outline"} onClick={() => setPaxMode("range")}>Pax Range</Button>
+                <Button
+                  type="button"
+                  variant={paxMode === "exact" ? "default" : "outline"}
+                  onClick={() => setPaxMode("exact")}
+                >
+                  Exact Travellers
+                </Button>
+                <Button
+                  type="button"
+                  variant={paxMode === "range" ? "default" : "outline"}
+                  onClick={() => setPaxMode("range")}
+                >
+                  Pax Range
+                </Button>
               </div>
-              {paxMode === "exact" ? <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
-                <div className="space-y-2"><Label>Adults</Label><Input type="number" min={0} value={exactAdults} onChange={(e) => setExactAdults(e.target.value)} /></div>
-                <div className="space-y-2"><Label>SS (Senior/Special)</Label><Input type="number" min={0} value={exactSs} onChange={(e) => setExactSs(e.target.value)} /></div>
-                <div className="space-y-2"><Label>Children</Label><Input type="number" min={0} value={exactChildren} onChange={(e) => { const count = Math.max(0, Number(e.target.value) || 0); setExactChildren(e.target.value); setChildAges((ages) => Array.from({ length: count }, (_, i) => ages[i] ?? "")); }} /></div>
-                {childAges.map((age, index) => <div className="space-y-2" key={index}><Label>Child {index + 1} Age *</Label><Input type="number" min={0} max={17} value={age} onChange={(e) => setChildAges((ages) => ages.map((item, i) => i === index ? e.target.value : item))} /></div>)}
-                <div className="font-semibold">Total Pax: {Math.max(0, Number(exactAdults) || 0) + Math.max(0, Number(exactSs) || 0) + childAges.length}</div>
-              </div> : <div className="bg-slate-100 border border-slate-200 rounded-md p-3 text-sm text-slate-600 mb-4">Use a minimum and maximum when exact traveller details are not available.</div>}
+              {paxMode === "exact" ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
+                  <div className="space-y-2">
+                    <Label>Adults</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={exactAdults}
+                      onChange={(e) => setExactAdults(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SS (Senior/Special)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={exactSs}
+                      onChange={(e) => setExactSs(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Children</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={exactChildren}
+                      onChange={(e) => {
+                        const count = Math.max(0, Number(e.target.value) || 0);
+                        setExactChildren(e.target.value);
+                        setChildAges((ages) =>
+                          Array.from({ length: count }, (_, i) => ages[i] ?? ""),
+                        );
+                      }}
+                    />
+                  </div>
+                  {childAges.map((age, index) => (
+                    <div className="space-y-2" key={index}>
+                      <Label>Child {index + 1} Age *</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={17}
+                        value={age}
+                        onChange={(e) =>
+                          setChildAges((ages) =>
+                            ages.map((item, i) => (i === index ? e.target.value : item)),
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                  <div className="font-semibold">
+                    Total Pax:{" "}
+                    {Math.max(0, Number(exactAdults) || 0) +
+                      Math.max(0, Number(exactSs) || 0) +
+                      childAges.length}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-100 border border-slate-200 rounded-md p-3 text-sm text-slate-600 mb-4">
+                  Use a minimum and maximum when exact traveller details are not available.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <Label>Minimum pax</Label>
-                  <Input type="number" value={minPax} disabled={paxMode === "exact"} onChange={(e) => setMinPax(e.target.value)} />
+                  <Input
+                    type="number"
+                    value={minPax}
+                    disabled={paxMode === "exact"}
+                    onChange={(e) => setMinPax(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Hotel category — from</Label>
@@ -727,7 +813,12 @@ export default function NewQuery() {
 
                 <div className="space-y-2">
                   <Label>Maximum pax</Label>
-                  <Input type="number" value={maxPax} disabled={paxMode === "exact"} onChange={(e) => setMaxPax(e.target.value)} />
+                  <Input
+                    type="number"
+                    value={maxPax}
+                    disabled={paxMode === "exact"}
+                    onChange={(e) => setMaxPax(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Hotel category — to</Label>

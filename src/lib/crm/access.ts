@@ -179,6 +179,8 @@ export function useAccessibleQueries() {
   const own = (query: (typeof queries)[number]) =>
     [query.owner].includes(employee.id) ||
     [query.owner].includes(employee.name) ||
+    ((!query.owner || query.owner === "Unassigned") &&
+      (query.created_by === employee.id || query.created_by === employee.name)) ||
     Boolean(
       query.shared_with_employee_ids?.includes(employee.id) ||
       query.review_support?.query_reviews?.some(

@@ -17,9 +17,9 @@ import { useAccessProfile, useAccessibleQueries } from "@/lib/crm/access";
 import { attentionFor } from "@/lib/crm/insights";
 import { useCrmTasks } from "@/lib/crm/store";
 import { STAGES } from "@/lib/crm/types";
+import { isKolkataToday } from "@/lib/crm/dates";
 
-const sameDay = (value?: string) =>
-  value && new Date(value).toDateString() === new Date().toDateString();
+const sameDay = isKolkataToday;
 const isOpen = (stage: string) => !["Won", "Lost"].includes(stage);
 
 export default function MySalesDesk() {
@@ -27,8 +27,15 @@ export default function MySalesDesk() {
   const accessible = useAccessibleQueries();
   const tasks = useCrmTasks();
   const name = profile.employee?.name;
+  const employeeId = profile.employee?.id;
   const queries = name
-    ? accessible.filter((query) => query.owner === name || query.created_by === name)
+    ? accessible.filter(
+        (query) =>
+          query.owner === name ||
+          query.owner === employeeId ||
+          query.created_by === name ||
+          query.created_by === employeeId,
+      )
     : accessible;
   const mineTasks = name ? tasks.filter((task) => task.owner === name) : tasks;
   const now = Date.now();

@@ -251,7 +251,12 @@ await check(
       ]);
       await db.query("INSERT INTO public.crm_employees(id, data) VALUES ($1, $2)", [
         id,
-        JSON.stringify({ ...record(id, role, code), name, department: "Sales", unit: "Test Unit" }),
+        JSON.stringify({
+          ...record(id, role, code),
+          name,
+          department: "Sales",
+          unit: "Madhya Pradesh",
+        }),
       ]);
       await asUser(
         id,
@@ -291,6 +296,188 @@ await check(
     await asUser(staff, async () => {
       assert.equal((await rows("app_master_state")).length, 0);
       assert.equal((await rows("destination_cities")).length, 0);
+    });
+  },
+);
+await check(
+  "Sales roles create their own unassigned Query using stable Employee identity",
+  async () => {
+    for (const [index, employeeId] of salesIds.entries()) {
+      const rowId = `unassigned-create-${index}`;
+      const queryId = `Q-UNASSIGNED-${index}`;
+      const data = {
+        id: rowId,
+        query_id: queryId,
+        owner: "",
+        created_by: employeeId,
+        assignment_status: "Awaiting Assignment",
+        primary_unit: "Madhya Pradesh",
+        participating_units: ["Madhya Pradesh"],
+      };
+      await asUser(
+        employeeId,
+        async () => {
+          const identity = (
+            await db.query(
+              `SELECT auth.uid() AS auth_uid,
+                      public.current_crm_employee_id() AS employee_id,
+                      public.can_create_crm_query($1::jsonb, NULL) AS can_create`,
+              [JSON.stringify(data)],
+            )
+          ).rows[0];
+          assert.equal(identity.auth_uid, employeeId);
+          assert.equal(identity.employee_id, employeeId);
+          assert.equal(identity.can_create, true);
+          const result = await db.query(
+            `INSERT INTO public.crm_queries(id, query_id, owner, owner_user_id, data)
+             VALUES ($1,$2,'',NULL,$3::jsonb)
+             RETURNING owner, owner_user_id, data`,
+            [rowId, queryId, JSON.stringify(data)],
+          );
+          assert.equal(result.rows.length, 1);
+          assert.equal(result.rows[0].owner, "");
+          assert.equal(result.rows[0].owner_user_id, null);
+          assert.equal(result.rows[0].data.created_by, employeeId);
+        },
+        `EMP-010${index + 1}@example.invalid`,
+      );
+      const persisted = (
+        await db.query(
+          `SELECT owner, owner_user_id, data
+           FROM public.crm_queries WHERE query_id = $1`,
+          [queryId],
+        )
+      ).rows[0];
+      assert.equal(persisted.owner, "");
+      assert.equal(persisted.owner_user_id, null);
+      assert.equal(persisted.data.created_by, employeeId);
+    }
+
+    await asUser(
+      salesIds[2],
+      async () => {
+        const ownRows = await db.query(
+          "SELECT query_id FROM public.crm_queries WHERE query_id = 'Q-UNASSIGNED-2'",
+        );
+        assert.equal(ownRows.rows.length, 1);
+        const otherRows = await db.query(
+          "SELECT query_id FROM public.crm_queries WHERE query_id = 'Q-UNASSIGNED-1'",
+        );
+        assert.equal(otherRows.rows.length, 0);
+
+        const upsertData = {
+          id: "unassigned-create-2",
+          query_id: "Q-UNASSIGNED-2",
+          owner: "",
+          created_by: salesIds[2],
+          assignment_status: "Awaiting Assignment",
+          primary_unit: "Madhya Pradesh",
+          participating_units: ["Madhya Pradesh"],
+          api_upsert_verified: true,
+        };
+        const upsert = await db.query(
+          `INSERT INTO public.crm_queries(id, query_id, owner, owner_user_id, data)
+           VALUES ($1,$2,'',NULL,$3::jsonb)
+           ON CONFLICT (id) DO UPDATE SET
+             query_id = EXCLUDED.query_id,
+             owner = EXCLUDED.owner,
+             owner_user_id = EXCLUDED.owner_user_id,
+             data = EXCLUDED.data
+           RETURNING owner_user_id, data`,
+          [upsertData.id, upsertData.query_id, JSON.stringify(upsertData)],
+        );
+        assert.equal(upsert.rows.length, 1);
+        assert.equal(upsert.rows[0].owner_user_id, null);
+        assert.equal(upsert.rows[0].data.api_upsert_verified, true);
+      },
+      "EMP-0103@example.invalid",
+    );
+
+    await asUser(
+      salesIds[0],
+      async () => {
+        const assignedData = {
+          id: "unassigned-create-2",
+          query_id: "Q-UNASSIGNED-2",
+          owner: salesIds[2],
+          created_by: salesIds[2],
+          assignment_status: "Assigned",
+          assigned_by: salesIds[0],
+          assigned_at: "2026-10-22T12:00:00.000Z",
+          assignment_history: [
+            {
+              assigned_from: "",
+              assigned_to: salesIds[2],
+              assigned_by: salesIds[0],
+              assigned_at: "2026-10-22T12:00:00.000Z",
+            },
+          ],
+          primary_unit: "Madhya Pradesh",
+          participating_units: ["Madhya Pradesh"],
+          api_upsert_verified: true,
+        };
+        const assigned = await db.query(
+          `UPDATE public.crm_queries
+           SET owner = $1::text, owner_user_id = $1::uuid, data = $2::jsonb
+           WHERE id = 'unassigned-create-2'
+           RETURNING owner_user_id, data`,
+          [salesIds[2], JSON.stringify(assignedData)],
+        );
+        assert.equal(assigned.rows.length, 1);
+        assert.equal(assigned.rows[0].owner_user_id, salesIds[2]);
+        assert.equal(assigned.rows[0].data.assignment_status, "Assigned");
+      },
+      "EMP-0101@example.invalid",
+    );
+
+    const forgedData = {
+      id: "forged-unassigned-create",
+      query_id: "Q-FORGED-UNASSIGNED",
+      owner: "",
+      created_by: salesIds[2],
+      assignment_status: "Awaiting Assignment",
+      primary_unit: "Madhya Pradesh",
+      participating_units: ["Madhya Pradesh"],
+    };
+    await asUser(
+      salesIds[1],
+      async () => {
+        assert.equal(
+          (
+            await db.query("SELECT public.can_create_crm_query($1::jsonb, NULL) AS allowed", [
+              JSON.stringify(forgedData),
+            ])
+          ).rows[0].allowed,
+          false,
+        );
+        await assert.rejects(
+          db.query(
+            `INSERT INTO public.crm_queries(id, query_id, owner, owner_user_id, data)
+             VALUES ($1,$2,'',NULL,$3::jsonb)`,
+            [forgedData.id, forgedData.query_id, JSON.stringify(forgedData)],
+          ),
+          /row-level security/,
+        );
+      },
+      "EMP-0102@example.invalid",
+    );
+    await asUser(unlinked, async () => {
+      assert.equal(
+        (
+          await db.query("SELECT public.can_create_crm_query($1::jsonb, NULL) AS allowed", [
+            JSON.stringify({ ...forgedData, id: "unlinked-create", created_by: unlinked }),
+          ])
+        ).rows[0].allowed,
+        false,
+      );
+      await assert.rejects(
+        db.query(
+          `INSERT INTO public.crm_queries(id, query_id, owner, owner_user_id, data)
+           VALUES ('unlinked-create','Q-UNLINKED','',NULL,$1::jsonb)`,
+          [JSON.stringify({ ...forgedData, id: "unlinked-create", created_by: unlinked })],
+        ),
+        /row-level security/,
+      );
     });
   },
 );

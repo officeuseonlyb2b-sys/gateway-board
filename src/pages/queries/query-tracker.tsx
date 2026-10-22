@@ -76,7 +76,7 @@ function SortableHead({
 export default function QueryTracker() {
   const navigate = useNavigate();
   const queries = useAccessibleQueries();
-  const scope = useQueryFilters(queries);
+  const scope = useQueryFilters(queries, "today");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "received",
     direction: "desc",
@@ -136,6 +136,7 @@ export default function QueryTracker() {
         onChange={scope.setFilters}
         options={scope.options}
         onReset={scope.reset}
+        defaultQuickDuration="today"
       />
       <div className="grid gap-4 md:grid-cols-4">
         {[

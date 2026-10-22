@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import type { CrmQuery, Stage } from "@/lib/crm/types";
 import { STAGES } from "@/lib/crm/types";
+import { kolkataDateKey, kolkataTodayKey, shiftKolkataDateKey } from "@/lib/crm/dates";
 
 export interface QueryFilterState {
   search: string;
@@ -31,20 +32,20 @@ export interface QueryFilterState {
   dueWindow: string;
 }
 
-const initial: QueryFilterState = {
+const initial = (duration: "all" | "today" = "all"): QueryFilterState => ({
   search: "",
   owner: "all",
   stage: "all",
   financialYear: "all",
   receivedMonths: [],
-  dateFrom: "",
-  dateTo: "",
+  dateFrom: duration === "today" ? kolkataTodayKey() : "",
+  dateTo: duration === "today" ? kolkataTodayKey() : "",
   travelMonth: "all",
   customer: "all",
   costingBasis: "all",
   priority: "all",
   dueWindow: "all",
-};
+});
 const monthKey = (value: string) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -61,8 +62,8 @@ const unique = (values: string[]) => [...new Set(values.filter(Boolean))].sort()
 
 // Shared with every Query view so one filter state model drives all counters and lists.
 // eslint-disable-next-line react-refresh/only-export-components
-export function useQueryFilters(queries: CrmQuery[]) {
-  const [filters, setFilters] = useState<QueryFilterState>(initial);
+export function useQueryFilters(queries: CrmQuery[], initialDuration: "all" | "today" = "all") {
+  const [filters, setFilters] = useState<QueryFilterState>(() => initial(initialDuration));
   const options = useMemo(
     () => ({
       owners: unique(queries.map((query) => query.owner)),
@@ -94,7 +95,7 @@ export function useQueryFilters(queries: CrmQuery[]) {
       ]
         .join(" ")
         .toLowerCase();
-      const received = new Date(query.created_at);
+      const receivedDateKey = kolkataDateKey(query.created_at);
       const due = query.followup_due ? new Date(query.followup_due) : null;
       const dueMatch =
         filters.dueWindow === "all" ||
@@ -108,8 +109,8 @@ export function useQueryFilters(queries: CrmQuery[]) {
         (filters.financialYear === "all" || fy(query.created_at) === filters.financialYear) &&
         (!filters.receivedMonths.length ||
           filters.receivedMonths.includes(monthKey(query.created_at))) &&
-        (!filters.dateFrom || received >= new Date(`${filters.dateFrom}T00:00:00`)) &&
-        (!filters.dateTo || received <= new Date(`${filters.dateTo}T23:59:59`)) &&
+        (!filters.dateFrom || receivedDateKey >= filters.dateFrom) &&
+        (!filters.dateTo || receivedDateKey <= filters.dateTo) &&
         (filters.travelMonth === "all" || monthKey(query.travel_start) === filters.travelMonth) &&
         (filters.customer === "all" || query.customer === filters.customer) &&
         (filters.costingBasis === "all" ||
@@ -119,7 +120,13 @@ export function useQueryFilters(queries: CrmQuery[]) {
       );
     });
   }, [queries, filters]);
-  return { filters, setFilters, filtered, options, reset: () => setFilters(initial) };
+  return {
+    filters,
+    setFilters,
+    filtered,
+    options,
+    reset: () => setFilters(initial(initialDuration)),
+  };
 }
 
 function Choice({
@@ -225,15 +232,17 @@ export function QueryFilters({
   options,
   onReset,
   compact = false,
+  defaultQuickDuration = "all",
 }: {
   state: QueryFilterState;
   onChange: (state: QueryFilterState) => void;
   options: ReturnType<typeof useQueryFilters>["options"];
   onReset: () => void;
   compact?: boolean;
+  defaultQuickDuration?: "all" | "today";
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [quickDuration, setQuickDuration] = useState("all");
+  const [quickDuration, setQuickDuration] = useState<string>(defaultQuickDuration);
   const set = <K extends keyof QueryFilterState>(key: K, value: QueryFilterState[K]) =>
     onChange({ ...state, [key]: value });
   const advancedCount =
@@ -245,19 +254,13 @@ export function QueryFilters({
     (state.priority !== "all" ? 1 : 0) +
     (state.dueWindow !== "all" ? 1 : 0);
   const quickRange = (range: string) => {
-    const end = new Date();
-    const start = new Date();
-    if (range === "today") start.setDate(end.getDate());
-    if (range === "week") start.setDate(end.getDate() - 6);
-    if (range === "month") start.setDate(end.getDate() - 29);
-    if (range === "sixty") start.setDate(end.getDate() - 59);
-    if (range === "quarter") start.setDate(end.getDate() - 89);
-    const local = (date: Date) =>
-      new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const end = kolkataTodayKey();
+    const days = range === "week" ? 6 : range === "month" ? 29 : range === "sixty" ? 59 : 89;
+    const start = shiftKolkataDateKey(end, range === "today" ? 0 : -days);
     onChange({
       ...state,
-      dateFrom: range === "all" ? "" : local(start),
-      dateTo: range === "all" ? "" : local(end),
+      dateFrom: range === "all" ? "" : start,
+      dateTo: range === "all" ? "" : end,
     });
   };
   return (
@@ -298,7 +301,7 @@ export function QueryFilters({
           variant="outline"
           onClick={() => {
             onReset();
-            setQuickDuration("all");
+            setQuickDuration(defaultQuickDuration);
             setAdvancedOpen(false);
           }}
         >

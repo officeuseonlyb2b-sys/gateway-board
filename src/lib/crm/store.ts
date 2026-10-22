@@ -117,6 +117,8 @@ let events: CrmEvent[] = [];
 let standaloneQuotationReviews: StandaloneQuotationReviewAssignment[] = [];
 let inited = false;
 let storageSizesLogged = false;
+const rejectedStorageWrites = new Map<string, string>();
+let serializedQueryCache: { source: CrmQuery[]; value: string } | null = null;
 
 function isQuotaExceeded(error: unknown) {
   return (
@@ -126,12 +128,19 @@ function isQuotaExceeded(error: unknown) {
 }
 
 function safeSetStorage(key: string, value: string): boolean {
+  const signature = `${value.length}:${value.slice(0, 96)}:${value.slice(-96)}`;
+  // Preserve the existing cache after a quota rejection and avoid repeatedly
+  // attempting the same oversized cloud-authoritative snapshot.
+  if (rejectedStorageWrites.get(key) === signature) return false;
   try {
+    if (localStorage.getItem(key) === value) return true;
     localStorage.setItem(key, value);
+    rejectedStorageWrites.delete(key);
     return true;
   } catch (error) {
     const approximateBytes = value.length * 2;
     if (isQuotaExceeded(error)) {
+      rejectedStorageWrites.set(key, signature);
       console.error("[crm] local cache quota exceeded", { key, approximateBytes, error });
       return false;
     }
@@ -140,6 +149,13 @@ function safeSetStorage(key: string, value: string): boolean {
     console.error("[crm] local cache write failed", { key, approximateBytes, error });
     return false;
   }
+}
+
+function serializedQueriesForCache(): string {
+  if (serializedQueryCache?.source === queries) return serializedQueryCache.value;
+  const value = JSON.stringify(queries);
+  serializedQueryCache = { source: queries, value };
+  return value;
 }
 
 function compactTasksForCache(records: CrmTask[]): CrmTask[] {
@@ -236,7 +252,7 @@ function load() {
     queries = clone(IMPORTED_QUERIES).map(normalizeQuery);
     tasks = [...clone(IMPORTED_QUERY_TASKS), ...storedTasks.filter((task) => !task.query_id)];
     events = [...clone(IMPORTED_QUERY_EVENTS), ...storedEvents.filter((event) => !event.query_id)];
-    safeSetStorage(KEY, JSON.stringify(queries));
+    safeSetStorage(KEY, serializedQueriesForCache());
     safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
     safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
     safeSetStorage(DATASET_KEY, QUERY_TRACKER_DATASET_ID);
@@ -296,7 +312,7 @@ export function hydrateCrm(snapshot: CrmSnapshot) {
   // browser cache, so storage pressure cannot starve employee/reviewer hooks.
   emit();
   if (isBrowser()) {
-    safeSetStorage(KEY, JSON.stringify(queries));
+    safeSetStorage(KEY, serializedQueriesForCache());
     safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
     safeSetStorage(EMP_KEY, JSON.stringify(employees));
     safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
@@ -311,7 +327,7 @@ export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
 
 function persist() {
   if (!isBrowser()) return;
-  safeSetStorage(KEY, JSON.stringify(queries));
+  safeSetStorage(KEY, serializedQueriesForCache());
   safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
   safeSetStorage(EMP_KEY, JSON.stringify(employees));
   safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
@@ -347,7 +363,7 @@ export function replaceQueryFromCloud(record: CrmQuery) {
   const normalized = normalizeQuery(record);
   queries = queries.map((query) => (query.id === normalized.id ? normalized : query));
   if (!queries.some((query) => query.id === normalized.id)) queries.push(normalized);
-  if (isBrowser()) safeSetStorage(KEY, JSON.stringify(queries));
+  if (isBrowser()) safeSetStorage(KEY, serializedQueriesForCache());
   emit();
 }
 

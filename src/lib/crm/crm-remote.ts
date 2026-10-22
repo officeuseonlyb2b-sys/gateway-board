@@ -30,6 +30,7 @@ import {
 
 type CloudRow = { id: string; data: unknown };
 type CloudQueryRow = CloudRow & { owner_user_id: string | null };
+export type CrmQuerySaveResult = { ok: boolean; queryId: string; error?: unknown };
 
 let started = false;
 let ready = false;
@@ -40,6 +41,7 @@ let channel: ReturnType<typeof supabase.channel> | null = null;
 let syncGeneration = 0;
 let ownerUserIdByQueryId = new Map<string, string | null>();
 let cloudEventIds = new Set<string>();
+let rejectedBackgroundQuerySignatures = new Map<string, string>();
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
@@ -167,13 +169,139 @@ async function readCloud(): Promise<CrmSnapshot> {
   };
 }
 
-async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
+function currentActiveEmployee(): Employee | undefined {
   const userId = auth.current()?.id;
-  const actor = listEmployees().find(
+  return listEmployees().find(
     (employee) =>
-      employee.auth_user_id === userId && employee.active && employee.account_status === "Active",
+      employee.auth_user_id === userId &&
+      employee.active &&
+      employee.account_status === "Active" &&
+      employee.employee_status !== "Exited",
   );
-  if (!actor) return;
+}
+
+function activeQueryOwner(query: CrmQuery): Employee | undefined {
+  return listEmployees().find(
+    (employee) =>
+      (employee.id === query.owner || employee.name === query.owner) &&
+      employee.active &&
+      employee.account_status === "Active" &&
+      employee.employee_status !== "Exited",
+  );
+}
+
+function isUnassignedQuery(query: CrmQuery): boolean {
+  return !query.owner || query.owner === "Unassigned";
+}
+
+function resolvedOwnerUserId(query: CrmQuery): string | null {
+  if (isUnassignedQuery(query)) return null;
+  return activeQueryOwner(query)?.auth_user_id ?? ownerUserIdByQueryId.get(query.id) ?? null;
+}
+
+function queryRow(query: CrmQuery) {
+  return {
+    id: query.id,
+    query_id: query.query_id,
+    owner: query.owner,
+    owner_user_id: resolvedOwnerUserId(query),
+    stage: query.stage,
+    data: asJson(query),
+  };
+}
+
+export async function refreshCrmQuery(queryId: string): Promise<void> {
+  const result = await supabase
+    .from("crm_queries")
+    .select("id,data,owner_user_id")
+    .eq("id", queryId)
+    .maybeSingle();
+  if (result.error) throw result.error;
+  if (!result.data) return;
+  ownerUserIdByQueryId.set(result.data.id, result.data.owner_user_id);
+  replaceQueryFromCloud(result.data.data as unknown as CrmQuery);
+}
+
+/** Persist one Query without coupling its result to unrelated CRM snapshot rows. */
+export async function saveCrmQueryNow(queryId: string): Promise<CrmQuerySaveResult> {
+  const query = getCrmSnapshot().queries.find(
+    (item) => item.id === queryId || item.query_id === queryId,
+  );
+  if (!query) return { ok: false, queryId, error: new Error("The Query could not be resolved.") };
+
+  const actor = currentActiveEmployee();
+  const ownerUserId = resolvedOwnerUserId(query);
+  const unassigned = isUnassignedQuery(query);
+  const actorMatchesCreatedBy = Boolean(
+    actor && (query.created_by === actor.id || query.created_by === actor.name),
+  );
+  if (!actor) {
+    const error = new Error(
+      "The authenticated CRM employee could not be resolved for Query saving.",
+    );
+    console.error("[crm] targeted query save failed", {
+      query_id: query.query_id,
+      row_id: query.id,
+      actor_employee_id: null,
+      actor_role: null,
+      owner: query.owner,
+      resolved_owner_user_id: ownerUserId,
+      created_by: query.created_by,
+      unassigned,
+      actor_matches_created_by: false,
+      error_code: "CRM_EMPLOYEE_NOT_RESOLVED",
+      error_message: error.message,
+    });
+    return {
+      ok: false,
+      queryId: query.query_id,
+      error,
+    };
+  }
+
+  const result = await supabase
+    .from("crm_queries")
+    .upsert(queryRow(query), { onConflict: "id" })
+    .select("id,data,owner_user_id")
+    .single();
+  if (result.error) {
+    console.error("[crm] targeted query save failed", {
+      query_id: query.query_id,
+      row_id: query.id,
+      actor_employee_id: actor.id,
+      actor_role: actor.role,
+      owner: query.owner,
+      resolved_owner_user_id: ownerUserId,
+      created_by: query.created_by,
+      unassigned,
+      actor_matches_created_by: actorMatchesCreatedBy,
+      error_code: result.error.code,
+      error_message: result.error.message,
+    });
+    return { ok: false, queryId: query.query_id, error: result.error };
+  }
+
+  ownerUserIdByQueryId.set(query.id, result.data.owner_user_id);
+  replaceQueryFromCloud(result.data.data as unknown as CrmQuery);
+  // The returned row updates subscribers synchronously before navigation. A
+  // targeted background read then reconciles any database-side normalization.
+  void refreshCrmQuery(query.id).catch((error) =>
+    console.error("[crm] targeted query refresh failed", {
+      query_id: query.query_id,
+      row_id: query.id,
+      error,
+    }),
+  );
+  return { ok: true, queryId: query.query_id };
+}
+
+async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): Promise<void> {
+  const actor = currentActiveEmployee();
+  if (!actor) {
+    if (requiredQueryId)
+      throw new Error("The authenticated CRM employee could not be resolved for Query saving.");
+    return;
+  }
   const superAdmin = actor.role === "Super Admin";
   const teamIds = new Set(
     listEmployees()
@@ -188,15 +316,18 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
   );
   const managerCanWriteQuery = (query: CrmQuery) =>
     actor.role === "Sales Manager" &&
-    (teamIds.has(query.owner || "") ||
-      (!query.owner &&
+    (Boolean(activeQueryOwner(query)?.auth_user_id && teamIds.has(query.owner || "")) ||
+      (isUnassignedQuery(query) &&
         (query.primary_unit === actor.unit ||
           Boolean(actor.unit && query.participating_units?.includes(actor.unit)))));
-  const writableQueries = snapshot.queries.filter(
-    (query) =>
+  const writableQueries = snapshot.queries.filter((query) => {
+    if (rejectedBackgroundQuerySignatures.get(query.id) === JSON.stringify(query)) return false;
+    return (
       superAdmin ||
       [query.owner].includes(actor.id) ||
       [query.owner].includes(actor.name) ||
+      (isUnassignedQuery(query) &&
+        (query.created_by === actor.id || query.created_by === actor.name)) ||
       query.review_support?.query_reviews?.some(
         (review) =>
           review.requested_by_employee_id === actor.id ||
@@ -212,33 +343,104 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
           assignment.assigned_by_employee_id === actor.id ||
           (assignment.assistant_employee_id === actor.id && assignment.status !== "Cancelled"),
       ) ||
-      managerCanWriteQuery(query),
-  );
-  const writableQueryIds = new Set(writableQueries.map((query) => query.query_id));
-  const writableEvents = snapshot.events.filter(
+      managerCanWriteQuery(query)
+    );
+  });
+  const writableBusinessQueryIds = new Set(writableQueries.map((query) => query.query_id));
+  if (import.meta.env.DEV) {
+    snapshot.queries
+      .filter((query) => !writableQueries.includes(query))
+      .forEach((query) =>
+        console.warn("[crm] excluding non-writable local query from background sync", {
+          query_id: query.query_id,
+          row_id: query.id,
+          actor_employee_id: actor.id,
+        }),
+      );
+  }
+  const queryRows = writableQueries.map((query) => ({
+    query,
+    row: queryRow(query),
+  }));
+  const savedBusinessQueryIds = new Set<string>();
+  const persistQueries = async () => {
+    if (!queryRows.length) return { error: null };
+    const batch = await supabase.from("crm_queries").upsert(
+      queryRows.map(({ row }) => row),
+      { onConflict: "id" },
+    );
+    if (!batch.error) {
+      queryRows.forEach(({ query }) => {
+        rejectedBackgroundQuerySignatures.delete(query.id);
+        savedBusinessQueryIds.add(query.query_id);
+      });
+      return batch;
+    }
+
+    // A stale local row can invalidate an entire PostgREST batch. Retry each
+    // legitimately writable row independently so it cannot block a new Query.
+    let requiredError: typeof batch.error | null = null;
+    for (const { query, row } of queryRows) {
+      const result = await supabase.from("crm_queries").upsert(row, { onConflict: "id" });
+      if (!result.error) {
+        rejectedBackgroundQuerySignatures.delete(query.id);
+        savedBusinessQueryIds.add(query.query_id);
+        continue;
+      }
+      if (!requiredQueryId) rejectedBackgroundQuerySignatures.set(query.id, JSON.stringify(query));
+      if (query.query_id === requiredQueryId || query.id === requiredQueryId)
+        requiredError = result.error;
+      console.error("[crm] query save failed", {
+        query_id: query.query_id,
+        actor_employee_id: actor.id,
+        actor_role: actor.role,
+        unassigned: !query.owner,
+        actor_matches_created_by: query.created_by === actor.id || query.created_by === actor.name,
+        owner_user_id_resolved: Boolean(row.owner_user_id),
+        error: result.error,
+      });
+    }
+    // Background reconciliation is best-effort and reports failures per row.
+    return { error: requiredQueryId ? requiredError : null };
+  };
+  const candidateEvents = snapshot.events.filter(
     (event) =>
-      (superAdmin || Boolean(event.query_id && writableQueryIds.has(event.query_id))) &&
+      (superAdmin || Boolean(event.query_id && writableBusinessQueryIds.has(event.query_id))) &&
       (superAdmin || !cloudEventIds.has(event.id)),
   );
+  const savedEventIds: string[] = [];
+  const persistEvents = async () => {
+    const writableEvents = candidateEvents.filter(
+      (event) => superAdmin || Boolean(event.query_id && savedBusinessQueryIds.has(event.query_id)),
+    );
+    for (const event of writableEvents) {
+      const row = {
+        id: event.id,
+        query_id: event.query_id ?? null,
+        at: event.at,
+        data: asJson(event),
+      };
+      const result = superAdmin
+        ? await supabase.from("crm_events").upsert(row, { onConflict: "id" })
+        : await supabase.from("crm_events").insert(row);
+      if (result.error) {
+        console.error("[crm] event save failed", {
+          event_id: event.id,
+          query_id: event.query_id ?? null,
+          actor_employee_id: actor.id,
+          error: result.error,
+        });
+      } else {
+        savedEventIds.push(event.id);
+      }
+    }
+    // Event persistence is isolated from successful Query persistence.
+    return { error: null };
+  };
+  // Confirm Query writes before considering their linked events.
+  const queryResult = await persistQueries();
   const operations = [
-    writableQueries.length
-      ? supabase.from("crm_queries").upsert(
-          writableQueries.map((q) => ({
-            id: q.id,
-            query_id: q.query_id,
-            owner: q.owner,
-            owner_user_id:
-              listEmployees().find(
-                (employee) => employee.id === q.owner || employee.name === q.owner,
-              )?.auth_user_id ??
-              ownerUserIdByQueryId.get(q.id) ??
-              ([q.owner].includes(actor.id) || [q.owner].includes(actor.name) ? userId : null),
-            stage: q.stage,
-            data: asJson(q),
-          })),
-          { onConflict: "id" },
-        )
-      : Promise.resolve({ error: null }),
+    Promise.resolve(queryResult),
     superAdmin && snapshot.tasks.length
       ? supabase.from("crm_tasks").upsert(
           snapshot.tasks.map((task) => ({
@@ -251,26 +453,7 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
           { onConflict: "id" },
         )
       : Promise.resolve({ error: null }),
-    writableEvents.length
-      ? superAdmin
-        ? supabase.from("crm_events").upsert(
-            writableEvents.map((event) => ({
-              id: event.id,
-              query_id: event.query_id ?? null,
-              at: event.at,
-              data: asJson(event),
-            })),
-            { onConflict: "id" },
-          )
-        : supabase.from("crm_events").insert(
-            writableEvents.map((event) => ({
-              id: event.id,
-              query_id: event.query_id ?? null,
-              at: event.at,
-              data: asJson(event),
-            })),
-          )
-      : Promise.resolve({ error: null }),
+    persistEvents(),
     snapshot.standaloneQuotationReviews.length
       ? supabase
           .from("crm_standalone_quotation_reviews")
@@ -280,9 +463,16 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
       : Promise.resolve({ error: null }),
   ];
   const results = await Promise.all(operations);
-  const error = results.find((result) => result.error)?.error;
+  if (requiredQueryId) {
+    const queryError = results[0].error;
+    if (queryError) throw queryError;
+    results.slice(1).forEach((result) => {
+      if (result.error) console.error("[crm] related snapshot save failed", result.error);
+    });
+  }
+  const error = requiredQueryId ? null : results.find((result) => result.error)?.error;
   if (error) throw error;
-  writableEvents.forEach((event) => cloudEventIds.add(event.id));
+  savedEventIds.forEach((eventId) => cloudEventIds.add(eventId));
 }
 
 async function hasImportedDatasetMarker(): Promise<boolean> {
@@ -343,8 +533,11 @@ async function installImportedQueryDataset(
   return snapshot;
 }
 
-export async function pushCrmSnapshotNow(snapshot = getCrmSnapshot()): Promise<void> {
-  await upsertSnapshot(snapshot);
+export async function pushCrmSnapshotNow(
+  snapshot = getCrmSnapshot(),
+  requiredQueryId?: string,
+): Promise<void> {
+  await upsertSnapshot(snapshot, requiredQueryId);
 }
 
 /** Allocate and persist the next immutable version while holding a database row lock. */
@@ -550,5 +743,6 @@ export function startCrmSync(includeBusiness = true): () => void {
     started = false;
     ownerUserIdByQueryId = new Map();
     cloudEventIds = new Set();
+    rejectedBackgroundQuerySignatures = new Map();
   };
 }
