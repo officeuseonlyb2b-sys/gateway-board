@@ -182,6 +182,78 @@ export type Database = {
         };
         Relationships: [];
       };
+      crm_standalone_quotation_reviews: {
+        Row: {
+          created_at: string;
+          creator_employee_id: string;
+          prepared_by_employee_id: string;
+          assigned_to_employee_id: string;
+          draft_id: string;
+          snapshot_id: string;
+          quotation_family_id: string | null;
+          query_id: string | null;
+          data: Json;
+          id: string;
+          requester_employee_id: string;
+          reviewer_employee_id: string;
+          status: string;
+          reason: string;
+          priority: string;
+          due_at: string | null;
+          started_at: string | null;
+          completed_at: string | null;
+          return_notes: string | null;
+          snapshot: Json;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          creator_employee_id: string;
+          prepared_by_employee_id: string;
+          assigned_to_employee_id: string;
+          draft_id: string;
+          snapshot_id: string;
+          quotation_family_id?: string | null;
+          query_id?: string | null;
+          data: Json;
+          id: string;
+          requester_employee_id: string;
+          reviewer_employee_id: string;
+          status: string;
+          reason: string;
+          priority?: string;
+          due_at?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          return_notes?: string | null;
+          snapshot: Json;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          creator_employee_id?: string;
+          prepared_by_employee_id?: string;
+          assigned_to_employee_id?: string;
+          draft_id?: string;
+          snapshot_id?: string;
+          quotation_family_id?: string | null;
+          query_id?: string | null;
+          data?: Json;
+          id?: string;
+          requester_employee_id?: string;
+          reviewer_employee_id?: string;
+          status?: string;
+          reason?: string;
+          priority?: string;
+          due_at?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          return_notes?: string | null;
+          snapshot?: Json;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       crm_tasks: {
         Row: {
           cancelled_at: string | null;
@@ -555,6 +627,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      finalize_crm_quotation_version: {
+        Args: { p_draft_id?: string | null; p_query_id: string; p_quote: Json };
+        Returns: Json;
+      };
       crm_review_employee_directory: {
         Args: never;
         Returns: {

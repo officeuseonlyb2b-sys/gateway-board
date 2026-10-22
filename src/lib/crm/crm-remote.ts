@@ -4,11 +4,20 @@ import {
   hydrateCrm,
   onCrmPersist,
   replaceEmployeesFromCloud,
+  replaceQueryFromCloud,
+  replaceStandaloneQuotationReviewsFromCloud,
+  upsertStandaloneQuotationReviewFromCloud,
   listEmployees,
   type CrmSnapshot,
 } from "./store";
 import { auth } from "@/lib/auth-mock";
-import type { CrmEvent, CrmQuery, CrmTask, Employee } from "./types";
+import type {
+  CrmEvent,
+  CrmQuery,
+  CrmTask,
+  Employee,
+  StandaloneQuotationReviewAssignment,
+} from "./types";
 import type { Json } from "@/integrations/supabase/types";
 import { ingestNotification } from "@/lib/notifications-store";
 import {
@@ -35,6 +44,31 @@ let cloudEventIds = new Set<string>();
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
 
+function standaloneQuotationReviewRow(review: StandaloneQuotationReviewAssignment) {
+  return {
+    id: review.id,
+    requester_employee_id: review.requested_by_employee_id,
+    reviewer_employee_id: review.reviewer_employee_id,
+    creator_employee_id: review.created_by_employee_id,
+    prepared_by_employee_id:
+      review.quotation_snapshot.prepared_by_employee_id || review.created_by_employee_id,
+    assigned_to_employee_id: review.assigned_to_employee_id || review.reviewer_employee_id,
+    draft_id: review.draft_id,
+    snapshot_id: review.quotation_snapshot.quote.id,
+    quotation_family_id: review.quotation_lineage_id || null,
+    query_id: null,
+    status: review.status,
+    reason: review.instructions || "",
+    priority: review.priority || "Normal",
+    due_at: review.due_at || null,
+    started_at: review.started_at || null,
+    completed_at: review.completed_at || null,
+    return_notes: review.status === "Returned" ? review.decision_note || null : null,
+    snapshot: asJson(review.quotation_snapshot),
+    data: asJson(review),
+  };
+}
+
 function mergeById<T extends { id: string }>(remote: T[], local: T[]): T[] {
   const merged = new Map(remote.map((item) => [item.id, item]));
   local.forEach((item) => {
@@ -47,6 +81,69 @@ function unwrap<T>(rows: CloudRow[] | null): T[] {
   return (rows ?? []).map((row) => row.data as T).filter(Boolean);
 }
 
+async function readStandaloneQuotationReviews(): Promise<StandaloneQuotationReviewAssignment[]> {
+  try {
+    const result = await supabase.from("crm_standalone_quotation_reviews").select("id,data");
+    if (result.error) throw result.error;
+    return unwrap<StandaloneQuotationReviewAssignment>(result.data);
+  } catch (error) {
+    console.error("[crm] standalone quotation review refresh failed", error);
+    return [];
+  }
+}
+
+export async function persistStandaloneQuotationReview(
+  review: StandaloneQuotationReviewAssignment,
+): Promise<void> {
+  const result = await supabase
+    .from("crm_standalone_quotation_reviews")
+    .insert(standaloneQuotationReviewRow(review))
+    .select("id,data")
+    .single();
+  if (result.error) throw result.error;
+  const persisted = result.data.data as unknown as StandaloneQuotationReviewAssignment;
+  upsertStandaloneQuotationReviewFromCloud(persisted);
+
+  const refreshed = await readStandaloneQuotationReviews();
+  // The insert response remains authoritative if the optional follow-up list
+  // refresh is unavailable; readStandaloneQuotationReviews already reports it.
+  replaceStandaloneQuotationReviewsFromCloud(
+    refreshed.some((item) => item.id === persisted.id) ? refreshed : [persisted, ...refreshed],
+  );
+}
+
+export async function persistStandaloneQuotationReviewUpdate(assignmentId: string): Promise<void> {
+  const review = getCrmSnapshot().standaloneQuotationReviews.find(
+    (item) => item.id === assignmentId,
+  );
+  if (!review) throw new Error("The standalone review could not be resolved.");
+  const result = await supabase
+    .from("crm_standalone_quotation_reviews")
+    .update(standaloneQuotationReviewRow(review))
+    .eq("id", review.id)
+    .select("id,data")
+    .single();
+  if (result.error) throw result.error;
+  upsertStandaloneQuotationReviewFromCloud(
+    result.data.data as unknown as StandaloneQuotationReviewAssignment,
+  );
+}
+
+export async function persistQueryQuotationReview(queryId: string): Promise<void> {
+  const query = getCrmSnapshot().queries.find(
+    (item) => item.query_id === queryId || item.id === queryId,
+  );
+  if (!query) throw new Error("The linked Query could not be resolved.");
+  const result = await supabase
+    .from("crm_queries")
+    .update({ data: asJson(query) })
+    .eq("id", query.id)
+    .select("id,data")
+    .single();
+  if (result.error) throw result.error;
+  replaceQueryFromCloud(result.data.data as unknown as CrmQuery);
+}
+
 async function readCloud(): Promise<CrmSnapshot> {
   const [queryResult, taskResult, employeeResult, eventResult] = await Promise.all([
     supabase.from("crm_queries").select("id,data,owner_user_id"),
@@ -56,6 +153,7 @@ async function readCloud(): Promise<CrmSnapshot> {
   ]);
   const error = queryResult.error ?? taskResult.error ?? eventResult.error;
   if (error) throw error;
+  const standaloneQuotationReviews = await readStandaloneQuotationReviews();
   ownerUserIdByQueryId = new Map(
     ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => [row.id, row.owner_user_id]),
   );
@@ -65,6 +163,7 @@ async function readCloud(): Promise<CrmSnapshot> {
     tasks: unwrap<CrmTask>(taskResult.data),
     employees: employeeResult,
     events: unwrap<CrmEvent>(eventResult.data),
+    standaloneQuotationReviews,
   };
 }
 
@@ -172,6 +271,13 @@ async function upsertSnapshot(snapshot: CrmSnapshot): Promise<void> {
             })),
           )
       : Promise.resolve({ error: null }),
+    snapshot.standaloneQuotationReviews.length
+      ? supabase
+          .from("crm_standalone_quotation_reviews")
+          .upsert(snapshot.standaloneQuotationReviews.map(standaloneQuotationReviewRow), {
+            onConflict: "id",
+          })
+      : Promise.resolve({ error: null }),
   ];
   const results = await Promise.all(operations);
   const error = results.find((result) => result.error)?.error;
@@ -223,6 +329,7 @@ async function installImportedQueryDataset(
       ...clone(IMPORTED_QUERY_EVENTS),
       ...standaloneEvents,
     ].slice(0, 800),
+    standaloneQuotationReviews: remote.standaloneQuotationReviews,
   };
 
   // Employee records are read-only here; only server account actions write them.
@@ -231,12 +338,38 @@ async function installImportedQueryDataset(
     tasks: clone(IMPORTED_QUERY_TASKS),
     employees: snapshot.employees,
     events: [clone(IMPORTED_DATASET_MARKER), ...clone(IMPORTED_QUERY_EVENTS)],
+    standaloneQuotationReviews: snapshot.standaloneQuotationReviews,
   });
   return snapshot;
 }
 
 export async function pushCrmSnapshotNow(snapshot = getCrmSnapshot()): Promise<void> {
   await upsertSnapshot(snapshot);
+}
+
+/** Allocate and persist the next immutable version while holding a database row lock. */
+export async function finalizeQuotationVersion(
+  queryId: string,
+  quote: import("@/lib/quotes-store").SavedQuote,
+  draftId?: string,
+) {
+  const { data, error } = await supabase.rpc("finalize_crm_quotation_version", {
+    p_query_id: queryId,
+    p_quote: asJson(quote),
+    p_draft_id: draftId ?? null,
+  });
+  if (error) throw error;
+  const current = getCrmSnapshot().queries.find(
+    (query) => query.query_id === queryId || query.id === queryId,
+  );
+  if (!current || !data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("The saved quotation could not be reconciled with its Query.");
+  }
+  const updated = { ...current, ...(data as unknown as CrmQuery) };
+  replaceQueryFromCloud(updated);
+  const version = updated.costing_versions?.at(-1);
+  if (!version) throw new Error("The database did not return the saved quotation version.");
+  return version;
 }
 
 function schedulePush(snapshot: CrmSnapshot) {
@@ -273,6 +406,9 @@ async function pullAndMerge(run: number) {
     tasks: superAdmin ? mergeById(remote.tasks, local.tasks) : remote.tasks,
     employees: remote.employees,
     events: superAdmin ? mergeById(remote.events, local.events).slice(0, 800) : remote.events,
+    standaloneQuotationReviews: superAdmin
+      ? mergeById(remote.standaloneQuotationReviews, local.standaloneQuotationReviews)
+      : remote.standaloneQuotationReviews,
   };
   hydrateCrm(merged);
   ready = true;
@@ -280,7 +416,8 @@ async function pullAndMerge(run: number) {
     superAdmin &&
     (merged.queries.length !== remote.queries.length ||
       merged.tasks.length !== remote.tasks.length ||
-      merged.events.length !== remote.events.length);
+      merged.events.length !== remote.events.length ||
+      merged.standaloneQuotationReviews.length !== remote.standaloneQuotationReviews.length);
   if (recoveredLocalRecords) await upsertSnapshot(merged);
 }
 
@@ -388,7 +525,12 @@ export function startCrmSync(includeBusiness = true): () => void {
     channel
       .on("postgres_changes", { event: "*", schema: "public", table: "crm_queries" }, pull)
       .on("postgres_changes", { event: "*", schema: "public", table: "crm_tasks" }, pull)
-      .on("postgres_changes", { event: "*", schema: "public", table: "crm_events" }, pull);
+      .on("postgres_changes", { event: "*", schema: "public", table: "crm_events" }, pull)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "crm_standalone_quotation_reviews" },
+        pull,
+      );
   channel.on(
     "postgres_changes",
     { event: "*", schema: "public", table: "crm_notifications" },

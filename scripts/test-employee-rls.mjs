@@ -84,6 +84,7 @@ await check("Active linked Super Admin can read all employees and business rows"
     assert.equal((await rows("crm_queries")).length, 1);
   });
 });
+const salesIds = [];
 await check(
   "Employee sees only their own row and cannot read business tables, even with forged admin email",
   async () => {
@@ -237,19 +238,20 @@ await check(
       "INSERT INTO public.destination_tours(id, city_id, title) VALUES ('dt-shared', 'dc-shared', 'Fort')",
     );
     const sales = [
-      ["Sales Manager", "EMP-0101"],
-      ["Senior Sales Executive", "EMP-0102"],
-      ["Sales Executive", "EMP-0103"],
+      ["Sales Manager", "EMP-0101", "Deeksha Saini"],
+      ["Senior Sales Executive", "EMP-0102", "Chhaya Prajapati"],
+      ["Sales Executive", "EMP-0103", "Bhumika Prajapati"],
     ];
-    for (const [role, code] of sales) {
+    for (const [role, code, name] of sales) {
       const id = randomUUID();
+      salesIds.push(id);
       await db.query("INSERT INTO auth.users(id, email) VALUES ($1, $2)", [
         id,
         `${code}@example.invalid`,
       ]);
       await db.query("INSERT INTO public.crm_employees(id, data) VALUES ($1, $2)", [
         id,
-        JSON.stringify(record(id, role, code)),
+        JSON.stringify({ ...record(id, role, code), name, department: "Sales", unit: "Test Unit" }),
       ]);
       await asUser(
         id,
@@ -289,6 +291,236 @@ await check(
     await asUser(staff, async () => {
       assert.equal((await rows("app_master_state")).length, 0);
       assert.equal((await rows("destination_cities")).length, 0);
+    });
+  },
+);
+await check(
+  "Quotation versions allocate atomically per lineage and preserve prior snapshots",
+  async () => {
+    const ownerId = salesIds[2];
+    const queryRowId = randomUUID();
+    await db.query(
+      `INSERT INTO public.crm_queries(id, query_id, owner, owner_user_id, data)
+     VALUES ($1, 'Q-VERSION-TEST', $2, $3, $4)`,
+      [
+        queryRowId,
+        ownerId,
+        ownerId,
+        JSON.stringify({
+          id: queryRowId,
+          query_id: "Q-VERSION-TEST",
+          owner: ownerId,
+          costing_versions: [],
+          quotation_drafts: [],
+        }),
+      ],
+    );
+    await asUser(
+      ownerId,
+      async () => {
+        const save = async (id, family, amount) =>
+          (
+            await db.query(
+              "SELECT public.finalize_crm_quotation_version($1, $2::jsonb, NULL) AS data",
+              ["Q-VERSION-TEST", JSON.stringify({ id, family_id: family, totals: { amount } })],
+            )
+          ).rows[0].data;
+        const first = await save("quote-a-v1", "family-a", 100);
+        const second = await save("quote-a-v2", "family-a", 200);
+        const alternate = await save("quote-b-v1", "family-b", 300);
+        assert.deepEqual(
+          second.costing_versions.map((version) => version.version),
+          [1, 2],
+        );
+        assert.equal(second.costing_versions[0].quote.totals.amount, 100);
+        assert.equal(second.costing_versions[1].quote.totals.amount, 200);
+        assert.equal(alternate.costing_versions[2].version, 1);
+        assert.equal(alternate.costing_versions[2].quote.family_id, "family-b");
+        assert.equal(alternate.costing_versions[2].quote.prepared_by_employee_id, ownerId);
+      },
+      "EMP-0103@example.invalid",
+    );
+  },
+);
+await check(
+  "Draft review snapshots grant the selected reviewer access without creating V1",
+  async () => {
+    const ownerId = salesIds[2];
+    const reviewerId = salesIds[1];
+    await asUser(
+      ownerId,
+      async () => {
+        const row = (
+          await db.query("SELECT data FROM public.crm_queries WHERE query_id='Q-VERSION-TEST'")
+        ).rows[0];
+        const draft = {
+          id: "draft-review-1",
+          query_id: "Q-VERSION-TEST",
+          updated_at: new Date().toISOString(),
+          latest_review_snapshot_at: new Date().toISOString(),
+          latest_review_snapshot_hash: "HASH-1",
+        };
+        const review = {
+          id: "draft-review-request-1",
+          reviewer_employee_id: reviewerId,
+          requested_by_employee_id: ownerId,
+          requested_at: new Date().toISOString(),
+          status: "Requested",
+          source_type: "draft",
+          draft_id: draft.id,
+          draft_snapshot_hash: "HASH-1",
+          quotation_snapshot: { version: 0, quote: { id: "snapshot-1", totals: { amount: 444 } } },
+          checklist: [],
+        };
+        const next = {
+          ...row.data,
+          quotation_drafts: [draft],
+          review_support: { query_reviews: [review], quotation_reviews: [], assistance: [] },
+        };
+        const updated = await db.query(
+          "UPDATE public.crm_queries SET data=$1::jsonb WHERE query_id='Q-VERSION-TEST' RETURNING data",
+          [JSON.stringify(next)],
+        );
+        assert.equal(updated.rows.length, 1);
+        assert.equal(
+          updated.rows[0].data.costing_versions.length,
+          3,
+          "draft review must not create V1",
+        );
+        const edited = {
+          ...updated.rows[0].data,
+          quotation_drafts: [{ ...draft, updated_at: new Date(Date.now() + 1000).toISOString() }],
+        };
+        const afterEdit = await db.query(
+          "UPDATE public.crm_queries SET data=$1::jsonb WHERE query_id='Q-VERSION-TEST' RETURNING data",
+          [JSON.stringify(edited)],
+        );
+        assert.equal(
+          afterEdit.rows[0].data.review_support.query_reviews[0].quotation_snapshot.quote.totals
+            .amount,
+          444,
+          "editing the live draft must not mutate its prior review snapshot",
+        );
+      },
+      "EMP-0103@example.invalid",
+    );
+    await asUser(
+      reviewerId,
+      async () => {
+        const visible = await db.query(
+          "SELECT data FROM public.crm_queries WHERE query_id='Q-VERSION-TEST'",
+        );
+        assert.equal(visible.rows.length, 1);
+        assert.equal(
+          visible.rows[0].data.review_support.query_reviews[0].quotation_snapshot.quote.totals
+            .amount,
+          444,
+        );
+      },
+      "EMP-0102@example.invalid",
+    );
+  },
+);
+await check(
+  "Standalone quotation review grants only explicit snapshot access and does not require a Query",
+  async () => {
+    const requesterId = salesIds[2];
+    const reviewerId = salesIds[1];
+    await db.query(
+      "UPDATE public.crm_employees SET data=jsonb_set(data, '{unit}', '\"\"') WHERE id=$1",
+      [reviewerId],
+    );
+    await asUser(
+      requesterId,
+      async () => {
+        const directory = await db.query("SELECT * FROM public.crm_review_employee_directory()");
+        assert.ok(
+          directory.rows.some((employee) => employee.id === reviewerId),
+          "eligible reviewer must remain visible when unit metadata differs",
+        );
+        assert.deepEqual(
+          directory.rows
+            .filter((employee) => ["Chhaya Prajapati", "Deeksha Saini"].includes(employee.name))
+            .map((employee) => employee.name)
+            .sort(),
+          ["Chhaya Prajapati", "Deeksha Saini"],
+        );
+        const data = {
+          id: "standalone-review-1",
+          source_type: "standalone_draft",
+          query_id: null,
+          draft_id: "standalone-draft-1",
+          draft_name: "MP Tour Costing",
+          created_by_employee_id: requesterId,
+          requested_by_employee_id: requesterId,
+          reviewer_employee_id: reviewerId,
+          assigned_to_employee_id: reviewerId,
+          status: "Requested",
+          quotation_snapshot: {
+            version: 0,
+            prepared_by_employee_id: requesterId,
+            quote: { id: "standalone-snapshot", total: 765 },
+          },
+        };
+        await db.query(
+          `INSERT INTO public.crm_standalone_quotation_reviews
+           (id, requester_employee_id, reviewer_employee_id, creator_employee_id,
+            prepared_by_employee_id, assigned_to_employee_id, draft_id, snapshot_id,
+            status, reason, snapshot, data)
+           VALUES ($1,$2,$3,$4,$4,$3,'standalone-draft-1','standalone-snapshot',
+             'Requested','Please verify final costing.',$5::jsonb,$6::jsonb)`,
+          [
+            "standalone-review-1",
+            requesterId,
+            reviewerId,
+            requesterId,
+            JSON.stringify(data.quotation_snapshot),
+            JSON.stringify(data),
+          ],
+        );
+        assert.equal((await rows("crm_standalone_quotation_reviews")).length, 1);
+      },
+      "EMP-0103@example.invalid",
+    );
+    await asUser(
+      reviewerId,
+      async () => {
+        const visible = await rows("crm_standalone_quotation_reviews");
+        assert.equal(visible.length, 1);
+        assert.equal(visible[0].data.quotation_snapshot.quote.total, 765);
+        const next = { ...visible[0].data, status: "In Review" };
+        assert.equal(
+          (
+            await db.query(
+              "UPDATE public.crm_standalone_quotation_reviews SET status='In Review', data=$1::jsonb WHERE id='standalone-review-1' RETURNING id",
+              [JSON.stringify(next)],
+            )
+          ).rows.length,
+          1,
+        );
+        const tampered = {
+          ...next,
+          quotation_snapshot: { version: 0, quote: { id: "standalone-snapshot", total: 1 } },
+        };
+        await assert.rejects(
+          db.query(
+            "UPDATE public.crm_standalone_quotation_reviews SET data=$1::jsonb WHERE id='standalone-review-1'",
+            [JSON.stringify(tampered)],
+          ),
+          /immutable/,
+        );
+      },
+      "EMP-0102@example.invalid",
+    );
+    await asUser(
+      other,
+      async () => {
+        assert.equal((await rows("crm_standalone_quotation_reviews")).length, 0);
+      },
+      "other@example.invalid",
+    );
+    await asUser(admin, async () => {
+      assert.equal((await rows("crm_standalone_quotation_reviews")).length, 1);
     });
   },
 );

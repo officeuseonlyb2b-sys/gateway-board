@@ -27,20 +27,55 @@ try {
   );
   const landReview = await vite.ssrLoadModule("/src/lib/wizard/land-review.ts");
   const landPricing = await vite.ssrLoadModule("/src/lib/wizard/land-pricing.ts");
+  const mealsStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepMeals.tsx");
+
+  const mealCities = [
+    { id: "indore", name: "Indore" },
+    { id: "ujjain", name: "Ujjain" },
+    { id: "omkareshwar", name: "Omkareshwar" },
+  ];
+  const mealRoute = (day, from, to, overnight = true) => ({
+    day,
+    date: `2026-10-${String(day).padStart(2, "0")}`,
+    from_city: from,
+    to_city_id: to,
+    to_city_ids: [to],
+    city_id: to,
+    to_city: mealCities.find((city) => city.id === to)?.name,
+    program: "",
+    program_mode: "text",
+    overnight,
+  });
+  assert.deepEqual(mealsStep.mealCitiesForDay(mealRoute(1, "Indore", "ujjain"), mealCities), [
+    "indore",
+    "ujjain",
+  ]);
+  assert.deepEqual(mealsStep.mealCitiesForDay(mealRoute(2, "ujjain", "omkareshwar"), mealCities), [
+    "ujjain",
+    "omkareshwar",
+  ]);
+  assert.deepEqual(
+    mealsStep.mealCitiesForDay(mealRoute(3, "omkareshwar", "indore", false), mealCities),
+    ["omkareshwar", "indore"],
+  );
+  const lunchAtUjjain = mealsStep.updateMealSelection({}, 1, "ujjain", "lunch");
+  const independentDinner = mealsStep.updateMealSelection(lunchAtUjjain, 1, "indore", "dinner");
+  assert.equal(independentDinner["1:ujjain"].lunch.source, "none");
+  assert.equal(independentDinner["1:indore"].dinner.source, "none");
 
   const packageScope = queryFor.getQuotationScope("Package");
   const landScope = queryFor.getQuotationScope("Land Part");
   const accommodationScope = queryFor.getQuotationScope("Accommodation Part");
-  assert.deepEqual(packageScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(packageScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(packageScope.program, true);
   assert.equal(packageScope.routing, true);
   assert.equal(packageScope.landPart, true);
   assert.equal(packageScope.accommodationPart, true);
-  assert.deepEqual(landScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 9, 10, 11]);
+  assert.deepEqual(landScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 9, 10]);
   assert.equal(landScope.routing, true, "Land Part still requires Routing");
   assert.equal(landScope.landPart, true);
   assert.equal(landScope.accommodationPart, false);
-  assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 5, 6, 8, 9, 10, 11]);
+  assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 5, 6, 8, 9, 10]);
   assert.equal(accommodationScope.program, false);
   assert.equal(accommodationScope.routing, true, "Accommodation Part requires Routing context");
   assert.equal(accommodationScope.landPart, false);
@@ -527,7 +562,7 @@ try {
       ...reachedDraftRecord.wizard_state,
       step: 4,
     }),
-    11,
+    10,
     "Moving backward in the same scope preserves the reached-step high-water mark",
   );
   assert.equal(

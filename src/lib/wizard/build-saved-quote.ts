@@ -29,12 +29,20 @@ type DB = ReturnType<typeof useDB>;
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): SavedQuote {
+export function buildSavedQuote(
+  draft: QuoteDraft,
+  d: DB,
+  savedBy: string,
+  preparedBy?: { employeeId: string; authUserId?: string; name: string; role: string },
+  options?: { preview?: boolean },
+): SavedQuote {
   const identity = quoteVersionContext(draft);
   const id = uid();
   const now = new Date().toISOString();
   const version = identity.version || 1;
-  const quoteNumber = identity.quote_number || nextQuoteNumber();
+  // Rendering Step 10 must be side-effect free: allocating the official quote
+  // number remains part of the successful finalisation path only.
+  const quoteNumber = identity.quote_number || (options?.preview ? "DRAFT" : nextQuoteNumber());
   const routingCities = new Set(
     draft.routing
       .map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name)
@@ -273,6 +281,10 @@ export function buildSavedQuote(draft: QuoteDraft, d: DB, savedBy: string): Save
     status: "Generated",
     saved_at: now,
     saved_by: savedBy,
+    prepared_by_employee_id: preparedBy?.employeeId,
+    prepared_by_auth_user_id: preparedBy?.authUserId,
+    prepared_by_name: preparedBy?.name || savedBy,
+    prepared_by_role: preparedBy?.role,
     generated_at: now,
     generated_by: savedBy,
     revision_of_quote_id: identity.revision_of_quote_id,

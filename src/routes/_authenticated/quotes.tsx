@@ -10,18 +10,27 @@ import {
   CopyPlus,
   Search,
   Download,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { quoteToRevisionDraft, useSavedQuotes, voidQuote, type SavedQuote } from "@/lib/quotes-store";
+import {
+  quoteToRevisionDraft,
+  quotesFromQueries,
+  useSavedQuotes,
+  voidQuote,
+  type SavedQuote,
+} from "@/lib/quotes-store";
 import { upsertDraft } from "@/lib/drafts-store";
 import { writeDraft } from "@/lib/wizard/store";
 import { useAuth } from "@/lib/auth-mock";
 import { inr, fmtDateShort } from "@/lib/format";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { exportQuoteExcel, exportAllQuotesExcel } from "@/lib/quotes-export";
+import { useAccessibleQueries } from "@/lib/crm/access";
+import { QuotationReviewRequestDialog } from "@/components/quotation/QuotationReviewRequestDialog";
 
 export const Route = createFileRoute("/_authenticated/quotes")({
   head: () => ({ meta: [{ title: "Recent Quotes — MP Tourism Hub" }] }),
@@ -31,12 +40,19 @@ export const Route = createFileRoute("/_authenticated/quotes")({
 function SavedQuotesPage() {
   const navigate = useNavigate();
   const user = useAuth();
-  const quotes = useSavedQuotes();
+  const localQuotes = useSavedQuotes();
+  const queries = useAccessibleQueries();
+  const quotes = useMemo(() => {
+    const merged = new Map(localQuotes.map((quote) => [quote.id, quote]));
+    quotesFromQueries(queries).forEach((quote) => merged.set(quote.id, quote));
+    return [...merged.values()].sort((a, b) => b.saved_at.localeCompare(a.saved_at));
+  }, [localQuotes, queries]);
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [range, setRange] = useState<"week" | "all">("week");
   const [viewing, setViewing] = useState<SavedQuote | null>(null);
+  const [reviewing, setReviewing] = useState<SavedQuote | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -51,6 +67,8 @@ function SavedQuotesPage() {
           x.tour_title,
           ...x.cities,
           ...x.itinerary.map((d) => d.hotel_name),
+          x.prepared_by_name,
+          x.prepared_by_role,
         ]
           .join(" ")
           .toLowerCase();
@@ -150,7 +168,8 @@ function SavedQuotesPage() {
                 <th className="text-center py-2.5 px-2">Nights</th>
                 <th className="text-left py-2.5 px-2">Cities</th>
                 <th className="text-right py-2.5 px-2">Average per person</th>
-                <th className="text-left py-2.5 px-2">Saved By</th>
+                <th className="text-left py-2.5 px-2">Prepared By</th>
+                <th className="text-left py-2.5 px-2">Review</th>
                 <th className="text-left py-2.5 px-2">Date</th>
                 <th className="text-right py-2.5 px-4">Actions</th>
               </tr>
@@ -165,7 +184,7 @@ function SavedQuotesPage() {
                     {group !== previousGroup && (
                       <tr className="border-y bg-muted/40">
                         <td
-                          colSpan={9}
+                          colSpan={10}
                           className="px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground"
                         >
                           {group}
@@ -175,7 +194,9 @@ function SavedQuotesPage() {
                     <tr className="border-b last:border-0 hover:bg-muted/20">
                       <td className="py-2.5 px-4 font-mono text-xs">
                         <div>{qu.display_number || `${qu.quote_number}-V${qu.version || 1}`}</div>
-                        <div className="mt-1 text-[10px] font-sans text-muted-foreground">{qu.status || "Generated"}</div>
+                        <div className="mt-1 text-[10px] font-sans text-muted-foreground">
+                          {qu.status || "Generated"}
+                        </div>
                       </td>
                       <td className="py-2.5 px-2 text-xs">
                         {qu.query_id ? (
@@ -199,12 +220,34 @@ function SavedQuotesPage() {
                         {inr(qu.scenarios?.[0]?.per_person_avg ?? qu.totals.grand_dbl / 2)}
                         <span className="text-muted-foreground font-normal">/pax</span>
                       </td>
-                      <td className="py-2.5 px-2 text-muted-foreground text-xs">{qu.saved_by}</td>
+                      <td className="py-2.5 px-2 text-xs">
+                        <div className="font-medium">{qu.prepared_by_name || qu.saved_by}</div>
+                        <div className="text-muted-foreground">
+                          {qu.prepared_by_role || "Role not recorded"}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-2 text-xs">
+                        {queries
+                          .find((query) => query.query_id === qu.query_id)
+                          ?.review_support?.quotation_reviews?.filter(
+                            (review) => review.quotation_snapshot.quote.id === qu.id,
+                          )
+                          .at(-1)?.status || "Not Requested"}
+                      </td>
                       <td className="py-2.5 px-2 text-muted-foreground text-xs">
                         {fmtDateShort(qu.saved_at)}
                       </td>
                       <td className="py-2.5 px-4">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Request Review"
+                            disabled={!qu.query_id}
+                            onClick={() => setReviewing(qu)}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
                           <Button
                             size="icon"
                             variant="ghost"
@@ -245,7 +288,9 @@ function SavedQuotesPage() {
                             variant="ghost"
                             title="Create revision"
                             onClick={() => {
-                              const reason = window.prompt(`Reason for revising ${qu.display_number || qu.quote_number}:`);
+                              const reason = window.prompt(
+                                `Reason for revising ${qu.display_number || qu.quote_number}:`,
+                              );
                               if (!reason?.trim()) return;
                               try {
                                 const revision = quoteToRevisionDraft(qu, reason);
@@ -257,7 +302,11 @@ function SavedQuotesPage() {
                                 writeDraft(revision);
                                 navigate({ to: "/costing", search: { id: draftId } });
                               } catch (error) {
-                                toast.error(error instanceof Error ? error.message : "Could not create revision");
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "Could not create revision",
+                                );
                               }
                             }}
                           >
@@ -269,13 +318,21 @@ function SavedQuotesPage() {
                             title="Void with reason"
                             disabled={qu.status === "Void"}
                             onClick={() => {
-                              const reason = window.prompt(`Reason for voiding ${qu.display_number || qu.quote_number}:`);
+                              const reason = window.prompt(
+                                `Reason for voiding ${qu.display_number || qu.quote_number}:`,
+                              );
                               if (!reason?.trim()) return;
                               try {
                                 voidQuote(qu.id, reason, user?.name || "Unknown");
-                                toast.success("Quotation marked Void. The locked record has been retained.");
+                                toast.success(
+                                  "Quotation marked Void. The locked record has been retained.",
+                                );
                               } catch (error) {
-                                toast.error(error instanceof Error ? error.message : "Could not void quotation");
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "Could not void quotation",
+                                );
                               }
                             }}
                           >
@@ -293,6 +350,14 @@ function SavedQuotesPage() {
       </Card>
 
       <QuoteViewerDialog quote={viewing} open={!!viewing} onClose={() => setViewing(null)} />
+      <QuotationReviewRequestDialog
+        draft={null}
+        quote={reviewing}
+        open={Boolean(reviewing)}
+        onOpenChange={(next) => {
+          if (!next) setReviewing(null);
+        }}
+      />
     </div>
   );
 }

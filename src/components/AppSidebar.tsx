@@ -42,7 +42,7 @@ import { useBranding } from "@/lib/branding";
 import { useDraftCount } from "@/lib/drafts-store";
 import { useUnreadCount } from "@/lib/notifications-store";
 import { useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
-import { useEmployees } from "@/lib/crm/store";
+import { useEmployees, useStandaloneQuotationReviews } from "@/lib/crm/store";
 import type { AppRole } from "@/lib/crm/types";
 
 interface Item {
@@ -521,6 +521,7 @@ export function AppSidebar() {
   const access = useAccessProfile();
   const accessibleQueries = useAccessibleQueries();
   const employees = useEmployees();
+  const standaloneQuotationReviews = useStandaloneQuotationReviews();
   const employeeId = access.employee?.id;
   const teamOwners = new Set(
     employees
@@ -549,18 +550,26 @@ export function AppSidebar() {
       ).length,
     0,
   );
-  const quotationReviewCount = accessibleQueries.reduce(
-    (count, query) =>
-      count +
-      (query.review_support?.quotation_reviews || []).filter(
-        (review) =>
-          (review.reviewer_employee_id === employeeId ||
-            review.requested_by_employee_id === employeeId ||
-            relevantQuery(query.owner)) &&
-          activeReview(review.status),
-      ).length,
-    0,
-  );
+  const quotationReviewCount =
+    accessibleQueries.reduce(
+      (count, query) =>
+        count +
+        (query.review_support?.quotation_reviews || []).filter(
+          (review) =>
+            (review.reviewer_employee_id === employeeId ||
+              review.requested_by_employee_id === employeeId ||
+              relevantQuery(query.owner)) &&
+            activeReview(review.status),
+        ).length,
+      0,
+    ) +
+    standaloneQuotationReviews.filter(
+      (review) =>
+        ((review.assigned_to_employee_id || review.reviewer_employee_id) === employeeId ||
+          review.requested_by_employee_id === employeeId ||
+          review.created_by_employee_id === employeeId) &&
+        activeReview(review.status),
+    ).length;
   const assistanceCount = accessibleQueries.reduce(
     (count, query) =>
       count +

@@ -6,9 +6,18 @@ const QUOTES_KEY = "mp_tourism_quotes";
 const SEQ_KEY = "mp_tourism_quote_seq";
 
 export interface SavedQuoteRates {
-  sgl_net: number; sgl_gst_rate: number; sgl_gst_amt: number; sgl_total: number;
-  dbl_net: number; dbl_gst_rate: number; dbl_gst_amt: number; dbl_total: number;
-  trp_net: number; trp_gst_rate: number; trp_gst_amt: number; trp_total: number;
+  sgl_net: number;
+  sgl_gst_rate: number;
+  sgl_gst_amt: number;
+  sgl_total: number;
+  dbl_net: number;
+  dbl_gst_rate: number;
+  dbl_gst_amt: number;
+  dbl_total: number;
+  trp_net: number;
+  trp_gst_rate: number;
+  trp_gst_amt: number;
+  trp_total: number;
 }
 export interface SavedItineraryDay {
   day_number: number;
@@ -28,9 +37,31 @@ export interface SavedItineraryDay {
 export interface SavedAddons {
   travels: { name: string; days: number; vehicles: number; rate_per_day: number; total: number }[];
   miscellaneous: { name: string; pax: number; rate: number; unit: string; total: number }[];
-  guide: { name: string; type: string; days: number; count: number; rate_per_day: number; total: number }[];
-  entrances: { site_name: string; city: string; indian_pax: number; indian_rate: number; foreigner_pax: number; foreigner_rate: number; total: number }[];
-  activities: { name: string; destination: string; pricing_type: string; qty: number; rate: number; total: number }[];
+  guide: {
+    name: string;
+    type: string;
+    days: number;
+    count: number;
+    rate_per_day: number;
+    total: number;
+  }[];
+  entrances: {
+    site_name: string;
+    city: string;
+    indian_pax: number;
+    indian_rate: number;
+    foreigner_pax: number;
+    foreigner_rate: number;
+    total: number;
+  }[];
+  activities: {
+    name: string;
+    destination: string;
+    pricing_type: string;
+    qty: number;
+    rate: number;
+    total: number;
+  }[];
   optional_supplements?: { name: string; qty: number; rate: number; total: number }[];
   addons_total: number;
 }
@@ -43,12 +74,22 @@ export interface SavedInclusions {
   guide_included: boolean;
 }
 export interface SavedTotals {
-  room_net_sgl: number; room_net_dbl: number; room_net_trp: number;
-  gst_rooms_sgl: number; gst_rooms_dbl: number; gst_rooms_trp: number;
+  room_net_sgl: number;
+  room_net_dbl: number;
+  room_net_trp: number;
+  gst_rooms_sgl: number;
+  gst_rooms_dbl: number;
+  gst_rooms_trp: number;
   addons_total: number;
-  markup_sgl: number; markup_dbl: number; markup_trp: number;
-  gst_markup_sgl: number; gst_markup_dbl: number; gst_markup_trp: number;
-  grand_sgl: number; grand_dbl: number; grand_trp: number;
+  markup_sgl: number;
+  markup_dbl: number;
+  markup_trp: number;
+  gst_markup_sgl: number;
+  gst_markup_dbl: number;
+  gst_markup_trp: number;
+  grand_sgl: number;
+  grand_dbl: number;
+  grand_trp: number;
 }
 export interface SavedAllocationRow {
   label: string;
@@ -61,8 +102,8 @@ export interface SavedAllocationRow {
   grand_total: number;
 }
 export interface SavedGroupRow {
-  arrangement: string;   // e.g. "Double Sharing"
-  rooms_label: string;   // e.g. "20 rooms" or "13 Triple + 1 Single"
+  arrangement: string; // e.g. "Double Sharing"
+  rooms_label: string; // e.g. "20 rooms" or "13 Triple + 1 Single"
   total_package: number;
   per_person: number;
   pax_covered: number;
@@ -130,6 +171,11 @@ export interface SavedQuote {
   status: SavedQuoteStatus;
   saved_at: string;
   saved_by: string;
+  /** Stable CRM identity. Display names are descriptive only. */
+  prepared_by_employee_id?: string;
+  prepared_by_auth_user_id?: string;
+  prepared_by_name?: string;
+  prepared_by_role?: string;
   generated_at?: string;
   generated_by?: string;
   revision_of_quote_id?: string;
@@ -162,18 +208,26 @@ export interface SavedQuote {
   query_snapshot?: SavedQuerySnapshot;
 }
 
-
-
 const listeners = new Set<() => void>();
 let cachedSnapshot: SavedQuote[] = [];
 let cacheInitialized = false;
 
 function readFromStorage(): SavedQuote[] {
   if (!isBrowser()) return [];
-  try { return JSON.parse(localStorage.getItem(QUOTES_KEY) || "[]"); } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(QUOTES_KEY) || "[]");
+  } catch {
+    return [];
+  }
 }
-function refreshCache() { cachedSnapshot = readFromStorage(); cacheInitialized = true; }
-function emit() { refreshCache(); listeners.forEach((l) => l()); }
+function refreshCache() {
+  cachedSnapshot = readFromStorage();
+  cacheInitialized = true;
+}
+function emit() {
+  refreshCache();
+  listeners.forEach((l) => l());
+}
 const isBrowser = () => typeof window !== "undefined";
 
 export function loadQuotes(): SavedQuote[] {
@@ -189,7 +243,6 @@ function saveAll(list: SavedQuote[]) {
   localStorage.setItem(QUOTES_KEY, JSON.stringify(list));
   emit();
 }
-
 
 export function nextQuoteNumber(): string {
   if (!isBrowser()) return "QT-0000-000";
@@ -215,12 +268,22 @@ export function saveQuote(q: SavedQuote): void {
     display_number: q.display_number || `${q.quote_number}-V${q.version || 1}`,
     audit_log: q.audit_log?.length
       ? q.audit_log
-      : [{ at: now, by: q.saved_by, action: "generated", detail: "Quotation finalised and locked" }],
+      : [
+          {
+            at: now,
+            by: q.saved_by,
+            action: "generated",
+            detail: "Quotation finalised and locked",
+          },
+        ],
   };
-  normalized.content_hash = normalized.content_hash || quoteChecksum(normalized);
+  normalized.content_hash = normalized.content_hash || quoteContentHash(normalized);
   if (normalized.version > 1 && normalized.family_id) {
     const previousIndex = list.findIndex(
-      (item) => item.family_id === normalized.family_id && item.status !== "Void" && item.status !== "Superseded",
+      (item) =>
+        item.family_id === normalized.family_id &&
+        item.status !== "Void" &&
+        item.status !== "Superseded",
     );
     if (previousIndex >= 0) {
       const previous = list[previousIndex];
@@ -247,14 +310,18 @@ export function saveQuote(q: SavedQuote): void {
 export function voidQuote(id: string, reason: string, by: string): void {
   if (!reason.trim()) throw new Error("A reason is required to void a quotation.");
   const at = new Date().toISOString();
-  const list = loadQuotes().map((quote) => quote.id === id ? {
-    ...quote,
-    status: "Void" as const,
-    audit_log: [
-      ...(quote.audit_log ?? []),
-      { at, by, action: "voided" as const, detail: reason.trim() },
-    ],
-  } : quote);
+  const list = loadQuotes().map((quote) =>
+    quote.id === id
+      ? {
+          ...quote,
+          status: "Void" as const,
+          audit_log: [
+            ...(quote.audit_log ?? []),
+            { at, by, action: "voided" as const, detail: reason.trim() },
+          ],
+        }
+      : quote,
+  );
   saveAll(list);
 }
 
@@ -266,11 +333,17 @@ export function updateQuoteStatus(
 ): void {
   const at = new Date().toISOString();
   const action = status === "Sent" ? "sent" : status === "Accepted" ? "accepted" : "superseded";
-  saveAll(loadQuotes().map((quote) => quote.id === id ? {
-    ...quote,
-    status,
-    audit_log: [...(quote.audit_log ?? []), { at, by, action, detail }],
-  } : quote));
+  saveAll(
+    loadQuotes().map((quote) =>
+      quote.id === id
+        ? {
+            ...quote,
+            status,
+            audit_log: [...(quote.audit_log ?? []), { at, by, action, detail }],
+          }
+        : quote,
+    ),
+  );
 }
 
 /** Backward-compatible symbol: deliberately refuses destructive deletion. */
@@ -307,6 +380,17 @@ export function quoteVersionContext(draft: QuoteDraft): {
   };
 }
 
+/** All cloud-backed Query versions are already immutable SavedQuote snapshots. */
+export function quotesFromQueries(
+  queries: Array<{ costing_versions?: Array<{ quote: SavedQuote }> }>,
+): SavedQuote[] {
+  const byId = new Map<string, SavedQuote>();
+  for (const query of queries) {
+    for (const version of query.costing_versions ?? []) byId.set(version.quote.id, version.quote);
+  }
+  return [...byId.values()].sort((a, b) => b.saved_at.localeCompare(a.saved_at));
+}
+
 export function quoteToRevisionDraft(quote: SavedQuote, reason: string): QuoteDraft {
   if (!quote.draft_snapshot) throw new Error("This legacy quotation has no revision snapshot.");
   if (!reason.trim()) throw new Error("A revision reason is required.");
@@ -315,7 +399,8 @@ export function quoteToRevisionDraft(quote: SavedQuote, reason: string): QuoteDr
     ...snapshot,
     step: 1,
     revision_of_quote_id: quote.id,
-    revision_of_quote_number: quote.display_number || `${quote.quote_number}-V${quote.version || 1}`,
+    revision_of_quote_number:
+      quote.display_number || `${quote.quote_number}-V${quote.version || 1}`,
     revision_reason: reason.trim(),
     intended_version: (quote.version || 1) + 1,
     updated_at: new Date().toISOString(),
@@ -324,13 +409,16 @@ export function quoteToRevisionDraft(quote: SavedQuote, reason: string): QuoteDr
 
 export function useSavedQuotes(): SavedQuote[] {
   return useSyncExternalStore(
-    (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
     getSnapshot,
     () => [],
   );
 }
 
-function quoteChecksum(quote: SavedQuote): string {
+export function quoteContentHash(quote: SavedQuote): string {
   const protectedPayload = {
     query_id: quote.query_id,
     family_id: quote.family_id,

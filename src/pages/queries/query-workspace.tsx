@@ -137,9 +137,24 @@ export default function QueryWorkspace() {
     (item) => item.id === query?.program_id || item.name === query?.program_name,
   );
   const versions = [...(query?.costing_versions || [])].sort((a, b) => b.version - a.version);
-  const linkedDrafts = allDrafts
-    .filter((draft) => draft.wizard_state.linked_query_id === query?.query_id)
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const linkedDrafts = useMemo(() => {
+    const merged = new Map(
+      allDrafts
+        .filter((draft) => draft.wizard_state.linked_query_id === query?.query_id)
+        .map((draft) => [draft.id, draft]),
+    );
+    for (const cloud of query?.quotation_drafts ?? []) {
+      merged.set(cloud.id, {
+        id: cloud.id,
+        draft_name: cloud.draft_name,
+        created_at: cloud.created_at,
+        updated_at: cloud.updated_at,
+        last_step: cloud.draft_data.step,
+        wizard_state: cloud.draft_data,
+      });
+    }
+    return [...merged.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [allDrafts, query?.query_id, query?.quotation_drafts]);
   const ownsQuery = Boolean(
     access.employee &&
     ([query?.owner].includes(access.employee.id) || [query?.owner].includes(access.employee.name)),
@@ -1061,96 +1076,113 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
             )}
-            {versions.map((version) => (
-              <Card key={version.version}>
-                <CardContent className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
-                  <div>
-                    <p className="font-bold">
-                      Costing V{version.version} · {version.quote.quote_number}
-                    </p>
-                    <p className="text-sm text-slate-500">
-                      Saved {fmt(version.saved_at)} by {version.saved_by}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    {canRequestSupport && (
-                      <>
-                        <Button
-                          variant="outline"
-                          disabled={!reviewerId || !supportNote.trim()}
-                          onClick={() => {
-                            try {
-                              requestQuotationReview(query.query_id, {
-                                quotationId: version.quote.id,
-                                quotationVersion: version.version,
-                                reviewerEmployeeId: reviewerId,
-                                requestedByEmployeeId: access.employee?.id || actor,
-                                dueAt: supportDue ? new Date(supportDue).toISOString() : undefined,
-                                instructions: supportNote.trim(),
-                                priority: supportPriority,
+            {versions.map((version, index) => {
+              const review = [...(query.review_support?.quotation_reviews || [])]
+                .filter(
+                  (assignment) =>
+                    assignment.quotation_id === version.quote.id ||
+                    assignment.quotation_snapshot?.quote.id === version.quote.id,
+                )
+                .sort((a, b) => b.requested_at.localeCompare(a.requested_at))[0];
+              return (
+                <Card key={version.quote.id}>
+                  <CardContent className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-bold">
+                          Costing V{version.version} · {version.quote.quote_number}
+                        </p>
+                        {index === 0 && <Badge variant="secondary">Current latest</Badge>}
+                        {review && <Badge variant="outline">Review: {review.status}</Badge>}
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        Saved {fmt(version.saved_at)} by{" "}
+                        {version.prepared_by_name || version.saved_by}
+                        {version.prepared_by_role ? ` · ${version.prepared_by_role}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {canRequestSupport && (
+                        <>
+                          <Button
+                            variant="outline"
+                            disabled={!reviewerId || !supportNote.trim()}
+                            onClick={() => {
+                              try {
+                                requestQuotationReview(query.query_id, {
+                                  quotationId: version.quote.id,
+                                  quotationVersion: version.version,
+                                  reviewerEmployeeId: reviewerId,
+                                  requestedByEmployeeId: access.employee?.id || actor,
+                                  dueAt: supportDue
+                                    ? new Date(supportDue).toISOString()
+                                    : undefined,
+                                  instructions: supportNote.trim(),
+                                  priority: supportPriority,
+                                });
+                                toast.success(`Quotation V${version.version} sent for review.`);
+                              } catch (error) {
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "Could not request review.",
+                                );
+                              }
+                            }}
+                          >
+                            Request Review
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              const blob = new Blob([JSON.stringify(version.quote, null, 2)], {
+                                type: "application/json",
                               });
-                              toast.success(`Quotation V${version.version} sent for review.`);
-                            } catch (error) {
-                              toast.error(
-                                error instanceof Error
-                                  ? error.message
-                                  : "Could not request review.",
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `${query.query_id}-costing-v${version.version}.json`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Download
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              const reason = window.prompt(
+                                `Reason for revising ${version.quote.display_number || version.quote.quote_number}:`,
                               );
-                            }
-                          }}
-                        >
-                          Request Review
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            const blob = new Blob([JSON.stringify(version.quote, null, 2)], {
-                              type: "application/json",
-                            });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `${query.query_id}-costing-v${version.version}.json`;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                          }}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Download
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            const reason = window.prompt(
-                              `Reason for revising ${version.quote.display_number || version.quote.quote_number}:`,
-                            );
-                            if (!reason?.trim()) return;
-                            try {
-                              const revision = quoteToRevisionDraft(version.quote, reason);
-                              const draftId = upsertDraft(
-                                revision,
-                                undefined,
-                                `${version.quote.quote_number} · Revision V${revision.intended_version}`,
-                              );
-                              writeDraft(revision);
-                              navigate({ to: "/costing", search: { id: draftId } });
-                            } catch (error) {
-                              toast.error(
-                                error instanceof Error
-                                  ? error.message
-                                  : "Could not create revision",
-                              );
-                            }
-                          }}
-                        >
-                          <FileText className="mr-2 h-4 w-4" />
-                          Create revision
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                              if (!reason?.trim()) return;
+                              try {
+                                const revision = quoteToRevisionDraft(version.quote, reason);
+                                const draftId = upsertDraft(
+                                  revision,
+                                  undefined,
+                                  `${version.quote.quote_number} · Revision V${revision.intended_version}`,
+                                );
+                                writeDraft(revision);
+                                navigate({ to: "/costing", search: { id: draftId } });
+                              } catch (error) {
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "Could not create revision",
+                                );
+                              }
+                            }}
+                          >
+                            <FileText className="mr-2 h-4 w-4" />
+                            Create revision
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
         {tab === "Lifecycle Progress" && (

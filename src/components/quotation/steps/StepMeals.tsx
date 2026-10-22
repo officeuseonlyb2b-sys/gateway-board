@@ -36,16 +36,54 @@ export function restaurantsForCategory(list: Restaurant[], category?: string): R
   return list.filter((item) => !item.category || item.category.trim().toLowerCase() === wanted);
 }
 
-const citiesForDay = (day: RoutingDay, cities: ReturnType<typeof useDB>["cities"]) => {
-  const from = cities.find(
-    (city) => city.id === day.from_city || city.name.toLowerCase() === day.from_city?.toLowerCase(),
-  )?.id;
-  return Array.from(
-    new Set(
-      [from, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(Boolean) as string[],
-    ),
-  );
+// eslint-disable-next-line react-refresh/only-export-components
+export const mealCitiesForDay = (day: RoutingDay, cities: ReturnType<typeof useDB>["cities"]) => {
+  const ids: string[] = [];
+  const push = (value?: string) => {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized) return;
+    const city = cities.find(
+      (item) => item.id === value || item.name.trim().toLowerCase() === normalized,
+    );
+    if (city && !ids.includes(city.id)) ids.push(city.id);
+  };
+  push(day.from_city);
+  (day.to_city_ids ?? []).forEach(push);
+  push(day.to_city_id);
+  // Legacy routes may have only the display destination saved.
+  push(day.to_city);
+  // city_id is the saved overnight/destination ID. It remains a valid route
+  // city even when the day has no overnight accommodation plan.
+  push(day.city_id);
+  return ids;
 };
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function updateMealSelection(
+  selections: Record<string, MealDaySelection>,
+  day: number,
+  cityId: string,
+  meal: MealKey,
+  choice?: MealChoice,
+) {
+  const next = Object.fromEntries(
+    Object.entries(selections).map(([key, value]) => [key, { ...value }]),
+  ) as Record<string, MealDaySelection>;
+  Object.keys(next).forEach((key) => {
+    if (!key.startsWith(`${day}:`)) return;
+    delete next[key][meal];
+    if (!next[key].lunch && !next[key].dinner) delete next[key];
+  });
+  // A no-meal sentinel retains the independently selected route city while
+  // keeping it out of all meal-cost calculations.
+  if (cityId) {
+    next[`${day}:${cityId}`] = {
+      ...(next[`${day}:${cityId}`] ?? {}),
+      [meal]: choice ?? { source: "none" },
+    };
+  }
+  return next;
+}
 
 export function StepMeals({ draft, set }: StepProps) {
   const db = useDB();
@@ -59,7 +97,7 @@ export function StepMeals({ draft, set }: StepProps) {
   const days = useMemo(
     () =>
       draft.routing.map((day, index) => {
-        const cityIds = citiesForDay(day, db.cities);
+        const cityIds = mealCitiesForDay(day, db.cities);
         return {
           day,
           cityIds,
@@ -82,16 +120,7 @@ export function StepMeals({ draft, set }: StepProps) {
     return { cityId: "", choice: undefined as MealChoice | undefined };
   };
   const setMeal = (day: number, cityId: string, meal: MealKey, choice?: MealChoice) => {
-    const next = Object.fromEntries(
-      Object.entries(selections).map(([key, value]) => [key, { ...value }]),
-    ) as Record<string, MealDaySelection>;
-    Object.keys(next).forEach((key) => {
-      if (!key.startsWith(`${day}:`)) return;
-      delete next[key][meal];
-      if (!next[key].lunch && !next[key].dinner) delete next[key];
-    });
-    if (cityId && choice && choice.source !== "none")
-      next[`${day}:${cityId}`] = { ...(next[`${day}:${cityId}`] ?? {}), [meal]: choice };
+    const next = updateMealSelection(selections, day, cityId, meal, choice);
     set({
       meal_selections_by_option: { ...(draft.meal_selections_by_option ?? {}), [optionKey]: next },
       ...(optionKey === "A" ? { meal_selections: next } : {}),
@@ -256,7 +285,7 @@ export function StepMeals({ draft, set }: StepProps) {
             ))}
           </SelectContent>
         </Select>
-        {selected.choice && (
+        {selected.choice && selected.choice.source !== "none" && (
           <Select
             value={selected.choice.inclusion_status ?? "included"}
             onValueChange={(status) =>

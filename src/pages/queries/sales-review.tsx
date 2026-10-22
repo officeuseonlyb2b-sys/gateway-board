@@ -4,27 +4,39 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
+import { FinalCostingWorkspace } from "@/components/quotation/FinalCostingWorkspace";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAccessibleQueries, useAccessProfile } from "@/lib/crm/access";
 import {
   reassignReviewSupport,
   setAssistanceStatus,
   setReviewStatus,
+  setStandaloneQuotationReviewStatus,
   useEmployees,
+  useStandaloneQuotationReviews,
 } from "@/lib/crm/store";
 import type {
   AssistanceAssignment,
   CrmQuery,
   QueryReviewAssignment,
   QuotationReviewAssignment,
+  StandaloneQuotationReviewAssignment,
 } from "@/lib/crm/types";
 import type { SavedQuote } from "@/lib/quotes-store";
+import {
+  persistQueryQuotationReview,
+  persistStandaloneQuotationReviewUpdate,
+} from "@/lib/crm/crm-remote";
 
 export type ReviewMode = "query" | "quotation" | "assistance";
 type QueueTab = "assigned" | "requested" | "completed" | "team";
 type QueueItem = {
-  query: CrmQuery;
-  assignment: QueryReviewAssignment | QuotationReviewAssignment | AssistanceAssignment;
+  query?: CrmQuery;
+  assignment:
+    | QueryReviewAssignment
+    | QuotationReviewAssignment
+    | StandaloneQuotationReviewAssignment
+    | AssistanceAssignment;
 };
 const completed = (status: string) =>
   ["Approved", "Returned", "Cancelled", "Completed"].includes(status);
@@ -38,6 +50,7 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
   const employeeId = access.employee?.id;
   const employees = useEmployees();
   const queries = useAccessibleQueries();
+  const standaloneReviews = useStandaloneQuotationReviews();
   const [tab, setTab] = useState<QueueTab>("assigned");
   const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
   const [reassignTargets, setReassignTargets] = useState<Record<string, string>>({});
@@ -63,23 +76,34 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
       ["Senior Sales Executive", "Sales Manager"].includes(employee.role),
   );
   const items = useMemo<QueueItem[]>(
-    () =>
-      queries.flatMap((query) => {
+    () => [
+      ...queries.flatMap((query) => {
         const assignments =
           mode === "query"
-            ? query.review_support?.query_reviews || []
+            ? (query.review_support?.query_reviews || []).filter(
+                (assignment) => assignment.source_type !== "draft",
+              )
             : mode === "quotation"
-              ? query.review_support?.quotation_reviews || []
+              ? [
+                  ...(query.review_support?.quotation_reviews || []),
+                  ...(query.review_support?.query_reviews || []).filter(
+                    (assignment) => assignment.source_type === "draft",
+                  ),
+                ]
               : query.review_support?.assistance || [];
         return assignments.map((assignment) => ({ query, assignment }));
       }),
-    [queries, mode],
+      ...(mode === "quotation" ? standaloneReviews.map((assignment) => ({ assignment })) : []),
+    ],
+    [queries, mode, standaloneReviews],
   );
   const visible = items.filter(({ query, assignment }) => {
     const assignedTo =
       "assistant_employee_id" in assignment
         ? assignment.assistant_employee_id
-        : assignment.reviewer_employee_id;
+        : "assigned_to_employee_id" in assignment
+          ? assignment.assigned_to_employee_id
+          : assignment.reviewer_employee_id;
     const requestedBy =
       "assigned_by_employee_id" in assignment
         ? assignment.assigned_by_employee_id
@@ -89,11 +113,13 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
         completed(assignment.status) &&
         (assignedTo === employeeId ||
           requestedBy === employeeId ||
-          (access.canManageTeam && managerTeamQuery(query)))
+          (query && access.canManageTeam && managerTeamQuery(query)))
       );
     if (tab === "requested") return requestedBy === employeeId && !completed(assignment.status);
     if (tab === "team")
-      return access.canManageTeam && managerTeamQuery(query) && !completed(assignment.status);
+      return Boolean(
+        access.canManageTeam && query && managerTeamQuery(query) && !completed(assignment.status),
+      );
     return assignedTo === employeeId && !completed(assignment.status);
   });
   const title =
@@ -102,7 +128,7 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
       : mode === "quotation"
         ? "Quotations for Review"
         : "Assisted Queries";
-  const act = (
+  const act = async (
     item: QueueItem,
     action: "start" | "accept" | "approve" | "return" | "complete" | "cancel",
   ) => {
@@ -112,7 +138,7 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
           action === "complete" ? window.prompt("What was done? Completion summary:") : undefined;
         if (action === "complete" && !summary?.trim()) return;
         setAssistanceStatus(
-          item.query.query_id,
+          item.query!.query_id,
           item.assignment.id,
           action === "complete"
             ? "Completed"
@@ -127,9 +153,33 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
       } else {
         const note = action === "return" ? window.prompt("Correction instructions:") : undefined;
         if (action === "return" && !note?.trim()) return;
+        if (
+          "source_type" in item.assignment &&
+          item.assignment.source_type === "standalone_draft"
+        ) {
+          setStandaloneQuotationReviewStatus(
+            item.assignment.id,
+            action === "approve"
+              ? "Approved"
+              : action === "return"
+                ? "Returned"
+                : action === "cancel"
+                  ? "Cancelled"
+                  : "In Review",
+            employeeId || "Unknown employee",
+            note || undefined,
+          );
+          await persistStandaloneQuotationReviewUpdate(item.assignment.id);
+          toast.success("Workflow updated.");
+          return;
+        }
+        const reviewKind =
+          "source_type" in item.assignment && item.assignment.source_type === "draft"
+            ? "query"
+            : mode;
         setReviewStatus(
-          item.query.query_id,
-          mode,
+          item.query!.query_id,
+          reviewKind as "query" | "quotation",
           item.assignment.id,
           action === "approve"
             ? "Approved"
@@ -141,6 +191,7 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
           employeeId || "Unknown employee",
           note || undefined,
         );
+        await persistQueryQuotationReview(item.query!.query_id);
       }
       toast.success("Workflow updated.");
     } catch (error) {
@@ -179,14 +230,30 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
           const assignedId =
             "assistant_employee_id" in assignment
               ? assignment.assistant_employee_id
-              : assignment.reviewer_employee_id;
+              : "assigned_to_employee_id" in assignment
+                ? assignment.assigned_to_employee_id
+                : assignment.reviewer_employee_id;
           const requesterId =
             "assigned_by_employee_id" in assignment
               ? assignment.assigned_by_employee_id
               : assignment.requested_by_employee_id;
           const requestedAt =
             "assigned_at" in assignment ? assignment.assigned_at : assignment.requested_at;
-          const quotation = "quotation_version" in assignment ? assignment : undefined;
+          const savedQuotation =
+            "quotation_version" in assignment
+              ? (assignment as QuotationReviewAssignment)
+              : undefined;
+          const draftQuotation =
+            "source_type" in assignment &&
+            assignment.source_type === "draft" &&
+            assignment.quotation_snapshot
+              ? (assignment as QueryReviewAssignment)
+              : undefined;
+          const standaloneQuotation =
+            "source_type" in assignment && assignment.source_type === "standalone_draft"
+              ? (assignment as StandaloneQuotationReviewAssignment)
+              : undefined;
+          const quotation = savedQuotation || draftQuotation || standaloneQuotation;
           const assistance = "areas" in assignment ? assignment : undefined;
           return (
             <Card key={assignment.id}>
@@ -194,22 +261,39 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
                 <div className="flex flex-col justify-between gap-4 md:flex-row">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        to="/queries/$id"
-                        params={{ id: item.query.id }}
-                        className="font-bold text-teal-700 hover:underline"
-                      >
+                      <span className="font-bold text-teal-700">
                         {quotation
-                          ? `${quotation.quotation_snapshot.quote.display_number || quotation.quotation_id} · V${quotation.quotation_version}`
-                          : item.query.query_id}
-                      </Link>
+                          ? savedQuotation
+                            ? `${savedQuotation.quotation_snapshot.quote.display_number || savedQuotation.quotation_id} · V${savedQuotation.quotation_version}`
+                            : `${standaloneQuotation ? "Standalone Costing" : "Draft Review Snapshot"} · R${quotation.draft_snapshot_revision || 1}`
+                          : item.query?.query_id}
+                      </span>
                       <Badge variant="outline">{assignment.status}</Badge>
                       <Badge>{assignment.priority || "Normal"}</Badge>
                     </div>
-                    <p className="mt-1 font-semibold">{item.query.customer}</p>
+                    <p className="mt-1 font-semibold">
+                      {item.query?.customer ||
+                        standaloneQuotation?.draft_name ||
+                        "Standalone Costing"}
+                    </p>
+                    {quotation && (
+                      <p className="text-sm text-slate-600">
+                        {item.query ? `Query No. ${item.query.query_id}` : "Query: Not linked"} ·{" "}
+                        {draftQuotation ? "Draft" : "Saved version"}
+                        {draftQuotation?.draft_id ? ` ${draftQuotation.draft_id}` : ""} · Prepared
+                        by{" "}
+                        {quotation.quotation_snapshot?.prepared_by_name ||
+                          quotation.quotation_snapshot?.quote.prepared_by_name ||
+                          quotation.quotation_snapshot?.saved_by ||
+                          "Not recorded"}
+                      </p>
+                    )}
                     <p className="text-sm text-slate-500">
-                      Owner {item.query.owner || "Unassigned"} · Requested by{" "}
-                      {employeeName(requesterId)} · Assigned to {employeeName(assignedId)}
+                      {item.query
+                        ? `Owner ${item.query.owner || "Unassigned"}`
+                        : "Standalone Costing"}{" "}
+                      · Requested by {employeeName(requesterId)} · Assigned to{" "}
+                      {employeeName(assignedId)}
                     </p>
                     <p className="text-xs text-slate-500">
                       Requested {fmt(requestedAt)} · Due {fmt(assignment.due_at)}
@@ -255,8 +339,10 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
                           onClick={() => {
                             try {
                               reassignReviewSupport(
-                                item.query.query_id,
-                                mode,
+                                item.query!.query_id,
+                                "source_type" in assignment && assignment.source_type === "draft"
+                                  ? "query"
+                                  : mode,
                                 assignment.id,
                                 reassignTargets[assignment.id],
                                 employeeId || "",
@@ -282,16 +368,18 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
                     {quotation && (
                       <Button
                         variant="outline"
-                        onClick={() => setViewingQuote(quotation.quotation_snapshot.quote)}
+                        onClick={() => setViewingQuote(quotation.quotation_snapshot!.quote)}
                       >
-                        View Exact Version
+                        View Exact Snapshot
                       </Button>
                     )}
-                    <Button asChild variant="outline">
-                      <Link to="/queries/$id" params={{ id: item.query.id }}>
-                        Open Query Workspace
-                      </Link>
-                    </Button>
+                    {item.query && (
+                      <Button asChild variant="outline">
+                        <Link to="/queries/$id" params={{ id: item.query.id }}>
+                          Open Query Workspace
+                        </Link>
+                      </Button>
+                    )}
                   </div>
                 </div>
                 {assignedId === employeeId && !completed(assignment.status) && (
@@ -349,11 +437,22 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
           </Card>
         )}
       </div>
-      <QuoteViewerDialog
-        quote={viewingQuote}
-        open={Boolean(viewingQuote)}
-        onClose={() => setViewingQuote(null)}
-      />
+      <Dialog open={Boolean(viewingQuote)} onOpenChange={(next) => !next && setViewingQuote(null)}>
+        <DialogContent className="max-h-[94vh] max-w-[96vw] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Final Quotation Review · Immutable Snapshot</DialogTitle>
+          </DialogHeader>
+          {viewingQuote?.draft_snapshot ? (
+            <div className="pointer-events-none">
+              <FinalCostingWorkspace draft={viewingQuote.draft_snapshot} set={() => undefined} />
+            </div>
+          ) : (
+            <p className="p-6 text-sm text-slate-500">
+              This legacy snapshot does not contain the full Step 9 input state.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

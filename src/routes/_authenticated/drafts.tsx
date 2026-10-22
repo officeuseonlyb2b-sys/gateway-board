@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { FileText, Play, Trash2, Search, Pencil, Check, X } from "lucide-react";
+import { FileText, Play, Trash2, Search, Pencil, Check, X, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useDrafts, deleteDraft, renameDraft, type DraftRecord } from "@/lib/drafts-store";
 import { fmtDateShort } from "@/lib/format";
+import { useAccessibleQueries } from "@/lib/crm/access";
+import { removeQueryQuotationDraft, useStandaloneQuotationReviews } from "@/lib/crm/store";
+import { QuotationReviewRequestDialog } from "@/components/quotation/QuotationReviewRequestDialog";
 
 export const Route = createFileRoute("/_authenticated/drafts")({
   head: () => ({ meta: [{ title: "Drafts — MP Tourism Hub" }] }),
@@ -23,22 +26,53 @@ const STEP_LABELS = [
   "Land Part",
   "Accommodation Part",
   "Costing",
-  "Optional Supplements",
-  "Final Review",
+  "Preview & Save",
 ];
 
 function DraftsPage() {
-  const drafts = useDrafts();
+  const localDrafts = useDrafts();
+  const queries = useAccessibleQueries();
+  const standaloneReviews = useStandaloneQuotationReviews();
+  const cloudDraftMetadata = useMemo(
+    () =>
+      new Map(
+        queries.flatMap((query) => query.quotation_drafts ?? []).map((draft) => [draft.id, draft]),
+      ),
+    [queries],
+  );
+  const drafts = useMemo(() => {
+    const merged = new Map(localDrafts.map((draft) => [draft.id, draft]));
+    for (const cloud of cloudDraftMetadata.values()) {
+      merged.set(cloud.id, {
+        id: cloud.id,
+        draft_name: cloud.draft_name,
+        created_at: cloud.created_at,
+        updated_at: cloud.updated_at,
+        last_step: cloud.draft_data.step,
+        wizard_state: cloud.draft_data,
+      });
+    }
+    return [...merged.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [cloudDraftMetadata, localDrafts]);
   const [q, setQ] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const navigate = useNavigate();
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return drafts;
     return drafts.filter((d) =>
-      (d.draft_name + " " + (d.wizard_state.query_type || "") + " " + d.wizard_state.program_name + " " + (d.wizard_state.linked_query_id || ""))
+      (
+        d.draft_name +
+        " " +
+        (d.wizard_state.query_type || "") +
+        " " +
+        d.wizard_state.program_name +
+        " " +
+        (d.wizard_state.linked_query_id || "")
+      )
         .toLowerCase()
         .includes(needle),
     );
@@ -106,6 +140,7 @@ function DraftsPage() {
                 <th className="text-left py-2.5 px-2">Query</th>
                 <th className="text-left py-2.5 px-2">Last Step</th>
                 <th className="text-left py-2.5 px-2">Modified</th>
+                <th className="text-left py-2.5 px-2">Created / Edited By</th>
                 <th className="text-right py-2.5 px-4">Actions</th>
               </tr>
             </thead>
@@ -116,6 +151,28 @@ function DraftsPage() {
                 const completion = Math.max(
                   0,
                   Math.min(100, Math.round(((d.last_step - 1) / (STEP_LABELS.length - 1)) * 100)),
+                );
+                const cloud = cloudDraftMetadata.get(d.id);
+                const query = queries.find((item) => item.query_id === cloud?.query_id);
+                const standaloneReview = standaloneReviews
+                  .filter((review) => review.draft_id === d.id)
+                  .sort((a, b) => b.requested_at.localeCompare(a.requested_at))[0];
+                const activeReview =
+                  query?.review_support?.query_reviews?.some(
+                    (review) =>
+                      review.source_type === "draft" &&
+                      review.draft_id === d.id &&
+                      !["Approved", "Returned", "Cancelled"].includes(review.status),
+                  ) ||
+                  Boolean(
+                    standaloneReview &&
+                    !["Approved", "Returned", "Cancelled"].includes(standaloneReview.status),
+                  );
+                const changedAfterReview = Boolean(
+                  (cloud?.latest_review_snapshot_at &&
+                    d.updated_at > cloud.latest_review_snapshot_at) ||
+                  (standaloneReview?.draft_updated_at &&
+                    d.updated_at > standaloneReview.draft_updated_at),
                 );
                 return (
                   <tr key={d.id} className="border-b last:border-0 hover:bg-muted/20">
@@ -150,8 +207,13 @@ function DraftsPage() {
                           </Button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span>{d.draft_name}</span>
+                          {changedAfterReview && (
+                            <Badge variant="outline" className="border-amber-300 text-amber-700">
+                              Draft changed after review request
+                            </Badge>
+                          )}
                           <button
                             className="opacity-0 group-hover:opacity-100"
                             onClick={() => beginRename(d)}
@@ -199,10 +261,41 @@ function DraftsPage() {
                     <td className="py-2.5 px-2 text-muted-foreground text-xs">
                       {fmtDateShort(d.updated_at)}
                     </td>
+                    <td className="py-2.5 px-2 text-xs">
+                      {cloudDraftMetadata.has(d.id) ? (
+                        <>
+                          <div>{cloudDraftMetadata.get(d.id)?.created_by_name}</div>
+                          <div className="text-muted-foreground">
+                            Last: {cloudDraftMetadata.get(d.id)?.last_edited_by_name} ·{" "}
+                            {cloudDraftMetadata.get(d.id)?.last_edited_by_role}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">Legacy local draft</span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-4">
                       <div className="flex justify-end gap-1">
                         <Button size="sm" variant="outline" onClick={() => resume(d)}>
                           <Play className="h-3.5 w-3.5 mr-1" /> Resume
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(activeReview && !changedAfterReview)}
+                          title={
+                            activeReview && !changedAfterReview
+                              ? "Review is pending for this exact snapshot."
+                              : undefined
+                          }
+                          onClick={() => setReviewDraft(d)}
+                        >
+                          <Send className="mr-1 h-3.5 w-3.5" />
+                          {activeReview && !changedAfterReview
+                            ? "Review Pending"
+                            : changedAfterReview
+                              ? "Request Updated Review"
+                              : "Request Review"}
                         </Button>
                         <Button
                           size="icon"
@@ -219,6 +312,8 @@ function DraftsPage() {
                           onClick={() => {
                             if (confirm(`Delete draft "${d.draft_name}"?`)) {
                               deleteDraft(d.id);
+                              const cloud = cloudDraftMetadata.get(d.id);
+                              if (cloud) removeQueryQuotationDraft(cloud.query_id, d.id);
                               toast.success("Draft deleted.");
                             }
                           }}
@@ -234,6 +329,13 @@ function DraftsPage() {
           </table>
         )}
       </Card>
+      <QuotationReviewRequestDialog
+        draft={reviewDraft}
+        open={Boolean(reviewDraft)}
+        onOpenChange={(next) => {
+          if (!next) setReviewDraft(null);
+        }}
+      />
     </div>
   );
 }

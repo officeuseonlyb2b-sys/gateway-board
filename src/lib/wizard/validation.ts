@@ -563,7 +563,7 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       issue(
         "NO_INCLUSIONS",
         "warning",
-        "Final Review",
+        "Preview & Save",
         "The quotation has no inclusion statements.",
       ),
     );

@@ -1,7 +1,7 @@
 export const QUERY_FOR_OPTIONS = ["Package", "Land Part", "Accommodation Part"] as const;
 
 export type QueryFor = (typeof QUERY_FOR_OPTIONS)[number];
-export type QuotationStepId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+export type QuotationStepId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 /** Map historical records to the supported authoritative commercial buckets. */
 export function normalizeQueryFor(value?: string | null): QueryFor | undefined {
@@ -45,7 +45,6 @@ export function getQuotationScope(queryFor?: string | null, commercialMode?: str
     ...(accommodationPart ? [8] : []),
     9,
     10,
-    11,
   ] as QuotationStepId[];
 
   return {

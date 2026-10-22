@@ -254,6 +254,43 @@ try {
     },
   );
   await check(
+    "Standalone quotation draft opens reviewer selection without requiring a Query",
+    async () => {
+      const now = new Date().toISOString();
+      await page.evaluate((timestamp) => {
+        localStorage.setItem(
+          "mp_tourism_drafts",
+          JSON.stringify([
+            {
+              id: "browser-legacy-draft",
+              draft_name: "Legacy Browser Draft",
+              created_at: timestamp,
+              updated_at: timestamp,
+              last_step: 1,
+              wizard_state: { step: 1, program_name: "Legacy Browser Draft" },
+            },
+          ]),
+        );
+      }, now);
+      await page.goto(`${base}/drafts`);
+      await page.getByRole("heading", { name: "Drafts", exact: true }).waitFor();
+      const requestReview = page.getByRole("button", { name: "Request Review", exact: true });
+      assert.equal(await requestReview.isEnabled(), true);
+      await requestReview.click();
+      await page.getByRole("heading", { name: "Request Quotation Review" }).waitFor();
+      assert.match(
+        await page.getByRole("dialog").innerText(),
+        /Standalone Costing.*Query not linked/is,
+      );
+      await page.getByText("Reviewer *", { exact: true }).waitFor();
+      await page.getByText("Reason / What should be checked *", { exact: true }).waitFor();
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => localStorage.removeItem("mp_tourism_drafts"));
+      await page.goto(`${base}/admin-console`);
+      await page.getByRole("heading", { name: "Admin Console", exact: true }).waitFor();
+    },
+  );
+  await check(
     "Temporary employee-profile request failure preserves the authenticated Super Admin session",
     async () => {
       failNextProfileRead = true;

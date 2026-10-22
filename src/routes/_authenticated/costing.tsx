@@ -61,6 +61,7 @@ import {
   deleteDraft,
   migrateLegacyDraft,
   completedStepForScope,
+  type DraftRecord,
 } from "@/lib/drafts-store";
 import { addNotification } from "@/lib/notifications-store";
 import type {
@@ -116,8 +117,15 @@ import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { buildSavedQuote as buildSavedQuoteFromDraft } from "@/lib/wizard/build-saved-quote";
-import { getCrmQuery, saveQueryCosting, useCrmQueries } from "@/lib/crm/store";
-import { pushCrmSnapshotNow } from "@/lib/crm/crm-remote";
+import {
+  getCrmQuery,
+  getQueryQuotationDraft,
+  removeQueryQuotationDraft,
+  upsertQueryQuotationDraft,
+  useCrmQueries,
+} from "@/lib/crm/store";
+import { finalizeQuotationVersion } from "@/lib/crm/crm-remote";
+import { useAccessProfile } from "@/lib/crm/access";
 
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
@@ -140,7 +148,8 @@ import { Step13 } from "@/components/quotation/steps/StepGuide";
 import { Step14 } from "@/components/quotation/steps/StepMisc";
 import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
-import { Step17 } from "@/components/quotation/steps/StepFinal";
+import { CustomerQuotationPreview } from "@/components/quotation/CustomerQuotationPreview";
+import { QuotationReviewRequestDialog } from "@/components/quotation/QuotationReviewRequestDialog";
 
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
 import { MarkupGstSettings } from "@/components/quotation/MarkupGstSettings";
@@ -181,8 +190,7 @@ const STEPS: { n: number; label: string; subs?: string[] }[] = [
   },
   { n: 8, label: "Accommodation Part", subs: ["Hotels", "Meals"] },
   { n: 9, label: "Costing" },
-  { n: 10, label: "Optional Supplements" },
-  { n: 11, label: "Final Review" },
+  { n: 10, label: "Preview & Save" },
 ];
 
 const FLOW_GROUPS = [
@@ -208,8 +216,8 @@ const FLOW_GROUPS = [
   },
   {
     label: "Review & Generate",
-    description: "Costing, supplements and controlled generation",
-    steps: [9, 10, 11],
+    description: "Internal costing and customer-facing preview",
+    steps: [9, 10],
   },
 ] as const;
 
@@ -466,6 +474,7 @@ function WizardPage() {
   const draft = useDraft();
   const dbData = useDB();
   const user = useAuth();
+  const access = useAccessProfile();
   const search = Route.useSearch();
 
   const [showBanner, setShowBanner] = useState(false);
@@ -473,6 +482,7 @@ function WizardPage() {
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [sub, setSub] = useState(0);
   const scope = getQuotationScope(draft?.query_for, draft?.commercial_mode);
@@ -505,6 +515,25 @@ function WizardPage() {
       activeDraftRecord.wizard_state.commercial_mode,
     ).queryFor !== scope.queryFor,
   );
+  const previewQuote = useMemo(() => {
+    if (!draft || !access.employee) return null;
+    try {
+      return buildSavedQuoteFromDraft(
+        draft,
+        dbData,
+        access.employee.name,
+        {
+          employeeId: access.employee.id,
+          authUserId: access.employee.auth_user_id,
+          name: access.employee.name,
+          role: access.employee.role,
+        },
+        { preview: true },
+      );
+    } catch {
+      return null;
+    }
+  }, [draft, dbData, access.employee]);
 
   useEffect(() => {
     if (!draft) return;
@@ -599,6 +628,15 @@ function WizardPage() {
         setInitialized(true);
         return;
       }
+      const cloudDraft = getQueryQuotationDraft(search.id);
+      if (cloudDraft) {
+        const synced = syncLinkedQueryPaxRange(cloudDraft.draft_data);
+        writeDraft(synced);
+        upsertDraft(synced, cloudDraft.id, cloudDraft.draft_name);
+        setCurrentDraftId(cloudDraft.id);
+        setInitialized(true);
+        return;
+      }
     }
     const existing = draft || loadDraft();
     if (existing) {
@@ -640,9 +678,30 @@ function WizardPage() {
       const state = draft.step === step ? draft : { ...draft, step };
       const id = upsertDraft(state, currentDraftId ?? undefined);
       if (!currentDraftId) setCurrentDraftId(id);
+      const employee = access.employee;
+      if (state.linked_query_id && employee) {
+        const existing = getQueryQuotationDraft(id);
+        upsertQueryQuotationDraft(state.linked_query_id, {
+          id,
+          lineage_id: existing?.lineage_id,
+          based_on_version_id: state.revision_of_quote_id,
+          based_on_version_number: state.intended_version
+            ? Math.max(1, state.intended_version - 1)
+            : undefined,
+          draft_name: existing?.draft_name || state.program_name || "Quotation draft",
+          draft_data: state,
+          created_by_employee_id: existing?.created_by_employee_id || employee.id,
+          created_by_name: existing?.created_by_name || employee.name,
+          created_by_role: existing?.created_by_role || employee.role,
+          last_edited_by_employee_id: employee.id,
+          last_edited_by_name: employee.name,
+          last_edited_by_role: employee.role,
+          created_at: existing?.created_at,
+        });
+      }
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [draft, initialized, currentDraftId, step]);
+  }, [draft, initialized, currentDraftId, step, access.employee]);
 
   if (!draft) {
     return (
@@ -672,6 +731,28 @@ function WizardPage() {
   const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
     const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
     if (!currentDraftId) setCurrentDraftId(id);
+    const employee = access.employee;
+    if (nextState.linked_query_id && employee) {
+      const existing = getQueryQuotationDraft(id);
+      upsertQueryQuotationDraft(nextState.linked_query_id, {
+        id,
+        lineage_id: existing?.lineage_id,
+        based_on_version_id: nextState.revision_of_quote_id,
+        based_on_version_number: nextState.intended_version
+          ? Math.max(1, nextState.intended_version - 1)
+          : undefined,
+        draft_name:
+          opts?.name || existing?.draft_name || nextState.program_name || "Quotation draft",
+        draft_data: nextState,
+        created_by_employee_id: existing?.created_by_employee_id || employee.id,
+        created_by_name: existing?.created_by_name || employee.name,
+        created_by_role: existing?.created_by_role || employee.role,
+        last_edited_by_employee_id: employee.id,
+        last_edited_by_name: employee.name,
+        last_edited_by_role: employee.role,
+        created_at: existing?.created_at,
+      });
+    }
     if (!opts?.silent) {
       addNotification({
         kind: "info",
@@ -698,20 +779,27 @@ function WizardPage() {
       const preparedDraft = getQuotationScope(latest.query_for, latest.commercial_mode).program
         ? ensureProgramInMaster(latest, dbData, user?.name || "Unknown")
         : latest;
-      const quote = buildSavedQuoteFromDraft(preparedDraft, dbData, user?.name || "Unknown");
-      persistQuote(quote);
+      const employee = access.employee;
+      if (!employee)
+        throw new Error("An active linked CRM employee is required to save a quotation.");
+      let quote = buildSavedQuoteFromDraft(preparedDraft, dbData, employee.name, {
+        employeeId: employee.id,
+        authUserId: employee.auth_user_id,
+        name: employee.name,
+        role: employee.role,
+      });
       if (preparedDraft.linked_query_id) {
-        saveQueryCosting(preparedDraft.linked_query_id, quote, undefined, user?.name || "Unknown");
-        try {
-          await pushCrmSnapshotNow();
-        } catch (error) {
-          console.error("Linked costing remote sync failed", error);
-          toast.warning(
-            "The immutable quote and its Query link were saved locally; remote sync is pending.",
-          );
-        }
+        const version = await finalizeQuotationVersion(
+          preparedDraft.linked_query_id,
+          quote,
+          currentDraftId ?? undefined,
+        );
+        quote = version.quote;
       }
+      persistQuote(quote);
       if (currentDraftId) deleteDraft(currentDraftId);
+      if (preparedDraft.linked_query_id && currentDraftId)
+        removeQueryQuotationDraft(preparedDraft.linked_query_id, currentDraftId);
       setCurrentDraftId(null);
       clearDraft();
       setActiveWizard(null);
@@ -956,15 +1044,25 @@ function WizardPage() {
                 </div>
               </div>
               <div className="p-4 sm:p-6">
-                <StepContent draft={draft} set={set} step={step} sub={sub} setSub={setSub} />
-                {step === 10 && (
-                  <FinalizationPanel
-                    draft={draft}
-                    db={dbData}
-                    isFinalizing={isFinalizing}
-                    onFinalize={finalizeQuote}
-                  />
-                )}
+                <StepContent
+                  draft={draft}
+                  set={set}
+                  step={step}
+                  sub={sub}
+                  setSub={setSub}
+                  previewQuote={previewQuote}
+                  canFinalize={validateQuoteForFinalization(draft, dbData).canFinalize}
+                  isFinalizing={isFinalizing}
+                  onFinalize={finalizeQuote}
+                  onSaveDraft={() => {
+                    persistToDrafts(draft, { silent: true });
+                    toast.success("Draft saved successfully.");
+                  }}
+                  onRequestReview={() => {
+                    const id = persistToDrafts(draft, { silent: true });
+                    setReviewDraft(getDraft(id));
+                  }}
+                />
               </div>
             </Card>
 
@@ -1000,6 +1098,13 @@ function WizardPage() {
         quote={savedQuote}
         open={!!savedQuote}
         onClose={() => setSavedQuote(null)}
+      />
+      <QuotationReviewRequestDialog
+        draft={reviewDraft}
+        open={Boolean(reviewDraft)}
+        onOpenChange={(next) => {
+          if (!next) setReviewDraft(null);
+        }}
       />
     </div>
   );
@@ -1267,12 +1372,24 @@ function StepContent({
   step,
   sub,
   setSub,
+  previewQuote,
+  canFinalize,
+  isFinalizing,
+  onFinalize,
+  onSaveDraft,
+  onRequestReview,
 }: {
   draft: QuoteDraft;
   set: (p: Partial<QuoteDraft>) => void;
   step: number;
   sub: number;
   setSub: (n: number) => void;
+  previewQuote: SavedQuote | null;
+  canFinalize: boolean;
+  isFinalizing: boolean;
+  onFinalize: () => void | Promise<void>;
+  onSaveDraft: () => void;
+  onRequestReview: () => void;
 }) {
   const def = STEPS[step - 1];
   const subs = def?.subs;
@@ -1315,9 +1432,22 @@ function StepContent({
       case 9:
         return <Step16 draft={draft} set={set} />; // Costing
       case 10:
-        return <Step18 draft={draft} set={set} />; // Optional supplements
-      case 11:
-        return <Step17 draft={draft} set={set} />; // Internal final review
+        return previewQuote ? (
+          <CustomerQuotationPreview
+            draft={draft}
+            quote={previewQuote}
+            isFinalizing={isFinalizing}
+            canFinalize={canFinalize}
+            version={draft.intended_version || 1}
+            onSaveDraft={onSaveDraft}
+            onFinalize={onFinalize}
+            onRequestReview={onRequestReview}
+          />
+        ) : (
+          <Card className="p-5 text-sm text-muted-foreground">
+            Complete the selected costing inputs in Step 9 to generate the quotation preview.
+          </Card>
+        );
       default:
         return null;
     }

@@ -15,9 +15,12 @@ import type {
   ReviewPriority,
   ReviewStatus,
   QueryReviewAssignment,
+  QueryQuotationDraft,
+  StandaloneQuotationReviewAssignment,
   Stage,
 } from "./types";
 import { LIFECYCLE } from "./types";
+import { quoteContentHash } from "@/lib/quotes-store";
 import {
   IMPORTED_QUERIES,
   IMPORTED_QUERY_EVENTS,
@@ -30,6 +33,7 @@ const TASK_KEY = "mp_crm_tasks_v2";
 const EMP_KEY = "mp_crm_employees_v3";
 const EMPLOYEE_CACHE_VERSION_KEY = "mp_crm_employee_cache_version";
 const EVENT_KEY = "mp_crm_events_v2";
+const STANDALONE_REVIEW_KEY = "mp_crm_standalone_quotation_reviews_v1";
 const DATASET_KEY = "mp_crm_query_dataset_revision";
 const LEGACY_QUERY_KEY = "mp_tourism_queries";
 const isBrowser = () => typeof window !== "undefined";
@@ -110,7 +114,84 @@ let queries: CrmQuery[] = [];
 let tasks: CrmTask[] = [];
 let employees: Employee[] = [];
 let events: CrmEvent[] = [];
+let standaloneQuotationReviews: StandaloneQuotationReviewAssignment[] = [];
 let inited = false;
+let storageSizesLogged = false;
+
+function isQuotaExceeded(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+  );
+}
+
+function safeSetStorage(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    const approximateBytes = value.length * 2;
+    if (isQuotaExceeded(error)) {
+      console.error("[crm] local cache quota exceeded", { key, approximateBytes, error });
+      return false;
+    }
+    // CRM state is cloud-authoritative. A browser cache failure must remain
+    // visible for diagnosis, but must never prevent in-memory hydration.
+    console.error("[crm] local cache write failed", { key, approximateBytes, error });
+    return false;
+  }
+}
+
+function compactTasksForCache(records: CrmTask[]): CrmTask[] {
+  const ordered = [
+    ...records.filter((task) => !task.query_id),
+    ...records.filter((task) => task.query_id && !task.done),
+    ...records.filter((task) => task.query_id && task.done),
+  ];
+  const unique = new Map<string, CrmTask>();
+  for (const task of ordered) {
+    if (unique.has(task.id)) continue;
+    unique.set(task.id, {
+      id: task.id,
+      title: task.title,
+      query_id: task.query_id,
+      due_at: task.due_at,
+      owner: task.owner,
+      done: task.done,
+      priority: task.priority,
+      category: task.category,
+      assigned_by: task.assigned_by,
+      assigned_at: task.assigned_at,
+      completed_at: task.completed_at,
+      closed_reason: task.closed_reason,
+    });
+    if (unique.size >= 250) break;
+  }
+  return [...unique.values()];
+}
+
+function logLocalStorageSizes() {
+  if (!import.meta.env.DEV || storageSizesLogged || !isBrowser()) return;
+  storageSizesLogged = true;
+  const keys = [
+    TASK_KEY,
+    KEY,
+    EVENT_KEY,
+    EMP_KEY,
+    STANDALONE_REVIEW_KEY,
+    "mp_tourism_drafts",
+    "mp_tourism_draft_quote",
+    "mp_tourism_quotes",
+  ];
+  console.info(
+    "[crm] local storage sizes",
+    keys.map((key) => {
+      const value = localStorage.getItem(key) || "";
+      const bytes = value.length * 2;
+      return { key, bytes, kb: Number((bytes / 1024).toFixed(1)) };
+    }),
+  );
+}
 
 function parse<T>(raw: string | null): T[] {
   if (!raw) return [];
@@ -129,9 +210,21 @@ function clone<T>(value: T): T {
 function load() {
   inited = true;
   if (!isBrowser()) return;
+  logLocalStorageSizes();
   const storedQueries = parse<CrmQuery>(localStorage.getItem(KEY));
   const storedTasks = parse<CrmTask>(localStorage.getItem(TASK_KEY));
+  const compactStoredTasks = compactTasksForCache(storedTasks);
+  const compactStoredTaskJson = JSON.stringify(compactStoredTasks);
+  const existingStoredTaskJson = localStorage.getItem(TASK_KEY) || "[]";
+  if (compactStoredTaskJson.length < existingStoredTaskJson.length) {
+    // crm_tasks is authoritative in Supabase. Retain a small startup projection
+    // while dropping repeated progress history from this regenerable cache only.
+    safeSetStorage(TASK_KEY, compactStoredTaskJson);
+  }
   const storedEvents = parse<CrmEvent>(localStorage.getItem(EVENT_KEY));
+  standaloneQuotationReviews = parse<StandaloneQuotationReviewAssignment>(
+    localStorage.getItem(STANDALONE_REVIEW_KEY),
+  );
   migrateEmployeeCache();
   // Never trust browser employee identities for authorization, even on reload.
   employees = [];
@@ -143,10 +236,10 @@ function load() {
     queries = clone(IMPORTED_QUERIES).map(normalizeQuery);
     tasks = [...clone(IMPORTED_QUERY_TASKS), ...storedTasks.filter((task) => !task.query_id)];
     events = [...clone(IMPORTED_QUERY_EVENTS), ...storedEvents.filter((event) => !event.query_id)];
-    localStorage.setItem(KEY, JSON.stringify(queries));
-    localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
-    localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
-    localStorage.setItem(DATASET_KEY, QUERY_TRACKER_DATASET_ID);
+    safeSetStorage(KEY, JSON.stringify(queries));
+    safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
+    safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+    safeSetStorage(DATASET_KEY, QUERY_TRACKER_DATASET_ID);
     localStorage.removeItem(LEGACY_QUERY_KEY);
     return;
   }
@@ -164,11 +257,12 @@ export interface CrmSnapshot {
   tasks: CrmTask[];
   employees: Employee[];
   events: CrmEvent[];
+  standaloneQuotationReviews: StandaloneQuotationReviewAssignment[];
 }
 
 export function getCrmSnapshot(): CrmSnapshot {
   if (!inited) load();
-  return { queries, tasks, employees, events };
+  return { queries, tasks, employees, events, standaloneQuotationReviews };
 }
 
 export function migrateEmployeeCache() {
@@ -177,7 +271,7 @@ export function migrateEmployeeCache() {
     localStorage.removeItem("mp_crm_employees_v2");
     localStorage.removeItem("mp_crm_employee_roster_revision");
     localStorage.removeItem(EMP_KEY);
-    localStorage.setItem(EMPLOYEE_CACHE_VERSION_KEY, "3");
+    safeSetStorage(EMPLOYEE_CACHE_VERSION_KEY, "3");
   }
 }
 
@@ -186,7 +280,7 @@ export function replaceEmployeesFromCloud(records: Employee[]) {
   if (!inited) load();
   migrateEmployeeCache();
   employees = records;
-  if (isBrowser()) localStorage.setItem(EMP_KEY, JSON.stringify(employees));
+  if (isBrowser()) safeSetStorage(EMP_KEY, JSON.stringify(employees));
   emit();
 }
 
@@ -197,13 +291,17 @@ export function hydrateCrm(snapshot: CrmSnapshot) {
   tasks = snapshot.tasks;
   employees = snapshot.employees;
   events = snapshot.events;
-  if (isBrowser()) {
-    localStorage.setItem(KEY, JSON.stringify(queries));
-    localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
-    localStorage.setItem(EMP_KEY, JSON.stringify(employees));
-    localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
-  }
+  standaloneQuotationReviews = snapshot.standaloneQuotationReviews || [];
+  // Publish authoritative in-memory state before attempting the optional
+  // browser cache, so storage pressure cannot starve employee/reviewer hooks.
   emit();
+  if (isBrowser()) {
+    safeSetStorage(KEY, JSON.stringify(queries));
+    safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
+    safeSetStorage(EMP_KEY, JSON.stringify(employees));
+    safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+    safeSetStorage(STANDALONE_REVIEW_KEY, JSON.stringify(standaloneQuotationReviews));
+  }
 }
 
 export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
@@ -213,10 +311,11 @@ export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
 
 function persist() {
   if (!isBrowser()) return;
-  localStorage.setItem(KEY, JSON.stringify(queries));
-  localStorage.setItem(TASK_KEY, JSON.stringify(tasks));
-  localStorage.setItem(EMP_KEY, JSON.stringify(employees));
-  localStorage.setItem(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+  safeSetStorage(KEY, JSON.stringify(queries));
+  safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
+  safeSetStorage(EMP_KEY, JSON.stringify(employees));
+  safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
+  safeSetStorage(STANDALONE_REVIEW_KEY, JSON.stringify(standaloneQuotationReviews));
   emit();
   const snapshot = getCrmSnapshot();
   persistListeners.forEach((listener) => listener(snapshot));
@@ -240,6 +339,64 @@ export function listCrmEvents(): CrmEvent[] {
 }
 export function getCrmQuery(queryId: string): CrmQuery | undefined {
   return listCrmQueries().find((q) => q.query_id === queryId || q.id === queryId);
+}
+
+/** Replace one cloud-confirmed Query without scheduling a stale whole-store overwrite. */
+export function replaceQueryFromCloud(record: CrmQuery) {
+  if (!inited) load();
+  const normalized = normalizeQuery(record);
+  queries = queries.map((query) => (query.id === normalized.id ? normalized : query));
+  if (!queries.some((query) => query.id === normalized.id)) queries.push(normalized);
+  if (isBrowser()) safeSetStorage(KEY, JSON.stringify(queries));
+  emit();
+}
+
+export function getQueryQuotationDraft(draftId: string): QueryQuotationDraft | undefined {
+  return listCrmQueries()
+    .flatMap((query) => query.quotation_drafts ?? [])
+    .find((draft) => draft.id === draftId);
+}
+
+export function upsertQueryQuotationDraft(
+  queryId: string,
+  input: Omit<QueryQuotationDraft, "query_id" | "created_at" | "updated_at"> & {
+    created_at?: string;
+    updated_at?: string;
+  },
+) {
+  if (!inited) load();
+  const now = new Date().toISOString();
+  queries = queries.map((query) => {
+    if (query.query_id !== queryId && query.id !== queryId) return query;
+    const drafts = query.quotation_drafts ?? [];
+    const existing = drafts.find((draft) => draft.id === input.id);
+    const next: QueryQuotationDraft = {
+      ...input,
+      query_id: query.query_id,
+      created_at: input.created_at || existing?.created_at || now,
+      updated_at: input.updated_at || now,
+    };
+    return {
+      ...query,
+      quotation_drafts: existing
+        ? drafts.map((draft) => (draft.id === next.id ? next : draft))
+        : [next, ...drafts],
+    };
+  });
+  persist();
+}
+
+export function removeQueryQuotationDraft(queryId: string, draftId: string) {
+  if (!inited) load();
+  queries = queries.map((query) =>
+    query.query_id === queryId || query.id === queryId
+      ? {
+          ...query,
+          quotation_drafts: (query.quotation_drafts ?? []).filter((draft) => draft.id !== draftId),
+        }
+      : query,
+  );
+  persist();
 }
 
 // ---- activity log ----------------------------------------------------------
@@ -798,6 +955,280 @@ export function requestQuotationReview(
   });
   persist();
   return assignment;
+}
+
+export function requestDraftQuotationReview(
+  queryId: string,
+  input: {
+    draftId: string;
+    snapshot: import("@/lib/quotes-store").SavedQuote;
+    reviewerEmployeeId: string;
+    requestedByEmployeeId: string;
+    instructions: string;
+    priority?: ReviewPriority;
+    dueAt?: string;
+  },
+) {
+  if (!input.instructions.trim()) throw new Error("Review instructions are required.");
+  const query = getCrmQuery(queryId);
+  if (!query) throw new Error("Query not found.");
+  const draft = query.quotation_drafts?.find((item) => item.id === input.draftId);
+  if (!draft) throw new Error("Draft not found in the shared Query workspace.");
+  const requester = employees.find((employee) => employee.id === input.requestedByEmployeeId);
+  const reviewer = employees.find((employee) => employee.id === input.reviewerEmployeeId);
+  if (!requester) throw new Error("The requesting CRM employee could not be resolved.");
+  if (
+    !reviewer ||
+    !reviewer.active ||
+    reviewer.account_status !== "Active" ||
+    reviewer.employee_status === "Exited" ||
+    reviewer.department !== "Sales"
+  ) {
+    throw new Error("The selected reviewer is not an active eligible CRM employee.");
+  }
+  const eligibleRoles =
+    requester.role === "Sales Executive"
+      ? ["Senior Sales Executive", "Sales Manager"]
+      : requester.role === "Senior Sales Executive"
+        ? ["Senior Sales Executive", "Sales Manager"]
+        : requester.role === "Sales Manager"
+          ? ["Senior Sales Executive", "Sales Manager"]
+          : ["Sales Executive", "Senior Sales Executive", "Sales Manager"];
+  if (
+    reviewer.id === requester.id ||
+    !eligibleRoles.includes(reviewer.role) ||
+    (requester.unit?.trim() &&
+      reviewer.unit?.trim() &&
+      requester.unit.trim().toLowerCase() !== reviewer.unit.trim().toLowerCase())
+  ) {
+    throw new Error("The selected reviewer is outside the authorized review scope.");
+  }
+  const now = iso(new Date());
+  const revision =
+    (query.review_support?.query_reviews ?? []).filter(
+      (review) => review.source_type === "draft" && review.draft_id === input.draftId,
+    ).length + 1;
+  const snapshotHash = input.snapshot.content_hash || quoteContentHash(input.snapshot);
+  input.snapshot.content_hash = snapshotHash;
+  const duplicate = (query.review_support?.query_reviews ?? []).some(
+    (review) =>
+      review.source_type === "draft" &&
+      review.draft_id === input.draftId &&
+      review.draft_snapshot_hash === snapshotHash &&
+      !["Approved", "Returned", "Cancelled"].includes(review.status),
+  );
+  if (duplicate) throw new Error("Review is already pending for this exact draft snapshot.");
+  const snapshot: import("./types").CostingVersion = {
+    version: 0,
+    saved_at: now,
+    saved_by: input.snapshot.prepared_by_name || input.snapshot.saved_by,
+    prepared_by_employee_id: input.snapshot.prepared_by_employee_id,
+    prepared_by_auth_user_id: input.snapshot.prepared_by_auth_user_id,
+    prepared_by_name: input.snapshot.prepared_by_name,
+    prepared_by_role: input.snapshot.prepared_by_role,
+    quote: JSON.parse(JSON.stringify(input.snapshot)),
+  };
+  const assignment: QueryReviewAssignment = {
+    id: `qdr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    reviewer_employee_id: input.reviewerEmployeeId,
+    requested_by_employee_id: input.requestedByEmployeeId,
+    requested_at: now,
+    created_at: now,
+    instructions: input.instructions.trim(),
+    priority: input.priority || "Normal",
+    due_at: input.dueAt,
+    status: "Requested",
+    checklist: [],
+    source_type: "draft",
+    draft_id: input.draftId,
+    draft_snapshot_revision: revision,
+    draft_snapshot_hash: snapshotHash,
+    draft_updated_at: draft.updated_at,
+    quotation_lineage_id: draft.lineage_id || input.snapshot.family_id,
+    quotation_snapshot: snapshot,
+  };
+  queries = queries.map((item) =>
+    item.id === query.id
+      ? {
+          ...item,
+          review_support: {
+            ...(item.review_support || {}),
+            query_reviews: [...(item.review_support?.query_reviews || []), assignment],
+          },
+          quotation_drafts: (item.quotation_drafts ?? []).map((record) =>
+            record.id === input.draftId
+              ? {
+                  ...record,
+                  latest_review_snapshot_at: now,
+                  latest_review_snapshot_hash: snapshotHash,
+                }
+              : record,
+          ),
+        }
+      : item,
+  );
+  logWorkflowEvent({
+    type: "note_added",
+    by: input.requestedByEmployeeId,
+    at: now,
+    title: `Draft review snapshot R${revision} requested`,
+    detail: input.instructions.trim(),
+    query_id: query.query_id,
+    lead_id: query.lead_id,
+  });
+  persist();
+  return assignment;
+}
+
+export function requestStandaloneQuotationReview(input: {
+  draftId: string;
+  draftName: string;
+  draftUpdatedAt: string;
+  snapshot: import("@/lib/quotes-store").SavedQuote;
+  reviewerEmployeeId: string;
+  requestedByEmployeeId: string;
+  instructions: string;
+  priority?: ReviewPriority;
+  dueAt?: string;
+  deferCloudSync?: boolean;
+}) {
+  if (!input.instructions.trim()) throw new Error("Review instructions are required.");
+  const requester = employees.find((employee) => employee.id === input.requestedByEmployeeId);
+  const reviewer = employees.find((employee) => employee.id === input.reviewerEmployeeId);
+  if (!requester || !reviewer) throw new Error("The CRM employee record could not be resolved.");
+  const roles =
+    requester.role === "Sales Executive"
+      ? ["Senior Sales Executive", "Sales Manager"]
+      : requester.role === "Senior Sales Executive"
+        ? ["Senior Sales Executive", "Sales Manager"]
+        : requester.role === "Sales Manager"
+          ? ["Senior Sales Executive", "Sales Manager"]
+          : ["Sales Executive", "Senior Sales Executive", "Sales Manager"];
+  if (
+    reviewer.id === requester.id ||
+    !reviewer.active ||
+    reviewer.account_status !== "Active" ||
+    reviewer.employee_status === "Exited" ||
+    reviewer.department !== "Sales" ||
+    !roles.includes(reviewer.role) ||
+    (requester.unit?.trim() &&
+      reviewer.unit?.trim() &&
+      requester.unit.trim().toLowerCase() !== reviewer.unit.trim().toLowerCase())
+  ) {
+    throw new Error("The selected reviewer is not an active eligible CRM employee.");
+  }
+  const now = iso(new Date());
+  const hash = input.snapshot.content_hash || quoteContentHash(input.snapshot);
+  if (
+    standaloneQuotationReviews.some(
+      (review) =>
+        review.draft_id === input.draftId &&
+        review.draft_snapshot_hash === hash &&
+        !["Approved", "Returned", "Cancelled"].includes(review.status),
+    )
+  ) {
+    throw new Error("Review is already pending for this exact draft snapshot.");
+  }
+  input.snapshot.content_hash = hash;
+  const revision =
+    standaloneQuotationReviews.filter((review) => review.draft_id === input.draftId).length + 1;
+  const assignment: StandaloneQuotationReviewAssignment = {
+    id: `sqr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    source_type: "standalone_draft",
+    query_id: null,
+    draft_id: input.draftId,
+    draft_name: input.draftName,
+    created_by_employee_id: input.snapshot.prepared_by_employee_id || requester.id,
+    reviewer_employee_id: reviewer.id,
+    assigned_to_employee_id: reviewer.id,
+    requested_by_employee_id: requester.id,
+    requested_at: now,
+    created_at: now,
+    due_at: input.dueAt,
+    instructions: input.instructions.trim(),
+    priority: input.priority || "Normal",
+    status: "Requested",
+    checklist: [],
+    draft_snapshot_revision: revision,
+    draft_snapshot_hash: hash,
+    draft_updated_at: input.draftUpdatedAt,
+    quotation_lineage_id: input.snapshot.family_id,
+    quotation_snapshot: {
+      version: 0,
+      saved_at: now,
+      saved_by: input.snapshot.prepared_by_name || input.snapshot.saved_by,
+      prepared_by_employee_id: input.snapshot.prepared_by_employee_id,
+      prepared_by_auth_user_id: input.snapshot.prepared_by_auth_user_id,
+      prepared_by_name: input.snapshot.prepared_by_name,
+      prepared_by_role: input.snapshot.prepared_by_role,
+      quote: clone(input.snapshot),
+    },
+  };
+  standaloneQuotationReviews = [...standaloneQuotationReviews, assignment];
+  if (input.deferCloudSync) {
+    if (isBrowser())
+      safeSetStorage(STANDALONE_REVIEW_KEY, JSON.stringify(standaloneQuotationReviews));
+    emit();
+  } else {
+    persist();
+  }
+  return assignment;
+}
+
+export function setStandaloneQuotationReviewStatus(
+  assignmentId: string,
+  status: ReviewStatus,
+  by: string,
+  note?: string,
+) {
+  if (status === "Returned" && !note?.trim())
+    throw new Error("Correction instructions are required.");
+  const now = iso(new Date());
+  standaloneQuotationReviews = standaloneQuotationReviews.map((review) =>
+    review.id === assignmentId
+      ? {
+          ...review,
+          status,
+          started_at: status === "In Review" ? review.started_at || now : review.started_at,
+          completed_at: ["Approved", "Returned", "Cancelled"].includes(status) ? now : undefined,
+          decision_note: note?.trim() || review.decision_note,
+          decided_at: ["Approved", "Returned"].includes(status) ? now : review.decided_at,
+          review_notes: note?.trim() || review.review_notes,
+        }
+      : review,
+  );
+  void by;
+  persist();
+}
+
+export function replaceStandaloneQuotationReviewsFromCloud(
+  records: StandaloneQuotationReviewAssignment[],
+) {
+  if (!inited) load();
+  standaloneQuotationReviews = records;
+  if (isBrowser()) safeSetStorage(STANDALONE_REVIEW_KEY, JSON.stringify(records));
+  emit();
+}
+
+export function upsertStandaloneQuotationReviewFromCloud(
+  record: StandaloneQuotationReviewAssignment,
+) {
+  if (!inited) load();
+  standaloneQuotationReviews = [
+    ...standaloneQuotationReviews.filter((review) => review.id !== record.id),
+    record,
+  ];
+  if (isBrowser())
+    safeSetStorage(STANDALONE_REVIEW_KEY, JSON.stringify(standaloneQuotationReviews));
+  emit();
+}
+
+export function removeStandaloneQuotationReviewFromLocal(assignmentId: string) {
+  if (!inited) load();
+  standaloneQuotationReviews = standaloneQuotationReviews.filter(
+    (review) => review.id !== assignmentId,
+  );
+  persist();
 }
 
 export function setAssistanceStatus(
@@ -2012,6 +2443,16 @@ export function useCrmEvents(): CrmEvent[] {
     () => {
       if (!inited) load();
       return events;
+    },
+    () => EMPTY,
+  );
+}
+export function useStandaloneQuotationReviews(): StandaloneQuotationReviewAssignment[] {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!inited) load();
+      return standaloneQuotationReviews;
     },
     () => EMPTY,
   );

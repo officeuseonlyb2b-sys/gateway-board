@@ -25,7 +25,10 @@ export function completedStepForScope(record: DraftRecord | null, state: QuoteDr
   );
   const currentScope = getQuotationScope(state.query_for, state.commercial_mode);
   if (previousScope.queryFor === currentScope.queryFor)
-    return Math.max(record.last_step, state.step);
+    return Math.min(
+      Math.max(record.last_step, state.step),
+      currentScope.workflowSteps[currentScope.workflowSteps.length - 1] ?? state.step,
+    );
 
   let commonPrefixLength = 0;
   while (

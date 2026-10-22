@@ -186,8 +186,32 @@ export interface CostingVersion {
   version: number;
   saved_at: string;
   saved_by: string;
+  prepared_by_employee_id?: string;
+  prepared_by_auth_user_id?: string;
+  prepared_by_name?: string;
+  prepared_by_role?: string;
   draft_id?: string;
   quote: import("@/lib/quotes-store").SavedQuote;
+}
+
+export interface QueryQuotationDraft {
+  id: string;
+  lineage_id?: string;
+  query_id: string;
+  based_on_version_id?: string;
+  based_on_version_number?: number;
+  draft_name: string;
+  draft_data: import("@/lib/wizard/types").QuoteDraft;
+  created_by_employee_id: string;
+  created_by_name: string;
+  created_by_role: string;
+  last_edited_by_employee_id: string;
+  last_edited_by_name: string;
+  last_edited_by_role: string;
+  created_at: string;
+  updated_at: string;
+  latest_review_snapshot_at?: string;
+  latest_review_snapshot_hash?: string;
 }
 
 export type ReviewStatus =
@@ -231,6 +255,24 @@ export interface QueryReviewAssignment {
   decision_note?: string;
   decided_at?: string;
   cancelled_reason?: string;
+  /** Draft quotation reviews use a frozen snapshot without consuming official V1. */
+  source_type?: "query" | "draft" | "standalone_draft";
+  draft_id?: string;
+  draft_snapshot_revision?: number;
+  draft_snapshot_hash?: string;
+  draft_updated_at?: string;
+  quotation_lineage_id?: string;
+  quotation_snapshot?: CostingVersion;
+}
+
+export interface StandaloneQuotationReviewAssignment extends QueryReviewAssignment {
+  source_type: "standalone_draft";
+  query_id: null;
+  assigned_to_employee_id: string;
+  draft_id: string;
+  draft_name: string;
+  created_by_employee_id: string;
+  quotation_snapshot: CostingVersion;
 }
 export interface QuotationReviewAssignment extends QueryReviewAssignment {
   quotation_id: string;
@@ -349,6 +391,7 @@ export interface CrmQuery {
   activities: ActivityItem[];
   commercials: Commercials;
   costing_versions?: CostingVersion[];
+  quotation_drafts?: QueryQuotationDraft[];
 
   /** Pricing audience used when a linked quotation is pre-filled. */
   traveler_type?: "indian" | "foreign" | "student";
