@@ -87,7 +87,10 @@ export function updateMealSelection(
 
 export function StepMeals({ draft, set }: StepProps) {
   const db = useDB();
-  const options = draft.hotel_options.filter((option) => option.selections.length > 0);
+  const landMealsOnly = draft.query_for === "Land Part + Meals";
+  const options = landMealsOnly
+    ? [{ key: "A" as const, label: "Land + Meals", selections: [] }]
+    : draft.hotel_options.filter((option) => option.selections.length > 0);
   const [activeKey, setActiveKey] = useState<OptionKey>(options[0]?.key ?? "A");
   const option = options.find((item) => item.key === activeKey) ?? options[0];
   const optionKey = option?.key ?? "A";
@@ -147,7 +150,7 @@ export function StepMeals({ draft, set }: StepProps) {
     );
 
   const priced = days.flatMap(({ day, date, cityIds }) => {
-    const stay = day.overnight ? hotelSelectionForDay(option, day) : undefined;
+    const stay = !landMealsOnly && day.overnight ? hotelSelectionForDay(option, day) : undefined;
     const covered = mealPlanCoverage(stay?.meal_plan);
     return (["lunch", "dinner"] as const).map((meal) => {
       const selected = selectedFor(day.day, meal, cityIds);
@@ -381,7 +384,8 @@ export function StepMeals({ draft, set }: StepProps) {
             </thead>
             <tbody>
               {days.map(({ day, date, cityIds, route }) => {
-                const stay = day.overnight ? hotelSelectionForDay(option, day) : undefined;
+                const stay =
+                  !landMealsOnly && day.overnight ? hotelSelectionForDay(option, day) : undefined;
                 const coverage = mealPlanCoverage(stay?.meal_plan);
                 const lunchChoice = selectedFor(day.day, "lunch", cityIds).choice;
                 const dinnerChoice = selectedFor(day.day, "dinner", cityIds).choice;

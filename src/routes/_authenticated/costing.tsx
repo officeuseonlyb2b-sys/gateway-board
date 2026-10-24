@@ -54,7 +54,14 @@ import {
   type GuideLanguage,
 } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
-import { useDraft, writeDraft, clearDraft, initDraft, loadDraft } from "@/lib/wizard/store";
+import {
+  useDraft,
+  writeDraft,
+  clearDraft,
+  initDraft,
+  loadDraft,
+  flushDraftPersistence,
+} from "@/lib/wizard/store";
 import {
   upsertDraft,
   getDraft,
@@ -485,10 +492,17 @@ function WizardPage() {
   const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [sub, setSub] = useState(0);
-  const scope = getQuotationScope(draft?.query_for, draft?.commercial_mode);
+  const scope = useMemo(
+    () => getQuotationScope(draft?.query_for, draft?.commercial_mode),
+    [draft?.query_for, draft?.commercial_mode],
+  );
   const workflowSteps = scope.workflowSteps;
   const workflowStepSet = new Set<number>(workflowSteps);
-  const visibleSteps = workflowSteps.map((stepNumber) => STEPS[stepNumber - 1]);
+  const visibleSteps = workflowSteps.map((stepNumber) =>
+    stepNumber === 8 && scope.mealsPart && !scope.accommodationPart
+      ? { n: 8, label: "Meals", subs: undefined }
+      : STEPS[stepNumber - 1],
+  );
   const visibleFlowGroups = FLOW_GROUPS.map((group) => ({
     ...group,
     label: !scope.program && group.label === "Program & Routing" ? "Routing" : group.label,
@@ -515,25 +529,10 @@ function WizardPage() {
       activeDraftRecord.wizard_state.commercial_mode,
     ).queryFor !== scope.queryFor,
   );
-  const previewQuote = useMemo(() => {
-    if (!draft || !access.employee) return null;
-    try {
-      return buildSavedQuoteFromDraft(
-        draft,
-        dbData,
-        access.employee.name,
-        {
-          employeeId: access.employee.id,
-          authUserId: access.employee.auth_user_id,
-          name: access.employee.name,
-          role: access.employee.role,
-        },
-        { preview: true },
-      );
-    } catch {
-      return null;
-    }
-  }, [draft, dbData, access.employee]);
+  const canFinalize = useMemo(
+    () => (step === 10 && draft ? validateQuoteForFinalization(draft, dbData).canFinalize : false),
+    [step, draft, dbData],
+  );
 
   useEffect(() => {
     if (!draft) return;
@@ -729,6 +728,7 @@ function WizardPage() {
   };
 
   const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
+    flushDraftPersistence();
     const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
     if (!currentDraftId) setCurrentDraftId(id);
     const employee = access.employee;
@@ -766,6 +766,7 @@ function WizardPage() {
   };
 
   const finalizeQuote = async () => {
+    flushDraftPersistence();
     const latest = loadDraft() ?? draft;
     const review = validateQuoteForFinalization(latest, dbData);
     if (review.blockers.length) {
@@ -836,7 +837,10 @@ function WizardPage() {
     }
   };
 
-  const subCount = STEPS[step - 1]?.subs?.length ?? 0;
+  const subCount =
+    step === 8 && scope.mealsPart && !scope.accommodationPart
+      ? 0
+      : (STEPS[step - 1]?.subs?.length ?? 0);
   const goNext = () => {
     if (subCount > 0 && sub < subCount - 1) {
       setSub(sub + 1);
@@ -1050,8 +1054,7 @@ function WizardPage() {
                   step={step}
                   sub={sub}
                   setSub={setSub}
-                  previewQuote={previewQuote}
-                  canFinalize={validateQuoteForFinalization(draft, dbData).canFinalize}
+                  canFinalize={canFinalize}
                   isFinalizing={isFinalizing}
                   onFinalize={finalizeQuote}
                   onSaveDraft={() => {
@@ -1372,7 +1375,6 @@ function StepContent({
   step,
   sub,
   setSub,
-  previewQuote,
   canFinalize,
   isFinalizing,
   onFinalize,
@@ -1384,15 +1386,15 @@ function StepContent({
   step: number;
   sub: number;
   setSub: (n: number) => void;
-  previewQuote: SavedQuote | null;
   canFinalize: boolean;
   isFinalizing: boolean;
   onFinalize: () => void | Promise<void>;
   onSaveDraft: () => void;
   onRequestReview: () => void;
 }) {
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const def = STEPS[step - 1];
-  const subs = def?.subs;
+  const subs = step === 8 && scope.mealsPart && !scope.accommodationPart ? undefined : def?.subs;
 
   const inner = (() => {
     switch (step) {
@@ -1423,8 +1425,10 @@ function StepContent({
             return <Step11 draft={draft} set={set} />; // Activities
         }
       }
-      case 8: // Accommodation Part
-        return sub === 1 ? (
+      case 8: // Accommodation and/or independently selected meals
+        return scope.mealsPart && !scope.accommodationPart ? (
+          <StepMeals draft={draft} set={set} />
+        ) : sub === 1 ? (
           <StepMeals draft={draft} set={set} />
         ) : (
           <Step15 draft={draft} set={set} />
@@ -1432,10 +1436,9 @@ function StepContent({
       case 9:
         return <Step16 draft={draft} set={set} />; // Costing
       case 10:
-        return previewQuote ? (
+        return (
           <CustomerQuotationPreview
             draft={draft}
-            quote={previewQuote}
             isFinalizing={isFinalizing}
             canFinalize={canFinalize}
             version={draft.intended_version || 1}
@@ -1443,10 +1446,6 @@ function StepContent({
             onFinalize={onFinalize}
             onRequestReview={onRequestReview}
           />
-        ) : (
-          <Card className="p-5 text-sm text-muted-foreground">
-            Complete the selected costing inputs in Step 9 to generate the quotation preview.
-          </Card>
         );
       default:
         return null;

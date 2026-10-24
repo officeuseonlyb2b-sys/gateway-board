@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import {
   GUIDE_LANGUAGES,
   guideConfiguredLanguages,
@@ -38,7 +38,7 @@ import {
   savedQuoteRawRate,
   type LandReviewTourRow,
 } from "@/lib/wizard/land-review";
-import { applyLandCommercials, miscPerPersonForPax } from "@/lib/wizard/land-pricing";
+import { applyLandCommercials } from "@/lib/wizard/land-pricing";
 import type { EntranceCat, GuideLine, QuoteDraft, RoutingDay } from "@/lib/wizard/types";
 import { useDB } from "@/lib/mock-store";
 
@@ -56,7 +56,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-sm border border-[#d7e2ed]">
+    <div className="land-review-table-wrapper overflow-hidden rounded-sm border border-[#d7e2ed]">
       <div className="flex items-center justify-between gap-4 bg-[#f0f4f8] px-3 py-1.5">
         <h4 className="text-[11px] font-semibold text-[#103353]">{title}</h4>
         {helper && <span className="text-[9px] text-[#73849b]">{helper}</span>}
@@ -151,7 +151,7 @@ const languageForLine = (
 const dayApplies = (lineDays: number[] | undefined, day: number, routing: RoutingDay[]) =>
   lineDays?.length ? lineDays.includes(day) : routing.some((route) => route.day === day);
 
-export function LandDaywiseReview({
+function LandDaywiseReviewImpl({
   draft,
   filters,
 }: {
@@ -305,7 +305,7 @@ export function LandDaywiseReview({
       : filters.exactPax >= range.min_pax && filters.exactPax <= range.max_pax,
   );
   const escortColumns: EscortColumn[] =
-    !filters.escort || !isEscortEnabled(draft)
+    !filters.escort || !filters.guideIncluded || !isEscortEnabled(draft)
       ? []
       : escortMode === "pax_range" && escortRanges.length
         ? escortRanges.map((range) => ({
@@ -549,14 +549,13 @@ export function LandDaywiseReview({
         })
       : [];
     const miscRows: TourDisplayRow[] = showMisc
-      ? draft.misc.flatMap((line) => {
-          if (!line.from_routing_days?.includes(route.day)) return [];
-          const master = db.miscellaneous_items.find((item) => item.id === line.item_id);
+      ? sheetRow.misc_opts.flatMap((option) => {
+          if (!option.checked) return [];
           return [
             {
-              tour: { city: "—", title: line.custom_name || master?.name || "Miscellaneous" },
+              tour: { city: "—", title: option.label || "Miscellaneous" },
               rowType: "misc" as const,
-              serviceId: line.id,
+              serviceId: option.id,
             },
           ];
         })
@@ -575,7 +574,6 @@ export function LandDaywiseReview({
     };
   });
 
-  const generalMisc = showMisc ? draft.misc.filter((line) => !line.from_routing_days?.length) : [];
   const activityValue = (_group: DayGroup, row: TourDisplayRow, column: ActivityColumn) => {
     if (row.rowType !== "activity") return undefined;
     const line = draft.activities.find((item) => item.id === row.serviceId);
@@ -597,18 +595,11 @@ export function LandDaywiseReview({
     );
     return resolved.rate > 0 ? resolved.rate : undefined;
   };
-  const rawMiscValue = (id: string) => {
-    const line = draft.misc.find((item) => item.id === id);
-    if (!line) return undefined;
-    return savedQuoteRawRate(line, filters.exactPax);
+  const miscValue = (group: DayGroup, row: TourDisplayRow) => {
+    if (row.rowType !== "misc" || !row.serviceId) return undefined;
+    const option = group.sheetRow.misc_opts.find((item) => item.id === row.serviceId);
+    return option?.checked ? option.amount : undefined;
   };
-  const miscValue = (_group: DayGroup, row: TourDisplayRow) =>
-    row.rowType === "misc" && row.serviceId ? rawMiscValue(row.serviceId) : undefined;
-  const generalMiscValue = (id: string) => rawMiscValue(id);
-  const miscBase = draft.misc.reduce(
-    (total, line) => total + miscPerPersonForPax(line, pricingPax),
-    0,
-  );
   const summaryBases = [
     ...guideColumns.map((column) =>
       groups.reduce(
@@ -648,7 +639,7 @@ export function LandDaywiseReview({
         0,
       ),
     ),
-    ...(showMisc ? [miscBase] : []),
+    ...(showMisc ? [sheet.misc_total] : []),
   ];
 
   const guideHeaders = (
@@ -679,7 +670,7 @@ export function LandDaywiseReview({
       title="A. Day-wise Land Services Pricing Review (View Only)"
       helper="Guide and Escort values use the selected Pax slabs or exact Pax"
     >
-      <div className="overflow-x-auto">
+      <div className="land-review-scroll overflow-x-auto">
         <table className={`${grid} min-w-[1250px] table-fixed border-collapse`}>
           <colgroup>
             <col className="w-[48px]" />
@@ -847,40 +838,6 @@ export function LandDaywiseReview({
                 );
               });
             })}
-            {generalMisc.map((line, index) => {
-              const master = db.miscellaneous_items.find((item) => item.id === line.item_id);
-              return (
-                <tr
-                  key={`general-misc-${line.id}`}
-                  className={index === 0 ? "border-t-2 border-t-[#9db6ca]" : ""}
-                >
-                  <td>—</td>
-                  <td>—</td>
-                  <td>General</td>
-                  <td>—</td>
-                  <td className="whitespace-normal">
-                    {line.custom_name || master?.name || "Miscellaneous"}
-                  </td>
-                  {Array.from({
-                    length: guideColumns.length + escortColumns.length + entranceColumns.length,
-                  }).map((_, cellIndex) => (
-                    <td key={cellIndex} className="text-right">
-                      —
-                    </td>
-                  ))}
-                  {activityColumns.map((column) => (
-                    <td key={`activity-${column.key}`} className="bg-[#f7fcf8] text-right">
-                      —
-                    </td>
-                  ))}
-                  {showMisc && (
-                    <td className="bg-[#faf8fd] whitespace-nowrap text-right tabular-nums">
-                      {money(generalMiscValue(line.id))}
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
           </tbody>
           <tfoot className="font-semibold">
             {["Base / Total", "Markup", "GST", "Final Total"].map((label, index) => (
@@ -915,3 +872,14 @@ export function LandDaywiseReview({
     </Panel>
   );
 }
+
+export const LandDaywiseReview = memo(
+  LandDaywiseReviewImpl,
+  (previous, next) =>
+    previous.draft === next.draft &&
+    Object.keys(previous.filters).every(
+      (key) =>
+        previous.filters[key as keyof LandReviewFilters] ===
+        next.filters[key as keyof LandReviewFilters],
+    ),
+);

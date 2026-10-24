@@ -5,12 +5,22 @@ import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import { getQuotationScope } from "@/lib/query-for";
 import { buildRateSheet, type RateSheetRow } from "@/lib/wizard/costsheet";
-import type { HotelOption, QuoteDraft } from "@/lib/wizard/types";
+import type { HotelOption, LandReviewDisplaySelection, QuoteDraft } from "@/lib/wizard/types";
 
 type SetDraft = (patch: Partial<QuoteDraft>) => void;
 type MatrixRow = { key: string; groupKey: string; row: RateSheetRow };
 
-function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function CommercialPackageMatrixImpl({
+  draft,
+  set,
+  readOnly = false,
+  displaySelection,
+}: {
+  draft: QuoteDraft;
+  set: SetDraft;
+  readOnly?: boolean;
+  displaySelection?: LandReviewDisplaySelection;
+}) {
   const db = useDB();
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   // The matrix display mode is independent from the Accommodation editor's
@@ -143,20 +153,53 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
     );
     set({ rate_sheet_rows: next });
   };
+  const displayedRows = readOnly ? rows.filter(isSelected) : rows;
+  const landMeals = scope.queryFor === "Land Part + Meals";
+  const landOnly = scope.queryFor === "Land Part";
+  const accommodationOnly = !scope.landPart && scope.accommodationPart;
+  const landScoped = landOnly || landMeals;
+  const showLunch = landMeals && rows.some(({ row }) => row.lunch > 0);
+  const showDinner = landMeals && rows.some(({ row }) => row.dinner > 0);
+  const showTransport = Boolean(displaySelection?.transport);
+  const showGuideLanguages = Boolean(
+    displaySelection?.guideIncluded &&
+    (displaySelection.hindi || displaySelection.english || displaySelection.otherLanguage),
+  );
+  const showEscort = Boolean(displaySelection?.guideIncluded && displaySelection.escort);
+  const showGuide = landScoped ? showGuideLanguages : showGuideLanguages || showEscort;
+  const showEntrances = Boolean(
+    displaySelection?.entranceIncluded &&
+    (displaySelection.indian || displaySelection.foreign || displaySelection.student),
+  );
+  const showActivities = Boolean(displaySelection?.activities && displaySelection.activityIncluded);
+  const showMisc = Boolean(displaySelection?.misc && displaySelection.miscIncluded);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">4. Commercial Package Matrix</h2>
+          <h2 className="text-lg font-semibold">
+            {landMeals
+              ? "4. Commercial Matrix"
+              : landOnly
+                ? "3. Land Commercial Matrix"
+                : accommodationOnly
+                  ? "3. Accommodation Commercial Matrix"
+                  : "4. Commercial Package Matrix"}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Transport variation × actual Pax → common Land Cost PP → option-wise Lunch, Dinner,
-            Accommodation and Package Price PP
+            {landMeals
+              ? "Transport variation × actual Pax → Land Total PP + selected Lunch/Dinner PP → Final Land + Meals Price PP"
+              : landOnly
+                ? "Transport variation × actual Pax → selected Land components → Final Land Price PP"
+                : accommodationOnly
+                  ? "Actual Pax → option-wise selected meals, accommodation and Final Accommodation + Meals Price PP"
+                  : "Transport variation × actual Pax → common Land Cost PP → option-wise Lunch, Dinner, Accommodation and Package Price PP"}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className={readOnly ? "hidden" : "flex flex-wrap gap-2"}>
           <Button size="sm" className="pointer-events-none">
-            Standard Hotel Mode
+            {landMeals ? "Land + Meals Mode" : landOnly ? "Land Only Mode" : "Standard Hotel Mode"}
           </Button>
           <Button
             size="sm"
@@ -192,30 +235,59 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
 
       {matrixMode === "standard" && !rows.length ? (
         <Card className="p-5 text-sm text-muted-foreground">
-          Add a valid transport variation and completed standard accommodation option to generate
-          commercial matrix rows.
+          {landScoped
+            ? "Add a valid transport variation to generate Land commercial matrix rows."
+            : accommodationOnly
+              ? "Add a completed standard accommodation option to generate accommodation commercial matrix rows."
+              : "Add a valid transport variation and completed standard accommodation option to generate commercial matrix rows."}
         </Card>
       ) : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-[1750px] w-full border-separate border-spacing-0 border-l border-t border-slate-200 text-xs [&_td]:border-b [&_td]:border-r [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-2 [&_th]:border-b [&_th]:border-r [&_th]:border-slate-200 [&_th]:px-2 [&_th]:py-2">
+            <table
+              className={`${landScoped || accommodationOnly ? "min-w-[1100px]" : "min-w-[1750px]"} w-full border-separate border-spacing-0 border-l border-t border-slate-200 text-xs [&_td]:border-b [&_td]:border-r [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-2 [&_th]:border-b [&_th]:border-r [&_th]:border-slate-200 [&_th]:px-2 [&_th]:py-2`}
+            >
               <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 <tr className="bg-slate-100">
-                  <th rowSpan={3} className="bg-slate-100 text-center">
-                    Select
-                  </th>
-                  <th rowSpan={3} className="min-w-56 text-left">
-                    <span className="block font-semibold">Vehicle / Combination</span>
-                    <span className="mt-0.5 block text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
-                      Transport Variations
-                    </span>
-                  </th>
+                  {!readOnly && (
+                    <th rowSpan={3} className="bg-slate-100 text-center">
+                      Select
+                    </th>
+                  )}
+                  {!accommodationOnly && (
+                    <th rowSpan={3} className="min-w-56 text-left">
+                      <span className="block font-semibold">Vehicle / Combination</span>
+                      <span className="mt-0.5 block text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
+                        Transport Variations
+                      </span>
+                    </th>
+                  )}
                   <th rowSpan={3} className="p-2 text-right">
                     Pax
                   </th>
-                  <th colSpan={6} className="bg-blue-50 p-2 text-center text-blue-900">
-                    Land Part · Per Person
-                  </th>
+                  {!accommodationOnly && (
+                    <th
+                      colSpan={landScoped && showEscort ? 7 : 6}
+                      className="bg-blue-50 p-2 text-center text-blue-900"
+                    >
+                      Land Part · Per Person
+                    </th>
+                  )}
+                  {landMeals && showLunch && (
+                    <th rowSpan={3} className="bg-amber-50 text-right">
+                      Lunch PP
+                    </th>
+                  )}
+                  {landMeals && showDinner && (
+                    <th rowSpan={3} className="bg-amber-50 text-right">
+                      Dinner PP
+                    </th>
+                  )}
+                  {landMeals && (
+                    <th rowSpan={3} className="bg-emerald-50 text-right text-emerald-900">
+                      Final Land + Meals Price PP
+                    </th>
+                  )}
                   {options
                     .filter((option) => scope.accommodationPart)
                     .map((option) => (
@@ -229,13 +301,20 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
                     ))}
                 </tr>
                 <tr className="bg-slate-50">
-                  {["Transport", "Entrance", "Guide", "Activities", "Misc", "Land Total"].map(
-                    (label) => (
+                  {!accommodationOnly &&
+                    [
+                      "Transport",
+                      "Entrance",
+                      "Guide",
+                      ...(landScoped && showEscort ? ["Escort"] : []),
+                      "Activities",
+                      "Misc",
+                      "Land Total",
+                    ].map((label) => (
                       <th key={label} rowSpan={2} className="p-2 text-right">
                         {label}
                       </th>
-                    ),
-                  )}
+                    ))}
                   {options
                     .filter((option) => scope.accommodationPart)
                     .map((option) => (
@@ -259,7 +338,9 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
                           colSpan={3}
                           className="bg-emerald-50 p-2 text-center"
                         >
-                          Package Price · PP
+                          {accommodationOnly
+                            ? "Final Accommodation + Meals Price · PP"
+                            : "Package Price · PP"}
                         </th>
                       </>
                     ))}
@@ -277,7 +358,7 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
                 </tr>
               </thead>
               <tbody>
-                {rows.map((matrixRow) => {
+                {displayedRows.map((matrixRow) => {
                   const land = matrixRow.row;
                   const landTotal =
                     land.transport +
@@ -291,29 +372,50 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
                       key={matrixRow.key}
                       className={isSelected(matrixRow) ? "bg-primary/5" : "hover:bg-muted/30"}
                     >
-                      <td className="text-center">
-                        <input
-                          type="checkbox"
-                          checked={isSelected(matrixRow)}
-                          onChange={(event) => setRows([matrixRow], event.target.checked)}
-                        />
-                      </td>
-                      <td className="whitespace-normal font-medium leading-snug">
-                        {vehicleLabelByGroup.get(matrixRow.groupKey)}
-                      </td>
-                      <td className="p-2 text-right font-medium">{land.pax}</td>
-                      {[
-                        land.transport,
-                        land.entrances,
-                        land.guide + land.escort,
-                        land.activities,
-                        land.misc,
-                        landTotal,
-                      ].map((value, index) => (
-                        <td key={index} className="p-2 text-right tabular-nums">
-                          {inr(value)}
+                      {!readOnly && (
+                        <td className="text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected(matrixRow)}
+                            onChange={(event) => setRows([matrixRow], event.target.checked)}
+                          />
                         </td>
-                      ))}
+                      )}
+                      {!accommodationOnly && (
+                        <td className="whitespace-normal font-medium leading-snug">
+                          {vehicleLabelByGroup.get(matrixRow.groupKey)}
+                        </td>
+                      )}
+                      <td className="p-2 text-right font-medium">{land.pax}</td>
+                      {!accommodationOnly &&
+                        [
+                          showTransport ? land.transport : undefined,
+                          showEntrances ? land.entrances : undefined,
+                          showGuide
+                            ? landScoped
+                              ? land.guide
+                              : land.guide + land.escort
+                            : undefined,
+                          ...(landScoped && showEscort ? [land.escort] : []),
+                          showActivities ? land.activities : undefined,
+                          showMisc ? land.misc : undefined,
+                          landTotal,
+                        ].map((value, index) => (
+                          <td key={index} className="p-2 text-right tabular-nums">
+                            {value == null ? "—" : inr(value)}
+                          </td>
+                        ))}
+                      {landMeals && showLunch && (
+                        <td className="bg-amber-50 text-right tabular-nums">{inr(land.lunch)}</td>
+                      )}
+                      {landMeals && showDinner && (
+                        <td className="bg-amber-50 text-right tabular-nums">{inr(land.dinner)}</td>
+                      )}
+                      {landMeals && (
+                        <td className="bg-emerald-50 text-right font-semibold tabular-nums">
+                          {inr(landTotal + land.lunch + land.dinner)}
+                        </td>
+                      )}
                       {options
                         .filter((option) => scope.accommodationPart)
                         .map((option) => {
@@ -352,8 +454,13 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
         </Card>
       )}
       <p className="text-xs text-muted-foreground">
-        Standard: common Land PP + option Lunch PP + Dinner PP + relevant SGL/DBL/TRP Accommodation
-        PP. Dynamic accommodation matrix pricing is intentionally not included yet.
+        {landMeals
+          ? "Land + Meals: final Land PP plus explicitly selected Lunch and Dinner PP. Accommodation and optional activities are excluded."
+          : landOnly
+            ? "Land Part: selected land services only. Accommodation, hotel meals and room pricing are excluded."
+            : accommodationOnly
+              ? "Accommodation Part: selected hotel rooms and meals only. Land services are excluded."
+              : "Standard: common Land PP + option Lunch PP + Dinner PP + relevant SGL/DBL/TRP Accommodation PP. Dynamic accommodation matrix pricing is intentionally not included yet."}
       </p>
     </div>
   );
@@ -361,5 +468,8 @@ function CommercialPackageMatrixImpl({ draft, set }: { draft: QuoteDraft; set: S
 
 export const CommercialPackageMatrix = memo(
   CommercialPackageMatrixImpl,
-  (previous, next) => previous.draft === next.draft,
+  (previous, next) =>
+    previous.draft === next.draft &&
+    previous.readOnly === next.readOnly &&
+    previous.displaySelection === next.displaySelection,
 );

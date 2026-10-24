@@ -299,6 +299,64 @@ await check(
     });
   },
 );
+await check("Sales Manager assignment directory is safe and same-unit only", async () => {
+  const additionalEmployees = [
+    [randomUUID(), "Sales Head", "Madhya Pradesh Unit", true, "Active", "Active"],
+    [randomUUID(), "Sales Executive", "Rajasthan", true, "Active", "Active"],
+    [randomUUID(), "Sales Executive", "MP", true, "Active", "Exited"],
+    [randomUUID(), "Sales Executive", "MP", false, "Disabled", "Inactive"],
+    [randomUUID(), "Product Executive", "MP", true, "Active", "Active"],
+  ];
+  for (const [id, role, unit, active, accountStatus, employeeStatus] of additionalEmployees) {
+    await db.query("INSERT INTO auth.users(id, email) VALUES ($1, $2)", [
+      id,
+      `${id}@example.invalid`,
+    ]);
+    await db.query("INSERT INTO public.crm_employees(id, data) VALUES ($1, $2)", [
+      id,
+      JSON.stringify({
+        ...record(id, role, `EMP-${id.slice(0, 6)}`),
+        name: `${role} ${unit}`,
+        unit,
+        department: role === "Product Executive" ? "Product" : "Sales",
+        active,
+        account_status: accountStatus,
+        employee_status: employeeStatus,
+      }),
+    ]);
+  }
+  const [salesHeadId] = additionalEmployees[0];
+  await asUser(salesIds[0], async () => {
+    const result = await db.query(
+      "SELECT employee_id, role, auth_user_id FROM public.list_sales_assignment_candidates()",
+    );
+    const ids = result.rows.map((row) => row.employee_id).sort();
+    assert.deepEqual(ids, [salesIds[0], salesIds[1], salesIds[2], salesHeadId].sort());
+    assert.ok(
+      result.rows.every((row) => row.auth_user_id),
+      "safe ownership link is present",
+    );
+  });
+  await asUser(salesIds[2], async () => {
+    assert.equal(
+      (await db.query("SELECT * FROM public.list_sales_assignment_candidates()")).rows.length,
+      0,
+    );
+  });
+  await asUser(unlinked, async () => {
+    assert.equal(
+      (await db.query("SELECT * FROM public.list_sales_assignment_candidates()")).rows.length,
+      0,
+    );
+  });
+  await db.exec("SET ROLE anon");
+  await assert.rejects(
+    db.query("SELECT * FROM public.list_sales_assignment_candidates()"),
+    /permission denied/,
+  );
+  await db.exec("RESET ROLE");
+});
+
 await check(
   "Sales roles create their own unassigned Query using stable Employee identity",
   async () => {
@@ -426,6 +484,36 @@ await check(
         assert.equal(assigned.rows.length, 1);
         assert.equal(assigned.rows[0].owner_user_id, salesIds[2]);
         assert.equal(assigned.rows[0].data.assignment_status, "Assigned");
+
+        const selfAssignedData = {
+          id: "unassigned-create-0",
+          query_id: "Q-UNASSIGNED-0",
+          owner: salesIds[0],
+          created_by: salesIds[0],
+          assignment_status: "Assigned",
+          assigned_by: salesIds[0],
+          assigned_at: "2026-10-24T12:00:00.000Z",
+          assignment_history: [
+            {
+              assigned_from: "",
+              assigned_to: salesIds[0],
+              assigned_by: salesIds[0],
+              assigned_at: "2026-10-24T12:00:00.000Z",
+            },
+          ],
+          primary_unit: "Madhya Pradesh",
+          participating_units: ["Madhya Pradesh"],
+        };
+        const selfAssigned = await db.query(
+          `UPDATE public.crm_queries
+           SET owner = $1::text, owner_user_id = $1::uuid, data = $2::jsonb
+           WHERE id = 'unassigned-create-0'
+           RETURNING owner_user_id, data`,
+          [salesIds[0], JSON.stringify(selfAssignedData)],
+        );
+        assert.equal(selfAssigned.rows.length, 1);
+        assert.equal(selfAssigned.rows[0].owner_user_id, salesIds[0]);
+        assert.equal(selfAssigned.rows[0].data.assignment_status, "Assigned");
       },
       "EMP-0101@example.invalid",
     );

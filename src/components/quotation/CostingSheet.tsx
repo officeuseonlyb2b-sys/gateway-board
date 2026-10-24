@@ -3117,7 +3117,7 @@ function FragmentGroup({
         const landPerPerson = scope.landPart
           ? r.transport + r.guide + r.escort + r.entrances + activitiesPerPerson + r.misc
           : 0;
-        const mealsPerPerson = scope.accommodationPart ? r.lunch + r.dinner : 0;
+        const mealsPerPerson = scope.mealsPart ? r.lunch + r.dinner : 0;
         const packageSingle =
           landPerPerson + mealsPerPerson + (scope.accommodationPart ? r.single : 0);
         const packageDouble =

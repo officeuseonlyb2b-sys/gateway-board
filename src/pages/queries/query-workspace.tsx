@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 
 import { NewTaskDialog, ReassignQuery, useActor } from "@/components/crm/assign";
+import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
 import { inr, paxRangeLabel } from "@/components/crm/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,10 +57,12 @@ import {
   useEmployees,
   useCrmTasks,
   useCrmQueries,
+  useCrmHydrationStatus,
 } from "@/lib/crm/store";
 import { LIFECYCLE, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
 import { usePrograms } from "@/lib/wizard/agents-store";
-import { quoteToRevisionDraft } from "@/lib/quotes-store";
+import { quoteToRevisionDraft, type SavedQuote } from "@/lib/quotes-store";
+import { refreshCrmQuery } from "@/lib/crm/crm-remote";
 import { upsertDraft, useDrafts } from "@/lib/drafts-store";
 import { writeDraft } from "@/lib/wizard/store";
 
@@ -105,6 +108,7 @@ export default function QueryWorkspace() {
   const access = useAccessProfile();
   const query = useAccessibleQueries().find((item) => item.id === id || item.query_id === id);
   const existingQuery = useCrmQueries().find((item) => item.id === id || item.query_id === id);
+  const crmHydrationStatus = useCrmHydrationStatus();
   const allEvents = useCrmEvents();
   const employees = useEmployees();
   const tasks = useCrmTasks().filter((task) => task.query_id === query?.query_id);
@@ -126,6 +130,20 @@ export default function QueryWorkspace() {
   const [supportNote, setSupportNote] = useState("");
   const [supportPriority, setSupportPriority] = useState<"Normal" | "High" | "Urgent">("Normal");
   const [assistanceArea, setAssistanceArea] = useState("Costing");
+  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
+  useEffect(() => {
+    let active = true;
+    setVersionsLoading(true);
+    void refreshCrmQuery(existingQuery?.id || id)
+      .catch((error) => console.error("[crm] costing version refresh failed", error))
+      .finally(() => {
+        if (active) setVersionsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [existingQuery?.id, id]);
   const events = useMemo(
     () =>
       allEvents
@@ -137,6 +155,7 @@ export default function QueryWorkspace() {
     (item) => item.id === query?.program_id || item.name === query?.program_name,
   );
   const versions = [...(query?.costing_versions || [])].sort((a, b) => b.version - a.version);
+  const versionsPending = versionsLoading || crmHydrationStatus === "loading";
   const linkedDrafts = useMemo(() => {
     const merged = new Map(
       allDrafts
@@ -167,6 +186,14 @@ export default function QueryWorkspace() {
     (access.role === "Sales Manager" &&
       queryOwnerEmployee?.department === "Sales" &&
       queryOwnerEmployee.unit === access.unit);
+  if (!query && crmHydrationStatus === "loading")
+    return (
+      <div className="p-8">
+        <Card>
+          <CardContent className="p-10 text-center text-slate-500">Loading Query...</CardContent>
+        </Card>
+      </div>
+    );
   if (!query)
     return (
       <div className="p-8">
@@ -1069,7 +1096,14 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
             )}
-            {versions.length === 0 && (
+            {versionsPending && (
+              <Card>
+                <CardContent className="p-10 text-center text-slate-500">
+                  Loading costing versions...
+                </CardContent>
+              </Card>
+            )}
+            {!versionsPending && versions.length === 0 && (
               <Card>
                 <CardContent className="p-10 text-center text-slate-500">
                   No linked costing version yet.
@@ -1102,6 +1136,9 @@ export default function QueryWorkspace() {
                       </p>
                     </div>
                     <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setViewingQuote(version.quote)}>
+                        View V{version.version}
+                      </Button>
                       {canRequestSupport && (
                         <>
                           <Button
@@ -1401,6 +1438,11 @@ export default function QueryWorkspace() {
           </div>
         </DialogContent>
       </Dialog>
+      <QuoteViewerDialog
+        quote={viewingQuote}
+        open={Boolean(viewingQuote)}
+        onClose={() => setViewingQuote(null)}
+      />
     </div>
   );
 }

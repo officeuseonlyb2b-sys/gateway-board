@@ -1,4 +1,9 @@
-export const QUERY_FOR_OPTIONS = ["Package", "Land Part", "Accommodation Part"] as const;
+export const QUERY_FOR_OPTIONS = [
+  "Package",
+  "Land Part",
+  "Land Part + Meals",
+  "Accommodation Part",
+] as const;
 
 export type QueryFor = (typeof QUERY_FOR_OPTIONS)[number];
 export type QuotationStepId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
@@ -8,6 +13,7 @@ export function normalizeQueryFor(value?: string | null): QueryFor | undefined {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return undefined;
   if (normalized === "package") return "Package";
+  if (normalized.includes("land") && normalized.includes("meal")) return "Land Part + Meals";
   if (normalized.includes("hotel") || normalized.includes("accommodation"))
     return "Accommodation Part";
   if (
@@ -33,7 +39,11 @@ export function getQuotationScope(queryFor?: string | null, commercialMode?: str
   const program = normalized !== "Accommodation Part";
   const routing = true;
   const landPart = normalized !== "Accommodation Part";
-  const accommodationPart = normalized !== "Land Part";
+  const accommodationPart = normalized === "Package" || normalized === "Accommodation Part";
+  const mealsPart =
+    normalized === "Package" ||
+    normalized === "Accommodation Part" ||
+    normalized === "Land Part + Meals";
   const workflowSteps = [
     1,
     2,
@@ -42,7 +52,7 @@ export function getQuotationScope(queryFor?: string | null, commercialMode?: str
     ...(routing ? [5] : []),
     6,
     ...(landPart ? [7] : []),
-    ...(accommodationPart ? [8] : []),
+    ...(accommodationPart || mealsPart ? [8] : []),
     9,
     10,
   ] as QuotationStepId[];
@@ -53,6 +63,7 @@ export function getQuotationScope(queryFor?: string | null, commercialMode?: str
     routing,
     landPart,
     accommodationPart,
+    mealsPart,
     workflowSteps,
   } as const;
 }

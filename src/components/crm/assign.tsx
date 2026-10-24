@@ -24,10 +24,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { addTask, assignQuery, reassignQuery, useCrmQueries, useEmployees } from "@/lib/crm/store";
+import {
+  addTask,
+  assignQuery,
+  reassignQuery,
+  useCrmQueries,
+  useAssignmentCandidates,
+  useAssignmentDirectoryStatus,
+  useEmployeeDirectoryStatus,
+  useEmployees,
+} from "@/lib/crm/store";
 import { LEAD_PRIORITIES } from "@/lib/crm/types";
 import { useAuth } from "@/lib/auth-mock";
 import { isSalesAssignmentEligible, useAccessProfile } from "@/lib/crm/access";
+import { assignCrmQueryNow } from "@/lib/crm/crm-remote";
 
 /** Historical actor labels come from the employee linked by Auth UUID. */
 export function useActor(): string {
@@ -39,29 +49,43 @@ export function OwnerSelect({
   onChange,
   placeholder = "Assign to…",
   className,
+  managerAssignment = false,
 }: {
   value: string;
   onChange: (name: string) => void;
   placeholder?: string;
   className?: string;
+  managerAssignment?: boolean;
 }) {
   const profile = useAccessProfile();
-  const employees = useEmployees()
-    .filter(isSalesAssignmentEligible)
-    .filter((employee) => employee.id !== profile.employee?.id);
+  const allEmployees = useEmployees();
+  const assignmentCandidates = useAssignmentCandidates();
+  const directoryStatus = useEmployeeDirectoryStatus();
+  const assignmentDirectoryStatus = useAssignmentDirectoryStatus();
+  const employees = managerAssignment
+    ? assignmentCandidates
+    : allEmployees
+        .filter(isSalesAssignmentEligible)
+        .filter((employee) => employee.id !== profile.employee?.id);
   return (
     <Select value={value || undefined} onValueChange={onChange}>
       <SelectTrigger className={className}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {employees.length === 0 ? (
+        {(managerAssignment ? assignmentDirectoryStatus : directoryStatus) !== "ready" ? (
           <div className="px-2 py-3 text-xs text-muted-foreground">
-            No employees yet — add them in Users &amp; Roles.
+            {(managerAssignment ? assignmentDirectoryStatus : directoryStatus) === "error"
+              ? "Employee directory could not be loaded."
+              : "Loading employees..."}
+          </div>
+        ) : employees.length === 0 ? (
+          <div className="px-2 py-3 text-xs text-muted-foreground">
+            No eligible same-unit Sales employees.
           </div>
         ) : (
           employees.map((e) => (
-            <SelectItem key={e.id} value={e.name}>
+            <SelectItem key={e.id} value={managerAssignment ? e.id : e.name}>
               {e.name} — {e.role}
             </SelectItem>
           ))
@@ -82,14 +106,18 @@ export function ReassignQuery({
   className?: string;
 }) {
   const actor = useActor();
-  const employees = useEmployees().filter(isSalesAssignmentEligible);
+  const access = useAccessProfile();
+  const employees = useAssignmentCandidates();
+  const directoryStatus = useAssignmentDirectoryStatus();
   const [pending, setPending] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const pendingEmployee = employees.find((employee) => employee.id === pending);
 
-  if (employees.length === 0) {
+  if (directoryStatus === "ready" && employees.length === 0) {
     return (
       <p className={`text-xs text-muted-foreground ${className ?? ""}`}>
-        No employees available. Please add employees in Users &amp; Roles.
+        No eligible same-unit Sales employees.
       </p>
     );
   }
@@ -97,6 +125,7 @@ export function ReassignQuery({
   return (
     <>
       <OwnerSelect
+        managerAssignment
         className={className}
         value={owner}
         placeholder="Unassigned"
@@ -117,8 +146,10 @@ export function ReassignQuery({
           <DialogHeader>
             <DialogTitle>Reassign lead</DialogTitle>
             <DialogDescription>
-              {owner ? `Transfer from ${owner} to ${pending}.` : `Assign to ${pending}.`} The
-              previous owner and this reason are kept in the lead history.
+              {owner
+                ? `Transfer from ${owner} to ${pendingEmployee?.name || pending}.`
+                : `Assign to ${pendingEmployee?.name || pending}.`}{" "}
+              The previous owner and this reason are kept in the lead history.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -141,16 +172,30 @@ export function ReassignQuery({
               Cancel
             </Button>
             <Button
-              onClick={() => {
+              disabled={saving}
+              onClick={async () => {
                 if (!pending) return;
-                if (owner) reassignQuery(queryId, pending, actor, reason.trim() || undefined);
-                else assignQuery(queryId, pending, actor, reason.trim() || undefined);
-                toast.success(`${queryId} ${owner ? "reassigned" : "assigned"} to ${pending}`);
-                setPending(null);
-                setReason("");
+                setSaving(true);
+                try {
+                  await assignCrmQueryNow(
+                    queryId,
+                    pending,
+                    access.employee?.id || actor,
+                    reason.trim() || undefined,
+                  );
+                  toast.success(
+                    `${queryId} ${owner ? "reassigned" : "assigned"} to ${pendingEmployee?.name || pending}`,
+                  );
+                  setPending(null);
+                  setReason("");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not assign Query.");
+                } finally {
+                  setSaving(false);
+                }
               }}
             >
-              Reassign
+              {saving ? "Saving..." : owner ? "Reassign" : "Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>

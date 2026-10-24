@@ -13,6 +13,10 @@ const listeners = new Set<() => void>();
 
 let cache: QuoteDraft | null = null;
 let cacheInit = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingDraft: QuoteDraft | null = null;
+let lastSerialized = "";
+let unloadListenerInstalled = false;
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -103,14 +107,6 @@ function read(): QuoteDraft | null {
 }
 
 /**
- * Notify subscribers and refresh the in-memory cache.
- */
-function emit() {
-  refresh();
-  listeners.forEach((l) => l());
-}
-
-/**
  * Refresh the in-memory cache.
  */
 function refresh() {
@@ -133,7 +129,53 @@ function getSnapshot(): QuoteDraft | null {
  * Load the current draft.
  */
 export function loadDraft(): QuoteDraft | null {
-  return read();
+  if (!cacheInit) refresh();
+  return cache;
+}
+
+function persistDraft(next: QuoteDraft) {
+  if (!isBrowser()) return;
+  const serialized = JSON.stringify(next);
+  if (serialized === lastSerialized) return;
+
+  let saved = false;
+  try {
+    localStorage.setItem(KEY, serialized);
+    try {
+      sessionStorage.removeItem(FALLBACK_KEY);
+    } catch {
+      // Ignore sessionStorage errors.
+    }
+    saved = true;
+  } catch (error) {
+    console.warn(
+      "[draft-store] localStorage quota exceeded/unavailable. Using sessionStorage fallback.",
+      error,
+    );
+  }
+
+  if (!saved) {
+    try {
+      sessionStorage.setItem(FALLBACK_KEY, serialized);
+      saved = true;
+    } catch (error) {
+      console.warn(
+        "[draft-store] sessionStorage also unavailable/full. Keeping draft in memory.",
+        error,
+      );
+    }
+  }
+  if (saved) lastSerialized = serialized;
+}
+
+/** Flush pending autosave work before navigation or an explicit save boundary. */
+export function flushDraftPersistence() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  if (!pendingDraft) return;
+  const next = pendingDraft;
+  pendingDraft = null;
+  persistDraft(next);
 }
 
 /**
@@ -149,7 +191,7 @@ export function loadDraft(): QuoteDraft | null {
  *   keep the latest draft in memory so the React app
  *   does NOT crash.
  */
-export function writeDraft(d: QuoteDraft) {
+export function writeDraft(d: QuoteDraft, options?: { immediate?: boolean }) {
   if (!isBrowser()) return;
 
   const next: QuoteDraft = {
@@ -157,57 +199,21 @@ export function writeDraft(d: QuoteDraft) {
     updated_at: new Date().toISOString(),
   };
 
-  const serialized = JSON.stringify(next);
-
-  let saved = false;
-
-  // ---------------------------------------------------------
-  // 1. Try localStorage first
-  // ---------------------------------------------------------
-  try {
-    localStorage.setItem(KEY, serialized);
-
-    // LocalStorage succeeded, so remove any old fallback copy.
-    try {
-      sessionStorage.removeItem(FALLBACK_KEY);
-    } catch {
-      // Ignore sessionStorage errors.
-    }
-
-    saved = true;
-  } catch (error) {
-    // localStorage quota exceeded or unavailable.
-    console.warn(
-      "[draft-store] localStorage quota exceeded/unavailable. Using sessionStorage fallback.",
-      error,
-    );
-  }
-
-  // ---------------------------------------------------------
-  // 2. Fallback to sessionStorage
-  // ---------------------------------------------------------
-  if (!saved) {
-    try {
-      sessionStorage.setItem(FALLBACK_KEY, serialized);
-      saved = true;
-    } catch (error) {
-      console.warn(
-        "[draft-store] sessionStorage also unavailable/full. Keeping draft in memory.",
-        error,
-      );
-    }
-  }
-
-  // ---------------------------------------------------------
-  // 3. Always update the in-memory cache.
-  //
-  // This is important: even if both browser storage
-  // mechanisms fail, the React wizard must not crash.
-  // ---------------------------------------------------------
   cache = next;
   cacheInit = true;
-
   listeners.forEach((l) => l());
+
+  pendingDraft = next;
+  if (options?.immediate) {
+    flushDraftPersistence();
+    return;
+  }
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(flushDraftPersistence, 450);
+  if (!unloadListenerInstalled && typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", flushDraftPersistence);
+    unloadListenerInstalled = true;
+  }
 }
 
 /**
@@ -215,6 +221,11 @@ export function writeDraft(d: QuoteDraft) {
  */
 export function clearDraft() {
   if (!isBrowser()) return;
+
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  pendingDraft = null;
+  lastSerialized = "";
 
   try {
     localStorage.removeItem(KEY);
@@ -240,7 +251,7 @@ export function clearDraft() {
 export function initDraft(): QuoteDraft {
   const d = emptyDraft();
 
-  writeDraft(d);
+  writeDraft(d, { immediate: true });
 
   return d;
 }

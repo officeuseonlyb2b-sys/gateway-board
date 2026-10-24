@@ -117,7 +117,7 @@ export function Step17({ draft }: StepProps) {
                   />
                 </>
               )}
-              {scope.accommodationPart && <CostLine label="Meals" value={scenario.meals_total} />}
+              {scope.mealsPart && <CostLine label="Meals" value={scenario.meals_total} />}
               <CostLine label="Commercial markup" value={scenario.markup_total} strong />
               <CostLine label="Company GST" value={scenario.gst5_total} strong />
               <div className="mt-3 border-t pt-3">

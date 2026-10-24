@@ -65,6 +65,7 @@ try {
 
   const packageScope = queryFor.getQuotationScope("Package");
   const landScope = queryFor.getQuotationScope("Land Part");
+  const landMealsScope = queryFor.getQuotationScope("Land Part + Meals");
   const accommodationScope = queryFor.getQuotationScope("Accommodation Part");
   assert.deepEqual(packageScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(packageScope.program, true);
@@ -75,6 +76,10 @@ try {
   assert.equal(landScope.routing, true, "Land Part still requires Routing");
   assert.equal(landScope.landPart, true);
   assert.equal(landScope.accommodationPart, false);
+  assert.deepEqual(landMealsScope.workflowSteps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(landMealsScope.landPart, true);
+  assert.equal(landMealsScope.mealsPart, true);
+  assert.equal(landMealsScope.accommodationPart, false);
   assert.deepEqual(accommodationScope.workflowSteps, [1, 2, 3, 5, 6, 8, 9, 10]);
   assert.equal(accommodationScope.program, false);
   assert.equal(accommodationScope.routing, true, "Accommodation Part requires Routing context");
@@ -1550,6 +1555,38 @@ try {
     calc.computeMealDays(optionalMeal, db, "A").total,
     400,
     "Optional meals stay out of base meal costing",
+  );
+
+  const landMeals = baseDraft();
+  landMeals.query_for = "Land Part + Meals";
+  landMeals.hotel_options[0].selections[0].meal_plan = "AP";
+  close(
+    calc.computeMealDays(landMeals, db, "A").total,
+    1000,
+    "Land + Meals ignores hotel meal-plan coverage",
+  );
+  const landMealsRow = costsheet
+    .buildRateSheet(
+      landMeals,
+      db,
+      { key: "A", label: "Land + Meals", selections: [] },
+      landMeals.transport,
+    )
+    .flatMap((group) => group.rows)[0];
+  close(landMealsRow.single, 0, "Land + Meals excludes accommodation PP");
+  close(landMealsRow.lunch, 231, "Land + Meals keeps finalized Lunch PP");
+  close(landMealsRow.dinner, 346.5, "Land + Meals keeps finalized Dinner PP");
+  close(
+    landMealsRow.pkg_single,
+    landMealsRow.transport +
+      landMealsRow.entrances +
+      landMealsRow.guide +
+      landMealsRow.escort +
+      landMealsRow.activities +
+      landMealsRow.misc +
+      landMealsRow.lunch +
+      landMealsRow.dinner,
+    "Final Land + Meals PP is land plus selected meals only",
   );
 
   // Fixed-number reconciliation: 2 pax, one DBL room, land ₹13,700,

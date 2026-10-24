@@ -61,86 +61,86 @@
   --radius: 0.75rem;
 
   /* Premium navy + muted gold palette */
-  --background: #F0F2F5;
-  --foreground: #0F2D48;
+  --background: #f0f2f5;
+  --foreground: #0f2d48;
 
-  --card: #FFFFFF;
-  --card-foreground: #0F2D48;
-  --popover: #FFFFFF;
-  --popover-foreground: #0F2D48;
+  --card: #ffffff;
+  --card-foreground: #0f2d48;
+  --popover: #ffffff;
+  --popover-foreground: #0f2d48;
 
-  --primary: #0F2D48;
+  --primary: #0f2d48;
   /* dark navy */
-  --primary-foreground: #FFFFFF;
-  --primary-light: #1A4A6B;
+  --primary-foreground: #ffffff;
+  --primary-light: #1a4a6b;
   /* medium navy */
 
-  --secondary: #F3F4F6;
-  --secondary-foreground: #0F2D48;
+  --secondary: #f3f4f6;
+  --secondary-foreground: #0f2d48;
 
-  --muted: #F3F4F6;
-  --muted-foreground: #9CA3AF;
+  --muted: #f3f4f6;
+  --muted-foreground: #9ca3af;
 
-  --accent: #C9A84C;
+  --accent: #c9a84c;
   /* muted gold */
-  --accent-foreground: #FFFFFF;
-  --accent-light: #F5EDD6;
+  --accent-foreground: #ffffff;
+  --accent-light: #f5edd6;
   /* very light gold */
 
-  --destructive: #DC2626;
-  --destructive-foreground: #FFFFFF;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
 
-  --border: #E5E7EB;
-  --input: #E5E7EB;
-  --ring: #C9A84C;
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #c9a84c;
 
-  --gold: #C9A84C;
-  --gold-foreground: #0F2D48;
-  --teal: #1A4A6B;
-  --sand: #F5EDD6;
+  --gold: #c9a84c;
+  --gold-foreground: #0f2d48;
+  --teal: #1a4a6b;
+  --sand: #f5edd6;
 
   --success: #059669;
-  --warning: #C9A84C;
-  --danger: #DC2626;
-  --info: #1A4A6B;
+  --warning: #c9a84c;
+  --danger: #dc2626;
+  --info: #1a4a6b;
 
-  --chart-1: #0F2D48;
-  --chart-2: #1A4A6B;
-  --chart-3: #C9A84C;
-  --chart-4: #6B7A8D;
+  --chart-1: #0f2d48;
+  --chart-2: #1a4a6b;
+  --chart-3: #c9a84c;
+  --chart-4: #6b7a8d;
   --chart-5: #059669;
 
   /* Dark navy sidebar */
-  --sidebar: #0F2D48;
-  --sidebar-foreground: #D1D5DB;
-  --sidebar-primary: #C9A84C;
-  --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A3A52;
-  --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: #17324D;
-  --sidebar-ring: #C9A84C;
+  --sidebar: #0f2d48;
+  --sidebar-foreground: #d1d5db;
+  --sidebar-primary: #c9a84c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a3a52;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #17324d;
+  --sidebar-ring: #c9a84c;
 }
 
 .dark {
-  --background: #0F1A26;
-  --foreground: #E8EEF4;
+  --background: #0f1a26;
+  --foreground: #e8eef4;
   --card: #172436;
-  --card-foreground: #E8EEF4;
+  --card-foreground: #e8eef4;
   --popover: #172436;
-  --popover-foreground: #E8EEF4;
-  --primary: #E67E22;
-  --primary-foreground: #FFFFFF;
-  --secondary: #1F3149;
-  --secondary-foreground: #E8EEF4;
-  --muted: #1F3149;
-  --muted-foreground: #94A3B8;
-  --accent: #E67E22;
-  --accent-foreground: #FFFFFF;
-  --destructive: #E74C3C;
-  --destructive-foreground: #FFFFFF;
-  --border: rgba(255, 255, 255, 0.10);
+  --popover-foreground: #e8eef4;
+  --primary: #e67e22;
+  --primary-foreground: #ffffff;
+  --secondary: #1f3149;
+  --secondary-foreground: #e8eef4;
+  --muted: #1f3149;
+  --muted-foreground: #94a3b8;
+  --accent: #e67e22;
+  --accent-foreground: #ffffff;
+  --destructive: #e74c3c;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.1);
   --input: rgba(255, 255, 255, 0.12);
-  --ring: #E67E22;
+  --ring: #e67e22;
 }
 
 @layer base {
@@ -177,11 +177,17 @@
 }
 
 @utility card-elevated {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07), 0 4px 16px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 200ms ease, transform 200ms ease;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.07),
+    0 4px 16px rgba(0, 0, 0, 0.04);
+  transition:
+    box-shadow 200ms ease,
+    transform 200ms ease;
 
   &:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.08),
+      0 8px 24px rgba(0, 0, 0, 0.06);
   }
 }
 
@@ -216,8 +222,8 @@
 /* -------- Quote print / PDF CSS -------- */
 @media print {
   @page {
-    size: A4;
-    margin: 10mm;
+    size: A4 landscape;
+    margin: 5mm;
   }
 
   body.quote-viewer-open * {
@@ -247,7 +253,104 @@
     width: 100%;
     box-shadow: none !important;
     margin: 0 !important;
-    padding: 8mm 10mm !important;
+    padding: 0 !important;
+    font-size: 8pt;
+  }
+
+  body.quote-viewer-open .quote-print-target thead {
+    display: table-header-group;
+  }
+
+  body.quote-viewer-open .quote-print-target tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body.quote-viewer-open .print-quotation-pages {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4mm !important;
+    padding: 0 !important;
+  }
+
+  body.quote-viewer-open .print-quotation-pages > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  body.quote-viewer-open .print-trip-land-page {
+    order: 1;
+  }
+
+  body.quote-viewer-open .print-accommodation-section {
+    order: 2;
+  }
+
+  body.quote-viewer-open .print-optional-activities {
+    order: 3;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body.quote-viewer-open .print-commercial-matrix-page {
+    order: 4;
+  }
+
+  body.quote-viewer-open .print-land-only-pages .print-commercial-matrix-page {
+    order: 2;
+  }
+
+  body.quote-viewer-open .print-land-only-pages .print-optional-activities {
+    order: 3;
+  }
+
+  body.quote-viewer-open .print-trip-land-page {
+    break-before: auto !important;
+    page-break-before: auto !important;
+    break-after: page !important;
+    page-break-after: always !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    overflow: visible !important;
+    zoom: var(--print-fit-scale, 1);
+  }
+
+  body.quote-viewer-open .print-commercial-matrix-page {
+    break-before: page !important;
+    page-break-before: always !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    overflow: visible !important;
+    zoom: var(--print-fit-scale, 1);
+  }
+
+  body.quote-viewer-open .print-trip-land-page [class*="overflow-hidden"],
+  body.quote-viewer-open .print-trip-land-page [class*="overflow-x-auto"],
+  body.quote-viewer-open .print-trip-land-page .land-review-scroll,
+  body.quote-viewer-open .print-trip-land-page .land-review-table-wrapper,
+  body.quote-viewer-open .print-commercial-matrix-page [class*="overflow-hidden"],
+  body.quote-viewer-open .print-trip-land-page .overflow-x-auto,
+  body.quote-viewer-open .print-commercial-matrix-page .overflow-x-auto {
+    overflow: visible !important;
+    max-width: none !important;
+  }
+
+  body.quote-viewer-open .print-trip-land-page table,
+  body.quote-viewer-open .print-commercial-matrix-page table {
+    width: max-content !important;
+    max-width: none !important;
+  }
+
+  body.quote-viewer-open .print-trip-land-page th,
+  body.quote-viewer-open .print-trip-land-page td,
+  body.quote-viewer-open .print-accommodation-section th,
+  body.quote-viewer-open .print-accommodation-section td,
+  body.quote-viewer-open .print-optional-activities th,
+  body.quote-viewer-open .print-optional-activities td {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
   }
 
   * {
@@ -329,7 +432,7 @@
     gap: 0 !important;
   }
 
-  body.costing-print-open .printing-section .print-stack>* {
+  body.costing-print-open .printing-section .print-stack > * {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
@@ -338,12 +441,12 @@
     margin: 0 0 6mm 0 !important;
   }
 
-  body.costing-print-open .printing-section .print-stack>*+* {
+  body.costing-print-open .printing-section .print-stack > * + * {
     break-before: auto !important;
     page-break-before: auto !important;
   }
 
-  body.costing-print-open .printing-section .print-stack>* {
+  body.costing-print-open .printing-section .print-stack > * {
     break-inside: auto;
   }
 }

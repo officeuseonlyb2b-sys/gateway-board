@@ -4,6 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   ActivityItem,
+  AssignmentCandidate,
   AssistanceAssignment,
   CrmEvent,
   CrmQuery,
@@ -113,6 +114,11 @@ const persistListeners = new Set<(snapshot: CrmSnapshot) => void>();
 let queries: CrmQuery[] = [];
 let tasks: CrmTask[] = [];
 let employees: Employee[] = [];
+let assignmentCandidates: AssignmentCandidate[] = [];
+export type CloudHydrationStatus = "idle" | "loading" | "ready" | "error";
+let crmHydrationStatus: CloudHydrationStatus = "idle";
+let employeeDirectoryStatus: CloudHydrationStatus = "idle";
+let assignmentDirectoryStatus: CloudHydrationStatus = "idle";
 let events: CrmEvent[] = [];
 let standaloneQuotationReviews: StandaloneQuotationReviewAssignment[] = [];
 let inited = false;
@@ -268,6 +274,20 @@ function load() {
 function emit() {
   listeners.forEach((l) => l());
 }
+
+export function setCrmHydrationStatus(status: CloudHydrationStatus) {
+  crmHydrationStatus = status;
+  emit();
+}
+
+export function setEmployeeDirectoryStatus(status: CloudHydrationStatus) {
+  employeeDirectoryStatus = status;
+  emit();
+}
+export function setAssignmentDirectoryStatus(status: CloudHydrationStatus) {
+  assignmentDirectoryStatus = status;
+  emit();
+}
 export interface CrmSnapshot {
   queries: CrmQuery[];
   tasks: CrmTask[];
@@ -299,6 +319,11 @@ export function replaceEmployeesFromCloud(records: Employee[]) {
   if (isBrowser()) safeSetStorage(EMP_KEY, JSON.stringify(employees));
   emit();
 }
+/** Replace the minimal, RLS-authorized assignment directory only. */
+export function replaceAssignmentCandidatesFromCloud(records: AssignmentCandidate[]) {
+  assignmentCandidates = records;
+  emit();
+}
 
 export function hydrateCrm(snapshot: CrmSnapshot) {
   migrateEmployeeCache();
@@ -308,6 +333,8 @@ export function hydrateCrm(snapshot: CrmSnapshot) {
   employees = snapshot.employees;
   events = snapshot.events;
   standaloneQuotationReviews = snapshot.standaloneQuotationReviews || [];
+  crmHydrationStatus = "ready";
+  employeeDirectoryStatus = "ready";
   // Publish authoritative in-memory state before attempting the optional
   // browser cache, so storage pressure cannot starve employee/reviewer hooks.
   emit();
@@ -348,6 +375,9 @@ export function listCrmTasks(): CrmTask[] {
 export function listEmployees(): Employee[] {
   if (!inited) load();
   return employees;
+}
+export function listAssignmentCandidates(): AssignmentCandidate[] {
+  return assignmentCandidates;
 }
 export function listCrmEvents(): CrmEvent[] {
   if (!inited) load();
@@ -2451,6 +2481,37 @@ export function useEmployees(): Employee[] {
       return employees;
     },
     () => EMPTY,
+  );
+}
+
+export function useAssignmentCandidates(): AssignmentCandidate[] {
+  return useSyncExternalStore(
+    subscribe,
+    () => assignmentCandidates,
+    () => EMPTY,
+  );
+}
+
+export function useCrmHydrationStatus(): CloudHydrationStatus {
+  return useSyncExternalStore(
+    subscribe,
+    () => crmHydrationStatus,
+    () => "idle",
+  );
+}
+
+export function useEmployeeDirectoryStatus(): CloudHydrationStatus {
+  return useSyncExternalStore(
+    subscribe,
+    () => employeeDirectoryStatus,
+    () => "idle",
+  );
+}
+export function useAssignmentDirectoryStatus(): CloudHydrationStatus {
+  return useSyncExternalStore(
+    subscribe,
+    () => assignmentDirectoryStatus,
+    () => "idle",
   );
 }
 export function useCrmEvents(): CrmEvent[] {

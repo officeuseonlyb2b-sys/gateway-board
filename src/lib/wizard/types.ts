@@ -399,6 +399,8 @@ export interface QuoteDraft {
   day_room_mix?: Record<number, DayRoomMix>;
   /** Costing sheet — per routing day, which land-part components are included. */
   costing_selection?: CostingSelection;
+  /** Display-only choices made in Step 9 for the final quotation review. */
+  land_review_display_selection?: LandReviewDisplaySelection;
   /**
    * Rate Sheet row picks. Key: "<optionKey>|<vehicle group id>",
    * value: the pax counts checked in that vehicle group. Only these rows
@@ -469,6 +471,27 @@ export interface CostScenario {
   /** transport line id from draft.transport; empty = include all transport lines */
   transport_line_id?: string;
   option_key: OptionKey;
+}
+
+/** Step 9 display-only choices persisted with the draft/version snapshot. */
+export interface LandReviewDisplaySelection {
+  transport: boolean;
+  hindi: boolean;
+  english: boolean;
+  otherLanguage: boolean;
+  escort: boolean;
+  indian: boolean;
+  foreign: boolean;
+  student: boolean;
+  activities: boolean;
+  misc: boolean;
+  guideIncluded: boolean;
+  guideOptional: boolean;
+  entranceIncluded: boolean;
+  entranceOptional: boolean;
+  activityIncluded: boolean;
+  activityOptional: boolean;
+  miscIncluded: boolean;
 }
 
 export interface GroupRoomMix {

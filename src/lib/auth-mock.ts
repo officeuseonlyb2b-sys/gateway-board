@@ -2,7 +2,11 @@
 import { useSyncExternalStore } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { listEmployees, replaceEmployeesFromCloud } from "@/lib/crm/store";
+import {
+  listEmployees,
+  replaceAssignmentCandidatesFromCloud,
+  replaceEmployeesFromCloud,
+} from "@/lib/crm/store";
 import type { Employee } from "@/lib/crm/types";
 
 export type Role = "admin" | "staff";
@@ -69,7 +73,10 @@ function clearLocalIdentity(reason: string) {
   const hadIdentity = authUser !== null || lifecycle.user !== null;
   generation++;
   authUser = null;
-  if (hadIdentity) replaceEmployeesFromCloud([]);
+  if (hadIdentity) {
+    replaceEmployeesFromCloud([]);
+    replaceAssignmentCandidatesFromCloud([]);
+  }
   updateLifecycle({
     initialized: true,
     sessionStatus: "signed_out",
@@ -205,7 +212,10 @@ function acceptSession(user: User, event: string) {
 
   const isSameUser = lifecycle.user?.id === user.id;
   const previousProfileStatus = lifecycle.profileStatus;
-  if (!isSameUser) replaceEmployeesFromCloud([]);
+  if (!isSameUser) {
+    replaceEmployeesFromCloud([]);
+    replaceAssignmentCandidatesFromCloud([]);
+  }
   authUser = user;
   updateLifecycle({
     initialized: true,

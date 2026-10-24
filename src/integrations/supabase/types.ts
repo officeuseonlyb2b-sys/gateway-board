@@ -642,6 +642,17 @@ export type Database = {
           unit: string | null;
         }[];
       };
+      list_sales_assignment_candidates: {
+        Args: never;
+        Returns: {
+          auth_user_id: string;
+          department: string | null;
+          employee_id: string;
+          name: string | null;
+          role: string | null;
+          unit: string | null;
+        }[];
+      };
       delete_hotel_cascade: { Args: { p_hotel_id: string }; Returns: undefined };
       has_role: {
         Args: {

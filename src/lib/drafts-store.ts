@@ -56,9 +56,12 @@ function read(): DraftRecord[] {
   if (!isBrowser()) {
     return [];
   }
+  if (inited) return cache;
   try {
     const list = JSON.parse(localStorage.getItem(KEY) || "[]") as DraftRecord[];
-    return Array.isArray(list) ? list : [];
+    cache = Array.isArray(list) ? list : [];
+    inited = true;
+    return cache;
   } catch {
     return [];
   }
@@ -66,10 +69,6 @@ function read(): DraftRecord[] {
 function refresh() {
   cache = read();
   inited = true;
-}
-function emit() {
-  refresh();
-  listeners.forEach((l) => l());
 }
 function getSnapshot(): DraftRecord[] {
   if (!inited) refresh();
@@ -79,7 +78,9 @@ function getSnapshot(): DraftRecord[] {
 function writeAll(list: DraftRecord[]) {
   if (!isBrowser()) return;
   localStorage.setItem(KEY, JSON.stringify(list));
-  emit();
+  cache = list;
+  inited = true;
+  listeners.forEach((listener) => listener());
 }
 
 function uid() {

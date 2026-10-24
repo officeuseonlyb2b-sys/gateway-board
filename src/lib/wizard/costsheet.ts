@@ -856,6 +856,7 @@ export function buildRateSheet(
   const includeLand = scope.landPart;
   const includeTransport = scope.landPart;
   const includeAccommodation = scope.accommodationPart;
+  const includeMeals = scope.mealsPart;
 
   const hotels = buildHotelMealSheet(draft, d, opt);
   const mk = {
@@ -910,11 +911,31 @@ export function buildRateSheet(
           .reduce((mealSum, row) => mealSum + row.total, 0),
       0,
     ) / actualPax;
-  const lunch = includeAccommodation
-    ? gross(splitAccommodation ? splitMealPerPerson("Lunch") : hotels.lunch_total, mk.h, mk.hg)
+  const independentMealPerPerson = (mealType: "Lunch" | "Dinner") =>
+    computeMealDays(draft, d, opt.key)
+      .rows.filter((row) => row.meal_type === mealType)
+      .reduce((sum, row) => sum + row.per_person, 0);
+  const lunch = includeMeals
+    ? gross(
+        !includeAccommodation
+          ? independentMealPerPerson("Lunch")
+          : splitAccommodation
+            ? splitMealPerPerson("Lunch")
+            : hotels.lunch_total,
+        mk.h,
+        mk.hg,
+      )
     : 0;
-  const dinner = includeAccommodation
-    ? gross(splitAccommodation ? splitMealPerPerson("Dinner") : hotels.dinner_total, mk.h, mk.hg)
+  const dinner = includeMeals
+    ? gross(
+        !includeAccommodation
+          ? independentMealPerPerson("Dinner")
+          : splitAccommodation
+            ? splitMealPerPerson("Dinner")
+            : hotels.dinner_total,
+        mk.h,
+        mk.hg,
+      )
     : 0;
 
   const groups = (!scope.landPart ? [undefined] : lines.length ? lines : [undefined]) as (

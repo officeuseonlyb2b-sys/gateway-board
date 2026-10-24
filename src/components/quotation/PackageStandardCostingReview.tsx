@@ -1,6 +1,7 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { addDaysISO, inr } from "@/lib/format";
+import { getQuotationScope } from "@/lib/query-for";
 import {
   GUIDE_LANGUAGES,
   guideConfiguredLanguages,
@@ -10,6 +11,7 @@ import {
   type GuideLanguage,
 } from "@/lib/mock-store";
 import {
+  computeMealDays,
   effectivePaxForPricing,
   getCostingPaxValues,
   gstRateFor,
@@ -47,6 +49,7 @@ import {
 import {
   hotelSelectionForDay,
   type HotelOption,
+  type LandReviewDisplaySelection,
   type QuoteDraft,
   type RoutingDay,
 } from "@/lib/wizard/types";
@@ -62,7 +65,6 @@ import {
   getEscortPricingMode,
   getEscortRangeBase,
   getEscortRangeDayCharge,
-  isEscortEnabled,
 } from "@/lib/wizard/guide-pricing";
 import { CommercialPackageMatrix } from "./CommercialPackageMatrix";
 import { LandDaywiseReview, type LandReviewFilters } from "./LandDaywiseReview";
@@ -72,6 +74,23 @@ const grid =
   "w-full border-separate border-spacing-0 border-l border-t border-[#d7e2ed] text-[10px] text-[#1a3045] [&_td]:border-b [&_td]:border-r [&_td]:border-[#d7e2ed] [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-r [&_th]:border-[#d7e2ed] [&_th]:px-2 [&_th]:py-1.5";
 const money = (value?: number) => (value == null || !Number.isFinite(value) ? "—" : inr(value));
 const gross = (base: number, markup: number, gst: number) => base * (1 + markup) * (1 + gst);
+
+/** Keep the calculation input identity stable when only Step 9 presentation
+ * choices (or the autosave timestamp) changed. All pricing fields retain their
+ * normal identity-driven invalidation. */
+function useStableCostingDraft(draft: QuoteDraft) {
+  const previous = useRef(draft);
+  const ignored = new Set<keyof QuoteDraft>(["land_review_display_selection", "updated_at"]);
+  const keys = new Set<keyof QuoteDraft>([
+    ...(Object.keys(previous.current) as (keyof QuoteDraft)[]),
+    ...(Object.keys(draft) as (keyof QuoteDraft)[]),
+  ]);
+  const pricingChanged = [...keys].some(
+    (key) => !ignored.has(key) && !Object.is(previous.current[key], draft[key]),
+  );
+  if (pricingChanged) previous.current = draft;
+  return previous.current;
+}
 
 function FilterChip({
   checked,
@@ -103,13 +122,15 @@ function FilterChip({
 
 function LandReviewControls({
   filters,
-  setFilters,
+  onChange,
 }: {
   filters: LandReviewFilters;
-  setFilters: React.Dispatch<React.SetStateAction<LandReviewFilters>>;
+  onChange: <K extends keyof LandReviewDisplaySelection>(
+    key: K,
+    value: LandReviewDisplaySelection[K],
+  ) => void;
 }) {
-  const set = <K extends keyof LandReviewFilters>(key: K, value: LandReviewFilters[K]) =>
-    setFilters((current) => ({ ...current, [key]: value }));
+  const set = onChange;
   const box = "rounded-sm border border-[#d7e2ed] bg-white p-2";
   const title = "mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#103353]";
   return (
@@ -284,6 +305,7 @@ function Panel({
 }
 
 function Masthead({ draft }: { draft: QuoteDraft }) {
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   return (
     <div className="flex items-start justify-between border-b-2 border-[#103353] px-2 py-3">
       <div>
@@ -294,7 +316,13 @@ function Masthead({ draft }: { draft: QuoteDraft }) {
           Final Quotation Review
         </h2>
         <p className="mt-1 text-[10px] text-[#73849b]">
-          Package · Standard Hotel Mode · Land, accommodation and included meals
+          {scope.queryFor === "Land Part + Meals"
+            ? "Land Part + Meals · Land services and separately selected meals"
+            : scope.landPart && scope.accommodationPart
+              ? "Package · Standard Hotel Mode · Land, accommodation and included meals"
+              : scope.landPart
+                ? "Land Part · Transport, guides, escort, entrances, activities and miscellaneous"
+                : "Accommodation Part · Hotels, rooms and selected meals"}
         </p>
       </div>
       <div className="text-right text-[10px] text-[#73849b]">
@@ -781,36 +809,47 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
   );
 }
 
-function LandReview({ draft }: { draft: QuoteDraft }) {
-  const initialFilters = useMemo<LandReviewFilters>(() => {
-    const languages = draft.guides
-      .filter((line) => line.inclusion_status !== "optional" && !line.is_escort)
-      .map((line) => (line.language || "").toLowerCase());
-    return {
-      transport: true,
-      hindi: languages.includes("hindi"),
-      english: languages.includes("english"),
-      otherLanguage: languages.some(
-        (language) => language && !["hindi", "english"].includes(language),
-      ),
-      escort: isEscortEnabled(draft) || draft.guides.some((line) => line.is_escort),
-      indian: draft.entrances.some((line) => line.indian_rate > 0),
-      foreign: draft.entrances.some((line) => line.foreign_rate > 0),
-      student: draft.entrances.some((line) => (line.student_rate ?? 0) > 0),
-      activities: true,
-      misc: true,
-      guideIncluded: true,
-      guideOptional: true,
-      entranceIncluded: true,
-      entranceOptional: true,
-      activityIncluded: true,
-      activityOptional: true,
-      miscIncluded: true,
-      paxDisplay: draft.pax_mode === "range" ? "ranges" : "exact",
-      exactPax: effectivePaxForPricing(draft),
-    };
-  }, [draft]);
-  const [filters, setFilters] = useState(initialFilters);
+const emptyLandReviewSelection: LandReviewDisplaySelection = {
+  transport: false,
+  hindi: false,
+  english: false,
+  otherLanguage: false,
+  escort: false,
+  indian: false,
+  foreign: false,
+  student: false,
+  activities: false,
+  misc: false,
+  guideIncluded: false,
+  guideOptional: false,
+  entranceIncluded: false,
+  entranceOptional: false,
+  activityIncluded: false,
+  activityOptional: false,
+  miscIncluded: false,
+};
+
+function LandReview({
+  draft,
+  costingDraft,
+  set,
+  readOnly,
+}: {
+  draft: QuoteDraft;
+  costingDraft: QuoteDraft;
+  set: SetDraft;
+  readOnly?: boolean;
+}) {
+  const selection = draft.land_review_display_selection ?? emptyLandReviewSelection;
+  const filters: LandReviewFilters = {
+    ...selection,
+    paxDisplay: draft.pax_mode === "range" ? "ranges" : "exact",
+    exactPax: effectivePaxForPricing(draft),
+  };
+  const changeSelection = <K extends keyof LandReviewDisplaySelection>(
+    key: K,
+    value: LandReviewDisplaySelection[K],
+  ) => set({ land_review_display_selection: { ...selection, [key]: value } });
   return (
     <Section number={2} title="Land Services — Pricing & Selection Review">
       <div className="space-y-2 p-2">
@@ -819,15 +858,21 @@ function LandReview({ draft }: { draft: QuoteDraft }) {
             ? `Costing Mode: Pax Range · ${draft.pax_min ?? 1}–${draft.pax_max ?? draft.pax_min ?? 1} Pax`
             : `Costing Mode: Exact Travellers · ${effectivePaxForPricing(draft)} Pax`}
         </div>
-        <LandReviewControls filters={filters} setFilters={setFilters} />
-        <LandDaywiseReview draft={draft} filters={filters} />
-        {filters.transport && <TransportReview draft={draft} />}
+        {!readOnly && <LandReviewControls filters={filters} onChange={changeSelection} />}
+        <LandDaywiseReview draft={costingDraft} filters={filters} />
+        {filters.transport && <TransportReview draft={costingDraft} />}
       </div>
     </Section>
   );
 }
 
-function AccommodationReview({ draft }: { draft: QuoteDraft }) {
+function AccommodationReview({
+  draft,
+  sectionNumber = 3,
+}: {
+  draft: QuoteDraft;
+  sectionNumber?: number;
+}) {
   const db = useDB();
   const options = useMemo(
     () => draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4),
@@ -859,8 +904,8 @@ function AccommodationReview({ draft }: { draft: QuoteDraft }) {
     [options, standardDraft, db, draft.transport],
   );
   return (
-    <div aria-label="3. Accommodation & Meals — Hotel Verification">
-      <Section number={3} title="Accommodation & Meals — Hotel Verification">
+    <div aria-label={`${sectionNumber}. Accommodation & Meals — Hotel Verification`}>
+      <Section number={sectionNumber} title="Accommodation & Meals — Hotel Verification">
         <div className="space-y-2 p-2">
           <Panel title="A. Hotel Foreseen / Stay Plan">
             <div className="overflow-x-auto">
@@ -1090,34 +1135,153 @@ function AccommodationReview({ draft }: { draft: QuoteDraft }) {
   );
 }
 
-function PackageStandardCostingReviewImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
+  const db = useDB();
+  const rows = useMemo(() => computeMealDays(draft, db, "A").rows, [draft, db]);
+  const finalValue = (value: number) => gross(value, hotelsMarkup(draft), hotelsGst(draft));
+  const lunch = rows
+    .filter((row) => row.meal_type === "Lunch")
+    .reduce((sum, row) => sum + row.per_person, 0);
+  const dinner = rows
+    .filter((row) => row.meal_type === "Dinner")
+    .reduce((sum, row) => sum + row.per_person, 0);
+
+  return (
+    <Section number={3} title="Meals — Separate Meals Review">
+      <div className="space-y-2 p-2">
+        <Panel
+          title="Selected Lunch / Dinner"
+          helper="Final selling values from the shared meal-costing output"
+        >
+          {rows.length ? (
+            <div className="overflow-x-auto">
+              <table className={`${grid} min-w-[760px]`}>
+                <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]">
+                  <tr>
+                    <th>Day</th>
+                    <th>Date</th>
+                    <th className="text-left">City</th>
+                    <th className="text-left">Meal / Venue</th>
+                    <th className="text-right">Final Selling PP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
+                      <td>{row.day}</td>
+                      <td>{row.date}</td>
+                      <td>{row.city}</td>
+                      <td>
+                        {row.meal_type} · {row.label}
+                      </td>
+                      <td className="text-right tabular-nums">
+                        {money(finalValue(row.per_person))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-[#eaf8ef] font-semibold text-[#103353]">
+                  {lunch > 0 && (
+                    <tr>
+                      <td colSpan={4}>Lunch PP</td>
+                      <td className="text-right tabular-nums">{money(finalValue(lunch))}</td>
+                    </tr>
+                  )}
+                  {dinner > 0 && (
+                    <tr>
+                      <td colSpan={4}>Dinner PP</td>
+                      <td className="text-right tabular-nums">{money(finalValue(dinner))}</td>
+                    </tr>
+                  )}
+                </tfoot>
+              </table>
+            </div>
+          ) : (
+            <div className="p-3 text-[10px] text-[#73849b]">
+              No separately selected Lunch or Dinner.
+            </div>
+          )}
+        </Panel>
+      </div>
+    </Section>
+  );
+}
+
+function PackageStandardCostingReviewImpl({
+  draft,
+  set,
+  readOnly = false,
+}: {
+  draft: QuoteDraft;
+  set: SetDraft;
+  readOnly?: boolean;
+}) {
+  const costingDraft = useStableCostingDraft(draft);
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  const landMeals = scope.queryFor === "Land Part + Meals";
+  const landOnly = scope.queryFor === "Land Part";
+  const accommodationOnly = !scope.landPart && scope.accommodationPart;
   const optionalCount = draft.activities.filter(
     (line) => line.inclusion_status === "optional",
   ).length;
   return (
-    <div className="space-y-3 rounded-sm bg-white p-1">
-      <Masthead draft={draft} />
-      <TripInformation draft={draft} />
-      <LandReview draft={draft} />
-      <AccommodationReview draft={draft} />
-      <div className="[&_h2]:text-[#103353]">
-        <CommercialPackageMatrix draft={draft} set={set} />
+    <div
+      className={`print-quotation-pages space-y-3 rounded-sm bg-white p-1 ${
+        landOnly ? "print-land-only-pages" : landMeals ? "print-land-meals-pages" : ""
+      }`}
+    >
+      <div className="print-trip-land-page space-y-3">
+        <Masthead draft={costingDraft} />
+        <TripInformation draft={costingDraft} />
+        {scope.landPart && (
+          <LandReview draft={draft} costingDraft={costingDraft} set={set} readOnly={readOnly} />
+        )}
+        {accommodationOnly && <AccommodationReview draft={costingDraft} sectionNumber={2} />}
       </div>
-      <div aria-label="5. Optional Activities & Experiences — Additional Sale">
-        <Section number={5} title="Optional Activities & Experiences — Additional Sale">
-          <div className="p-2">
-            <ActivitiesReview draft={draft} optional />
+      {!landOnly &&
+        !accommodationOnly &&
+        (landMeals ? (
+          <div className="print-meals-section">
+            <SeparateMealsReview draft={costingDraft} />
           </div>
-          <div className="border-t border-[#d7e2ed] px-3 py-1 text-[9px] text-[#73849b]">
-            Optional activities rendered: {optionalCount} · excluded from package totals
+        ) : (
+          <div className="print-accommodation-section">
+            <AccommodationReview draft={costingDraft} />
           </div>
-        </Section>
+        ))}
+      <div className="print-commercial-matrix-page [&_h2]:text-[#103353]">
+        <CommercialPackageMatrix
+          draft={costingDraft}
+          set={set}
+          readOnly={readOnly}
+          displaySelection={draft.land_review_display_selection}
+        />
       </div>
+      {draft.land_review_display_selection?.activities &&
+        draft.land_review_display_selection.activityOptional &&
+        optionalCount > 0 && (
+          <div
+            className="print-optional-activities"
+            aria-label="5. Optional Activities & Experiences — Additional Sale"
+          >
+            <Section
+              number={landOnly ? 4 : landMeals ? 5 : 5}
+              title="Optional Activities & Experiences — Additional Sale"
+            >
+              <div className="p-2">
+                <ActivitiesReview draft={costingDraft} optional />
+              </div>
+              <div className="border-t border-[#d7e2ed] px-3 py-1 text-[9px] text-[#73849b]">
+                Optional activities rendered: {optionalCount} · excluded from package totals
+              </div>
+            </Section>
+          </div>
+        )}
     </div>
   );
 }
 
 export const PackageStandardCostingReview = memo(
   PackageStandardCostingReviewImpl,
-  (previous, next) => previous.draft === next.draft,
+  (previous, next) => previous.draft === next.draft && previous.readOnly === next.readOnly,
 );

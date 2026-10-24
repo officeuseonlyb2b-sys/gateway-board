@@ -470,6 +470,16 @@ export interface Employee extends Executive {
   login_email_pending?: boolean;
 }
 
+/** Minimal, server-authorized projection used only by Sales Manager assignment UI. */
+export interface AssignmentCandidate {
+  id: string;
+  name: string;
+  role: AppRole;
+  unit: string;
+  department: string;
+  auth_user_id: string;
+}
+
 /** Every tracked employee action in the CRM. */
 export type CrmEventType =
   | "lead_created"

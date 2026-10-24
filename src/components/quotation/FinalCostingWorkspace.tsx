@@ -593,12 +593,23 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
   );
 }
 
-function FinalCostingWorkspaceImpl({ draft, set }: { draft: QuoteDraft; set: SetDraft }) {
+function FinalCostingWorkspaceImpl({
+  draft,
+  set,
+  readOnly = false,
+}: {
+  draft: QuoteDraft;
+  set: SetDraft;
+  readOnly?: boolean;
+}) {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const dynamic = draft.allocation_mode === "dynamic" || (draft.dynamic_days ?? []).length > 0;
   const options = draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4);
-  if (scope.landPart && scope.accommodationPart && !dynamic) {
-    return <PackageStandardCostingReview draft={draft} set={set} />;
+  if (
+    (scope.landPart && (!scope.accommodationPart || !dynamic)) ||
+    (!scope.landPart && scope.accommodationPart)
+  ) {
+    return <PackageStandardCostingReview draft={draft} set={set} readOnly={readOnly} />;
   }
   if (!scope.landPart && scope.accommodationPart && dynamic) {
     const reference = draft.linked_query_id || draft.linked_query_name || "Draft quotation";
@@ -664,7 +675,7 @@ function FinalCostingWorkspaceImpl({ draft, set }: { draft: QuoteDraft; set: Set
           <StandardAccommodationReview draft={draft} options={options} />
         ))}
       {scope.landPart && scope.accommodationPart && !dynamic && (
-        <CommercialPackageMatrix draft={draft} set={set} />
+        <CommercialPackageMatrix draft={draft} set={set} readOnly={readOnly} />
       )}
       {scope.landPart && (!scope.accommodationPart || dynamic) && (
         <LandCommercialMatrix draft={draft} />
@@ -676,5 +687,5 @@ function FinalCostingWorkspaceImpl({ draft, set }: { draft: QuoteDraft; set: Set
 
 export const FinalCostingWorkspace = memo(
   FinalCostingWorkspaceImpl,
-  (previous, next) => previous.draft === next.draft,
+  (previous, next) => previous.draft === next.draft && previous.readOnly === next.readOnly,
 );

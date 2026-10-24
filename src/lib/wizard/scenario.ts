@@ -182,6 +182,7 @@ export function computeScenario(
 ): ScenarioResult | null {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const includesAccommodation = scope.accommodationPart;
+  const includesMeals = scope.mealsPart;
   const includesLand = scope.landPart;
   const selectedOption = draft.hotel_options.find((o) => o.key === scenario.option_key);
   if (includesAccommodation && !selectedOption) return null;
@@ -285,7 +286,7 @@ export function computeScenario(
   const misc_per_person = includesLand ? landSheet.misc_per_person_total : 0;
   const misc_total = misc_per_person * pax;
   const optionals_total = draft.optionals.reduce((s, l) => s + l.rate * l.qty, 0);
-  const meals_total = includesAccommodation
+  const meals_total = includesMeals
     ? splitAccommodation
       ? splitOptions.reduce((sum, option) => sum + computeMealsTotal(draft, d, option.key), 0)
       : computeMealsTotal(draft, d, opt.key)
@@ -299,8 +300,8 @@ export function computeScenario(
   // Land Part and Hotels & Meals carry their own markup / GST percentages.
   const landMk = includesLand ? landMarkup(draft) : 0;
   const landGs = includesLand ? landGst(draft) : 0;
-  const hotelMk = includesAccommodation ? hotelsMarkup(draft) : 0;
-  const hotelGs = includesAccommodation ? hotelsGst(draft) : 0;
+  const hotelMk = includesMeals ? hotelsMarkup(draft) : 0;
+  const hotelGs = includesMeals ? hotelsGst(draft) : 0;
   const allocs = opt.pax_allocations ?? [];
 
   const persons: ScenarioPersonRow[] = Array.from({ length: pax }, (_, p) => {

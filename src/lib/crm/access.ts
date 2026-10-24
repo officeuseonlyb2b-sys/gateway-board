@@ -62,12 +62,60 @@ export function employeeForAuthUser(employees: Employee[], user?: AuthUser | nul
 }
 
 export function employeeAccountActive(employee?: Employee) {
-  return Boolean(
-    employee?.auth_user_id &&
-    employee.active === true &&
-    employee.employee_status !== "Exited" &&
-    employee.account_status === "Active",
+  return Boolean(employee?.auth_user_id && isEmployeeActive(employee) && isActiveAccount(employee));
+}
+
+/**
+ * These mappings only cover labels present in the historical CRM import. They
+ * are for frontend directory interpretation; database RLS remains authoritative.
+ */
+export function normalizeUnit(value?: string | null): string {
+  const normalized = value?.trim().toLocaleLowerCase().replace(/\s+/g, " ") || "";
+  if (["mp", "madhya pradesh", "madhya pradesh unit"].includes(normalized)) return "Madhya Pradesh";
+  return value?.trim() || "";
+}
+
+export function normalizeDepartment(value?: string | null): string {
+  const normalized = value?.trim().toLocaleLowerCase().replace(/\s+/g, " ") || "";
+  if (["sales", "sales & marketing", "sales and marketing"].includes(normalized)) return "Sales";
+  return value?.trim() || "";
+}
+
+export function normalizeEmployeeStatus(value?: string | null): string {
+  const normalized = value?.trim().toLocaleLowerCase() || "";
+  if (!normalized) return "";
+  if (normalized === "exited") return "Exited";
+  if (normalized === "active") return "Active";
+  if (normalized === "inactive") return "Inactive";
+  if (normalized === "on leave") return "On Leave";
+  return value?.trim() || "";
+}
+
+function isEmployeeActive(employee: Employee): boolean {
+  // Older JSON rows used true-like values. Deliberately do not accept arbitrary
+  // non-empty strings so values such as "false" cannot grant access.
+  const active = employee.active as unknown;
+  return active === true || active === 1 || active === "true";
+}
+
+function isActiveAccount(employee: Employee): boolean {
+  return (
+    String(employee.account_status || "")
+      .trim()
+      .toLocaleLowerCase() === "active" &&
+    normalizeEmployeeStatus(employee.employee_status) !== "Exited"
   );
+}
+
+/** Sales roles that the CRM role model allows to receive a Query. */
+export function isCanonicalSalesRole(role?: string | null): boolean {
+  return [
+    "Sales Executive",
+    "Senior Sales Executive",
+    "Assistant Manager",
+    "Sales Manager",
+    "Sales Head",
+  ].includes(normalizeRole(role));
 }
 
 export function canAccessPath(profile: AccessProfile, pathname: string) {
@@ -117,12 +165,75 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
 export function isSalesAssignmentEligible(employee: Employee) {
   return (
     employeeAccountActive(employee) &&
-    employee.role !== "Employee" &&
-    (employee.department === "Sales" ||
-      employee.role === "Owner / Director" ||
+    normalizeRole(employee.role) !== "Employee" &&
+    (normalizeDepartment(employee.department) === "Sales" ||
+      normalizeRole(employee.role) === "Owner / Director" ||
       employee.permissions?.includes("query.assignment.receive") ||
       employee.permission_grants?.includes("query.assignment.receive"))
   );
+}
+
+/** The frontend mirrors the database's same-unit Sales assignment boundary. */
+export function eligibleSalesAssignees(actor: Employee | undefined, employees: Employee[]) {
+  if (import.meta.env.DEV && actor) {
+    console.debug("[crm] assignment actor", {
+      id: actor.id,
+      name: actor.name,
+      role: actor.role,
+      department: actor.department,
+      unit: actor.unit,
+      normalized_unit: normalizeUnit(actor.unit),
+      active: actor.active,
+      account_status: actor.account_status,
+      employee_status: actor.employee_status,
+      has_auth_user_id: Boolean(actor.auth_user_id),
+    });
+  }
+  if (
+    !actor ||
+    normalizeRole(actor.role) !== "Sales Manager" ||
+    !employeeAccountActive(actor) ||
+    !normalizeUnit(actor.unit)
+  )
+    return [];
+  const actorUnit = normalizeUnit(actor.unit);
+  const candidates = employees.filter((employee) => {
+    const reason =
+      employee.id === actor.id
+        ? "self"
+        : normalizeUnit(employee.unit) !== actorUnit
+          ? "different unit"
+          : !isCanonicalSalesRole(employee.role)
+            ? "non-Sales role"
+            : !isEmployeeActive(employee)
+              ? "inactive"
+              : String(employee.account_status || "")
+                    .trim()
+                    .toLocaleLowerCase() !== "active"
+                ? "account disabled"
+                : normalizeEmployeeStatus(employee.employee_status) === "Exited"
+                  ? "exited"
+                  : !employee.auth_user_id
+                    ? "missing auth link"
+                    : null;
+    if (import.meta.env.DEV) {
+      console.debug("[crm] assignment candidate evaluated", {
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+        department: employee.department,
+        unit: employee.unit,
+        normalized_unit: normalizeUnit(employee.unit),
+        active: employee.active,
+        account_status: employee.account_status,
+        employee_status: employee.employee_status,
+        has_auth_user_id: Boolean(employee.auth_user_id),
+        eligibility: reason || "eligible",
+      });
+    }
+    return !reason;
+  });
+  return candidates;
 }
 
 export function dashboardPathForUser(user?: AuthUser | null) {

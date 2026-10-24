@@ -4,10 +4,17 @@ import {
   hydrateCrm,
   onCrmPersist,
   replaceEmployeesFromCloud,
+  replaceAssignmentCandidatesFromCloud,
   replaceQueryFromCloud,
   replaceStandaloneQuotationReviewsFromCloud,
   upsertStandaloneQuotationReviewFromCloud,
   listEmployees,
+  assignQuery,
+  reassignQuery,
+  setCrmHydrationStatus,
+  setEmployeeDirectoryStatus,
+  setAssignmentDirectoryStatus,
+  listAssignmentCandidates,
   type CrmSnapshot,
 } from "./store";
 import { auth } from "@/lib/auth-mock";
@@ -16,6 +23,7 @@ import type {
   CrmQuery,
   CrmTask,
   Employee,
+  AssignmentCandidate,
   StandaloneQuotationReviewAssignment,
 } from "./types";
 import type { Json } from "@/integrations/supabase/types";
@@ -147,11 +155,12 @@ export async function persistQueryQuotationReview(queryId: string): Promise<void
 }
 
 async function readCloud(): Promise<CrmSnapshot> {
-  const [queryResult, taskResult, employeeResult, eventResult] = await Promise.all([
+  const [queryResult, taskResult, employeeResult, eventResult, candidates] = await Promise.all([
     supabase.from("crm_queries").select("id,data,owner_user_id"),
     supabase.from("crm_tasks").select("id,data"),
     readEmployeeRows(),
     supabase.from("crm_events").select("id,data").order("at", { ascending: false }).limit(800),
+    readAssignmentCandidates(),
   ]);
   const error = queryResult.error ?? taskResult.error ?? eventResult.error;
   if (error) throw error;
@@ -160,8 +169,13 @@ async function readCloud(): Promise<CrmSnapshot> {
     ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => [row.id, row.owner_user_id]),
   );
   cloudEventIds = new Set((eventResult.data ?? []).map((row) => row.id));
+  replaceAssignmentCandidatesFromCloud(candidates);
+  setAssignmentDirectoryStatus("ready");
   return {
-    queries: unwrap<CrmQuery>(queryResult.data),
+    queries: ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => {
+      const data = row.data as CrmQuery;
+      return { ...data, id: row.id, query_id: data.query_id || row.id };
+    }),
     tasks: unwrap<CrmTask>(taskResult.data),
     employees: employeeResult,
     events: unwrap<CrmEvent>(eventResult.data),
@@ -196,7 +210,12 @@ function isUnassignedQuery(query: CrmQuery): boolean {
 
 function resolvedOwnerUserId(query: CrmQuery): string | null {
   if (isUnassignedQuery(query)) return null;
-  return activeQueryOwner(query)?.auth_user_id ?? ownerUserIdByQueryId.get(query.id) ?? null;
+  return (
+    activeQueryOwner(query)?.auth_user_id ??
+    listAssignmentCandidates().find((candidate) => candidate.id === query.owner)?.auth_user_id ??
+    ownerUserIdByQueryId.get(query.id) ??
+    null
+  );
 }
 
 function queryRow(query: CrmQuery) {
@@ -211,15 +230,47 @@ function queryRow(query: CrmQuery) {
 }
 
 export async function refreshCrmQuery(queryId: string): Promise<void> {
-  const result = await supabase
+  let result = await supabase
     .from("crm_queries")
     .select("id,data,owner_user_id")
     .eq("id", queryId)
     .maybeSingle();
   if (result.error) throw result.error;
+  if (!result.data) {
+    result = await supabase
+      .from("crm_queries")
+      .select("id,data,owner_user_id")
+      .eq("query_id", queryId)
+      .maybeSingle();
+    if (result.error) throw result.error;
+  }
   if (!result.data) return;
   ownerUserIdByQueryId.set(result.data.id, result.data.owner_user_id);
-  replaceQueryFromCloud(result.data.data as unknown as CrmQuery);
+  const cloud = result.data.data as unknown as CrmQuery;
+  replaceQueryFromCloud({ ...cloud, id: result.data.id, query_id: cloud.query_id || queryId });
+}
+
+/** Assign through the existing store model, then require the RLS-protected cloud write. */
+export async function assignCrmQueryNow(
+  queryId: string,
+  employeeId: string,
+  assignedBy: string,
+  reason?: string,
+) {
+  const before = getCrmSnapshot().queries.find(
+    (query) => query.id === queryId || query.query_id === queryId,
+  );
+  if (!before) throw new Error("The Query could not be resolved.");
+  if (before.assignment_status === "Assigned")
+    reassignQuery(before.query_id, employeeId, assignedBy, reason);
+  else assignQuery(before.query_id, employeeId, assignedBy, reason);
+  try {
+    await pushCrmSnapshotNow(getCrmSnapshot(), before.query_id);
+    await refreshCrmQuery(before.id);
+  } catch (error) {
+    await refreshCrmQuery(before.id).catch(() => {});
+    throw error;
+  }
 }
 
 /** Persist one Query without coupling its result to unrelated CRM snapshot rows. */
@@ -628,39 +679,103 @@ async function readEmployeeRows(): Promise<Employee[]> {
     );
     if (result.data.length < 1000) break;
   }
+  const employeeMasterRows = [...records];
   const directory = await supabase.rpc("crm_review_employee_directory");
   if (directory.error) throw directory.error;
   const knownIds = new Set(records.map((employee) => employee.id));
-  records.push(
-    ...directory.data
-      .filter((row) => !knownIds.has(row.id))
-      .map((row): Employee => ({
-        id: row.id,
-        name: row.name || "Sales employee",
-        role: (row.role || "Employee") as Employee["role"],
-        email: "",
-        auth_user_id: row.auth_user_id || undefined,
-        department: (row.department || "Sales") as Employee["department"],
-        unit: row.unit || "",
-        active: true,
-        joined_at: "",
-        account_status: "Active",
-        employee_status: "Active",
+  directory.data.forEach((row) => {
+    if (knownIds.has(row.id)) return;
+    knownIds.add(row.id);
+    records.push({
+      id: row.id,
+      name: row.name || "Sales employee",
+      role: (row.role || "Employee") as Employee["role"],
+      email: "",
+      auth_user_id: row.auth_user_id || undefined,
+      department: (row.department || "Sales") as Employee["department"],
+      unit: row.unit || "",
+      active: true,
+      joined_at: "",
+      account_status: "Active",
+      employee_status: "Active",
+    });
+  });
+  if (import.meta.env.DEV) {
+    const actorId = auth.current()?.id;
+    console.debug("[crm] employee directory result", {
+      employee_master_rows: employeeMasterRows.length,
+      actor_auth_user_id: actorId,
+      employee_master: employeeMasterRows.map((employee) => ({
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+        unit: employee.unit,
+        self: employee.auth_user_id === actorId,
       })),
-  );
+    });
+  }
   return records;
+}
+
+async function readAssignmentCandidates(): Promise<AssignmentCandidate[]> {
+  const result = await supabase.rpc("list_sales_assignment_candidates");
+  if (result.error) throw result.error;
+  const candidates = result.data
+    .filter((row) => row.employee_id && row.name && row.role && row.unit && row.auth_user_id)
+    .map((row): AssignmentCandidate => ({
+      id: row.employee_id,
+      name: row.name,
+      role: row.role as AssignmentCandidate["role"],
+      unit: row.unit,
+      department: row.department || "",
+      auth_user_id: row.auth_user_id,
+    }));
+  if (import.meta.env.DEV) {
+    console.debug("[crm] assignment candidates loaded", {
+      count: candidates.length,
+      candidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        name: candidate.name,
+        role: candidate.role,
+        unit: candidate.unit,
+        has_auth_link: Boolean(candidate.auth_user_id),
+      })),
+    });
+  }
+  return candidates;
 }
 
 export async function refreshEmployees() {
   const userId = auth.current()?.id;
   if (!userId) return;
-  const records = await readEmployeeRows();
-  if (auth.current()?.id === userId) replaceEmployeesFromCloud(records);
+  setEmployeeDirectoryStatus("loading");
+  setAssignmentDirectoryStatus("loading");
+  try {
+    const [records, candidates] = await Promise.all([
+      readEmployeeRows(),
+      readAssignmentCandidates(),
+    ]);
+    if (auth.current()?.id === userId) {
+      replaceEmployeesFromCloud(records);
+      replaceAssignmentCandidatesFromCloud(candidates);
+      setEmployeeDirectoryStatus("ready");
+      setAssignmentDirectoryStatus("ready");
+    }
+  } catch (error) {
+    if (auth.current()?.id === userId) {
+      setEmployeeDirectoryStatus("error");
+      setAssignmentDirectoryStatus("error");
+    }
+    throw error;
+  }
 }
 
 export function startCrmSync(includeBusiness = true): () => void {
   if (started) return () => {};
   started = true;
+  setEmployeeDirectoryStatus("loading");
+  setAssignmentDirectoryStatus("loading");
+  if (includeBusiness) setCrmHydrationStatus("loading");
   const run = ++syncGeneration;
   const pull = () => {
     if (pullTimer) clearTimeout(pullTimer);
@@ -704,6 +819,9 @@ export function startCrmSync(includeBusiness = true): () => void {
     );
   };
   void (includeBusiness ? pullAndMerge(run) : refreshEmployees()).catch((error) => {
+    setEmployeeDirectoryStatus("error");
+    setAssignmentDirectoryStatus("error");
+    if (includeBusiness) setCrmHydrationStatus("error");
     console.error("[crm] initial refresh failed", error);
   });
   void pullNotifications().catch((error) =>

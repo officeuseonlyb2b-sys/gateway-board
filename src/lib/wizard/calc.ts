@@ -312,7 +312,10 @@ export function computeMealDays(
   d: import("@/lib/mock-store").DB,
   optionKey?: string,
 ): { rows: MealDayRow[]; total: number } {
-  const opt = draft.hotel_options?.find((o) => o.key === optionKey) ?? draft.hotel_options?.[0];
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  const opt = scope.accommodationPart
+    ? (draft.hotel_options?.find((o) => o.key === optionKey) ?? draft.hotel_options?.[0])
+    : undefined;
   const pax = opt
     ? effectiveAccommodationPax(draft, opt)
     : Math.max(1, effectivePaxForPricing(draft));
@@ -470,7 +473,7 @@ export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-sto
         );
       }, 0)
     : 0;
-  const meals = scope.accommodationPart ? computeMealsTotal(draft, d) : 0;
+  const meals = scope.mealsPart ? computeMealsTotal(draft, d) : 0;
   // Optional supplements are deliberately excluded from the package total.
   // They are priced and displayed separately in Step 9.
   return t + a + e + g + m + meals;

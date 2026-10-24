@@ -8,12 +8,11 @@ import { useAccessibleQueries } from "@/lib/crm/access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useEmployees } from "@/lib/crm/store";
-import { isSalesAssignmentEligible } from "@/lib/crm/access";
+import { useAssignmentCandidates } from "@/lib/crm/store";
 
 export default function AssignmentDesk() {
   const queries = useAccessibleQueries();
-  const employees = useEmployees().filter(isSalesAssignmentEligible);
+  const employees = useAssignmentCandidates();
   const pending = useMemo(
     () =>
       queries
