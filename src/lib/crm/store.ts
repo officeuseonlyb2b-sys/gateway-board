@@ -248,8 +248,8 @@ function load() {
     localStorage.getItem(STANDALONE_REVIEW_KEY),
   );
   migrateEmployeeCache();
-  // Never trust browser employee identities for authorization, even on reload.
-  employees = [];
+  // Never restore employee identities from browser storage for authorization.
+  // Preserve only a row already verified by the live auth bootstrap.
 
   if (localStorage.getItem(DATASET_KEY) !== QUERY_TRACKER_DATASET_ID) {
     // This release intentionally replaces the prior Query Tracker dataset.
@@ -313,7 +313,6 @@ export function migrateEmployeeCache() {
 
 /** Replace only the read cache with rows fetched from Supabase. Never triggers a cloud push. */
 export function replaceEmployeesFromCloud(records: Employee[]) {
-  if (!inited) load();
   migrateEmployeeCache();
   employees = records;
   if (isBrowser()) safeSetStorage(EMP_KEY, JSON.stringify(employees));
@@ -375,6 +374,12 @@ export function listCrmTasks(): CrmTask[] {
 export function listEmployees(): Employee[] {
   if (!inited) load();
   return employees;
+}
+/** Stable employee IDs are stored as owners; convert only at the presentation edge. */
+export function ownerDisplayName(owner?: string): string {
+  if (!inited) load();
+  if (!owner || owner === "Unassigned") return "Awaiting Assignment";
+  return employees.find((employee) => employee.id === owner)?.name || owner;
 }
 export function listAssignmentCandidates(): AssignmentCandidate[] {
   return assignmentCandidates;

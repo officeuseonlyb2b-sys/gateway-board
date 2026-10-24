@@ -10,6 +10,7 @@ import { useCrmMetrics, isOpen, sameDay } from "@/lib/crm/metrics";
 import { StageBadge, inr, fmtDate, fmtTime } from "@/components/crm/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AssignLeadsDialog, ReassignQuery } from "@/components/crm/assign";
+import { ownerDisplayName } from "@/lib/crm/store";
 
 export default function QueryTracker() {
   const navigate = useNavigate();
@@ -21,12 +22,12 @@ export default function QueryTracker() {
     const s = search.toLowerCase();
     return m.queries.filter(
       (q) =>
-        (owner === "all" || q.owner === owner) &&
+        (owner === "all" || q.owner === owner || ownerDisplayName(q.owner) === owner) &&
         (!s ||
           q.query_id.toLowerCase().includes(s) ||
           q.customer.toLowerCase().includes(s) ||
           q.destination.toLowerCase().includes(s) ||
-          q.owner.toLowerCase().includes(s)),
+          ownerDisplayName(q.owner).toLowerCase().includes(s)),
     );
   }, [m.queries, search, owner]);
 
@@ -174,7 +175,7 @@ export default function QueryTracker() {
                     <TableCell>{q.travel_type}</TableCell>
                     <TableCell>{q.customer}</TableCell>
                     <TableCell><StageBadge stage={q.stage} /></TableCell>
-                    <TableCell>{q.owner}</TableCell>
+                    <TableCell>{ownerDisplayName(q.owner)}</TableCell>
                     <TableCell className="font-medium">{inr(q.value)}</TableCell>
                     <TableCell>{q.next_action}</TableCell>
                     <TableCell>{fmtTime(q.followup_due)}</TableCell>

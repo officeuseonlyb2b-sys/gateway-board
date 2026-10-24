@@ -1,7 +1,7 @@
 // Shared assignment controls for the CRM: owner picker, task dialog and the
 // Manager Dashboard bulk "Assign Leads" flow. All mutations go through
 // src/lib/crm/store.ts — no separate data source.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -37,7 +37,7 @@ import {
 import { LEAD_PRIORITIES } from "@/lib/crm/types";
 import { useAuth } from "@/lib/auth-mock";
 import { isSalesAssignmentEligible, useAccessProfile } from "@/lib/crm/access";
-import { assignCrmQueryNow } from "@/lib/crm/crm-remote";
+import { assignCrmQueryNow, refreshAssignmentCandidates } from "@/lib/crm/crm-remote";
 
 /** Historical actor labels come from the employee linked by Auth UUID. */
 export function useActor(): string {
@@ -62,6 +62,12 @@ export function OwnerSelect({
   const assignmentCandidates = useAssignmentCandidates();
   const directoryStatus = useEmployeeDirectoryStatus();
   const assignmentDirectoryStatus = useAssignmentDirectoryStatus();
+  useEffect(() => {
+    if (!managerAssignment || assignmentDirectoryStatus !== "idle") return;
+    void refreshAssignmentCandidates().catch((error) =>
+      console.error("[crm] assignment directory refresh failed", error),
+    );
+  }, [assignmentDirectoryStatus, managerAssignment]);
   const employees = managerAssignment
     ? assignmentCandidates
     : allEmployees

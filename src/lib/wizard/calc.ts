@@ -350,7 +350,13 @@ export function computeMealDays(
       (["lunch", "dinner"] as const).forEach((mealKey) => {
         if (covered[mealKey]) return;
         const choice = selected[mealKey];
-        if (!choice || choice.source === "none" || choice.inclusion_status === "optional") return;
+        if (
+          !choice ||
+          choice.source === "none" ||
+          choice.inclusion_status === "optional" ||
+          choice.inclusion_status === "removed"
+        )
+          return;
         let perPerson = choice.per_person_rate ?? 0;
         let label = choice.label || "";
         if (choice.source === "restaurant") {
@@ -400,7 +406,12 @@ export function computeMealsTotal(
 
 export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-store").DB): number {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const t = scope.landPart ? draft.transport.reduce((s, l) => s + transportLineTotal(l), 0) : 0;
+  // Configured transport options are alternatives, never add-ons to be summed.
+  // Option-aware Rate Sheets/scenarios inject exactly one alternative instead.
+  const t =
+    scope.landPart && !draft.transport_options?.length
+      ? draft.transport.reduce((s, l) => s + transportLineTotal(l), 0)
+      : 0;
   const a = scope.landPart
     ? draft.activities.reduce((sum, line) => {
         if (line.inclusion_status === "optional") return sum;

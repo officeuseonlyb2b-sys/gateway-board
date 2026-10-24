@@ -20,7 +20,7 @@ import {
   mixLabel,
   computeGroupOption,
 } from "@/lib/wizard/calc";
-import { computeScenario } from "@/lib/wizard/scenario";
+import { computeScenario, draftForScenarioTransport } from "@/lib/wizard/scenario";
 import { getQuotationScope } from "@/lib/query-for";
 import { buildLandPart, buildRateSheet, type SheetOption } from "@/lib/wizard/costsheet";
 import { hotelSelectionForDay, type CostScenario, type QuoteDraft } from "@/lib/wizard/types";
@@ -63,17 +63,26 @@ export function buildSavedQuote(
   const scenarioOptions = !scope.accommodationPart
     ? draft.hotel_options.slice(0, 1)
     : draft.hotel_options.filter((option) => includedKeys.has(option.key));
-  const scenarioDefs: CostScenario[] = draft.scenarios?.length
-    ? draft.scenarios
-    : scenarioOptions.flatMap((option) => {
-        const vehicles = draft.transport.length ? draft.transport : [undefined];
-        return vehicles.map((vehicle, index) => ({
-          id: `saved-${option.key}-${vehicle?.id ?? index}`,
-          label: `${option.category || `Option ${option.key}`}${vehicle ? " + vehicle" : ""}`,
-          option_key: option.key,
-          transport_line_id: vehicle?.id,
-        }));
-      });
+  const scenarioDefs: CostScenario[] =
+    draft.scenarios?.length && !draft.transport_options?.length
+      ? draft.scenarios
+      : scenarioOptions.flatMap((option) => {
+          if (draft.transport_options?.length) {
+            return draft.transport_options.map((transport) => ({
+              id: `saved-${option.key}-${transport.id}`,
+              label: `${option.category || `Option ${option.key}`} + ${transport.name}`,
+              option_key: option.key,
+              transport_option_id: transport.id,
+            }));
+          }
+          const vehicles = draft.transport.length ? draft.transport : [undefined];
+          return vehicles.map((vehicle, index) => ({
+            id: `saved-${option.key}-${vehicle?.id ?? index}`,
+            label: `${option.category || `Option ${option.key}`}${vehicle ? " + vehicle" : ""}`,
+            option_key: option.key,
+            transport_line_id: vehicle?.id,
+          }));
+        });
   const scenarioResults = scenarioDefs
     .map((definition) => ({ definition, result: computeScenario(draft, definition, d) }))
     .filter(
@@ -92,7 +101,11 @@ export function buildSavedQuote(
   const primaryTransport = primaryEntry.definition.transport_line_id
     ? draft.transport.find((line) => line.id === primaryEntry.definition.transport_line_id)
     : undefined;
-  const primaryLand = buildLandPart(draft, d, primaryTransport);
+  const primaryLand = buildLandPart(
+    draftForScenarioTransport(draft, primaryEntry.definition),
+    d,
+    primaryTransport,
+  );
 
   const aggregateSelected = (
     bucket: "transport_opts" | "guide_opts" | "entrance_opts" | "activity_opts" | "misc_opts",

@@ -1,4 +1,4 @@
-import { useAuth, type AuthUser } from "@/lib/auth-mock";
+import { auth, useAuth, useAuthLifecycle, type AuthUser } from "@/lib/auth-mock";
 import { listEmployees, useCrmQueries, useEmployees } from "./store";
 import type { AppRole, DataScope, Department, Employee } from "./types";
 
@@ -237,7 +237,11 @@ export function eligibleSalesAssignees(actor: Employee | undefined, employees: E
 }
 
 export function dashboardPathForUser(user?: AuthUser | null) {
-  const employee = employeeForAuthUser(listEmployees(), user);
+  const verifiedEmployee = auth.lifecycle().employee;
+  const employee =
+    verifiedEmployee?.auth_user_id === user?.id
+      ? verifiedEmployee
+      : employeeForAuthUser(listEmployees(), user);
   if (!employeeAccountActive(employee)) return "/employee-home" as const;
   if (employee?.role === "Super Admin") return "/admin-console" as const;
   if (employee?.role === "Sales Manager") return "/queries/sales-control-tower" as const;
@@ -248,7 +252,10 @@ export function dashboardPathForUser(user?: AuthUser | null) {
 
 export function useAccessProfile(): AccessProfile {
   const user = useAuth();
-  const employee = employeeForAuthUser(useEmployees(), user);
+  const authEmployee = useAuthLifecycle().employee;
+  // Auth bootstrap owns the current employee. Do not touch the full CRM store
+  // here: this hook is used by the layout/sidebar before the first app paint.
+  const employee = authEmployee?.auth_user_id === user?.id ? authEmployee : undefined;
   const accountReady = employeeAccountActive(employee);
   const role = accountReady ? normalizeRole(employee!.role) : "";
   const superAdmin = role === "Super Admin";

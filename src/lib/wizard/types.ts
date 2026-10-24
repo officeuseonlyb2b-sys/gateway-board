@@ -244,7 +244,8 @@ export interface DynamicRoomAllocation {
 export type MealSource = "none" | "hotel" | "restaurant";
 export interface MealChoice {
   source: MealSource;
-  inclusion_status?: "included" | "optional";
+  /** Kept even when removed so navigation, drafts and version snapshots do not re-add it. */
+  inclusion_status?: "included" | "optional" | "removed";
   hotel_id?: string;
   restaurant_id?: string;
   label?: string;
@@ -468,8 +469,10 @@ export interface QuoteDraft {
 export interface CostScenario {
   id: string;
   label: string;
-  /** transport line id from draft.transport; empty = include all transport lines */
+  /** A single legacy vehicle line. */
   transport_line_id?: string;
+  /** A configured transport alternative, including its vehicle quantities. */
+  transport_option_id?: string;
   option_key: OptionKey;
 }
 

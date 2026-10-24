@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAccessibleQueries } from "@/lib/crm/access";
+import { useEmployees } from "@/lib/crm/store";
 import type { CrmQuery } from "@/lib/crm/types";
 
 const fmt = (value?: string) =>
@@ -76,6 +77,10 @@ function SortableHead({
 export default function QueryTracker() {
   const navigate = useNavigate();
   const queries = useAccessibleQueries();
+  const employees = useEmployees();
+  const ownerName = (query: CrmQuery) =>
+    employees.find((employee) => employee.id === query.owner || employee.name === query.owner)?.name ||
+    query.owner;
   const scope = useQueryFilters(queries, "today");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "received",
@@ -255,7 +260,7 @@ export default function QueryTracker() {
                       <Badge variant="outline">{query.stage}</Badge>
                     </TableCell>
                     <TableCell>
-                      {query.owner || (
+                      {ownerName(query) || (
                         <Badge className="bg-amber-100 text-amber-800">Awaiting Assignment</Badge>
                       )}
                     </TableCell>

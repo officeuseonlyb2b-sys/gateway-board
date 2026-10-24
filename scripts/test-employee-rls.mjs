@@ -518,6 +518,110 @@ await check(
       "EMP-0101@example.invalid",
     );
 
+    // Regression coverage for the exact targeted UPDATE used by Assignment
+    // Desk: same-unit manager assignments succeed; unsafe targets and a Sales
+    // Executive attempting the manager action remain denied.
+    const crossUnitId = (
+      await db.query(
+        "SELECT id FROM public.crm_employees WHERE data ->> 'unit' = 'Rajasthan' LIMIT 1",
+      )
+    ).rows[0].id;
+    const exitedId = (
+      await db.query(
+        "SELECT id FROM public.crm_employees WHERE data ->> 'employee_status' = 'Exited' LIMIT 1",
+      )
+    ).rows[0].id;
+    const assignmentPayload = (id, queryId, owner) => ({
+      id,
+      query_id: queryId,
+      owner,
+      created_by: salesIds[1],
+      assignment_status: "Assigned",
+      assigned_by: salesIds[0],
+      assigned_at: "2026-10-24T12:30:00.000Z",
+      assignment_history: [
+        { assigned_to: owner, assigned_by: salesIds[0], assigned_at: "2026-10-24T12:30:00.000Z" },
+      ],
+      primary_unit: "Madhya Pradesh",
+      participating_units: ["Madhya Pradesh"],
+    });
+    await asUser(salesIds[0], async () => {
+      // Deeksha -> Chhaya: the second same-unit eligible Sales role.
+      const chhayaRow = (
+        await db.query("SELECT data FROM public.crm_queries WHERE id='unassigned-create-1'")
+      ).rows[0];
+      const chhayaData = {
+        ...chhayaRow.data,
+        owner: salesIds[1],
+        assignment_status: "Assigned",
+        assigned_by: salesIds[0],
+        assigned_at: "2026-10-24T12:29:00.000Z",
+        assigned_on: "2026-10-24T12:29:00.000Z",
+        assignment_history: [
+          ...(chhayaRow.data.assignment_history || []),
+          {
+            assigned_to: salesIds[1],
+            assigned_by: salesIds[0],
+            assigned_at: "2026-10-24T12:29:00.000Z",
+          },
+        ],
+      };
+      const chhayaAssignment = await db.query(
+        "UPDATE public.crm_queries SET owner=$1::text, owner_user_id=$1::uuid, data=$2::jsonb WHERE id='unassigned-create-1' RETURNING owner, owner_user_id, data",
+        [salesIds[1], JSON.stringify(chhayaData)],
+      );
+      assert.equal(chhayaAssignment.rows[0].owner, salesIds[1]);
+      assert.equal(chhayaAssignment.rows[0].owner_user_id, salesIds[1]);
+      assert.equal(chhayaAssignment.rows[0].data.assignment_status, "Assigned");
+      await assert.rejects(
+        db.query(
+          "UPDATE public.crm_queries SET owner=$1::text, owner_user_id=$1::uuid, data=$2::jsonb WHERE id='unassigned-create-1'",
+          [
+            crossUnitId,
+            JSON.stringify(assignmentPayload("unassigned-create-1", "Q-UNASSIGNED-1", crossUnitId)),
+          ],
+        ),
+        /active Sales employee in your unit/,
+      );
+      await assert.rejects(
+        db.query(
+          "UPDATE public.crm_queries SET owner=$1::text, owner_user_id=$1::uuid, data=$2::jsonb WHERE id='unassigned-create-1'",
+          [
+            exitedId,
+            JSON.stringify(assignmentPayload("unassigned-create-1", "Q-UNASSIGNED-1", exitedId)),
+          ],
+        ),
+        /active Sales employee in your unit/,
+      );
+    });
+    await asUser(salesIds[2], async () => {
+      const row = (
+        await db.query("SELECT data FROM public.crm_queries WHERE id='unassigned-create-2'")
+      ).rows[0];
+      const attempted = {
+        ...row.data,
+        owner: salesIds[1],
+        assigned_by: salesIds[2],
+        assigned_at: "2026-10-24T12:31:00.000Z",
+        assignment_history: [
+          ...row.data.assignment_history,
+          {
+            assigned_from: salesIds[2],
+            assigned_to: salesIds[1],
+            assigned_by: salesIds[2],
+            assigned_at: "2026-10-24T12:31:00.000Z",
+          },
+        ],
+      };
+      await assert.rejects(
+        db.query(
+          "UPDATE public.crm_queries SET owner=$1::text, owner_user_id=$1::uuid, data=$2::jsonb WHERE id='unassigned-create-2'",
+          [salesIds[1], JSON.stringify(attempted)],
+        ),
+        /authorized Sales Manager/,
+      );
+    });
+
     const forgedData = {
       id: "forged-unassigned-create",
       query_id: "Q-FORGED-UNASSIGNED",

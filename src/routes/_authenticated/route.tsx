@@ -5,21 +5,11 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
 import { ActiveWizardBanner } from "@/components/ActiveWizardBanner";
 import { auth, useAuthLifecycle } from "@/lib/auth-mock";
-import { db } from "@/lib/mock-store";
-import { seedIfEmpty, checkExpiringRatesOnce } from "@/lib/notify";
-import { startDestinationsSync } from "@/lib/destinations-remote";
-import {
-  startMastersSync,
-  afterMastersReady,
-  getMasterSyncState,
-  subscribeMasterSync,
-} from "@/lib/masters-remote";
-import { startCrmSync } from "@/lib/crm/crm-remote";
 import { Button } from "@/components/ui/button";
 import { canAccessPath, dashboardPathForUser, useAccessProfile } from "@/lib/crm/access";
 
@@ -56,39 +46,60 @@ function AuthenticatedLayout() {
   const userId = user?.id;
   const isSuperAdmin = access.canManageCostingMasters;
   const canReadMasters = access.canReadCostingMasters;
-  const masterSync = useSyncExternalStore(
-    subscribeMasterSync,
-    getMasterSyncState,
-    getMasterSyncState,
-  );
-
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    seedIfEmpty();
-    checkExpiringRatesOnce(db.get().rate_plans);
-  }, [isSuperAdmin]);
+  const [masterSync, setMasterSync] = useState({ status: "idle", message: "" });
 
   // Shared master data (hotels, rates, guides, entrances, activities, meals,
   // transport, other services): cloud record + realtime, account-based.
   useEffect(() => {
-    if (!userId || !hasSupabaseConfig) return;
-    const stopCrm = startCrmSync(true);
-    if (!canReadMasters) return stopCrm;
-    const stopMasters = startMastersSync({ readOnly: !isSuperAdmin });
+    if (!userId || authState.profileStatus !== "ready" || !hasSupabaseConfig) return;
     let disposed = false;
+    let stopCrm: (() => void) | null = null;
+    let stopMasters: (() => void) | null = null;
     let stopDestinations: (() => void) | null = null;
-    // Destinations reconcile only after the shared master data is in place,
-    // so a local-only cache can never delete cloud tours (or their pricing).
-    afterMastersReady(() => {
-      if (!disposed) stopDestinations = startDestinationsSync({ readOnly: !isSuperAdmin });
+    let unsubscribeMaster: (() => void) | null = null;
+    const startBackgroundHydration = async () => {
+      // These imports evaluate the large CRM/master stores. Keep them after the
+      // first authenticated paint so local cache parsing cannot delay access.
+      const crm = await import("@/lib/crm/crm-remote");
+      if (disposed) return;
+      stopCrm = crm.startCrmSync(true);
+      if (!canReadMasters) return;
+      const masters = await import("@/lib/masters-remote");
+      if (disposed) return;
+      const updateMasterState = () => setMasterSync(masters.getMasterSyncState());
+      unsubscribeMaster = masters.subscribeMasterSync(updateMasterState);
+      updateMasterState();
+      stopMasters = masters.startMastersSync({ readOnly: !isSuperAdmin });
+      masters.afterMastersReady(() => {
+        if (disposed) return;
+        void import("@/lib/destinations-remote").then(({ startDestinationsSync }) => {
+          if (!disposed) stopDestinations = startDestinationsSync({ readOnly: !isSuperAdmin });
+        });
+      });
+      if (isSuperAdmin) {
+        const [{ db }, notifications] = await Promise.all([
+          import("@/lib/mock-store"),
+          import("@/lib/notify"),
+        ]);
+        if (!disposed) {
+          notifications.seedIfEmpty();
+          notifications.checkExpiringRatesOnce(db.get().rate_plans);
+        }
+      }
+    };
+    const frame = window.requestAnimationFrame(() => {
+      auth.markShellRendered();
+      window.setTimeout(() => void startBackgroundHydration(), 0);
     });
     return () => {
       disposed = true;
+      window.cancelAnimationFrame(frame);
+      unsubscribeMaster?.();
       stopDestinations?.();
-      stopCrm();
-      stopMasters();
+      stopCrm?.();
+      stopMasters?.();
     };
-  }, [userId, hasSupabaseConfig, canReadMasters, isSuperAdmin]);
+  }, [userId, authState.profileStatus, hasSupabaseConfig, canReadMasters, isSuperAdmin]);
 
   useEffect(() => {
     if (!user || !access.accountReady || canAccessPath(access, pathname)) return;

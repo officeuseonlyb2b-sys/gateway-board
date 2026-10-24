@@ -378,6 +378,19 @@ export function Step11({ draft, set }: StepProps) {
                                             >
                                               Optional
                                             </button>
+                                            <button
+                                              type="button"
+                                              className="rounded px-2 py-1 text-destructive"
+                                              onClick={() =>
+                                                set({
+                                                  activities: draft.activities.filter(
+                                                    (item) => item.id !== line.id,
+                                                  ),
+                                                })
+                                              }
+                                            >
+                                              Remove
+                                            </button>
                                           </div>
                                         )}
 

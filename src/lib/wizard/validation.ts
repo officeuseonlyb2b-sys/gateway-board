@@ -472,17 +472,26 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
     });
 
   const scenarioOptions = requiresAccommodation ? selectedOptions : draft.hotel_options.slice(0, 1);
-  const scenarioDefs: CostScenario[] = draft.scenarios?.length
-    ? draft.scenarios
-    : scenarioOptions.flatMap((option) => {
-        const vehicles = draft.transport.length ? draft.transport : [undefined];
-        return vehicles.map((vehicle, index) => ({
-          id: `auto-${option.key}-${vehicle?.id ?? index}`,
-          label: `Option ${option.key}${vehicle ? " + vehicle" : ""}`,
-          option_key: option.key,
-          transport_line_id: vehicle?.id,
-        }));
-      });
+  const scenarioDefs: CostScenario[] =
+    draft.scenarios?.length && !draft.transport_options?.length
+      ? draft.scenarios
+      : scenarioOptions.flatMap((option) => {
+          if (draft.transport_options?.length) {
+            return draft.transport_options.map((transport) => ({
+              id: `auto-${option.key}-${transport.id}`,
+              label: `Option ${option.key} + ${transport.name}`,
+              option_key: option.key,
+              transport_option_id: transport.id,
+            }));
+          }
+          const vehicles = draft.transport.length ? draft.transport : [undefined];
+          return vehicles.map((vehicle, index) => ({
+            id: `auto-${option.key}-${vehicle?.id ?? index}`,
+            label: `Option ${option.key}${vehicle ? " + vehicle" : ""}`,
+            option_key: option.key,
+            transport_line_id: vehicle?.id,
+          }));
+        });
   const scenarios = scenarioDefs.map((definition) => computeScenario(draft, definition, db));
   const validScenarios = scenarios.filter((result): result is ScenarioResult => Boolean(result));
   if (!validScenarios.length) {

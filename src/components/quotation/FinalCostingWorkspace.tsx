@@ -327,7 +327,8 @@ function DynamicAccommodationReview({
             <thead className="bg-indigo-50 text-[10px] uppercase text-indigo-900">
               <tr>
                 <th className="text-left">Option / Day</th>
-                <th className="text-left">Room</th>
+                <th className="text-left">Hotel</th>
+                <th className="text-left">Room Category</th>
                 <th>Occupancy</th>
                 <th className="text-right">Qty</th>
                 <th className="text-right">Net</th>
@@ -345,6 +346,9 @@ function DynamicAccommodationReview({
                         (item) => item.id === allocation.room_id,
                       );
                       const selection = day ? hotelSelectionForDay(option, day) : undefined;
+                      const hotel = selection
+                        ? db.hotels.find((item) => item.id === selection.hotel_id)
+                        : undefined;
                       const plan =
                         room && selection && day
                           ? findRatePlan(db.rate_plans, room.id, selection.meal_plan, day.date)
@@ -366,6 +370,7 @@ function DynamicAccommodationReview({
                           <td>
                             Option {option.key} · Day {dayNumber}
                           </td>
+                          <td>{hotel?.name || "Hotel not selected"}</td>
                           <td>{room?.name || "Rate not available"}</td>
                           <td className="capitalize">{allocation.occupancy}</td>
                           <td className="text-right">{allocation.rooms}</td>

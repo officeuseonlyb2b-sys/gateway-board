@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -133,7 +134,7 @@ export function StepMeals({ draft, set }: StepProps) {
     day: number,
     cityId: string,
     meal: MealKey,
-    inclusion_status: "included" | "optional",
+    inclusion_status: "included" | "optional" | "removed",
   ) => {
     const current = selections[`${day}:${cityId}`]?.[meal];
     if (current) setMeal(day, cityId, meal, { ...current, inclusion_status });
@@ -199,11 +200,15 @@ export function StepMeals({ draft, set }: StepProps) {
           ? "included"
           : row.choice?.inclusion_status === "optional"
             ? "optional"
-            : "included",
+            : row.choice?.inclusion_status === "removed"
+              ? "removed"
+              : "included",
       }));
   const lunches = arrangements("lunch");
   const dinners = arrangements("dinner");
-  const mealArrangements = [...lunches, ...dinners].filter((item) => item.type !== "No Meal");
+  const mealArrangements = [...lunches, ...dinners].filter(
+    (item) => item.type !== "No Meal" && item.inclusion !== "removed",
+  );
   const includedMeals = mealArrangements.filter((item) => item.inclusion === "included");
   const optionalMeals = mealArrangements.filter((item) => item.inclusion === "optional");
 
@@ -289,20 +294,23 @@ export function StepMeals({ draft, set }: StepProps) {
           </SelectContent>
         </Select>
         {selected.choice && selected.choice.source !== "none" && (
-          <Select
-            value={selected.choice.inclusion_status ?? "included"}
-            onValueChange={(status) =>
-              setMealInclusion(day, cityId, meal, status as "included" | "optional")
-            }
-          >
-            <SelectTrigger className="h-8 w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="included">Included</SelectItem>
-              <SelectItem value="optional">Optional</SelectItem>
-            </SelectContent>
-          </Select>
+          <>
+            <Select
+              value={selected.choice.inclusion_status ?? "included"}
+              onValueChange={(status) =>
+                setMealInclusion(day, cityId, meal, status as "included" | "optional" | "removed")
+              }
+            >
+              <SelectTrigger className="h-8 w-28">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="included">Included</SelectItem>
+                <SelectItem value="optional">Optional</SelectItem>
+                <SelectItem value="removed">Remove</SelectItem>
+              </SelectContent>
+            </Select>
+          </>
         )}
       </div>
     );

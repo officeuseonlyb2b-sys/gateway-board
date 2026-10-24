@@ -956,6 +956,7 @@ export function buildRateSheet(
       const base = buildRateSheet(
         {
           ...draft,
+          transport: [],
           transport_options: [],
           pax_mode: "range",
           pax_min: min,

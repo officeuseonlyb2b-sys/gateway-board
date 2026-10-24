@@ -181,6 +181,7 @@ export default function QueryWorkspace() {
   const queryOwnerEmployee = employees.find(
     (employee) => employee.id === query?.owner || employee.name === query?.owner,
   );
+  const queryOwnerName = queryOwnerEmployee?.name || query?.owner || "Awaiting Assignment";
   const canRequestSupport =
     ownsQuery ||
     (access.role === "Sales Manager" &&
@@ -515,7 +516,7 @@ export default function QueryWorkspace() {
             {access.canAssign && ownsQuery ? (
               <ReassignQuery queryId={query.query_id} owner={query.owner} />
             ) : (
-              query.owner || "Awaiting Assignment"
+              queryOwnerName
             )}
           </Fact>
         </div>

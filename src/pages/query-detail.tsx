@@ -11,7 +11,7 @@ import {
   ArrowLeft, CheckCircle, Circle, Phone, Mail, MessageSquare, Clock3,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fmtDur, logFollowup, reassignTask, setQueryStage, stageEnteredAt, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
+import { fmtDur, logFollowup, ownerDisplayName, reassignTask, setQueryStage, stageEnteredAt, useCrmEvents, useCrmQueries, useCrmTasks } from "@/lib/crm/store";
 import { EVENT_LABELS, STAGES, type CrmEventType, type Stage } from "@/lib/crm/types";
 import { StageBadge, fmtDate, fmtTime, inr } from "@/components/crm/ui";
 import { NewTaskDialog, OwnerSelect, ReassignQuery, useActor } from "@/components/crm/assign";
@@ -109,7 +109,7 @@ export default function QueryDetail() {
               <span className="text-sm text-muted-foreground">{data.travel_type}</span>
               <span className="text-sm text-muted-foreground">{data.destination}</span>
               <span className="text-sm text-muted-foreground">{fmtDate(data.travel_start)} – {fmtDate(data.travel_end)}</span>
-              <span className="text-sm text-muted-foreground">Owner: {data.owner}</span>
+              <span className="text-sm text-muted-foreground">Owner: {ownerDisplayName(data.owner)}</span>
             </div>
           </div>
         </div>

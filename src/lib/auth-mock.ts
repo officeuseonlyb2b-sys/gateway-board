@@ -2,11 +2,6 @@
 import { useSyncExternalStore } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  listEmployees,
-  replaceAssignmentCandidatesFromCloud,
-  replaceEmployeesFromCloud,
-} from "@/lib/crm/store";
 import type { Employee } from "@/lib/crm/types";
 
 export type Role = "admin" | "staff";
@@ -24,6 +19,8 @@ export interface AuthLifecycle {
   profileStatus: "idle" | "loading" | "ready" | "error" | "denied";
   profileError?: string;
   user: AuthUser | null;
+  /** The one Employee Master row verified during auth bootstrap. */
+  employee: Employee | null;
 }
 
 export const hasSupabaseConfig = Boolean(
@@ -35,6 +32,7 @@ let lifecycle: AuthLifecycle = {
   sessionStatus: "loading",
   profileStatus: "idle",
   user: null,
+  employee: null,
 };
 let initialization: Promise<void> | undefined;
 let resolveInitialization: (() => void) | undefined;
@@ -46,6 +44,10 @@ let signOutPromise: Promise<void> | undefined;
 let authSubscription: { unsubscribe: () => void } | undefined;
 let retryTimer: number | undefined;
 let focusHandler: (() => void) | undefined;
+let profileFlight: { userId: string; promise: Promise<ProfileResult> } | undefined;
+let profileQueries = 0;
+let duplicateAuthEventsIgnored = 0;
+const bootStartedAt = typeof performance === "undefined" ? 0 : performance.now();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
@@ -56,6 +58,33 @@ function updateLifecycle(patch: Partial<AuthLifecycle>) {
 
 function debugAuth(message: string) {
   if (import.meta.env.DEV) console.info(`[AUTH] ${message}`);
+}
+
+function bootTiming(label: string) {
+  if (import.meta.env.DEV && typeof performance !== "undefined") {
+    console.info(`[boot] ${label}: ${Math.round(performance.now() - bootStartedAt)}ms`);
+  }
+}
+
+function publishEmployeeToCrmStore(employee: Employee | null) {
+  // Keep the large CRM store (and its legacy localStorage caches) out of the
+  // critical auth path. Modules that need it receive the verified employee on
+  // the next idle turn.
+  const publish = () => {
+    void import("@/lib/crm/store").then((store) => {
+      if ((employee?.auth_user_id ?? null) !== (lifecycle.employee?.auth_user_id ?? null)) return;
+      store.replaceEmployeesFromCloud(employee ? [employee] : []);
+      if (!employee) {
+        store.replaceAssignmentCandidatesFromCloud([]);
+        store.setAssignmentDirectoryStatus("idle");
+      }
+    });
+  };
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    window.requestIdleCallback(publish, { timeout: 1_000 });
+  } else if (typeof window !== "undefined") {
+    window.setTimeout(publish, 0);
+  }
 }
 
 function toAuthUser(user: User): AuthUser {
@@ -72,18 +101,17 @@ function toAuthUser(user: User): AuthUser {
 function clearLocalIdentity(reason: string) {
   const hadIdentity = authUser !== null || lifecycle.user !== null;
   generation++;
+  profileFlight = undefined;
   authUser = null;
-  if (hadIdentity) {
-    replaceEmployeesFromCloud([]);
-    replaceAssignmentCandidatesFromCloud([]);
-  }
   updateLifecycle({
     initialized: true,
     sessionStatus: "signed_out",
     profileStatus: "idle",
     profileError: undefined,
     user: null,
+    employee: null,
   });
+  if (hadIdentity) publishEmployeeToCrmStore(null);
   debugAuth(`session cleared reason=${reason}`);
   resolveInitialization?.();
   resolveInitialization = undefined;
@@ -99,19 +127,30 @@ function isEmployeeAllowed(employee: Employee): boolean {
   );
 }
 
-async function resolveEmployeeProfile(user: User, source: string) {
-  const requestGeneration = ++generation;
+type ProfileResult = "ready" | "error" | "denied" | "stale";
+
+async function runEmployeeProfileResolution(user: User, source: string): Promise<ProfileResult> {
+  const requestGeneration = generation;
   const requestUserId = user.id;
   if (authUser?.id !== requestUserId || lifecycle.user?.id !== requestUserId) {
     return "stale" as const;
   }
 
-  debugAuth(`profile resolution started user=${requestUserId} source=${source}`);
+  profileQueries++;
+  debugAuth(
+    `profile resolution started user=${requestUserId} source=${source} query_count=${profileQueries}`,
+  );
   try {
-    const { data, error } = await supabase
+    const profileLookup = supabase
       .from("crm_employees")
       .select("id,data")
       .eq("data->>auth_user_id", requestUserId);
+    const { data, error } = await Promise.race([
+      profileLookup,
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("Employee profile check timed out.")), 15_000);
+      }),
+    ]);
 
     if (requestGeneration !== generation || authUser?.id !== requestUserId) {
       debugAuth(`profile result ignored as stale user=${requestUserId}`);
@@ -148,12 +187,6 @@ async function resolveEmployeeProfile(user: User, source: string) {
       ...(data[0].data as unknown as Employee),
       id: data[0].id,
     };
-    const records =
-      lifecycle.user?.id === requestUserId && employee.role === "Super Admin"
-        ? [...listEmployees().filter((row) => row.auth_user_id !== requestUserId), employee]
-        : [employee];
-    replaceEmployeesFromCloud(records);
-
     if (!isEmployeeAllowed(employee)) {
       debugAuth(`employee access prohibited user=${requestUserId} reason=Employee Master status`);
       updateLifecycle({
@@ -178,10 +211,14 @@ async function resolveEmployeeProfile(user: User, source: string) {
 
     updateLifecycle({
       user: { ...toAuthUser(user), name: employee.name || toAuthUser(user).name },
+      employee,
       sessionStatus: "authenticated",
       profileStatus: "ready",
       profileError: undefined,
     });
+    bootTiming("CRM profile resolved");
+    bootTiming("auth ready");
+    publishEmployeeToCrmStore(employee);
     debugAuth(`profile resolution succeeded user=${requestUserId} role=${employee.role}`);
     return "ready" as const;
   } catch (error) {
@@ -203,6 +240,21 @@ async function resolveEmployeeProfile(user: User, source: string) {
   }
 }
 
+function resolveEmployeeProfile(user: User, source: string): Promise<ProfileResult> {
+  if (profileFlight?.userId === user.id) {
+    duplicateAuthEventsIgnored++;
+    debugAuth(
+      `profile resolution reused user=${user.id} source=${source} duplicate_count=${duplicateAuthEventsIgnored}`,
+    );
+    return profileFlight.promise;
+  }
+  const promise = runEmployeeProfileResolution(user, source).finally(() => {
+    if (profileFlight?.promise === promise) profileFlight = undefined;
+  });
+  profileFlight = { userId: user.id, promise };
+  return promise;
+}
+
 function acceptSession(user: User, event: string) {
   if (explicitlyLoggedOut && event !== "SIGNED_IN" && !signingIn) {
     debugAuth(`ignored ${event} session restore after explicit logout user=${user.id}`);
@@ -213,8 +265,9 @@ function acceptSession(user: User, event: string) {
   const isSameUser = lifecycle.user?.id === user.id;
   const previousProfileStatus = lifecycle.profileStatus;
   if (!isSameUser) {
-    replaceEmployeesFromCloud([]);
-    replaceAssignmentCandidatesFromCloud([]);
+    generation++;
+    profileFlight = undefined;
+    publishEmployeeToCrmStore(null);
   }
   authUser = user;
   updateLifecycle({
@@ -223,19 +276,25 @@ function acceptSession(user: User, event: string) {
     profileStatus: isSameUser ? previousProfileStatus : "loading",
     profileError: isSameUser ? lifecycle.profileError : undefined,
     user: isSameUser ? { ...lifecycle.user!, email: user.email || "" } : toAuthUser(user),
+    employee: isSameUser ? lifecycle.employee : null,
   });
   resolveInitialization?.();
   resolveInitialization = undefined;
   debugAuth(`${event} user=${user.id} session=true`);
+  if (event === "INITIAL_SESSION") bootTiming("session resolved");
 
   // Never call another Supabase Auth method inside onAuthStateChange.
   const shouldResolveProfile =
-    event === "INITIAL_SESSION" ||
     event === "USER_UPDATED" ||
     (!isSameUser && !signingIn) ||
     (event === "SIGNED_IN" && !signingIn && previousProfileStatus !== "ready");
   if (shouldResolveProfile) {
     setTimeout(() => void resolveEmployeeProfile(user, event), 0);
+  } else if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+    duplicateAuthEventsIgnored++;
+    debugAuth(
+      `ignored duplicate ${event} bootstrap user=${user.id} duplicate_count=${duplicateAuthEventsIgnored}`,
+    );
   }
 }
 
@@ -251,6 +310,7 @@ function init() {
       sessionStatus: "signed_out",
       profileStatus: "idle",
       user: null,
+      employee: null,
     });
     resolveInitialization?.();
     resolveInitialization = undefined;
@@ -335,6 +395,9 @@ export const auth = {
   },
   logRedirect(reason: string) {
     debugAuth(`redirect reason=${reason}`);
+  },
+  markShellRendered() {
+    bootTiming("app shell rendered");
   },
   async ready() {
     init();

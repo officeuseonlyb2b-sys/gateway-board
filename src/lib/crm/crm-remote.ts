@@ -9,8 +9,6 @@ import {
   replaceStandaloneQuotationReviewsFromCloud,
   upsertStandaloneQuotationReviewFromCloud,
   listEmployees,
-  assignQuery,
-  reassignQuery,
   setCrmHydrationStatus,
   setEmployeeDirectoryStatus,
   setAssignmentDirectoryStatus,
@@ -50,6 +48,8 @@ let syncGeneration = 0;
 let ownerUserIdByQueryId = new Map<string, string | null>();
 let cloudEventIds = new Set<string>();
 let rejectedBackgroundQuerySignatures = new Map<string, string>();
+let assignmentDirectoryFlight: Promise<void> | null = null;
+let crmRefreshCalls = 0;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
@@ -155,12 +155,11 @@ export async function persistQueryQuotationReview(queryId: string): Promise<void
 }
 
 async function readCloud(): Promise<CrmSnapshot> {
-  const [queryResult, taskResult, employeeResult, eventResult, candidates] = await Promise.all([
+  const [queryResult, taskResult, employeeResult, eventResult] = await Promise.all([
     supabase.from("crm_queries").select("id,data,owner_user_id"),
     supabase.from("crm_tasks").select("id,data"),
     readEmployeeRows(),
     supabase.from("crm_events").select("id,data").order("at", { ascending: false }).limit(800),
-    readAssignmentCandidates(),
   ]);
   const error = queryResult.error ?? taskResult.error ?? eventResult.error;
   if (error) throw error;
@@ -169,8 +168,6 @@ async function readCloud(): Promise<CrmSnapshot> {
     ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => [row.id, row.owner_user_id]),
   );
   cloudEventIds = new Set((eventResult.data ?? []).map((row) => row.id));
-  replaceAssignmentCandidatesFromCloud(candidates);
-  setAssignmentDirectoryStatus("ready");
   return {
     queries: ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => {
       const data = row.data as CrmQuery;
@@ -250,7 +247,11 @@ export async function refreshCrmQuery(queryId: string): Promise<void> {
   replaceQueryFromCloud({ ...cloud, id: result.data.id, query_id: cloud.query_id || queryId });
 }
 
-/** Assign through the existing store model, then require the RLS-protected cloud write. */
+/**
+ * Assign one existing cloud Query.  Assignment is deliberately not routed
+ * through snapshot sync: an unrelated legacy row must never make this update
+ * fail or turn it into an INSERT/upsert RLS check.
+ */
 export async function assignCrmQueryNow(
   queryId: string,
   employeeId: string,
@@ -261,13 +262,83 @@ export async function assignCrmQueryNow(
     (query) => query.id === queryId || query.query_id === queryId,
   );
   if (!before) throw new Error("The Query could not be resolved.");
-  if (before.assignment_status === "Assigned")
-    reassignQuery(before.query_id, employeeId, assignedBy, reason);
-  else assignQuery(before.query_id, employeeId, assignedBy, reason);
+  const actor = currentActiveEmployee();
+  const assignee = listAssignmentCandidates().find((candidate) => candidate.id === employeeId);
+  if (!actor || !assignee?.auth_user_id)
+    throw new Error("The selected Sales employee could not be resolved for assignment.");
+
+  // Build the audited next document without mutating the store.  Calling the
+  // store assignment helpers here emits a whole-snapshot persistence event,
+  // which used to make an unrelated legacy row part of this assignment.
+  const assignedAt = new Date().toISOString();
+  const isReassignment = !isUnassignedQuery(before) || before.assignment_status === "Assigned";
+  const assignment = {
+    assigned_at: assignedAt,
+    assigned_by: actor.id,
+    assigned_to: assignee.id,
+    ...(isReassignment ? { assigned_from: before.owner } : {}),
+    ...(reason ? { reason } : {}),
+  };
+  const updated: CrmQuery = {
+    ...before,
+    id: before.id,
+    owner: assignee.id,
+    assignment_status: "Assigned",
+    assigned_on: assignedAt,
+    assigned_at: assignedAt,
+    assigned_by: actor.id,
+    assignment_history: [...(before.assignment_history || []), assignment],
+    last_updated_by: actor.id,
+    last_activity_at: assignedAt,
+    lifecycle: (before.lifecycle || []).map((step) =>
+      step.label === "Assigned" ? { ...step, at: assignedAt } : step,
+    ),
+    activities: [
+      {
+        id: `assignment_${before.id}_${Date.now()}`,
+        title: `${isReassignment ? "Reassigned" : "Assigned"} to ${assignee.name}${reason ? ` — ${reason}` : ""}`,
+        at: assignedAt,
+        by: actor.name,
+      },
+      ...(before.activities || []),
+    ],
+  };
+
   try {
-    await pushCrmSnapshotNow(getCrmSnapshot(), before.query_id);
-    await refreshCrmQuery(before.id);
+    const result = await supabase
+      .from("crm_queries")
+      .update({
+        owner: employeeId,
+        owner_user_id: assignee.auth_user_id,
+        data: asJson({
+          ...updated,
+          owner: assignee.id,
+        }),
+      })
+      .eq("id", before.id)
+      .select("id,data,owner_user_id")
+      .single();
+    if (result.error) throw result.error;
+    ownerUserIdByQueryId.set(result.data.id, result.data.owner_user_id);
+    replaceQueryFromCloud({
+      ...(result.data.data as unknown as CrmQuery),
+      id: result.data.id,
+      query_id: updated.query_id || before.query_id,
+    });
   } catch (error) {
+    const supabaseError = error as { code?: string; message?: string };
+    console.error("[crm] targeted assignment failed", {
+      query_id: before.query_id,
+      row_id: before.id,
+      manager_employee_id: actor.id,
+      assignee_employee_id: assignee.id,
+      assignee_role: assignee.role,
+      resolved_owner_user_id: assignee.auth_user_id,
+      previous_owner: before.owner,
+      assignment_status_before: before.assignment_status,
+      error_code: supabaseError?.code,
+      error_message: supabaseError?.message || String(error),
+    });
     await refreshCrmQuery(before.id).catch(() => {});
     throw error;
   }
@@ -770,13 +841,37 @@ export async function refreshEmployees() {
   }
 }
 
+/** Load the assignment-only directory when an assignment control is actually rendered. */
+export function refreshAssignmentCandidates(): Promise<void> {
+  if (assignmentDirectoryFlight) return assignmentDirectoryFlight;
+  const userId = auth.current()?.id;
+  if (!userId) return Promise.resolve();
+  setAssignmentDirectoryStatus("loading");
+  assignmentDirectoryFlight = readAssignmentCandidates()
+    .then((candidates) => {
+      if (auth.current()?.id !== userId) return;
+      replaceAssignmentCandidatesFromCloud(candidates);
+      setAssignmentDirectoryStatus("ready");
+    })
+    .catch((error) => {
+      if (auth.current()?.id === userId) setAssignmentDirectoryStatus("error");
+      throw error;
+    })
+    .finally(() => {
+      assignmentDirectoryFlight = null;
+    });
+  return assignmentDirectoryFlight;
+}
+
 export function startCrmSync(includeBusiness = true): () => void {
   if (started) return () => {};
   started = true;
   setEmployeeDirectoryStatus("loading");
-  setAssignmentDirectoryStatus("loading");
   if (includeBusiness) setCrmHydrationStatus("loading");
   const run = ++syncGeneration;
+  const hydrationStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+  crmRefreshCalls++;
+  if (import.meta.env.DEV) console.info(`[boot] CRM refresh calls: ${crmRefreshCalls}`);
   const pull = () => {
     if (pullTimer) clearTimeout(pullTimer);
     pullTimer = setTimeout(() => {
@@ -818,12 +913,19 @@ export function startCrmSync(includeBusiness = true): () => void {
       }),
     );
   };
-  void (includeBusiness ? pullAndMerge(run) : refreshEmployees()).catch((error) => {
-    setEmployeeDirectoryStatus("error");
-    setAssignmentDirectoryStatus("error");
-    if (includeBusiness) setCrmHydrationStatus("error");
-    console.error("[crm] initial refresh failed", error);
-  });
+  void (includeBusiness ? pullAndMerge(run) : refreshEmployees())
+    .then(() => {
+      if (import.meta.env.DEV && typeof performance !== "undefined") {
+        console.info(
+          `[boot] initial page data hydrated: ${Math.round(performance.now() - hydrationStartedAt)}ms`,
+        );
+      }
+    })
+    .catch((error) => {
+      setEmployeeDirectoryStatus("error");
+      if (includeBusiness) setCrmHydrationStatus("error");
+      console.error("[crm] initial refresh failed", error);
+    });
   void pullNotifications().catch((error) =>
     console.error("[crm] notification refresh failed", error),
   );

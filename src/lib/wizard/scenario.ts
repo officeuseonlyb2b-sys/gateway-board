@@ -81,6 +81,26 @@ export interface ScenarioResult {
   rate_missing: number;
 }
 
+/**
+ * Limit a draft to exactly one configured transport alternative.  Keeping this
+ * transformation here makes the final review, saved quote and PDF snapshot use
+ * the same vehicle quantities and prevents alternatives being summed together.
+ */
+export function draftForScenarioTransport(draft: QuoteDraft, scenario: CostScenario): QuoteDraft {
+  if (!scenario.transport_option_id) return draft;
+  const option = draft.transport_options?.find((item) => item.id === scenario.transport_option_id);
+  if (!option) return draft;
+  return {
+    ...draft,
+    transport: option.vehicles.flatMap((selection) => {
+      const line = draft.transport.find((item) => item.id === selection.transport_line_id);
+      return line
+        ? [{ ...line, vehicles: Math.max(1, line.vehicles || 1) * Math.max(1, selection.quantity) }]
+        : [];
+    }),
+  };
+}
+
 const SIZE: Record<PersonRoomType, number> = {
   single: 1,
   double: 2,
@@ -274,10 +294,11 @@ export function computeScenario(
     });
 
   // ---------- Add-ons (reuse existing, already-correct formulas) ----------
+  const scenarioDraft = draftForScenarioTransport(draft, scenario);
   const transportLines = scenario.transport_line_id
     ? draft.transport.filter((t) => t.id === scenario.transport_line_id)
     : [];
-  const landSheet = buildLandPart(draft, d, transportLines[0]);
+  const landSheet = buildLandPart(scenarioDraft, d, transportLines[0]);
   const transport_total = includesLand ? landSheet.transport_total : 0;
   const guide_total = includesLand ? landSheet.guide_total : 0;
   const activities_per_person = includesLand ? landSheet.activities_per_person_total : 0;
@@ -351,13 +372,17 @@ export function computeScenario(
 
   const sum = (f: (r: ScenarioPersonRow) => number) => persons.reduce((s, r) => s + f(r), 0);
   const grand_total = sum((r) => r.total);
+  const optionName = draft.transport_options?.find(
+    (item) => item.id === scenario.transport_option_id,
+  )?.name;
   const vehicle =
-    transportLines.length === 1
+    optionName ||
+    (transportLines.length === 1
       ? d.travel_options.find((t) => t.id === transportLines[0].travel_id)?.vehicle_type ||
         "Vehicle"
       : transportLines.length === 0
         ? "No transport"
-        : "All vehicles";
+        : "All vehicles");
 
   return {
     id: scenario.id,
