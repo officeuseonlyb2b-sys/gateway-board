@@ -1,8 +1,12 @@
 // Supabase Auth identity; application authority comes only from Employee Master.
 import { useSyncExternalStore } from "react";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import type { Employee } from "@/lib/crm/types";
+import {
+  supabase,
+  supabaseProjectHost,
+  supabasePublicConfig,
+} from "@/integrations/supabase/client";
+import type { AppRole, Employee } from "@/lib/crm/types";
 
 export type Role = "admin" | "staff";
 export interface AuthUser {
@@ -18,14 +22,24 @@ export interface AuthLifecycle {
   sessionStatus: "loading" | "authenticated" | "signed_out";
   profileStatus: "idle" | "loading" | "ready" | "error" | "denied";
   profileError?: string;
+  profileErrorCode?: ProfileResolutionCode;
   user: AuthUser | null;
   /** The one Employee Master row verified during auth bootstrap. */
   employee: Employee | null;
 }
 
 export const hasSupabaseConfig = Boolean(
-  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  supabasePublicConfig.url && supabasePublicConfig.publishableKey,
 );
+
+export type ProfileResolutionCode =
+  | "profile_network_error"
+  | "profile_not_linked"
+  | "profile_rls_denied"
+  | "profile_inactive"
+  | "profile_exited"
+  | "profile_invalid"
+  | "profile_success";
 
 let lifecycle: AuthLifecycle = {
   initialized: false,
@@ -57,7 +71,8 @@ function updateLifecycle(patch: Partial<AuthLifecycle>) {
 }
 
 function debugAuth(message: string) {
-  if (import.meta.env.DEV) console.info(`[AUTH] ${message}`);
+  // Deliberately safe in production: never include tokens, passwords, keys, or full rows.
+  console.info(`[AUTH] ${message}`);
 }
 
 function bootTiming(label: string) {
@@ -108,6 +123,7 @@ function clearLocalIdentity(reason: string) {
     sessionStatus: "signed_out",
     profileStatus: "idle",
     profileError: undefined,
+    profileErrorCode: undefined,
     user: null,
     employee: null,
   });
@@ -117,14 +133,53 @@ function clearLocalIdentity(reason: string) {
   resolveInitialization = undefined;
 }
 
-function isEmployeeAllowed(employee: Employee): boolean {
-  // Match the existing Employee Master access rule; do not infer status from a failed read.
-  return (
-    employee.auth_user_id !== undefined &&
-    employee.active === true &&
-    employee.account_status === "Active" &&
-    employee.employee_status !== "Exited"
-  );
+const CANONICAL_ROLES = new Set<AppRole>([
+  "Super Admin",
+  "Employee",
+  "Sales Executive",
+  "Senior Sales Executive",
+  "Assistant Manager",
+  "Sales Manager",
+  "Sales Head",
+  "Operations Executive",
+  "Unit Head",
+  "Administrator",
+  "Owner / Director",
+  "Product Executive",
+  "Contracting Executive",
+  "Vendor Executive",
+]);
+
+function validateEmployee(employee: Employee, userId: string): ProfileResolutionCode {
+  if (
+    !employee.id ||
+    employee.auth_user_id !== userId ||
+    !employee.name?.trim() ||
+    !CANONICAL_ROLES.has(employee.role)
+  )
+    return "profile_invalid";
+  if (employee.active !== true || employee.account_status !== "Active") return "profile_inactive";
+  if (employee.employee_status === "Exited") return "profile_exited";
+  return "profile_success";
+}
+
+function profileMessage(code: ProfileResolutionCode, detail?: string) {
+  switch (code) {
+    case "profile_not_linked":
+      return "No Employee Master record is linked to this login. Ask an administrator to verify its auth_user_id.";
+    case "profile_rls_denied":
+      return `Employee Master denied the profile request${detail ? ` (${detail})` : ""}. Your session is preserved.`;
+    case "profile_inactive":
+      return "This employee account is inactive or disabled.";
+    case "profile_exited":
+      return "This employee is marked as exited and cannot access the system.";
+    case "profile_invalid":
+      return "The linked Employee Master profile is malformed or uses an unsupported role.";
+    case "profile_network_error":
+      return `Employee access details could not be refreshed${detail ? ` (${detail})` : ""}. Your session is preserved; retry when connected.`;
+    default:
+      return undefined;
+  }
 }
 
 type ProfileResult = "ready" | "error" | "denied" | "stale";
@@ -138,7 +193,7 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
 
   profileQueries++;
   debugAuth(
-    `profile resolution started user=${requestUserId} source=${source} query_count=${profileQueries}`,
+    `profile lookup started user=${requestUserId} source=${source} session=true host=${supabaseProjectHost} query_count=${profileQueries}`,
   );
   try {
     const profileLookup = supabase
@@ -158,13 +213,21 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
     }
     if (error) {
       const errorCode = "code" in error && typeof error.code === "string" ? error.code : "unknown";
-      debugAuth(
-        `profile resolution failed user=${requestUserId} code=${errorCode}; keeping session`,
+      const errorMessage = error.message || "Supabase profile query failed";
+      const isRls =
+        errorCode === "42501" ||
+        errorCode === "PGRST301" ||
+        /row.level security|permission denied|jwt/i.test(errorMessage);
+      const category: ProfileResolutionCode = isRls
+        ? "profile_rls_denied"
+        : "profile_network_error";
+      console.warn(
+        `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} count=0 category=${category} supabase_code=${errorCode} supabase_message=${errorMessage}; session preserved`,
       );
       updateLifecycle({
         profileStatus: lifecycle.profileStatus === "ready" ? "ready" : "error",
-        profileError:
-          "Employee access details could not be refreshed. Your session is preserved; retry when connected.",
+        profileErrorCode: category,
+        profileError: profileMessage(category, errorCode),
       });
       return "error" as const;
     }
@@ -172,13 +235,16 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
     // A successful empty/ambiguous lookup is not proof that an account was disabled:
     // RLS can hide rows. Block application access, but preserve the session and cached profile.
     if (!data || data.length !== 1) {
-      debugAuth(
-        `profile resolution unavailable user=${requestUserId} matches=${data?.length ?? 0}`,
+      const count = data?.length ?? 0;
+      const category: ProfileResolutionCode =
+        count === 0 ? "profile_not_linked" : "profile_invalid";
+      console.warn(
+        `[AUTH] profile lookup completed user=${requestUserId} host=${supabaseProjectHost} count=${count} category=${category}`,
       );
       updateLifecycle({
         profileStatus: "error",
-        profileError:
-          "A unique linked Employee Master profile could not be verified. Retry the profile check.",
+        profileErrorCode: category,
+        profileError: profileMessage(category),
       });
       return "error" as const;
     }
@@ -187,25 +253,17 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       ...(data[0].data as unknown as Employee),
       id: data[0].id,
     };
-    if (!isEmployeeAllowed(employee)) {
-      debugAuth(`employee access prohibited user=${requestUserId} reason=Employee Master status`);
+    const validation = validateEmployee(employee, requestUserId);
+    debugAuth(
+      `profile validation user=${requestUserId} host=${supabaseProjectHost} count=1 result=${validation}`,
+    );
+    if (validation !== "profile_success") {
       updateLifecycle({
         profileStatus: "denied",
-        profileError: "This employee account is inactive, suspended, disabled, or exited.",
+        profileErrorCode: validation,
+        profileError: profileMessage(validation),
       });
-      await signOutLocal("employee status explicitly prohibits access");
-      return "denied" as const;
-    }
-
-    if (source === "explicit admin login" && employee.role !== "Super Admin") {
-      debugAuth(
-        `employee access prohibited user=${requestUserId} reason=Super Admin role required`,
-      );
-      updateLifecycle({
-        profileStatus: "denied",
-        profileError: "This login is not authorised for Super Admin access.",
-      });
-      await signOutLocal("admin email did not resolve to an active Super Admin");
+      await signOutLocal(`employee profile rejected: ${validation}`);
       return "denied" as const;
     }
 
@@ -215,11 +273,14 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       sessionStatus: "authenticated",
       profileStatus: "ready",
       profileError: undefined,
+      profileErrorCode: "profile_success",
     });
     bootTiming("CRM profile resolved");
     bootTiming("auth ready");
     publishEmployeeToCrmStore(employee);
-    debugAuth(`profile resolution succeeded user=${requestUserId} role=${employee.role}`);
+    debugAuth(
+      `profile lookup completed user=${requestUserId} host=${supabaseProjectHost} count=1 category=profile_success role=${employee.role}`,
+    );
     return "ready" as const;
   } catch (error) {
     if (requestGeneration !== generation || authUser?.id !== requestUserId) {
@@ -230,11 +291,14 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       error && typeof error === "object" && "code" in error && typeof error.code === "string"
         ? error.code
         : "network_or_unknown";
-    debugAuth(`profile resolution failed user=${requestUserId} code=${errorCode}; keeping session`);
+    const errorMessage = error instanceof Error ? error.message : "Unknown profile request failure";
+    console.warn(
+      `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} count=0 category=profile_network_error supabase_code=${errorCode} supabase_message=${errorMessage}; session preserved`,
+    );
     updateLifecycle({
       profileStatus: lifecycle.profileStatus === "ready" ? "ready" : "error",
-      profileError:
-        "Employee access details could not be refreshed. Your session is preserved; retry when connected.",
+      profileErrorCode: "profile_network_error",
+      profileError: profileMessage("profile_network_error", errorCode),
     });
     return "error" as const;
   }
@@ -275,6 +339,7 @@ function acceptSession(user: User, event: string) {
     sessionStatus: "authenticated",
     profileStatus: isSameUser ? previousProfileStatus : "loading",
     profileError: isSameUser ? lifecycle.profileError : undefined,
+    profileErrorCode: isSameUser ? lifecycle.profileErrorCode : undefined,
     user: isSameUser ? { ...lifecycle.user!, email: user.email || "" } : toAuthUser(user),
     employee: isSameUser ? lifecycle.employee : null,
   });
@@ -309,6 +374,7 @@ function init() {
       initialized: true,
       sessionStatus: "signed_out",
       profileStatus: "idle",
+      profileErrorCode: undefined,
       user: null,
       employee: null,
     });
@@ -407,8 +473,21 @@ export const auth = {
   async revalidate() {
     init();
     if (initialization) await initialization;
-    const user = authUser;
-    if (!user || lifecycle.sessionStatus !== "authenticated") return;
+    const { data, error } = await supabase.auth.getSession();
+    const user = data.session?.user ?? null;
+    debugAuth(
+      `retry session check user=${user?.id ?? "none"} session=${Boolean(data.session)} host=${supabaseProjectHost}`,
+    );
+    if (error || !user) {
+      if (!data.session) clearLocalIdentity("retry confirmed no active Supabase session");
+      return;
+    }
+    if (authUser?.id !== user.id) acceptSession(user, "RETRY_SESSION");
+    updateLifecycle({
+      profileStatus: "loading",
+      profileError: undefined,
+      profileErrorCode: undefined,
+    });
     await resolveEmployeeProfile(user, "retry");
   },
   subscribe(listener: () => void) {
