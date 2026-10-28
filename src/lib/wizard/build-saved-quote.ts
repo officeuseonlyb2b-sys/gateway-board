@@ -148,7 +148,11 @@ export function buildSavedQuote(
       day_number: day.day,
       date: day.date,
       city: cityName,
-      hotel_name: sel?.no_hotel ? "No Hotel" : hotel?.name || "—",
+      hotel_name: sel?.no_hotel
+        ? sel.accommodation_status === "own_arrangement"
+          ? "Own Arrangement"
+          : "No Hotel Required"
+        : hotel?.name || "—",
       hotel_category: hotel?.hotel_category || "—",
       room_category: room?.name || "—",
       meal_plan: sel?.no_hotel ? "—" : sel?.meal_plan || "CP",

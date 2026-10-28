@@ -1735,19 +1735,36 @@ try {
     [
       {
         day: 1,
-        rowSpan: 7,
+        rowSpan: 2,
         activities: [
-          { name: "Day 1 Six Slab Activity", rowSpan: 6 },
+          { name: "Day 1 Six Slab Activity", rowSpan: 1 },
           { name: "Day 1 Flat Activity", rowSpan: 1 },
         ],
       },
       {
         day: 2,
-        rowSpan: 2,
-        activities: [{ name: "Day 2 Slab Activity", rowSpan: 2 }],
+        rowSpan: 1,
+        activities: [{ name: "Day 2 Slab Activity", rowSpan: 1 }],
       },
     ],
-    "Day and activity row spans use rendered slab counts without crossing itinerary days",
+    "Exact-pax review renders only each activity's matching slab",
+  );
+  const rangeActivityDayGroups = packageStandardReview.includedActivityDayGroups(
+    { ...groupedActivityDraft, pax_mode: "range", pax_min: 1, pax_max: 20 },
+    renderedReviewDb.activities,
+    2,
+  );
+  assert.deepEqual(
+    rangeActivityDayGroups.map((group) => ({
+      day: group.route.day,
+      rowSpan: group.rowSpan,
+      activities: group.activities.map((activity) => activity.rows.length),
+    })),
+    [
+      { day: 1, rowSpan: 7, activities: [6, 1] },
+      { day: 2, rowSpan: 2, activities: [2] },
+    ],
+    "Range review preserves independently configured activity slabs",
   );
   const duplicateRikshawSlabs = {
     ...renderedReviewDb.activities[0],
@@ -1779,12 +1796,31 @@ try {
   );
   assert.deepEqual(
     rikshawRows.map((row) => [row.min_pax, row.max_pax, row.base_rate]),
+    [[9, 12, 600]],
+    "Exact 12-pax E Rikshaw review shows only its selected configured slab",
+  );
+  const rangeRikshawRows = packageStandardReview.includedActivitySellingRows(
+    { ...groupedActivityDraft, pax_mode: "range", pax_min: 1, pax_max: 12 },
+    {
+      id: "e-rikshaw-line",
+      activity_id: duplicateRikshawSlabs.id,
+      qty: 1,
+      rate: 600,
+      pricing_mode: "slab",
+      inclusion_status: "included",
+      from_routing_days: [1],
+    },
+    duplicateRikshawSlabs,
+    12,
+  );
+  assert.deepEqual(
+    rangeRikshawRows.map((row) => [row.min_pax, row.max_pax, row.base_rate]),
     [
       [1, 4, 300],
       [5, 8, 450],
       [9, 12, 600],
     ],
-    "Included E Rikshaw presentation collapses unlabeled duplicate ranges and retains Step 7's selected 12-pax rate",
+    "Range E Rikshaw review retains distinct configured slabs",
   );
   masterPricing.db.hydrateAll(originalMasterDb);
   assert.deepEqual(

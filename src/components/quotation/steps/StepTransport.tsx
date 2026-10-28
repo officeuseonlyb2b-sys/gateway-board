@@ -847,10 +847,6 @@ export function Step10({ draft, set }: StepProps) {
                   {draft.transport.map(
                     (transport, index) => {
 
-                      const isTotalMode =
-                        transport.rate_mode ===
-                        "total";
-
                       return (
                         <td
                           key={transport.id}
@@ -859,13 +855,7 @@ export function Step10({ draft, set }: StepProps) {
 
                           <Input
                             className="h-7 text-xs"
-                            value={
-                              isTotalMode
-                                ? ""
-                                : transport.remarks ||
-                                  ""
-                            }
-                            disabled={isTotalMode}
+                            value={transport.remarks || ""}
                             onChange={(event) =>
                               patchLine(index, {
                                 remarks:

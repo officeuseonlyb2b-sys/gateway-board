@@ -989,10 +989,20 @@ function AccommodationSelectionTable({
                           {isMissingHotel ? (
                             <div className="space-y-1 text-amber-600 text-xs">
                               <Select
-                                value={r.sel?.no_hotel ? "__no_hotel__" : ""}
-                                onValueChange={() =>
+                                value={
+                                  r.sel?.accommodation_status === "own_arrangement"
+                                    ? "__own_arrangement__"
+                                    : r.sel?.no_hotel
+                                      ? "__no_hotel__"
+                                      : ""
+                                }
+                                onValueChange={(value) =>
                                   r.setSel({
                                     no_hotel: true,
+                                    accommodation_status:
+                                      value === "__own_arrangement__"
+                                        ? "own_arrangement"
+                                        : "no_hotel_required",
                                     hotel_id: "",
                                     room_id: "",
                                     meal_plan: "CP",
@@ -1008,7 +1018,8 @@ function AccommodationSelectionTable({
                                   />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="__no_hotel__">No Hotel</SelectItem>
+                                  <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
+                                  <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
                                 </SelectContent>
                               </Select>
                               <div className="flex items-center gap-1">
@@ -1035,23 +1046,39 @@ function AccommodationSelectionTable({
                           ) : (
                             <>
                               <Select
-                                value={r.sel?.no_hotel ? "__no_hotel__" : r.selectedHotelId}
+                                value={
+                                  r.sel?.accommodation_status === "own_arrangement"
+                                    ? "__own_arrangement__"
+                                    : r.sel?.no_hotel
+                                      ? "__no_hotel__"
+                                      : r.selectedHotelId
+                                }
                                 onValueChange={(v) =>
-                                  v === "__no_hotel__"
+                                  v === "__no_hotel__" || v === "__own_arrangement__"
                                     ? r.setSel({
                                         no_hotel: true,
+                                        accommodation_status:
+                                          v === "__own_arrangement__"
+                                            ? "own_arrangement"
+                                            : "no_hotel_required",
                                         hotel_id: "",
                                         room_id: "",
                                         meal_plan: "CP",
                                       })
-                                    : r.setSel({ no_hotel: false, hotel_id: v, room_id: "" })
+                                    : r.setSel({
+                                        no_hotel: false,
+                                        accommodation_status: undefined,
+                                        hotel_id: v,
+                                        room_id: "",
+                                      })
                                 }
                               >
                                 <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full">
                                   <SelectValue placeholder="Select hotel…" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="__no_hotel__">No Hotel</SelectItem>
+                                  <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
+                                  <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
                                   {r.hotelPool.map((h) => (
                                     <SelectItem key={h.id} value={h.id}>
                                       {h.name}
@@ -2258,7 +2285,7 @@ function OptionInclusionsEditor({
               ))}
             </div>
 
-            <div>
+            {/* <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Package inclusions · {option.category || "Uncategorised"}
               </div>
@@ -2293,18 +2320,18 @@ function OptionInclusionsEditor({
                   </li>
                 )}
               </ul>
-            </div>
+            </div> */}
 
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-3">
-              <div className="mb-2 text-xs font-medium text-slate-600">Add inclusion</div>
+              {/* <div className="mb-2 text-xs font-medium text-slate-600">Add inclusion</div> */}
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
+                {/* <Input
                   className="bg-white"
                   value={newInc}
                   onChange={(event) => setNewInc(event.target.value)}
                   placeholder="e.g. Welcome drink on arrival"
-                />
-                <Button
+                /> */}
+                {/* <Button
                   type="button"
                   className="sm:min-w-24"
                   onClick={() => {
@@ -2316,7 +2343,7 @@ function OptionInclusionsEditor({
                   }}
                 >
                   <Plus className="mr-1.5 h-4 w-4" /> Add
-                </Button>
+                </Button> */}
               </div>
             </div>
           </div>

@@ -157,6 +157,9 @@ export function Step12({ draft, set }: StepProps) {
       : someActivePricesSelected
         ? "indeterminate"
         : false;
+  const allToursSelected = eligibleRows.length > 0 && eligibleRows.every(isTourSelected);
+  const someToursSelected = eligibleRows.some(isTourSelected);
+  const tourHeaderState = allToursSelected ? true : someToursSelected ? "indeterminate" : false;
 
   useEffect(() => {
     const tourSelections = { ...(draft.entrance_tour_selected_by_day ?? {}) };
@@ -240,6 +243,17 @@ export function Step12({ draft, set }: StepProps) {
       entrance_rate_selection_by_day: rateSelections,
       costing_selection: costingSelection,
     });
+  };
+
+  const setAllTours = (selected: boolean) => {
+    const tourSelections = { ...(draft.entrance_tour_selected_by_day ?? {}) };
+    eligibleRows.forEach((row) => {
+      const selectedTours = new Set(tourSelections[row.day] ?? []);
+      if (selected) selectedTours.add(row.site.id);
+      else selectedTours.delete(row.site.id);
+      tourSelections[row.day] = [...selectedTours];
+    });
+    set({ entrance_tour_selected_by_day: tourSelections });
   };
 
   const setEntrancePrice = (
@@ -344,6 +358,8 @@ export function Step12({ draft, set }: StepProps) {
   };
   const includedBase = includedRows.reduce((sum, row) => sum + selectedRate(row.site), 0);
   const includedCommercial = applyLandCommercials(draft, includedBase, 0.05);
+  const optionalBase = optionalRows.reduce((sum, row) => sum + selectedRate(row.site), 0);
+  const optionalCommercial = applyLandCommercials(draft, optionalBase, 0.05);
   const invalidLines = draft.entrances.filter(
     (line) =>
       !isSelectedLandServiceValid("entrance", line.site_id, line.from_routing_days?.[0], draft, db),
@@ -357,7 +373,7 @@ export function Step12({ draft, set }: StepProps) {
   ) => (
     <Card className="overflow-hidden">
       <div className="border-b bg-muted/20 p-3 text-sm font-semibold">{title}</div>
-      {rows.length ? (
+      {(
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-xs">
             <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
@@ -372,6 +388,13 @@ export function Step12({ draft, set }: StepProps) {
               </tr>
             </thead>
             <tbody>
+              {!rows.length && (
+                <tr>
+                  <td colSpan={7} className="p-4 text-center italic text-muted-foreground">
+                    {empty}
+                  </td>
+                </tr>
+              )}
               {rows.map((row) => {
                 const base = selectedRate(row.site);
                 const commercial = applyLandCommercials(draft, base, 0.05);
@@ -395,21 +418,19 @@ export function Step12({ draft, set }: StepProps) {
                 );
               })}
             </tbody>
-            {included && (
-              <tfoot className="border-t bg-green-50 font-semibold">
+            <tfoot className={`border-t font-semibold ${included ? "bg-green-50" : "bg-amber-50"}`}>
                 <tr>
-                  <td colSpan={3} className="p-2">Included Entrance Total Per Person</td>
-                  <td className="p-2 text-right">{inr(includedCommercial.base)}</td>
-                  <td className="p-2 text-right">{inr(includedCommercial.markup)}</td>
-                  <td className="p-2 text-right">{inr(includedCommercial.gst)}</td>
-                  <td className="p-2 text-right">{inr(includedCommercial.final)}</td>
+                  <td colSpan={3} className="p-2">
+                    {included ? "Included" : "Optional"} Entrance Total Per Person
+                  </td>
+                  <td className="p-2 text-right">{inr((included ? includedCommercial : optionalCommercial).base)}</td>
+                  <td className="p-2 text-right">{inr((included ? includedCommercial : optionalCommercial).markup)}</td>
+                  <td className="p-2 text-right">{inr((included ? includedCommercial : optionalCommercial).gst)}</td>
+                  <td className="p-2 text-right">{inr((included ? includedCommercial : optionalCommercial).final)}</td>
                 </tr>
               </tfoot>
-            )}
           </table>
         </div>
-      ) : (
-        <div className="p-4 text-sm italic text-muted-foreground">{empty}</div>
       )}
     </Card>
   );
@@ -456,7 +477,18 @@ export function Step12({ draft, set }: StepProps) {
               <th className="p-2 text-left">Day</th>
               <th className="p-2 text-left">Route</th>
               <th className="p-2 text-left">City</th>
-              <th className="p-2 text-left">Tour / Entrance</th>
+              <th className="p-2 text-left">
+                <div>Tour / Entrance</div>
+                <label className="mt-1 flex items-center gap-1 normal-case">
+                  <Checkbox
+                    checked={tourHeaderState}
+                    disabled={eligibleRows.length === 0}
+                    onCheckedChange={(checked) => setAllTours(checked === true)}
+                    aria-label="Select All Tours"
+                  />
+                  <span>Select All Tours</span>
+                </label>
+              </th>
               <th className="p-2 text-right">
                 <div>{categoryLabel}</div>
                 <label className="mt-1 flex items-center justify-end gap-1 normal-case">
@@ -473,14 +505,14 @@ export function Step12({ draft, set }: StepProps) {
           </thead>
           <tbody>
             {dayData.map((day) => {
-              const rows = day.rows.filter(({ site }) => selectedRate(site) > 0);
+              const rows = day.rows;
               if (!rows.length)
                 return (
                   <tr key={day.route.day} className="border-b border-[#E5E7EB]">
                     <td className="p-2 font-semibold">Day {day.route.day}</td>
                     <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
                     <td colSpan={2} className="p-2 italic text-muted-foreground">
-                      No priced entrance sites for this day's selected tours.
+                      No entrance sites are mapped to this day's selected tours.
                     </td>
                     <td className="p-2 text-right text-muted-foreground">—</td>
                   </tr>
@@ -543,7 +575,7 @@ export function Step12({ draft, set }: StepProps) {
                       </div>
                     </td>
                     <td className="p-2 text-right font-semibold tabular-nums">
-                      <label className="inline-flex items-center justify-end gap-1">
+                      {activeRate > 0 ? <label className="inline-flex items-center justify-end gap-1">
                         <input
                           type="checkbox"
                           checked={selected}
@@ -557,7 +589,7 @@ export function Step12({ draft, set }: StepProps) {
                           aria-label={`Include ${categoryLabel} entrance rate for ${row.tour}`}
                         />
                         <span className="text-foreground">{inr(activeRate)}</span>
-                      </label>
+                      </label> : <span className="text-amber-700">Rate Not Configured</span>}
                     </td>
                   </tr>
                 );

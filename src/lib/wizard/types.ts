@@ -196,6 +196,8 @@ export interface HotelSelection {
   meal_plan: MealPlan;
   /** Quotation-only, day-specific accommodation opt-out; never a master rate. */
   no_hotel?: boolean;
+  /** Explicit reason for a zero-cost accommodation night. */
+  accommodation_status?: "no_hotel_required" | "own_arrangement";
   is_fallback?: boolean;
 }
 export type OptionKey = "A" | "B" | "C" | "D";

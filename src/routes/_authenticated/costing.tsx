@@ -2580,7 +2580,9 @@ function Step9({ draft, set }: StepProps) {
     const next = [...draft.routing];
     next[i] = { ...next[i], ...patch };
     if (patch.city_id !== undefined) {
-      next[i].overnight = Boolean(patch.city_id);
+      // The last itinerary row is a departure day. Its destination is still
+      // needed by land services, but it must never become an accommodation night.
+      next[i].overnight = i < next.length - 1 && Boolean(patch.city_id);
       if (i + 1 < next.length && patch.city_id) {
         next[i + 1] = { ...next[i + 1], from_city: cityName(patch.city_id) };
       }

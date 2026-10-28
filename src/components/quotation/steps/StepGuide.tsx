@@ -89,6 +89,16 @@ function makeTourKey(city: string, tour: string) {
   return `${city}||${tour}`;
 }
 
+const normalizedTourValue = (value?: string) =>
+  (value ?? "")
+    .normalize("NFKD")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 function guideMasterRatePax(
   guide: import("@/lib/mock-store").Guide,
   language: GuideLanguage,
@@ -266,58 +276,128 @@ export function Step13({ draft, set }: StepProps) {
     const from = route.from_city || fromDefault || "—";
     const to = cityName(route.city_id) || route.to_city || "—";
     const routeLabel = from === to ? `${to} Local` : `${from} → ${to}`;
-    const options = eligibleGuidesForDay(draft, route, db).map((guide) => ({
-      city: guide.city ?? guide.destination ?? "",
-      tour: guide.tour_program ?? guide.name,
-      guide,
-    }));
-    const siteRows = options
-      .map((option) => {
-        const key = makeTourKey(option.city, option.tour);
-        const languageLines = Object.fromEntries(
-          GUIDE_LANGUAGES.map((language) => [
-            language,
-            selectedGuideLine(option.guide.id, route.day, language),
-          ]),
-        ) as Record<GuideLanguage, GuideLine | undefined>;
-        const hasIncludedLanguage = GUIDE_LANGUAGES.some((language) =>
-          Boolean(languageLines[language]),
-        );
-        const explicitTourSelection = draft.guide_tour_selected_by_day?.[route.day];
-        const legacyDisabled = (draft.guide_tour_disabled_by_day?.[route.day] ?? []).includes(key);
-        const isTourSelected = explicitTourSelection
-          ? explicitTourSelection.includes(key)
-          : !legacyDisabled && Boolean(hasIncludedLanguage);
-        const tierRates = Object.fromEntries(
-          GUIDE_LANGUAGES.map((language) => [
-            language,
-            Object.fromEntries(
-              PAX_TIERS.map((tier) => [
-                tier.key,
-                guideRateForLine(
-                  option.guide,
-                  language,
-                  paxForGuideTier(tier),
-                  languageLines[language],
-                ),
-              ]),
-            ),
-          ]),
-        ) as Record<GuideLanguage, Record<TierKey, number>>;
-        return {
-          ...option,
-          key,
-          languageLines,
-          tierRates,
-          isTourSelected,
-          isSelected: isTourSelected,
-        };
-      })
-      .filter((site) =>
-        GUIDE_LANGUAGES.some((language) =>
-          applicableTiers.some((tier) => site.tierRates[language][tier.key] > 0),
-        ),
+    const context = landDayContext(draft, route, db);
+    const selectedTitleMap = route.tours_selected_by_city ?? {};
+    const selectedIdMap = route.tour_ids_by_city ?? {};
+    const selectionCityKeys = [
+      ...new Set([
+        ...Object.keys(selectedTitleMap),
+        ...Object.keys(selectedIdMap),
+        ...Object.keys(route.tour_titles_by_city ?? {}),
+      ]),
+    ];
+    const routingSelections = selectionCityKeys.flatMap((cityKey) => {
+      const titles = [...(selectedTitleMap[cityKey] ?? [])];
+      const legacyTitle = route.tour_titles_by_city?.[cityKey];
+      if (legacyTitle && !titles.includes(legacyTitle)) titles.push(legacyTitle);
+      const ids = selectedIdMap[cityKey] ?? [];
+      return Array.from({ length: Math.max(titles.length, ids.length) }, (_, index) => {
+        const tourId = ids[index];
+        const title =
+          titles[index] ?? db.destination_tours.find((tour) => tour.id === tourId)?.title ?? "";
+        return { cityKey, title, tourId };
+      }).filter(({ title }) => Boolean(title));
+    });
+    if (route.tour_title && !routingSelections.some(({ title }) => title === route.tour_title)) {
+      routingSelections.push({
+        cityKey: route.to_city_id ?? route.city_id,
+        title: route.tour_title,
+        tourId: undefined,
+      });
+    }
+    const options = routingSelections.map((selection) => {
+      const destinationTour = selection.tourId
+        ? db.destination_tours.find((tour) => tour.id === selection.tourId)
+        : context.selectedTours.find(
+            (tour) => normalizedTourValue(tour.title) === normalizedTourValue(selection.title),
+          );
+      const city =
+        db.destination_cities.find((item) => item.id === destinationTour?.city_id)?.name ??
+        db.cities.find((item) => item.id === selection.cityKey)?.name ??
+        db.destination_cities.find((item) => item.id === selection.cityKey)?.name ??
+        selection.cityKey;
+      const matchingGuide = db.guides.find(
+        (guide) =>
+          guide.is_active &&
+          ((destinationTour?.id && guide.tour_id === destinationTour.id) ||
+            (!guide.tour_id &&
+              normalizedTourValue(guide.city ?? guide.destination) === normalizedTourValue(city) &&
+              normalizedTourValue(guide.tour_program ?? guide.name) ===
+                normalizedTourValue(selection.title))),
       );
+      const key = makeTourKey(city, selection.title);
+      const guide: Guide =
+        matchingGuide ??
+        ({
+          id: `routing-tour-unconfigured::${route.day}::${key}`,
+          name: selection.title,
+          guide_type: "Hindi Guide - Local",
+          destination: city,
+          city,
+          tour_program: selection.title,
+          tour_id: destinationTour?.id,
+          rate_per_day: 0,
+          rate_1_to_5: 0,
+          rate_6_to_14: 0,
+          rate_15_plus: 0,
+          description: "Routing tour without a configured Guide Master rate",
+          is_active: false,
+          created_at: "",
+        } satisfies Guide);
+      return { city, tour: selection.title, guide, key };
+    });
+    // Legacy drafts without explicit Routing tour fields retain the old eligibility behavior.
+    if (!context.hasExplicitTourSelection) {
+      options.push(
+        ...eligibleGuidesForDay(draft, route, db).map((guide) => ({
+          city: guide.city ?? guide.destination ?? "",
+          tour: guide.tour_program ?? guide.name,
+          guide,
+          key: makeTourKey(guide.city ?? guide.destination ?? "", guide.tour_program ?? guide.name),
+        })),
+      );
+    }
+    const siteRows = options.map((option) => {
+      const key = option.key;
+      const languageLines = Object.fromEntries(
+        GUIDE_LANGUAGES.map((language) => [
+          language,
+          selectedGuideLine(option.guide.id, route.day, language),
+        ]),
+      ) as Record<GuideLanguage, GuideLine | undefined>;
+      const hasIncludedLanguage = GUIDE_LANGUAGES.some((language) =>
+        Boolean(languageLines[language]),
+      );
+      const explicitTourSelection = draft.guide_tour_selected_by_day?.[route.day];
+      const legacyDisabled = (draft.guide_tour_disabled_by_day?.[route.day] ?? []).includes(key);
+      const isTourSelected = explicitTourSelection
+        ? explicitTourSelection.includes(key)
+        : !legacyDisabled && Boolean(hasIncludedLanguage);
+      const tierRates = Object.fromEntries(
+        GUIDE_LANGUAGES.map((language) => [
+          language,
+          Object.fromEntries(
+            PAX_TIERS.map((tier) => [
+              tier.key,
+              guideRateForLine(
+                option.guide,
+                language,
+                paxForGuideTier(tier),
+                languageLines[language],
+              ),
+            ]),
+          ),
+        ]),
+      ) as Record<GuideLanguage, Record<TierKey, number>>;
+      return {
+        ...option,
+        key,
+        languageLines,
+        tierRates,
+        isTourSelected,
+        isSelected: isTourSelected,
+      };
+    });
     return {
       route,
       routeLabel,
@@ -626,6 +706,33 @@ export function Step13({ draft, set }: StepProps) {
       guide_tour_selected_by_day: selectedByDay,
       costing_selection: { ...(draft.costing_selection ?? {}), guide: guideSelection },
       ...(!selected ? { guide_slab_selection_by_day: guideSlabs } : {}),
+    });
+  };
+  const visibleGuideTours = dayData.flatMap((day) =>
+    day.siteRows.map((site) => ({ day: day.route.day, site })),
+  );
+  const allVisibleToursSelected =
+    visibleGuideTours.length > 0 && visibleGuideTours.every(({ site }) => site.isTourSelected);
+  const someVisibleToursSelected = visibleGuideTours.some(({ site }) => site.isTourSelected);
+  const setAllVisibleTours = (selected: boolean) => {
+    const selectedByDay = { ...(draft.guide_tour_selected_by_day ?? {}) };
+    const disabledByDay = { ...(draft.guide_tour_disabled_by_day ?? {}) };
+    visibleGuideTours.forEach(({ day, site }) => {
+      const selectedTours = new Set(selectedByDay[day] ?? tourSelectionForDay(day));
+      const disabledTours = new Set(disabledByDay[day] ?? []);
+      if (selected) {
+        selectedTours.add(site.key);
+        disabledTours.delete(site.key);
+      } else {
+        selectedTours.delete(site.key);
+        disabledTours.add(site.key);
+      }
+      selectedByDay[day] = [...selectedTours];
+      disabledByDay[day] = [...disabledTours];
+    });
+    set({
+      guide_tour_selected_by_day: selectedByDay,
+      guide_tour_disabled_by_day: disabledByDay,
     });
   };
   const setGuideLanguageStatus = (
@@ -1857,7 +1964,23 @@ export function Step13({ draft, set }: StepProps) {
                   City
                 </th>
                 <th rowSpan={2} className="p-2 text-left">
-                  Tour
+                  <div>Tour</div>
+                  <label className="mt-1 flex items-center gap-1 normal-case">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={
+                        allVisibleToursSelected ? true : someVisibleToursSelected ? "mixed" : false
+                      }
+                      className="flex h-4 w-4 items-center justify-center rounded-sm border border-primary text-[10px]"
+                      disabled={visibleGuideTours.length === 0}
+                      onClick={() => setAllVisibleTours(!allVisibleToursSelected)}
+                      aria-label="Select All Tours"
+                    >
+                      {allVisibleToursSelected ? "✓" : someVisibleToursSelected ? "−" : ""}
+                    </button>
+                    <span>Select All Tours</span>
+                  </label>
                 </th>
                 {visibleLanguages.map((language) => (
                   <th key={language} colSpan={3} className="p-2 text-center">
@@ -1970,14 +2093,14 @@ export function Step13({ draft, set }: StepProps) {
                               <span className="text-foreground">
                                 {site.tierRates[language][tier.key] > 0
                                   ? inr(site.tierRates[language][tier.key])
-                                  : "—"}
+                                  : "Rate Not Configured"}
                               </span>
                             </label>
                           ) : (
                             <span className="text-foreground">
                               {site.tierRates[language][tier.key] > 0
                                 ? inr(site.tierRates[language][tier.key])
-                                : "—"}
+                                : "Rate Not Configured"}
                             </span>
                           )}
                         </td>

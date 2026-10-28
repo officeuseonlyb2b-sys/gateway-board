@@ -53,6 +53,7 @@ import {
 import {
   hotelSelectionForDay,
   type HotelOption,
+  type OptionKey,
   type ActivityLine,
   type LandReviewDisplaySelection,
   type QuoteDraft,
@@ -130,7 +131,11 @@ export function includedActivitySellingRows(
       if (!byRange.has(key) || savedRateMatch) byRange.set(key, slab);
     });
 
-    return [...byRange.values()].map((slab) => {
+    const displayedSlabs = [...byRange.values()].filter(
+      (slab) =>
+        draft.pax_mode === "range" || (pax >= slab.from_pax && pax <= slab.to_pax),
+    );
+    return displayedSlabs.map((slab) => {
       const isActiveRange = pax >= slab.from_pax && pax <= slab.to_pax;
       const base = isActiveRange ? line.rate : slab.price;
       const commercial = applyLandCommercials(draft, base);
@@ -249,7 +254,7 @@ function LandReviewControls({
         />
       </div>
       <div className={box}>
-        <div className={title}>Guide Options &amp; Tour Escort · select any to show</div>
+        <div className={title}>Guide Options &amp; Tour Escort - select any to show</div>
         <div className="flex flex-wrap gap-1">
           <FilterChip
             checked={filters.hindi}
@@ -272,24 +277,9 @@ function LandReviewControls({
             onChange={(value) => set("escort", value)}
           />
         </div>
-        <div className="mt-2 border-t border-[#d7e2ed] pt-2">
-          <div className="mb-1 text-[9px] font-semibold text-[#51677d]">Guide Pricing to Show</div>
-          <div className="flex flex-wrap gap-1">
-            <FilterChip
-              checked={filters.guideIncluded}
-              label="Included"
-              onChange={(value) => set("guideIncluded", value)}
-            />
-            <FilterChip
-              checked={filters.guideOptional}
-              label="Optional"
-              onChange={(value) => set("guideOptional", value)}
-            />
-          </div>
-        </div>
       </div>
       <div className={box}>
-        <div className={title}>Entrances · select categories to show</div>
+        <div className={title}>Entrances - select categories to show</div>
         <div className="flex flex-wrap gap-1">
           <FilterChip
             checked={filters.indian}
@@ -307,59 +297,19 @@ function LandReviewControls({
             onChange={(value) => set("student", value)}
           />
         </div>
-        <div className="mt-2 border-t border-[#d7e2ed] pt-2">
-          <div className="mb-1 text-[9px] font-semibold text-[#51677d]">
-            Entrance Pricing to Show
-          </div>
-          <div className="flex flex-wrap gap-1">
-            <FilterChip
-              checked={filters.entranceIncluded}
-              label="Included"
-              onChange={(value) => set("entranceIncluded", value)}
-            />
-            <FilterChip
-              checked={filters.entranceOptional}
-              label="Optional"
-              onChange={(value) => set("entranceOptional", value)}
-            />
-          </div>
-        </div>
       </div>
       <div className={box}>
         <div className={title}>Activities &amp; Miscellaneous</div>
         <div className="flex flex-wrap gap-1">
           <FilterChip
             checked={filters.activities}
-            label="Activities / Experiences"
+            label="Included Activities / Experiences"
             onChange={(value) => set("activities", value)}
           />
           <FilterChip
             checked={filters.misc}
             label="Miscellaneous"
             onChange={(value) => set("misc", value)}
-          />
-        </div>
-        <div className="mt-2 border-t border-[#d7e2ed] pt-2 text-[9px] font-semibold text-[#51677d]">
-          Activities
-        </div>
-        <div className="mt-1 flex flex-wrap gap-1">
-          <FilterChip
-            checked={filters.activityIncluded}
-            label="Included"
-            onChange={(value) => set("activityIncluded", value)}
-          />
-          <FilterChip
-            checked={filters.activityOptional}
-            label="Optional"
-            onChange={(value) => set("activityOptional", value)}
-          />
-        </div>
-        <div className="mt-2 text-[9px] font-semibold text-[#51677d]">Miscellaneous</div>
-        <div className="mt-1 flex flex-wrap gap-1">
-          <FilterChip
-            checked={filters.miscIncluded}
-            label="Included"
-            onChange={(value) => set("miscIncluded", value)}
           />
         </div>
       </div>
@@ -948,6 +898,14 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
                   master,
                   draft.traveler_type || "indian",
                   pax,
+                ).filter(
+                  (row) =>
+                    draft.pax_mode === "range" ||
+                    row.rate_basis !== "custom_slab" ||
+                    (row.min_pax != null &&
+                      row.max_pax != null &&
+                      pax >= row.min_pax &&
+                      pax <= row.max_pax),
                 );
                 return rows.map((row, index) => {
                   const day = line.from_routing_days?.[0];
@@ -988,23 +946,23 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
 }
 
 const emptyLandReviewSelection: LandReviewDisplaySelection = {
-  transport: false,
-  hindi: false,
-  english: false,
+  transport: true,
+  hindi: true,
+  english: true,
   otherLanguage: false,
-  escort: false,
-  indian: false,
-  foreign: false,
-  student: false,
-  activities: false,
-  misc: false,
-  guideIncluded: false,
-  guideOptional: false,
-  entranceIncluded: false,
-  entranceOptional: false,
-  activityIncluded: false,
-  activityOptional: false,
-  miscIncluded: false,
+  escort: true,
+  indian: true,
+  foreign: true,
+  student: true,
+  activities: true,
+  misc: true,
+  guideIncluded: true,
+  guideOptional: true,
+  entranceIncluded: true,
+  entranceOptional: true,
+  activityIncluded: true,
+  activityOptional: true,
+  miscIncluded: true,
 };
 
 function LandReview({
@@ -1018,7 +976,18 @@ function LandReview({
   set: SetDraft;
   readOnly?: boolean;
 }) {
-  const selection = draft.land_review_display_selection ?? emptyLandReviewSelection;
+  const selection: LandReviewDisplaySelection = {
+    ...emptyLandReviewSelection,
+    ...(draft.land_review_display_selection ?? {}),
+    // Classification remains authoritative in Step 7 and is never controlled here.
+    guideIncluded: true,
+    guideOptional: true,
+    entranceIncluded: true,
+    entranceOptional: true,
+    activityIncluded: true,
+    activityOptional: true,
+    miscIncluded: true,
+  };
   const filters: LandReviewFilters = {
     ...selection,
     paxDisplay: draft.pax_mode === "range" ? "ranges" : "exact",
@@ -1046,12 +1015,15 @@ function LandReview({
         </div>
         {!readOnly && <LandReviewControls filters={filters} onChange={changeSelection} />}
         <LandDaywiseReview draft={costingDraft} filters={daywiseFilters} />
-        {(costingDraft.transport_options?.length ?? 0) > 0 && (
+        {filters.transport && (costingDraft.transport_options?.length ?? 0) > 0 && (
           <TransportReview draft={costingDraft} />
         )}
-        {costingDraft.misc.length > 0 && <MiscReview draft={costingDraft} />}
-        {costingDraft.activities.some((line) => line.inclusion_status !== "optional") && (
+        {filters.misc && costingDraft.misc.length > 0 && <MiscReview draft={costingDraft} />}
+        {filters.activities && costingDraft.activities.some((line) => line.inclusion_status !== "optional") && (
           <ActivitiesReview draft={costingDraft} />
+        )}
+        {filters.activities && costingDraft.activities.some((line) => line.inclusion_status === "optional") && (
+          <ActivitiesReview draft={costingDraft} optional />
         )}
       </div>
     </Section>
@@ -1134,7 +1106,11 @@ function AccommodationReview({
                         return (
                           <td key={option.key}>
                             {selection?.no_hotel ? (
-                              <b>No Hotel</b>
+                              <b>
+                                {selection.accommodation_status === "own_arrangement"
+                                  ? "Own Arrangement"
+                                  : "No Hotel Required"}
+                              </b>
                             ) : (
                               <>
                                 <div className="font-semibold">{hotel?.name || "Unavailable"}</div>
@@ -1327,9 +1303,18 @@ function AccommodationReview({
   );
 }
 
-function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
+function SeparateMealsReview({
+  draft,
+  optionKey = "A",
+}: {
+  draft: QuoteDraft;
+  optionKey?: OptionKey;
+}) {
   const db = useDB();
-  const rows = useMemo(() => calculateMealCostingRows(draft, db, "A"), [draft, db]);
+  const rows = useMemo(
+    () => calculateMealCostingRows(draft, db, optionKey),
+    [draft, db, optionKey],
+  );
   const includedLunch = mealCostingTotal(draft, rows, "Lunch", "included");
   const includedDinner = mealCostingTotal(draft, rows, "Dinner", "included");
   const optionalLunch = mealCostingTotal(draft, rows, "Lunch", "optional");
@@ -1340,7 +1325,7 @@ function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
   const optionalRows = rows.filter((row) => row.status === "optional");
 
   return (
-    <Section number={3} title="Meals — Separate Meals Review">
+    <Section number={3} title={`Meals — Option ${optionKey} Included & Optional Review`}>
       <div className="space-y-3 p-2">
         <div className="grid gap-2 lg:grid-cols-2">
           {(
@@ -1438,25 +1423,32 @@ function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
                         <th className="text-left">Meal / Venue</th>
                         <th className="text-right">Base</th>
                         <th className="text-right">Pax</th>
+                        <th className="text-right">Markup</th>
+                        <th className="text-right">GST</th>
                         <th className="text-right">Final Selling Price</th>
                       </tr>
                     </thead>
                     <tbody>
                       {optionalRows
                         .filter((row) => row.meal_type === meal)
-                        .map((row) => (
-                          <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
+                        .map((row) => {
+                          const base = row.total;
+                          const markedUp = base * (1 + hotelsMarkup(draft));
+                          const markup = markedUp - base;
+                          const final = markedUp * (1 + hotelsGst(draft));
+                          const gst = final - markedUp;
+                          return <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
                             <td>{row.day}</td>
                             <td>{row.date}</td>
                             <td>{row.city}</td>
                             <td>{row.label}</td>
-                            <td className="text-right">{money(row.total)}</td>
+                            <td className="text-right">{money(base)}</td>
                             <td className="text-right">{row.pax}</td>
-                            <td className="text-right">
-                              {money(gross(row.total, hotelsMarkup(draft), hotelsGst(draft)))}
-                            </td>
+                            <td className="text-right">{money(markup)}</td>
+                            <td className="text-right">{money(gst)}</td>
+                            <td className="text-right">{money(final)}</td>
                           </tr>
-                        ))}
+                        })}
                     </tbody>
                     <tfoot className="border-t bg-amber-50 font-semibold">
                       {[
@@ -1466,7 +1458,7 @@ function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
                         [`Optional ${meal} Final Selling Price`, total.final_total],
                       ].map(([label, value]) => (
                         <tr key={String(label)}>
-                          <td colSpan={6}>{label}</td>
+                          <td colSpan={8}>{label}</td>
                           <td className="text-right">{money(Number(value))}</td>
                         </tr>
                       ))}
@@ -1528,6 +1520,13 @@ function PackageStandardCostingReviewImpl({
             <AccommodationReview draft={costingDraft} />
           </div>
         ))}
+      {scope.accommodationPart && (
+        <div className="space-y-3 print-meals-section">
+          {costingDraft.hotel_options.slice(0, 4).map((option) => (
+            <SeparateMealsReview key={option.key} draft={costingDraft} optionKey={option.key} />
+          ))}
+        </div>
+      )}
       <div className="print-commercial-matrix-page [&_h2]:text-[#103353]">
         <CommercialPackageMatrix
           draft={costingDraft}
@@ -1536,9 +1535,7 @@ function PackageStandardCostingReviewImpl({
           displaySelection={draft.land_review_display_selection}
         />
       </div>
-      {draft.land_review_display_selection?.activities &&
-        draft.land_review_display_selection.activityOptional &&
-        optionalCount > 0 && (
+      {false && optionalCount > 0 && (
           <div
             className="print-optional-activities"
             aria-label="5. Optional Activities & Experiences — Additional Sale"

@@ -153,26 +153,20 @@ function CommercialPackageMatrixImpl({
     );
     set({ rate_sheet_rows: next });
   };
-  const displayedRows = readOnly ? rows.filter(isSelected) : rows;
+  // Matrix checkboxes select quotation variants; they never hide calculated rows.
+  const displayedRows = rows;
   const landMeals = scope.queryFor === "Land Part + Meals";
   const landOnly = scope.queryFor === "Land Part";
   const accommodationOnly = !scope.landPart && scope.accommodationPart;
   const landScoped = landOnly || landMeals;
   const showLunch = landMeals && rows.some(({ row }) => row.lunch > 0);
   const showDinner = landMeals && rows.some(({ row }) => row.dinner > 0);
-  const showTransport = Boolean(displaySelection?.transport);
-  const showGuideLanguages = Boolean(
-    displaySelection?.guideIncluded &&
-    (displaySelection.hindi || displaySelection.english || displaySelection.otherLanguage),
-  );
-  const showEscort = Boolean(displaySelection?.guideIncluded && displaySelection.escort);
-  const showGuide = landScoped ? showGuideLanguages : showGuideLanguages || showEscort;
-  const showEntrances = Boolean(
-    displaySelection?.entranceIncluded &&
-    (displaySelection.indian || displaySelection.foreign || displaySelection.student),
-  );
-  const showActivities = Boolean(displaySelection?.activities && displaySelection.activityIncluded);
-  const showMisc = Boolean(displaySelection?.misc && displaySelection.miscIncluded);
+  const showTransport = scope.landPart;
+  const showEscort = landScoped && rows.some(({ row }) => row.escort > 0);
+  const showGuide = scope.landPart;
+  const showEntrances = scope.landPart;
+  const showActivities = scope.landPart;
+  const showMisc = scope.landPart;
 
   return (
     <div className="space-y-4">
