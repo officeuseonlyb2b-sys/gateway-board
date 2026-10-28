@@ -29,6 +29,7 @@ import {
   guidePrimaryLanguage,
   guideRateForPax,
   type GuideLanguage,
+  type Guide,
 } from "@/lib/mock-store";
 import {
   effectivePaxForPricing,
@@ -37,6 +38,17 @@ import {
   parsePaxRange,
 } from "@/lib/wizard/calc";
 import { applyLandCommercials } from "@/lib/wizard/land-pricing";
+import {
+  guidePaxSlabKey,
+  guideSlabSelectionKey,
+  type GuidePaxSlabKey,
+  type GuideSelectionStatus,
+} from "@/lib/wizard/guide-pricing";
+import {
+  guideLanguageCostingForPax,
+  guidePaxValuesForSlab,
+  guideServicesForPax,
+} from "@/lib/wizard/guide-costing";
 import {
   eligibleGuidesForDay,
   isSelectedLandServiceValid,
@@ -54,9 +66,9 @@ import type { GuideLine, QuoteDraft } from "@/lib/wizard/types";
 
 const GUIDE_LANGUAGES: GuideLanguage[] = ["Hindi", "English", "Language"];
 const PAX_TIERS = [
-  { key: "1-5", label: "1–5 Pax", pax: 1 },
-  { key: "6-14", label: "6–14 Pax", pax: 6 },
-  { key: "15+", label: "15+ Pax", pax: 15 },
+  { key: "1-5", label: "1–5 Pax", min: 1, max: 5, pax: 5 },
+  { key: "6-14", label: "6–14 Pax", min: 6, max: 14, pax: 14 },
+  { key: "15+", label: "15+ Pax", min: 15, max: Number.POSITIVE_INFINITY, pax: 15 },
 ] as const;
 type TierKey = (typeof PAX_TIERS)[number]["key"];
 type EscortEditorState = {
@@ -98,8 +110,10 @@ export function Step13({ draft, set }: StepProps) {
   const db = useDB();
   const pricingPax = effectivePaxForPricing(draft);
   const costingPaxValues = getCostingPaxValues(draft);
-  const languageFilter = (draft.guide_language as GuideLanguage | "all") || "all";
-  const visibleLanguages = languageFilter === "all" ? GUIDE_LANGUAGES : [languageFilter];
+  const languageFilter = (GUIDE_LANGUAGES as readonly string[]).includes(draft.guide_language ?? "")
+    ? (draft.guide_language as GuideLanguage)
+    : "Hindi";
+  const visibleLanguages = [languageFilter];
   const escortMode = getEscortPricingMode(draft);
   const escortEnabled = isEscortEnabled(draft);
   const escortRanges = draft.escort_ranges ?? [];
@@ -108,6 +122,7 @@ export function Step13({ draft, set }: StepProps) {
   const [escortEditorError, setEscortEditorError] = useState("");
   const [confirmEscortRemoval, setConfirmEscortRemoval] = useState(false);
   const [serviceView, setServiceView] = useState<"guides" | "escort">("guides");
+  const showRestyledGuideTable = false;
   // Kept for draft compatibility with the legacy eligible-guide dialog.
   const [addGuideDay, setAddGuideDay] = useState<number | null>(null);
   const [guideSearch, setGuideSearch] = useState("");
@@ -156,11 +171,8 @@ export function Step13({ draft, set }: StepProps) {
         : guideMasterRatePax(guide, language, pax),
     [pricingPax],
   );
-  const paxForGuideTier = (tier: (typeof PAX_TIERS)[number]) => {
-    const min = tier.key === "1-5" ? 1 : tier.key === "6-14" ? 6 : 15;
-    const max = tier.key === "1-5" ? 5 : tier.key === "6-14" ? 14 : Number.POSITIVE_INFINITY;
-    return pricingPax >= min && pricingPax <= max ? pricingPax : tier.pax;
-  };
+  const paxForGuideTier = (tier: (typeof PAX_TIERS)[number]) =>
+    pricingPax >= tier.min && pricingPax <= tier.max ? pricingPax : tier.pax;
   const closeEscortEditor = () => {
     setEscortDialogOpen(false);
     setEscortEditor(null);
@@ -170,9 +182,9 @@ export function Step13({ draft, set }: StepProps) {
 
   const range = parsePaxRange(draft);
   const applicableTiers = PAX_TIERS.filter((tier) => {
-    const min = tier.key === "1-5" ? 1 : tier.key === "6-14" ? 6 : 15;
-    const max = tier.key === "1-5" ? 5 : tier.key === "6-14" ? 14 : Number.POSITIVE_INFINITY;
-    return range ? range.min <= max && range.max >= min : pricingPax >= min && pricingPax <= max;
+    return range
+      ? range.min <= tier.max && range.max >= tier.min
+      : pricingPax >= tier.min && pricingPax <= tier.max;
   });
 
   const openEscortEditor = () => {
@@ -268,9 +280,8 @@ export function Step13({ draft, set }: StepProps) {
             selectedGuideLine(option.guide.id, route.day, language),
           ]),
         ) as Record<GuideLanguage, GuideLine | undefined>;
-        const hasIncludedLanguage = GUIDE_LANGUAGES.some(
-          (language) =>
-            languageLines[language]?.inclusion_status !== "optional" && languageLines[language],
+        const hasIncludedLanguage = GUIDE_LANGUAGES.some((language) =>
+          Boolean(languageLines[language]),
         );
         const explicitTourSelection = draft.guide_tour_selected_by_day?.[route.day];
         const legacyDisabled = (draft.guide_tour_disabled_by_day?.[route.day] ?? []).includes(key);
@@ -388,111 +399,105 @@ export function Step13({ draft, set }: StepProps) {
     });
   }, [draft, dayData, applicableTiers, db.guides, guideRateForLine, pricingPax, set]);
 
-  const eligibleGuideRows = dayData.flatMap((day) =>
-    day.eligibleRows.flatMap((row) =>
-      visibleLanguages.map((language) => ({
-        ...row,
+  const paxInTier = (tier: (typeof PAX_TIERS)[number]) => guidePaxValuesForSlab(draft, tier.key);
+  const summaryPaxForTier = (tier: (typeof PAX_TIERS)[number]) =>
+    pricingPax >= tier.min && pricingPax <= tier.max ? pricingPax : tier.pax;
+  const guideSectionData = visibleLanguages.map((language) => ({
+    language,
+    tiers: PAX_TIERS.map((tier) => {
+      const summaryPax = summaryPaxForTier(tier);
+      const costing = guideLanguageCostingForPax(draft, db, summaryPax, language);
+      const optionalCommercial = applyLandCommercials(draft, costing.optionalBaseTotal);
+      const personRows = paxInTier(tier).map((pax) => {
+        const paxCosting = guideLanguageCostingForPax(draft, db, pax, language);
+        const commercial = applyLandCommercials(draft, paxCosting.baseTotal);
+        return {
+          pax,
+          base: paxCosting.baseTotal,
+          final: commercial.final,
+          perPerson: commercial.final / Math.max(1, pax),
+          masterTier:
+            pax <= 5 ? "Guide Master 1–5" : pax <= 14 ? "Guide Master 6–14" : "Guide Master 15+",
+        };
+      });
+      return {
+        ...tier,
+        summaryPax,
+        costing,
+        commercial: applyLandCommercials(draft, costing.baseTotal),
+        optionalCommercial,
+        personRows,
+      };
+    }),
+  }));
+  const guideSlabLabel = (pax: number) =>
+    PAX_TIERS.find((tier) => pax >= tier.min && pax <= tier.max)?.label ?? "15+ Pax";
+  const guideBaseForPax = (language: GuideLanguage, pax: number) =>
+    guideLanguageCostingForPax(draft, db, pax, language).baseTotal;
+  type LegacyGuideTableRow = {
+    day: number;
+    routeLabel: string;
+    city: string;
+    tour: string;
+    guide: Guide;
+    line?: GuideLine;
+    language: GuideLanguage;
+    isTourSelected: boolean;
+    tierRates: Record<GuideLanguage, Record<TierKey, number>>;
+  };
+  const eligibleGuideRows: LegacyGuideTableRow[] = dayData.flatMap((day) =>
+    day.siteRows.flatMap((site) =>
+      GUIDE_LANGUAGES.map((language) => ({
         day: day.route.day,
         routeLabel: day.routeLabel,
+        city: site.city,
+        tour: site.tour,
+        guide: site.guide,
+        line: site.languageLines[language],
         language,
-        line: row.languageLines[language],
+        isTourSelected: site.isTourSelected,
+        tierRates: site.tierRates,
       })),
     ),
   );
   const includedGuideRows = eligibleGuideRows.filter(
-    (row) =>
-      row.isTourSelected &&
-      row.line &&
-      row.line.inclusion_status !== "optional" &&
-      applicableTiers.some((tier) => row.tierRates[row.language][tier.key] > 0),
+    (row) => row.isTourSelected && row.line?.inclusion_status === "included",
   );
   const optionalGuideRows = eligibleGuideRows.filter(
-    (row) =>
-      row.isTourSelected &&
-      (!row.line || row.line.inclusion_status === "optional") &&
-      applicableTiers.some((tier) => row.tierRates[row.language][tier.key] > 0),
+    (row) => row.isTourSelected && row.line?.inclusion_status === "optional",
   );
-  const guideSlabLabel = (pax: number) =>
-    pax <= 5 ? "1–5 Pax" : pax <= 14 ? "6–14 Pax" : "15+ Pax";
-  const includedGuideBaseForRow = (row: (typeof includedGuideRows)[number], pax: number) => {
-    const line = row.line;
-    const targetDayCount = Math.max(1, line?.from_routing_days?.length ?? draft.routing.length);
-    return (
-      (guideRateForLine(row.guide, row.language, pax, line) *
-        Math.max(1, line?.guides ?? 1) *
-        Math.max(1, line?.days ?? 1)) /
-      targetDayCount
-    );
-  };
-  const guideBaseForPax = (language: GuideLanguage, pax: number) =>
-    includedGuideRows.reduce((sum, row) => {
-      if (row.language !== language) return sum;
-      return sum + includedGuideBaseForRow(row, pax);
-    }, 0) +
-    (includedGuideRows.some((row) => row.language === language) ? getReporting(language) : 0);
-  const includedGuideReporting = visibleLanguages.reduce(
-    (sum, language) =>
-      sum +
-      (includedGuideRows.some((row) => row.language === language) ? getReporting(language) : 0),
+  const includedGuideBaseForRow = (row: LegacyGuideTableRow, pax: number) =>
+    (guideRateForLine(row.guide, row.language, pax, row.line) *
+      Math.max(1, row.line?.guides ?? 1) *
+      Math.max(1, row.line?.days ?? 1)) /
+    Math.max(1, row.line?.from_routing_days?.length ?? draft.routing.length);
+  const languageCosting = (pax: number) =>
+    visibleLanguages.map((language) => guideLanguageCostingForPax(draft, db, pax, language));
+  const includedGuideReporting = languageCosting(pricingPax).reduce(
+    (sum, costing) => sum + costing.reportingCost,
     0,
   );
-  const includedGuideBase = visibleLanguages.reduce(
-    (sum, language) =>
-      sum +
-      (includedGuideRows.some((row) => row.language === language)
-        ? guideBaseForPax(language, pricingPax)
-        : 0),
-    0,
+  const includedGuideCommercial = applyLandCommercials(
+    draft,
+    languageCosting(pricingPax).reduce((sum, costing) => sum + costing.baseTotal, 0),
   );
-  const includedGuideCommercial = applyLandCommercials(draft, includedGuideBase, 0.05);
-  const optionalGuideBase = optionalGuideRows.reduce(
-    (sum, row) => sum + includedGuideBaseForRow(row, pricingPax),
-    0,
-  );
-  // Reporting cost has no separate optional bucket in the persisted draft, so
-  // it remains zero rather than duplicating the included reporting charge.
   const optionalGuideReporting = 0;
   const optionalGuideCommercial = applyLandCommercials(
     draft,
-    optionalGuideBase + optionalGuideReporting,
-    0.05,
+    languageCosting(pricingPax).reduce((sum, costing) => sum + costing.optionalBaseTotal, 0),
   );
-  // This is deliberately independent of the language display filter: range
-  // costing must use every included guide line, exactly as final costing does.
-  const includedGuideRowsForRange = dayData
-    .flatMap((day) =>
-      day.eligibleRows.flatMap((row) =>
-        GUIDE_LANGUAGES.map((language) => ({
-          ...row,
-          day: day.route.day,
-          routeLabel: day.routeLabel,
-          language,
-          line: row.languageLines[language],
-        })),
-      ),
-    )
-    .filter((row) => row.isTourSelected && row.line && row.line.inclusion_status !== "optional");
-  // Shared with the Final Matrix: Exact resolves only the actual traveller
-  // total; a Pax Range resolves every pax inside its selected bounds.
   const rangeCostingRows = costingPaxValues.map((pax) => {
-    const unavailable = includedGuideRowsForRange.filter(
-      (row) => guideRateForLine(row.guide, row.language, pax, row.line) <= 0,
-    );
-    const priced = includedGuideRowsForRange.filter(
-      (row) => guideRateForLine(row.guide, row.language, pax, row.line) > 0,
-    );
-    const activeLanguages = new Set(priced.map((row) => row.language));
-    const base =
-      priced.reduce((sum, row) => sum + includedGuideBaseForRow(row, pax), 0) +
-      [...activeLanguages].reduce((sum, language) => sum + getReporting(language), 0);
-    const commercial = applyLandCommercials(draft, base, 0.05);
+    const costing = languageCosting(pax);
+    const base = costing.reduce((sum, value) => sum + value.baseTotal, 0);
+    const optionalBase = costing.reduce((sum, value) => sum + value.optionalBaseTotal, 0);
     return {
       pax,
+      unavailable: [],
+      slabs: guideSlabLabel(pax),
       base,
-      commercial,
-      unavailable,
-      slabs:
-        [...new Set(priced.map(() => guideSlabLabel(pax)))].join(" / ") || "Rate Not Available",
+      optionalBase,
+      commercial: applyLandCommercials(draft, base),
+      optionalCommercial: applyLandCommercials(draft, optionalBase),
     };
   });
 
@@ -582,8 +587,11 @@ export function Step13({ draft, set }: StepProps) {
   const setTourStatus = (
     day: number,
     site: (typeof dayData)[number]["siteRows"][number],
-    selected: boolean,
+    selection: boolean | GuideSelectionStatus,
   ) => {
+    const status: GuideSelectionStatus =
+      typeof selection === "boolean" ? (selection ? "included" : "removed") : selection;
+    const selected = status !== "removed";
     const disabledByDay = { ...(draft.guide_tour_disabled_by_day ?? {}) };
     const selectedByDay = { ...(draft.guide_tour_selected_by_day ?? {}) };
     const disabled = new Set(disabledByDay[day] ?? []);
@@ -597,36 +605,59 @@ export function Step13({ draft, set }: StepProps) {
 
     let guides = [...draft.guides];
     const guideSelection = { ...(draft.costing_selection?.guide ?? {}) };
+    const guideSlabs = { ...(draft.guide_slab_selection_by_day ?? {}) };
     if (!selected) {
       const result = updateGuideLinesForDay(guides, site.guide.id, day, undefined, {
         inclusion_status: "optional",
       });
       guides = result.lines;
       updateGuideCostingSelection(guideSelection, day, result.affectedIds);
+      const daySlabs = { ...(guideSlabs[day] ?? {}) };
+      PAX_TIERS.forEach((tier) =>
+        GUIDE_LANGUAGES.forEach((language) => {
+          daySlabs[guideSlabSelectionKey(site.key, site.guide.id, language, tier.key)] = "removed";
+        }),
+      );
+      guideSlabs[day] = daySlabs;
     }
     set({
       guides,
       guide_tour_disabled_by_day: disabledByDay,
       guide_tour_selected_by_day: selectedByDay,
       costing_selection: { ...(draft.costing_selection ?? {}), guide: guideSelection },
+      ...(!selected ? { guide_slab_selection_by_day: guideSlabs } : {}),
     });
   };
   const setGuideLanguageStatus = (
     day: number,
     site: (typeof dayData)[number]["siteRows"][number],
     language: GuideLanguage,
-    selected: boolean,
+    selection: boolean | GuideSelectionStatus,
   ) => {
+    // A guide is one service with three alternative pax rates.  Keep its state
+    // atomic so an unchecked Included/Optional row is genuinely removed.
+    const status: GuideSelectionStatus =
+      typeof selection === "boolean" ? (selection ? "included" : "removed") : selection;
     let guides = [...draft.guides];
     const rate = guideMasterRatePax(site.guide, language, pricingPax);
+    const paxRanges = [
+      { from_pax: 1, to_pax: 5, rate: guideMasterRatePax(site.guide, language, 1) },
+      { from_pax: 6, to_pax: 14, rate: guideMasterRatePax(site.guide, language, 6) },
+      {
+        from_pax: 15,
+        to_pax: Number.MAX_SAFE_INTEGER,
+        rate: guideMasterRatePax(site.guide, language, 15),
+      },
+    ].filter((range) => range.rate > 0);
     const result = updateGuideLinesForDay(guides, site.guide.id, day, language, {
-      inclusion_status: selected ? "included" : "optional",
+      inclusion_status: status === "removed" ? "optional" : status,
       rate,
       language,
+      pax_ranges: paxRanges,
     });
     guides = result.lines;
     let affectedIds = result.affectedIds;
-    if (selected && !affectedIds.length) {
+    if (status !== "removed" && !affectedIds.length) {
       const line: GuideLine = {
         id: uid(),
         guide_id: site.guide.id,
@@ -634,8 +665,9 @@ export function Step13({ draft, set }: StepProps) {
         guides: 1,
         rate,
         language,
-        inclusion_status: "included",
+        inclusion_status: status,
         from_routing_days: [day],
+        pax_ranges: paxRanges,
       };
       guides.push(line);
       affectedIds = [line.id];
@@ -646,8 +678,8 @@ export function Step13({ draft, set }: StepProps) {
       guideSelection,
       day,
       affectedIds,
-      selected ? language : undefined,
-      selected ? selectedLine?.id : undefined,
+      status === "included" ? language : undefined,
+      status === "included" ? selectedLine?.id : undefined,
     );
     const disabledByDay = { ...(draft.guide_tour_disabled_by_day ?? {}) };
     disabledByDay[day] = (disabledByDay[day] ?? []).filter((key) => key !== site.key);
@@ -655,11 +687,102 @@ export function Step13({ draft, set }: StepProps) {
     const selectedTours = new Set(tourSelectionForDay(day));
     selectedTours.add(site.key);
     selectedByDay[day] = [...selectedTours];
+    const guideSlabs = { ...(draft.guide_slab_selection_by_day ?? {}) };
+    const daySlabs = { ...(guideSlabs[day] ?? {}) };
+    PAX_TIERS.forEach((tier) => {
+      daySlabs[guideSlabSelectionKey(site.key, site.guide.id, language, tier.key)] = status;
+    });
+    guideSlabs[day] = daySlabs;
     set({
       guides,
       guide_tour_disabled_by_day: disabledByDay,
       guide_tour_selected_by_day: selectedByDay,
+      guide_slab_selection_by_day: guideSlabs,
       costing_selection: { ...(draft.costing_selection ?? {}), guide: guideSelection },
+    });
+  };
+  const setGuideSlabStatus = (
+    row: ReturnType<typeof guideServicesForPax>[number],
+    _slab: GuidePaxSlabKey,
+    status: GuideSelectionStatus,
+    pax: number,
+  ) => {
+    let guides = [...draft.guides];
+    const matching = selectedGuideLine(row.guideId, row.day, row.language);
+    const savedPaxRates = [
+      { from_pax: 1, to_pax: 5, rate: guideMasterRatePax(row.guide, row.language, 1) },
+      { from_pax: 6, to_pax: 14, rate: guideMasterRatePax(row.guide, row.language, 6) },
+      {
+        from_pax: 15,
+        to_pax: Number.MAX_SAFE_INTEGER,
+        rate: guideMasterRatePax(row.guide, row.language, 15),
+      },
+    ].filter((rate) => rate.rate > 0);
+    if (matching) {
+      const updated = updateGuideLinesForDay(guides, row.guideId, row.day, row.language, {
+        inclusion_status: status === "removed" ? "optional" : status,
+        language: row.language,
+        pax_ranges: matching.pax_ranges?.length ? matching.pax_ranges : savedPaxRates,
+      });
+      guides = updated.lines;
+    } else if (status !== "removed") {
+      guides.push({
+        id: uid(),
+        guide_id: row.guideId,
+        days: 1,
+        guides: 1,
+        rate: guideMasterRatePax(row.guide, row.language, pax),
+        pax_ranges: savedPaxRates,
+        language: row.language,
+        inclusion_status: status,
+        from_routing_days: [row.day],
+      });
+    }
+
+    const guideSlabs = { ...(draft.guide_slab_selection_by_day ?? {}) };
+    const daySlabs = { ...(guideSlabs[row.day] ?? {}) };
+    const servicePrefix = `${row.serviceKey}::${row.guideId}::${row.language}::`;
+    if (!Object.keys(daySlabs).some((key) => key.startsWith(servicePrefix))) {
+      PAX_TIERS.forEach((tier) => {
+        daySlabs[guideSlabSelectionKey(row.serviceKey, row.guideId, row.language, tier.key)] =
+          "removed";
+      });
+    }
+    // A Guide Service is selected once for its language; its three Guide Master
+    // rates are alternatives, not independently selectable services.
+    PAX_TIERS.forEach((tier) => {
+      daySlabs[guideSlabSelectionKey(row.serviceKey, row.guideId, row.language, tier.key)] = status;
+    });
+    guideSlabs[row.day] = daySlabs;
+    const tourSelections = { ...(draft.guide_tour_selected_by_day ?? {}) };
+    if (status !== "removed") {
+      const current = new Set(tourSelectionForDay(row.day));
+      current.add(row.serviceKey);
+      tourSelections[row.day] = [...current];
+    }
+    const costingGuideSelections = { ...(draft.costing_selection?.guide ?? {}) };
+    const selectedLine = findGuideLanguageLine(guides, row.guideId, row.day, row.language);
+    const lineToken = selectedLine ? `${selectedLine.id}::${row.language}` : "";
+    const dayTokens = costingGuideSelections[row.day] ?? [];
+    const nextDayTokens =
+      status === "included" && lineToken
+        ? [
+            ...new Set([
+              ...dayTokens.filter((token) => !token.startsWith(`${selectedLine.id}::`)),
+              lineToken,
+            ]),
+          ]
+        : dayTokens.filter((token) => !token.startsWith(`${selectedLine?.id ?? row.guideId}::`));
+    if (nextDayTokens.length) costingGuideSelections[row.day] = nextDayTokens;
+    else delete costingGuideSelections[row.day];
+    set({
+      guides,
+      guide_slab_selection_by_day: guideSlabs,
+      costing_selection: {
+        ...(draft.costing_selection ?? {}),
+        guide: costingGuideSelections,
+      },
+      ...(status !== "removed" ? { guide_tour_selected_by_day: tourSelections } : {}),
     });
   };
   const hasRateForLanguage = (
@@ -671,11 +794,36 @@ export function Step13({ draft, set }: StepProps) {
     language: GuideLanguage,
   ) =>
     site.languageLines[language]?.inclusion_status !== "optional" && !!site.languageLines[language];
-  const setAllForLanguage = (language: GuideLanguage, selected: boolean) => {
+  const isLanguageInStatus = (
+    day: number,
+    site: (typeof dayData)[number]["siteRows"][number],
+    language: GuideLanguage,
+    status: Exclude<GuideSelectionStatus, "removed">,
+  ) =>
+    site.isTourSelected &&
+    hasRateForLanguage(site, language) &&
+    (guideServiceStatus(day, site, language) === "included" ? "included" : "optional") === status;
+  const guideServiceStatus = (
+    day: number,
+    site: (typeof dayData)[number]["siteRows"][number],
+    language: GuideLanguage,
+  ): GuideSelectionStatus =>
+    draft.guide_slab_selection_by_day?.[day]?.[
+      guideSlabSelectionKey(site.key, site.guide.id, language, "1-5")
+    ] ??
+    (site.languageLines[language]?.inclusion_status === "included"
+      ? "included"
+      : site.languageLines[language]?.inclusion_status === "optional"
+        ? "optional"
+        : "removed");
+  const setAllForLanguage = (language: GuideLanguage, selection: GuideSelectionStatus) => {
+    const selected = selection !== "removed";
+    const status = selection === "removed" ? "optional" : selection;
     let guides = [...draft.guides];
     const disabledByDay = { ...(draft.guide_tour_disabled_by_day ?? {}) };
     const selectedByDay = { ...(draft.guide_tour_selected_by_day ?? {}) };
     const guideSelection = { ...(draft.costing_selection?.guide ?? {}) };
+    const guideSlabs = { ...(draft.guide_slab_selection_by_day ?? {}) };
     dayData.forEach((day) =>
       day.siteRows.forEach((site) => {
         if (!site.isTourSelected || !hasRateForLanguage(site, language)) return;
@@ -684,9 +832,18 @@ export function Step13({ draft, set }: StepProps) {
         selectedTours.add(site.key);
         selectedByDay[routeDay] = [...selectedTours];
         const result = updateGuideLinesForDay(guides, site.guide.id, routeDay, language, {
-          inclusion_status: selected ? "included" : "optional",
+          inclusion_status: status,
           rate: guideMasterRatePax(site.guide, language, pricingPax),
           language,
+          pax_ranges: [
+            { from_pax: 1, to_pax: 5, rate: guideMasterRatePax(site.guide, language, 1) },
+            { from_pax: 6, to_pax: 14, rate: guideMasterRatePax(site.guide, language, 6) },
+            {
+              from_pax: 15,
+              to_pax: Number.MAX_SAFE_INTEGER,
+              rate: guideMasterRatePax(site.guide, language, 15),
+            },
+          ].filter((range) => range.rate > 0),
         });
         guides = result.lines;
         let affectedIds = result.affectedIds;
@@ -698,8 +855,17 @@ export function Step13({ draft, set }: StepProps) {
             guides: 1,
             rate: guideMasterRatePax(site.guide, language, pricingPax),
             language,
-            inclusion_status: "included",
+            inclusion_status: status,
             from_routing_days: [routeDay],
+            pax_ranges: [
+              { from_pax: 1, to_pax: 5, rate: guideMasterRatePax(site.guide, language, 1) },
+              { from_pax: 6, to_pax: 14, rate: guideMasterRatePax(site.guide, language, 6) },
+              {
+                from_pax: 15,
+                to_pax: Number.MAX_SAFE_INTEGER,
+                rate: guideMasterRatePax(site.guide, language, 15),
+              },
+            ].filter((range) => range.rate > 0),
           };
           guides.push(line);
           affectedIds = [line.id];
@@ -709,27 +875,37 @@ export function Step13({ draft, set }: StepProps) {
           guideSelection,
           routeDay,
           affectedIds,
-          selected ? language : undefined,
-          selected ? selectedLine?.id : undefined,
+          selection === "included" ? language : undefined,
+          selection === "included" ? selectedLine?.id : undefined,
         );
         disabledByDay[routeDay] = (disabledByDay[routeDay] ?? []).filter((key) => key !== site.key);
+        const daySlabs = { ...(guideSlabs[routeDay] ?? {}) };
+        PAX_TIERS.forEach((tier) => {
+          daySlabs[guideSlabSelectionKey(site.key, site.guide.id, language, tier.key)] = selection;
+        });
+        guideSlabs[routeDay] = daySlabs;
       }),
     );
     set({
       guides,
       guide_tour_disabled_by_day: disabledByDay,
       guide_tour_selected_by_day: selectedByDay,
+      guide_slab_selection_by_day: guideSlabs,
       costing_selection: { ...(draft.costing_selection ?? {}), guide: guideSelection },
     });
   };
-  const allLanguageRatesSelected = (language: GuideLanguage) => {
+  const allLanguageRatesSelected = (
+    language: GuideLanguage,
+    status: Exclude<GuideSelectionStatus, "removed"> = "included",
+  ) => {
     const available = dayData.flatMap((day) =>
       day.siteRows
         .filter((site) => site.isTourSelected && hasRateForLanguage(site, language))
         .map((site) => ({ site, day: day.route.day })),
     );
     return (
-      available.length > 0 && available.every(({ site }) => isLanguageSelected(site, language))
+      available.length > 0 &&
+      available.every(({ site, day }) => isLanguageInStatus(day, site, language, status))
     );
   };
 
@@ -805,6 +981,184 @@ export function Step13({ draft, set }: StepProps) {
       0.05,
     ).final,
   }));
+  // Replaced in-place rather than deleting the legacy JSX so existing draft
+  // state remains readable while the compact range tables own the visible UI.
+  const showLegacyGuideDisplays = false;
+  const showGuideChargesSelection = true;
+
+  const renderGuideRangeTable = (status: Exclude<GuideSelectionStatus, "removed">) => {
+    const included = status === "included";
+    const heading = included
+      ? "Included Guides — Range-wise Costing"
+      : "Optional Guides — Additional Sale";
+    const finalLabel = included ? "Final Total" : "Final Selling Total";
+    const totalFor = (language: GuideLanguage, pax: number) => {
+      const costing = guideLanguageCostingForPax(draft, db, pax, language);
+      const base = included ? costing.baseTotal : costing.optionalBaseTotal;
+      return {
+        commercial: applyLandCommercials(draft, base),
+      };
+    };
+
+    return (
+      <Card className="overflow-hidden">
+        <div className="border-b bg-muted/20 p-3 text-sm font-semibold">{heading}</div>
+        <div className="overflow-x-auto">
+          <table
+            data-testid={included ? "included-guide-review-table" : "optional-guide-review-table"}
+            className="w-full min-w-212.5 table-fixed border-collapse text-xs"
+          >
+            <colgroup>
+              <col style={{ width: "72px" }} />
+              <col style={{ width: "155px" }} />
+              <col style={{ width: "140px" }} />
+              <col style={{ width: "300px" }} />
+              {visibleLanguages.flatMap((language) =>
+                PAX_TIERS.map((tier) => (
+                  <col key={`${language}-${tier.key}`} style={{ width: "96px" }} />
+                )),
+              )}
+            </colgroup>
+            <thead className="bg-[#F3F4F6] text-[10px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-[#E5E7EB]">
+                <th rowSpan={2} className="p-2 text-left">
+                  Day
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  Route
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  City
+                </th>
+                <th rowSpan={2} className="p-2 text-left">
+                  Tour
+                </th>
+                {visibleLanguages.map((language) => (
+                  <th key={language} colSpan={3} className="p-2 text-center">
+                    {languageLabel(language)}
+                  </th>
+                ))}
+              </tr>
+              <tr className="border-b border-[#E5E7EB]">
+                {visibleLanguages.flatMap((language) =>
+                  PAX_TIERS.map((tier) => (
+                    <th key={`${language}-${tier.key}`} className="p-2 text-center">
+                      {tier.label}
+                    </th>
+                  )),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {dayData.map((day) => {
+                const selectedSites = day.siteRows.filter((site) =>
+                  visibleLanguages.some((language) =>
+                    isLanguageInStatus(day.route.day, site, language, status),
+                  ),
+                );
+                if (!selectedSites.length) {
+                  return (
+                    <tr key={day.route.day} className="border-b border-[#E5E7EB]">
+                      <td className="p-2 font-semibold">Day {day.route.day}</td>
+                      <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
+                      <td
+                        colSpan={2 + visibleLanguages.length * 3}
+                        className="p-2 italic text-muted-foreground"
+                      >
+                        No {included ? "included" : "optional"} guides for this routing day.
+                      </td>
+                    </tr>
+                  );
+                }
+                return selectedSites.map((site, siteIndex) => (
+                  <tr
+                    key={`${day.route.day}-${site.key}`}
+                    className="border-b border-[#E5E7EB] align-top"
+                  >
+                    {siteIndex === 0 && (
+                      <td rowSpan={selectedSites.length} className="p-2 font-semibold">
+                        Day {day.route.day}
+                      </td>
+                    )}
+                    {siteIndex === 0 && (
+                      <td
+                        rowSpan={selectedSites.length}
+                        className="p-2 text-[11px] text-muted-foreground"
+                      >
+                        {day.routeLabel}
+                      </td>
+                    )}
+                    <td className="wrap-break-word p-2">
+                      {site.city || <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="p-2">
+                      <div className="line-clamp-2 wrap-break-word text-sm font-medium">
+                        {site.tour}
+                      </div>
+                    </td>
+                    {visibleLanguages.flatMap((language) => {
+                      return PAX_TIERS.map((tier) => (
+                        <td
+                          key={`${language}-${tier.key}`}
+                          className={cn(
+                            "p-2 text-right tabular-nums",
+                            !isLanguageInStatus(day.route.day, site, language, status) &&
+                              "text-muted-foreground",
+                          )}
+                        >
+                          <span className="text-foreground">
+                            {site.tierRates[language][tier.key] > 0
+                              ? inr(site.tierRates[language][tier.key])
+                              : "Unavailable"}
+                          </span>
+                        </td>
+                      ));
+                    })}
+                  </tr>
+                ));
+              })}
+            </tbody>
+            <tfoot>
+              {(
+                [
+                  ["Base Total", "base"],
+                  [`Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`, "markup"],
+                  ["GST", "gst"],
+                  [finalLabel, "final"],
+                ] as const
+              ).map(([label, field]) => (
+                <tr
+                  key={field}
+                  className={cn(
+                    "border-t",
+                    field === "final" && "bg-green-50 font-semibold text-primary",
+                  )}
+                >
+                  <td
+                    colSpan={4}
+                    className="p-2 text-right text-[10px] uppercase text-muted-foreground"
+                  >
+                    {label}
+                  </td>
+                  {visibleLanguages.flatMap((language) =>
+                    PAX_TIERS.map((tier) => {
+                      const total = totalFor(language, tier.pax);
+                      const value = total.commercial[field];
+                      return (
+                        <td key={`${language}-${tier.key}`} className="p-2 text-right tabular-nums">
+                          {inr(value)}
+                        </td>
+                      );
+                    }),
+                  )}
+                </tr>
+              ))}
+            </tfoot>
+          </table>
+        </div>
+      </Card>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -817,7 +1171,6 @@ export function Step13({ draft, set }: StepProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Languages</SelectItem>
               <SelectItem value="Hindi">Hindi</SelectItem>
               <SelectItem value="English">English</SelectItem>
               <SelectItem value="Language">Other Language</SelectItem>
@@ -859,17 +1212,638 @@ export function Step13({ draft, set }: StepProps) {
         </button>
       </div>
 
+      {showRestyledGuideTable && serviceView === "guides" && (
+        <div className="space-y-4">
+          <Card className="overflow-hidden">
+            <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+              Tour / Guide Service Selection
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-xs">
+                <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-left">Day</th>
+                    <th className="p-2 text-left">Route</th>
+                    <th className="p-2 text-left">City</th>
+                    <th className="p-2 text-left">Tour / Guide Service</th>
+                    <th className="p-2 text-center">Selected</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayData.flatMap((day) =>
+                    day.siteRows.map((site) => (
+                      <tr key={`${day.route.day}-${site.key}`} className="border-t">
+                        <td className="p-2">{day.route.day}</td>
+                        <td className="p-2">{day.routeLabel}</td>
+                        <td className="p-2">{site.city || "—"}</td>
+                        <td className="p-2">
+                          {site.tour} · {site.guide.name}
+                        </td>
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={site.isTourSelected}
+                            onChange={(event) =>
+                              setTourStatus(day.route.day, site, event.target.checked)
+                            }
+                            aria-label={`Select ${site.tour} guide service`}
+                          />
+                        </td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+          {guideSectionData.map(({ language, tiers }) => {
+            const tierServices = tiers.map((tier) => ({
+              tier,
+              rows: guideServicesForPax(draft, db, tier.summaryPax, language),
+            }));
+            const rowKeys = [
+              ...new Set(
+                tierServices.flatMap(({ rows }) =>
+                  rows.map((row) => `${row.day}::${row.serviceKey}::${row.guideId}`),
+                ),
+              ),
+            ];
+            const optionalKeys = [
+              ...new Set(
+                tiers.flatMap((tier) =>
+                  tier.costing.optionalRows.map(
+                    (row) => `${row.day}::${row.serviceKey}::${row.guideId}`,
+                  ),
+                ),
+              ),
+            ];
+            return (
+              <section key={language} className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">
+                      {languageLabel(language)} Guide Costing
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      Guide Master rates are shown as independent 1–5, 6–14, and 15+ pax
+                      alternatives.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    Reporting Cost
+                    <Input
+                      type="number"
+                      min={0}
+                      value={getReporting(language) || ""}
+                      onChange={(event) => setReporting(language, Number(event.target.value) || 0)}
+                      className="h-8 w-28 text-right"
+                    />
+                  </label>
+                </div>
+                <Card className="overflow-hidden">
+                  <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+                    Included Guides
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[980px] text-xs">
+                      <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="p-2 text-left">Day</th>
+                          <th className="p-2 text-left">Route</th>
+                          <th className="p-2 text-left">City</th>
+                          <th className="p-2 text-left">Tour / Guide Service</th>
+                          {tiers.map((tier) => (
+                            <th key={tier.key} className="p-2 text-right">
+                              {tier.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rowKeys.map((key) => {
+                          const first = tierServices
+                            .flatMap(({ rows }) => rows)
+                            .find(
+                              (row) => `${row.day}::${row.serviceKey}::${row.guideId}` === key,
+                            )!;
+                          return (
+                            <tr key={key} className="border-t">
+                              <td className="p-2">{first.day}</td>
+                              <td className="p-2">
+                                {dayData.find((item) => item.route.day === first.day)?.routeLabel ||
+                                  "—"}
+                              </td>
+                              <td className="p-2">{first.city}</td>
+                              <td className="p-2">
+                                {first.tour} · {first.guideName}
+                              </td>
+                              {tierServices.map(({ tier, rows }) => {
+                                const row = rows.find(
+                                  (candidate) =>
+                                    `${candidate.day}::${candidate.serviceKey}::${candidate.guideId}` ===
+                                    key,
+                                );
+                                return (
+                                  <td key={tier.key} className="p-2 text-right">
+                                    {row ? (
+                                      <div className="flex flex-col items-end gap-1">
+                                        <span className="font-medium">{inr(row.rate)}</span>
+                                        <Select
+                                          value={row.status}
+                                          onValueChange={(value) =>
+                                            setGuideSlabStatus(
+                                              row,
+                                              tier.key,
+                                              value as GuideSelectionStatus,
+                                              tier.summaryPax,
+                                            )
+                                          }
+                                        >
+                                          <SelectTrigger className="h-7 w-28 text-[10px]">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="included">Included</SelectItem>
+                                            <SelectItem value="optional">Optional</SelectItem>
+                                            <SelectItem value="removed">Not selected</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">Unavailable</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                        {!rowKeys.length && (
+                          <tr>
+                            <td
+                              colSpan={7}
+                              className="p-3 text-center italic text-muted-foreground"
+                            >
+                              No eligible guide services for this language and routing.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      <tfoot className="border-t bg-green-50">
+                        {(["reportingCost", "base", "markup", "gst", "final"] as const).map(
+                          (field) => (
+                            <tr
+                              key={field}
+                              className={
+                                field === "final" ? "border-t font-semibold text-primary" : ""
+                              }
+                            >
+                              <td colSpan={4} className="p-2 text-right">
+                                {field === "reportingCost"
+                                  ? "Reporting Cost"
+                                  : field === "base"
+                                    ? "Base Total"
+                                    : field === "markup"
+                                      ? `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`
+                                      : field === "gst"
+                                        ? "GST"
+                                        : "Final Total"}
+                              </td>
+                              {tiers.map((tier) => (
+                                <td key={tier.key} className="p-2 text-right">
+                                  {inr(
+                                    field === "reportingCost"
+                                      ? tier.costing.reportingCost
+                                      : tier.commercial[field],
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ),
+                        )}
+                      </tfoot>
+                    </table>
+                  </div>
+                  <div className="border-t bg-muted/20 p-3 text-sm font-semibold">
+                    Per Person Cost Breakdown
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-xs">
+                      <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="p-2 text-left">Pax</th>
+                          <th className="p-2 text-left">Applicable Slab</th>
+                          <th className="p-2 text-right">Base Total</th>
+                          <th className="p-2 text-right">Final Total</th>
+                          <th className="p-2 text-right">Per Person</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tiers
+                          .flatMap((tier) => tier.personRows)
+                          .map((person) => (
+                            <tr key={person.pax} className="border-t">
+                              <td className="p-2">{person.pax}</td>
+                              <td className="p-2">{guideSlabLabel(person.pax)}</td>
+                              <td className="p-2 text-right">{inr(person.base)}</td>
+                              <td className="p-2 text-right">{inr(person.final)}</td>
+                              <td className="p-2 text-right font-semibold">
+                                {inr(person.perPerson)}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {optionalKeys.length > 0 && (
+                    <div className="border-t bg-amber-50/60 p-3">
+                      <h5 className="text-xs font-semibold">
+                        Optional Guides — For Additional Sale
+                      </h5>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full min-w-[720px] text-xs">
+                          <thead className="text-[10px] uppercase text-muted-foreground">
+                            <tr>
+                              <th className="p-2 text-left">Day / Guide Service</th>
+                              {tiers.map((tier) => (
+                                <th key={tier.key} className="p-2 text-right">
+                                  {tier.label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {optionalKeys.map((key) => {
+                              const row = tiers
+                                .flatMap((tier) => tier.costing.optionalRows)
+                                .find(
+                                  (candidate) =>
+                                    `${candidate.day}::${candidate.serviceKey}::${candidate.guideId}` ===
+                                    key,
+                                )!;
+                              return (
+                                <tr key={key} className="border-t">
+                                  <td className="p-2">
+                                    Day {row.day} · {row.tour} · {row.guideName}
+                                  </td>
+                                  {tiers.map((tier) => {
+                                    const candidate = tier.costing.optionalRows.find(
+                                      (item) =>
+                                        `${item.day}::${item.serviceKey}::${item.guideId}` === key,
+                                    );
+                                    return (
+                                      <td key={tier.key} className="p-2 text-right">
+                                        {candidate
+                                          ? inr(applyLandCommercials(draft, candidate.base).final)
+                                          : "—"}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="border-t font-semibold">
+                            <tr>
+                              <td className="p-2">Optional Final Total</td>
+                              {tiers.map((tier) => (
+                                <td key={tier.key} className="p-2 text-right">
+                                  {inr(tier.optionalCommercial.final)}
+                                </td>
+                              ))}
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              </section>
+            );
+          })}
+          {showLegacySlabCards &&
+            guideSectionData.map(({ language, tiers }) => (
+              <section key={language} className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">
+                      {languageLabel(language)} Guide Costing
+                    </h3>
+                    <p className="max-w-3xl text-[11px] text-muted-foreground">
+                      Guide Master rates remain authoritative: 1–5, 6–14, and 15+. The requested
+                      display sections (1–6 / 7–14 / 15+) do not have separate master rate fields;
+                      each pax below resolves its actual Guide Master tier (including 6 Pax).
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    Reporting Cost
+                    <Input
+                      type="number"
+                      min={0}
+                      value={getReporting(language) || ""}
+                      onChange={(event) => setReporting(language, Number(event.target.value) || 0)}
+                      className="h-8 w-28 text-right"
+                    />
+                  </label>
+                </div>
+                {tiers.map((tier) => {
+                  const services = guideServicesForPax(draft, db, tier.summaryPax, language);
+                  const optionalCommercial = tier.optionalCommercial;
+                  return (
+                    <Card key={tier.key} className="overflow-hidden">
+                      <div className="border-b bg-muted/20 p-3">
+                        <h4 className="text-sm font-semibold">
+                          {tier.label} — Included Guide Costing
+                        </h4>
+                        <p className="text-[10px] text-muted-foreground">
+                          Section total uses {tier.summaryPax} Pax. Per-person rows show only pax
+                          values in the quotation’s configured range.
+                        </p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[850px] text-xs">
+                          <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                            <tr>
+                              <th className="p-2 text-left">Day</th>
+                              <th className="p-2 text-left">Route</th>
+                              <th className="p-2 text-left">City</th>
+                              <th className="p-2 text-left">Tour / Guide Service</th>
+                              <th className="p-2 text-left">Guide Selection</th>
+                              <th className="p-2 text-right">Applicable Guide Rate</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {services.map((row) => (
+                              <tr
+                                key={`${row.day}-${row.guideId}-${row.language}`}
+                                className="border-t"
+                              >
+                                <td className="p-2">{row.day}</td>
+                                <td className="p-2">
+                                  {dayData.find((item) => item.route.day === row.day)?.routeLabel ||
+                                    "—"}
+                                </td>
+                                <td className="p-2">{row.city}</td>
+                                <td className="p-2">
+                                  {row.tour} · {row.guideName}
+                                </td>
+                                <td className="p-2">
+                                  <Select
+                                    value={row.status}
+                                    onValueChange={(value) =>
+                                      setGuideSlabStatus(
+                                        row,
+                                        tier.key,
+                                        value as GuideSelectionStatus,
+                                        tier.summaryPax,
+                                      )
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 w-32 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="included">Included</SelectItem>
+                                      <SelectItem value="optional">Optional</SelectItem>
+                                      <SelectItem value="removed">Not selected</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </td>
+                                <td className="p-2 text-right">
+                                  {inr(row.rate)}{" "}
+                                  <span className="text-[10px] text-muted-foreground">
+                                    (
+                                    {tier.personRows.find(
+                                      (person) => person.pax === tier.summaryPax,
+                                    )?.masterTier ||
+                                      (tier.summaryPax <= 5
+                                        ? "Guide Master 1–5"
+                                        : tier.summaryPax <= 14
+                                          ? "Guide Master 6–14"
+                                          : "Guide Master 15+")}
+                                    )
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                            {!services.length && (
+                              <tr>
+                                <td
+                                  colSpan={6}
+                                  className="p-3 text-center italic text-muted-foreground"
+                                >
+                                  No eligible guide services for this language and routing.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                          <tfoot className="border-t bg-green-50">
+                            {[
+                              ["Reporting Cost", tier.costing.reportingCost],
+                              ["Base Total", tier.commercial.base],
+                              [
+                                `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`,
+                                tier.commercial.markup,
+                              ],
+                              ["GST", tier.commercial.gst],
+                              ["Final Total", tier.commercial.final],
+                            ].map(([label, value], index) => (
+                              <tr
+                                key={String(label)}
+                                className={index === 4 ? "border-t font-semibold text-primary" : ""}
+                              >
+                                <td colSpan={5} className="p-2 text-right">
+                                  {label}
+                                </td>
+                                <td className="p-2 text-right">{inr(Number(value))}</td>
+                              </tr>
+                            ))}
+                          </tfoot>
+                        </table>
+                      </div>
+                      <div className="overflow-x-auto border-t">
+                        <table className="w-full min-w-[720px] text-xs">
+                          <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                            <tr>
+                              <th className="p-2 text-left">Pax</th>
+                              <th className="p-2 text-left">Guide Master Rate Tier</th>
+                              <th className="p-2 text-right">Base Total</th>
+                              <th className="p-2 text-right">Final Total</th>
+                              <th className="p-2 text-right">Per Person</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tier.personRows.map((person) => (
+                              <tr key={person.pax} className="border-t">
+                                <td className="p-2">{person.pax}</td>
+                                <td className="p-2">{person.masterTier}</td>
+                                <td className="p-2 text-right">{inr(person.base)}</td>
+                                <td className="p-2 text-right">{inr(person.final)}</td>
+                                <td className="p-2 text-right font-semibold">
+                                  {inr(person.perPerson)}
+                                </td>
+                              </tr>
+                            ))}
+                            {!tier.personRows.length && (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="p-3 text-center italic text-muted-foreground"
+                                >
+                                  No pax values from the configured quotation range fall in this
+                                  section.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      {tier.costing.optionalRows.length > 0 && (
+                        <div className="border-t bg-amber-50/60 p-3">
+                          <h5 className="text-xs font-semibold">
+                            Optional Guides — Additional Sale · {tier.label}
+                          </h5>
+                          <div className="mt-2 overflow-x-auto">
+                            <table className="w-full min-w-[720px] text-xs">
+                              <thead className="text-[10px] uppercase text-muted-foreground">
+                                <tr>
+                                  <th className="p-2 text-left">Day / Guide Service</th>
+                                  <th className="p-2 text-right">Base</th>
+                                  <th className="p-2 text-right">Markup</th>
+                                  <th className="p-2 text-right">GST</th>
+                                  <th className="p-2 text-right">Final Selling Price</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {tier.costing.optionalRows.map((row) => {
+                                  const sale = applyLandCommercials(draft, row.base, 0.05);
+                                  return (
+                                    <tr key={`${row.day}-${row.guideId}`} className="border-t">
+                                      <td className="p-2">
+                                        Day {row.day} · {row.tour} · {row.guideName}
+                                      </td>
+                                      <td className="p-2 text-right">{inr(row.base)}</td>
+                                      <td className="p-2 text-right">{inr(sale.markup)}</td>
+                                      <td className="p-2 text-right">{inr(sale.gst)}</td>
+                                      <td className="p-2 text-right font-semibold">
+                                        {inr(sale.final)}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                              <tfoot className="border-t font-semibold">
+                                <tr>
+                                  <td className="p-2">Optional {tier.label} Total</td>
+                                  <td className="p-2 text-right">{inr(optionalCommercial.base)}</td>
+                                  <td className="p-2 text-right">
+                                    {inr(optionalCommercial.markup)}
+                                  </td>
+                                  <td className="p-2 text-right">{inr(optionalCommercial.gst)}</td>
+                                  <td className="p-2 text-right">
+                                    {inr(optionalCommercial.final)}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+              </section>
+            ))}
+        </div>
+      )}
+
       {serviceView === "guides" && (
-        <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
-          <table className="w-full min-w-212.5 table-fixed border-collapse text-xs">
+        <div className="order-30 flex flex-col gap-4">
+          {renderGuideRangeTable("included")}
+          <Card className="overflow-hidden">
+            <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+              Included Guides — Per Person Cost Breakdown
+            </div>
+            <div className="overflow-x-auto">
+              <table data-testid="included-guide-per-person-table" className="w-full text-xs">
+                <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-left">Pax</th>
+                    <th className="p-2 text-left">Applicable Slab</th>
+                    <th className="p-2 text-right">Included Base Total</th>
+                    <th className="p-2 text-right">Included Final Total</th>
+                    <th className="p-2 text-right">Included Per Person</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rangeCostingRows.map((row) => (
+                    <tr key={row.pax} className="border-t">
+                      <td className="p-2 font-medium">{row.pax} Pax</td>
+                      <td className="p-2">{row.slabs}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(row.base)}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(row.commercial.final)}</td>
+                      <td className="p-2 text-right font-semibold tabular-nums">
+                        {inr(row.commercial.final / Math.max(1, row.pax))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+          {renderGuideRangeTable("optional")}
+          <Card className="overflow-hidden">
+            <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+              Optional Guides — Per Person Cost Breakdown
+            </div>
+            <div className="overflow-x-auto">
+              <table data-testid="optional-guide-per-person-table" className="w-full text-xs">
+                <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-left">Pax</th>
+                    <th className="p-2 text-left">Applicable Slab</th>
+                    <th className="p-2 text-right">Optional Base Total</th>
+                    <th className="p-2 text-right">Optional Final Total</th>
+                    <th className="p-2 text-right">Optional Per Person</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rangeCostingRows.map((row) => (
+                    <tr key={row.pax} className="border-t">
+                      <td className="p-2 font-medium">{row.pax} Pax</td>
+                      <td className="p-2">{row.slabs}</td>
+                      <td className="p-2 text-right tabular-nums">{inr(row.optionalBase)}</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {inr(row.optionalCommercial.final)}
+                      </td>
+                      <td className="p-2 text-right font-semibold tabular-nums">
+                        {inr(row.optionalCommercial.final / Math.max(1, row.pax))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {showGuideChargesSelection && serviceView === "guides" && (
+        <div className="order-20 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+          <table
+            data-testid="guide-charges-table"
+            className="w-full min-w-212.5 table-fixed border-collapse text-xs"
+          >
             <colgroup>
               <col style={{ width: "72px" }} />
               <col style={{ width: "155px" }} />
               <col style={{ width: "140px" }} />
               <col style={{ width: "300px" }} />
-              {visibleLanguages.map((language) => (
-                <col key={language} style={{ width: "135px" }} />
-              ))}
+              {visibleLanguages.flatMap((language) =>
+                PAX_TIERS.map((tier) => (
+                  <col key={`${language}-${tier.key}`} style={{ width: "112px" }} />
+                )),
+              )}
             </colgroup>
             <thead className="bg-[#F3F4F6] text-[10px] uppercase tracking-wide text-muted-foreground">
               <tr className="border-b border-[#E5E7EB]">
@@ -886,18 +1860,8 @@ export function Step13({ draft, set }: StepProps) {
                   Tour
                 </th>
                 {visibleLanguages.map((language) => (
-                  <th key={language} className="p-2 text-center">
-                    {languageLabel(language)}
-                  </th>
-                ))}
-              </tr>
-              <tr className="border-b border-[#E5E7EB]">
-                {visibleLanguages.map((language) => (
-                  <th key={language} className="p-2 text-center">
-                    <div>
-                      {applicableTiers.map((tier) => tier.label.replace(/ Pax$/, "")).join(" / ")}{" "}
-                      Pax
-                    </div>
+                  <th key={language} colSpan={3} className="p-2 text-center">
+                    <div>{languageLabel(language)}</div>
                     <label className="mt-1 flex items-center justify-center gap-1 normal-case">
                       <input
                         type="checkbox"
@@ -919,6 +1883,15 @@ export function Step13({ draft, set }: StepProps) {
                   </th>
                 ))}
               </tr>
+              <tr className="border-b border-[#E5E7EB]">
+                {visibleLanguages.flatMap((language) =>
+                  PAX_TIERS.map((tier) => (
+                    <th key={`${language}-${tier.key}`} className="p-2 text-center">
+                      {tier.label}
+                    </th>
+                  )),
+                )}
+              </tr>
             </thead>
             <tbody>
               {dayData.map((day) => {
@@ -927,7 +1900,7 @@ export function Step13({ draft, set }: StepProps) {
                     <tr key={day.route.day} className="border-b border-[#E5E7EB]">
                       <td className="p-2 font-semibold">Day {day.route.day}</td>
                       <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
-                      <td colSpan={2 + visibleLanguages.length} className="p-2">
+                      <td colSpan={2 + visibleLanguages.length * 3} className="p-2">
                         <span className="italic text-muted-foreground">
                           No guides are eligible for this routing day.
                         </span>
@@ -972,13 +1945,14 @@ export function Step13({ draft, set }: StepProps) {
                         </div>
                       </div>
                     </td>
-                    {visibleLanguages.map((language) => {
+                    {visibleLanguages.flatMap((language) => {
                       const hasRate = hasRateForLanguage(site, language);
-                      const selected = hasRate && isLanguageSelected(site, language);
-                      return (
-                        <td key={language} className="p-2 text-right tabular-nums">
-                          {hasRate || selected ? (
-                            <label className="inline-flex items-start justify-end gap-1">
+                      const selection = guideServiceStatus(day.route.day, site, language);
+                      const selected = hasRate && selection === "included";
+                      return PAX_TIERS.map((tier, tierIndex) => (
+                        <td key={`${language}-${tier.key}`} className="p-2 text-right tabular-nums">
+                          {tierIndex === 0 && (hasRate || selected) ? (
+                            <label className="inline-flex items-center justify-end gap-1">
                               <input
                                 type="checkbox"
                                 checked={selected}
@@ -988,31 +1962,26 @@ export function Step13({ draft, set }: StepProps) {
                                     day.route.day,
                                     site,
                                     language,
-                                    event.target.checked,
+                                    event.target.checked ? "included" : "optional",
                                   )
                                 }
                                 aria-label={`${selected ? "Unselect" : "Select"} ${languageLabel(language)} rate for ${site.tour}`}
                               />
                               <span className="text-foreground">
-                                {hasRate
-                                  ? applicableTiers.map((tier, tierIndex) => (
-                                      <span key={tier.key}>
-                                        {tierIndex > 0 && (
-                                          <span className="mr-1 text-muted-foreground">/</span>
-                                        )}
-                                        {site.tierRates[language][tier.key] > 0
-                                          ? inr(site.tierRates[language][tier.key])
-                                          : "—"}
-                                      </span>
-                                    ))
+                                {site.tierRates[language][tier.key] > 0
+                                  ? inr(site.tierRates[language][tier.key])
                                   : "—"}
                               </span>
                             </label>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-foreground">
+                              {site.tierRates[language][tier.key] > 0
+                                ? inr(site.tierRates[language][tier.key])
+                                : "—"}
+                            </span>
                           )}
                         </td>
-                      );
+                      ));
                     })}
                   </tr>
                 ));
@@ -1026,7 +1995,7 @@ export function Step13({ draft, set }: StepProps) {
                   Reporting Cost
                 </td>
                 {visibleLanguages.map((language) => (
-                  <td key={language} className="p-2 text-right">
+                  <td key={language} colSpan={3} className="p-2 text-right">
                     <Input
                       type="number"
                       min={0}
@@ -1042,8 +2011,64 @@ export function Step13({ draft, set }: StepProps) {
         </div>
       )}
 
-      {serviceView === "guides" && (
+      {showLegacyGuideDisplays && serviceView === "guides" && (
         <>
+          {range && (
+            <Card className="overflow-hidden">
+              <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+                Guide Charges — Pax Slab Summary
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px] text-xs">
+                  <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+                    <tr>
+                      <th className="p-2 text-left">Description</th>
+                      {PAX_TIERS.map((tier) => (
+                        <th key={tier.key} className="p-2 text-right">
+                          {tier.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(["base", "markup", "gst", "final"] as const).map((field) => (
+                      <tr
+                        key={field}
+                        className={
+                          field === "final"
+                            ? "border-t bg-green-50 font-semibold text-primary"
+                            : "border-t"
+                        }
+                      >
+                        <td className="p-2">
+                          {field === "base"
+                            ? "Base Total"
+                            : field === "markup"
+                              ? `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`
+                              : field === "gst"
+                                ? "GST"
+                                : "Final Total"}
+                        </td>
+                        {PAX_TIERS.map((tier) => {
+                          const base = visibleLanguages.reduce(
+                            (sum, language) =>
+                              sum +
+                              guideLanguageCostingForPax(draft, db, tier.pax, language).baseTotal,
+                            0,
+                          );
+                          return (
+                            <td key={tier.key} className="p-2 text-right tabular-nums">
+                              {inr(applyLandCommercials(draft, base)[field])}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
           <Card className="overflow-hidden">
             <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
               Included Guides — Per Person Costing

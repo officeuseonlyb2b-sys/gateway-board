@@ -7,6 +7,52 @@ import {
 import type { GuideLine, QuoteDraft } from "./types";
 
 export type EscortPricingMode = "per_person" | "pax_range" | "day_wise";
+export type GuidePaxSlabKey = "1-5" | "6-14" | "15+";
+export type GuideSelectionStatus = "included" | "optional" | "removed";
+
+export function guidePaxSlabKey(pax: number): GuidePaxSlabKey {
+  return pax <= 5 ? "1-5" : pax <= 14 ? "6-14" : "15+";
+}
+
+export function guideSlabSelectionKey(
+  serviceKey: string,
+  guideId: string,
+  language: GuideLanguage,
+  slab: GuidePaxSlabKey,
+): string {
+  return `${serviceKey}::${guideId}::${language}::${slab}`;
+}
+
+/** New drafts use the explicit slab map; legacy drafts retain their old line inclusion status. */
+export function guideSelectionStatusForPax(
+  draft: QuoteDraft,
+  day: number,
+  serviceKey: string,
+  guideId: string,
+  language: GuideLanguage,
+  pax: number,
+  legacyStatus?: GuideLine["inclusion_status"],
+  legacyLineId?: string,
+): GuideSelectionStatus {
+  const daySelections = draft.guide_slab_selection_by_day?.[day];
+  const slabKey = guideSlabSelectionKey(serviceKey, guideId, language, guidePaxSlabKey(pax));
+  const servicePrefix = `${serviceKey}::${guideId}::${language}::`;
+  if (daySelections && Object.keys(daySelections).some((key) => key.startsWith(servicePrefix))) {
+    return daySelections[slabKey] ?? "removed";
+  }
+  // Legacy optional lines are intentionally absent from the included-guide
+  // costing selection list. Preserve their saved status instead of treating
+  // that absence as an explicit removal.
+  if (legacyStatus === "optional") return "optional";
+  const legacySelections = draft.costing_selection?.guide?.[day];
+  if (
+    legacySelections !== undefined &&
+    legacyLineId &&
+    !legacySelections.includes(`${legacyLineId}::${language}`)
+  )
+    return "removed";
+  return legacyStatus === "included" ? "included" : "removed";
+}
 
 /** Resolve a raw Guide rate without replacing a saved quote snapshot with mutable master data. */
 export function guideRawRateForPax(

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { CalendarDays, Utensils } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,10 +13,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { addDaysISO, inr } from "@/lib/format";
 import { restaurantsForCityNames, useDB, type Restaurant } from "@/lib/mock-store";
 import {
-  computeMealDays,
+  calculateMealCostingRows,
   getCostingPaxValues,
-  hotelsGst,
-  hotelsMarkup,
+  hotelMealCommercials,
+  effectiveAccommodationPax,
+  isSplitAccommodation,
+  mealCostingTotal,
   mealPlanCoverage,
 } from "@/lib/wizard/calc";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
@@ -29,6 +32,26 @@ import {
 import type { StepProps } from "../shared";
 
 type MealKey = "lunch" | "dinner";
+
+// Uses the same authoritative classified rows as the detail tables. Counts are
+// meal entries, never traveller/Pax quantities.
+// eslint-disable-next-line react-refresh/only-export-components
+export function mealDashboardCounts(rows: Array<{ meal_type: string; status: string }>) {
+  const count = (meal: "Lunch" | "Dinner", statuses: string[]) =>
+    rows.filter((row) => row.meal_type === meal && statuses.includes(row.status)).length;
+  const includedLunch = count("Lunch", ["included", "hotel_plan"]);
+  const includedDinner = count("Dinner", ["included", "hotel_plan"]);
+  const optionalLunch = count("Lunch", ["optional"]);
+  const optionalDinner = count("Dinner", ["optional"]);
+  return {
+    includedLunch,
+    includedDinner,
+    includedTotal: includedLunch + includedDinner,
+    optionalLunch,
+    optionalDinner,
+    optionalTotal: optionalLunch + optionalDinner,
+  };
+}
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function restaurantsForCategory(list: Restaurant[], category?: string): Restaurant[] {
@@ -150,67 +173,89 @@ export function StepMeals({ draft, set }: StepProps) {
       </div>
     );
 
-  const priced = days.flatMap(({ day, date, cityIds }) => {
-    const stay = !landMealsOnly && day.overnight ? hotelSelectionForDay(option, day) : undefined;
-    const covered = mealPlanCoverage(stay?.meal_plan);
-    return (["lunch", "dinner"] as const).map((meal) => {
-      const selected = selectedFor(day.day, meal, cityIds);
-      return {
-        day: day.day,
-        date,
-        meal,
-        included: covered[meal],
-        cityId: covered[meal] ? day.city_id : selected.cityId,
-        choice: selected.choice,
-        rate: covered[meal] ? 0 : (selected.choice?.per_person_rate ?? 0),
-      };
-    });
+  const mealRows = calculateMealCostingRows(draft, db, optionKey);
+  const includedLunch = mealCostingTotal(draft, mealRows, "Lunch", "included");
+  const includedDinner = mealCostingTotal(draft, mealRows, "Dinner", "included");
+  const optionalLunch = mealCostingTotal(draft, mealRows, "Lunch", "optional");
+  const optionalDinner = mealCostingTotal(draft, mealRows, "Dinner", "optional");
+  const paxValues =
+    !landMealsOnly && isSplitAccommodation(draft)
+      ? [effectiveAccommodationPax(draft, option)]
+      : getCostingPaxValues(draft);
+  const paxWiseMeals = paxValues.map((pax) => {
+    const rows = calculateMealCostingRows(draft, db, optionKey, pax);
+    return {
+      pax,
+      lunch: mealCostingTotal(draft, rows, "Lunch", "included").per_person,
+      dinner: mealCostingTotal(draft, rows, "Dinner", "included").per_person,
+      optionalLunch: mealCostingTotal(draft, rows, "Lunch", "optional").per_person,
+      optionalDinner: mealCostingTotal(draft, rows, "Dinner", "optional").per_person,
+    };
   });
-  const commercials = (base: number) => {
-    const markup = base * hotelsMarkup(draft);
-    const gst = (base + markup) * hotelsGst(draft);
-    return { base, markup, gst, final: base + markup + gst };
-  };
-  const sharedMealRows = computeMealDays(draft, db, optionKey).rows;
-  const lunch = commercials(
-    sharedMealRows
-      .filter((row) => row.meal_type === "Lunch")
-      .reduce((sum, row) => sum + row.per_person, 0),
-  );
-  const dinner = commercials(
-    sharedMealRows
-      .filter((row) => row.meal_type === "Dinner")
-      .reduce((sum, row) => sum + row.per_person, 0),
-  );
-  const arrangements = (meal: MealKey) =>
-    priced
-      .filter((row) => row.meal === meal)
+  const arrangements = (meal: MealKey, status: "included" | "optional" | "hotel_plan") =>
+    mealRows
+      .filter(
+        (row) =>
+          row.meal_type.toLowerCase() === meal && row.status === status,
+      )
       .map((row) => ({
         ...row,
-        city: db.cities.find((city) => city.id === row.cityId)?.name || "—",
-        venue: row.included ? "Included in Hotel Plan" : row.choice?.label || "No Meal",
-        type: row.included
-          ? "Included in Hotel Plan"
-          : row.choice?.source === "hotel"
-            ? "Hotel"
-            : row.choice?.source === "restaurant"
-              ? "Restaurant"
-              : "No Meal",
-        inclusion: row.included
-          ? "included"
-          : row.choice?.inclusion_status === "optional"
-            ? "optional"
-            : row.choice?.inclusion_status === "removed"
-              ? "removed"
-              : "included",
+        city: row.city || "—",
+        venue: row.label || "—",
+        type:
+          row.status === "hotel_plan"
+            ? "Included in Hotel Plan"
+            : row.source === "hotel"
+              ? "Hotel"
+              : "Restaurant",
       }));
-  const lunches = arrangements("lunch");
-  const dinners = arrangements("dinner");
-  const mealArrangements = [...lunches, ...dinners].filter(
-    (item) => item.type !== "No Meal" && item.inclusion !== "removed",
-  );
-  const includedMeals = mealArrangements.filter((item) => item.inclusion === "included");
-  const optionalMeals = mealArrangements.filter((item) => item.inclusion === "optional");
+  const includedLunchRows = [
+    ...arrangements("lunch", "included"),
+    ...arrangements("lunch", "hotel_plan"),
+  ];
+  const includedDinnerRows = [
+    ...arrangements("dinner", "included"),
+    ...arrangements("dinner", "hotel_plan"),
+  ];
+  const optionalLunchRows = arrangements("lunch", "optional");
+  const optionalDinnerRows = arrangements("dinner", "optional");
+  const dashboardCounts = mealDashboardCounts(mealRows);
+
+  const MealSummaryCard = ({
+    title,
+    count,
+    subtitle,
+    tone,
+    summary = false,
+  }: {
+    title: string;
+    count: number;
+    subtitle: string;
+    tone: "blue" | "green" | "purple";
+    summary?: boolean;
+  }) => {
+    const Icon = summary ? CalendarDays : Utensils;
+    const iconTone =
+      tone === "blue"
+        ? "bg-blue-50 text-blue-600"
+        : tone === "green"
+          ? "bg-emerald-50 text-emerald-600"
+          : "bg-violet-50 text-violet-600";
+    return (
+      <Card className="border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex min-h-24 items-start gap-3">
+          <div className={`rounded-lg p-2.5 ${iconTone}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-slate-600">{title}</div>
+            <div className="mt-1 text-3xl font-bold leading-none text-slate-950">{count}</div>
+            <div className="mt-2 text-xs text-muted-foreground">{subtitle}</div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
 
   const selector = (
     day: number,
@@ -316,45 +361,101 @@ export function StepMeals({ draft, set }: StepProps) {
     );
   };
 
-  const ArrangementTable = ({
+  const MealCostingSection = ({
     title,
+    mealType,
+    status,
     items,
+    optional = false,
   }: {
     title: string;
+    mealType: "Lunch" | "Dinner";
+    status: "included" | "optional";
     items: ReturnType<typeof arrangements>;
-  }) => (
-    <Card className="overflow-hidden">
-      <div className="border-b px-3 py-2 text-sm font-semibold">{title}</div>
-      <table className="w-full text-xs">
-        <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
-          <tr>
-            <th className="p-2 text-left">Day</th>
-            <th className="p-2 text-left">Date</th>
-            <th className="p-2 text-left">City</th>
-            <th className="p-2 text-left">Hotel/Restaurant</th>
-            <th className="p-2 text-left">Type</th>
-            <th className="p-2 text-left">Meal</th>
-            <th className="p-2 text-right">Selling PP</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={`${item.day}-${item.meal}`} className="border-t">
-              <td className="p-2">{item.day}</td>
-              <td className="p-2">{item.date}</td>
-              <td className="p-2">{item.city}</td>
-              <td className="p-2">{item.venue}</td>
-              <td className="p-2">{item.type}</td>
-              <td className="p-2 capitalize">{item.meal}</td>
-              <td className="p-2 text-right">
-                {item.included ? "Included" : inr(commercials(item.rate).final)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
+    optional?: boolean;
+  }) => {
+    const total = mealCostingTotal(draft, mealRows, mealType, status);
+    return (
+      <Card className="overflow-hidden">
+        <div className="border-b px-3 py-2 text-sm font-semibold">{title}</div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left">Day</th>
+                <th className="p-2 text-left">Date</th>
+                <th className="p-2 text-left">City</th>
+                <th className="p-2 text-left">Hotel / Restaurant</th>
+                <th className="p-2 text-left">Meal</th>
+                <th className="p-2 text-right">Base Rate</th>
+                <th className="p-2 text-right">Applicable Pax</th>
+                {optional ? (
+                  <>
+                    <th className="p-2 text-right">Markup</th>
+                    <th className="p-2 text-right">GST</th>
+                    <th className="p-2 text-right">Final Selling Price</th>
+                  </>
+                ) : (
+                  <th className="p-2 text-right">Included Cost</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const rowCommercial = hotelMealCommercials(draft, item.total);
+                return (
+                  <tr key={`${item.day}-${item.city_id}-${item.meal}`} className="border-t">
+                    <td className="p-2">{item.day}</td>
+                    <td className="p-2">{item.date}</td>
+                    <td className="p-2">{item.city}</td>
+                    <td className="p-2">{item.venue}</td>
+                    <td className="p-2">{item.type}</td>
+                    <td className="p-2 text-right">{item.status === "hotel_plan" ? "—" : inr(item.per_person)}</td>
+                    <td className="p-2 text-right">{item.pax}</td>
+                    {optional ? (
+                      <>
+                        <td className="p-2 text-right">{inr(rowCommercial.markup)}</td>
+                        <td className="p-2 text-right">{inr(rowCommercial.gst)}</td>
+                        <td className="p-2 text-right font-semibold">{inr(rowCommercial.final)}</td>
+                      </>
+                    ) : (
+                      <td className="p-2 text-right">{item.status === "hotel_plan" ? "Included in Hotel Plan" : inr(item.total)}</td>
+                    )}
+                  </tr>
+                );
+              })}
+              {!items.length && (
+                <tr>
+                  <td colSpan={optional ? 10 : 8} className="p-3 text-center italic text-muted-foreground">
+                    No {optional ? "optional " : "included "}{mealType.toLowerCase()} selected.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot className="border-t-2 bg-muted/20">
+              {optional ? (
+                <>
+                  <tr><td colSpan={9} className="p-2 text-right font-medium">Optional {mealType} Base Total</td><td className="p-2 text-right">{inr(total.base_total)}</td></tr>
+                  <tr><td colSpan={9} className="p-2 text-right font-medium">Markup</td><td className="p-2 text-right">{inr(total.markup)}</td></tr>
+                  <tr><td colSpan={9} className="p-2 text-right font-medium">GST</td><td className="p-2 text-right">{inr(total.gst)}</td></tr>
+                  <tr className="border-t font-semibold"><td colSpan={9} className="p-2 text-right">Optional {mealType} Final Selling Price</td><td className="p-2 text-right">{inr(total.final_total)}</td></tr>
+                </>
+              ) : (
+                <>
+                  <tr><td colSpan={7} className="p-2 text-right font-medium">Reporting Cost</td><td className="p-2 text-right">Not configured</td></tr>
+                  <tr><td colSpan={7} className="p-2 text-right font-medium">Base Total</td><td className="p-2 text-right">{inr(total.base_total)}</td></tr>
+                  <tr><td colSpan={7} className="p-2 text-right font-medium">Markup</td><td className="p-2 text-right">{inr(total.markup)}</td></tr>
+                  <tr><td colSpan={7} className="p-2 text-right font-medium">GST</td><td className="p-2 text-right">{inr(total.gst)}</td></tr>
+                  <tr className="border-t font-semibold"><td colSpan={7} className="p-2 text-right">Included {mealType} Total</td><td className="p-2 text-right">{inr(total.final_total)}</td></tr>
+                  <tr><td colSpan={7} className="p-2 text-right font-medium">Per Person</td><td className="p-2 text-right">{inr(total.per_person)}</td></tr>
+                </>
+              )}
+            </tfoot>
+          </table>
+        </div>
+      </Card>
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -430,79 +531,144 @@ export function StepMeals({ draft, set }: StepProps) {
                 );
               })}
             </tbody>
-            <tfoot className="border-t-2 bg-muted/20">
-              {[
-                ["Total Cost Per Person", lunch.base, dinner.base],
-                ["Markup", lunch.markup, dinner.markup],
-                ["GST", lunch.gst, dinner.gst],
-                ["Final Meal Cost Per Person", lunch.final, dinner.final],
-              ].map(([label, l, d]) => (
-                <tr key={String(label)}>
-                  <td colSpan={2} className="p-2 text-right font-medium">
-                    {label}
-                  </td>
-                  <td colSpan={2} className="p-2 text-right">
-                    {inr(Number(l))}
-                  </td>
-                  <td colSpan={2} className="p-2 text-right">
-                    {inr(Number(d))}
-                  </td>
-                </tr>
-              ))}
-            </tfoot>
           </table>
         </div>
       </Card>
       <div>
         <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 2</div>
-        <h3 className="text-sm font-semibold">Meal Arrangement Summary</h3>
+        <h3 className="text-sm font-semibold">Included Meals</h3>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3" data-testid="included-meal-summary-cards">
+        <MealSummaryCard
+          title="Included Lunch"
+          count={dashboardCounts.includedLunch}
+          subtitle="lunches included in itinerary"
+          tone="blue"
+        />
+        <MealSummaryCard
+          title="Included Dinner"
+          count={dashboardCounts.includedDinner}
+          subtitle="dinners included in itinerary"
+          tone="green"
+        />
+        <MealSummaryCard
+          title="Total Included Meals"
+          count={dashboardCounts.includedTotal}
+          subtitle="total meals included"
+          tone="purple"
+          summary
+        />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ArrangementTable title="Included Meals" items={includedMeals} />
-        <ArrangementTable title="Optional Meals — For Additional Sale" items={optionalMeals} />
+        <MealCostingSection
+          title="Included Lunch"
+          mealType="Lunch"
+          status="included"
+          items={includedLunchRows}
+        />
+        <MealCostingSection
+          title="Included Dinner"
+          mealType="Dinner"
+          status="included"
+          items={includedDinnerRows}
+        />
       </div>
-      <Card className="p-3">
-        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
-          {[
-            ["Total Lunches", lunches.filter((row) => row.type !== "No Meal").length],
-            ["Total Dinners", dinners.filter((row) => row.type !== "No Meal").length],
-            ["Lunches in Hotels", lunches.filter((row) => row.type === "Hotel").length],
-            ["Lunches in Restaurants", lunches.filter((row) => row.type === "Restaurant").length],
-            ["Dinners in Hotels", dinners.filter((row) => row.type === "Hotel").length],
-            ["Dinners in Restaurants", dinners.filter((row) => row.type === "Restaurant").length],
-            ["Lunches Included", lunches.filter((row) => row.included).length],
-            ["Dinners Included", dinners.filter((row) => row.included).length],
-          ].map(([label, value]) => (
-            <div key={String(label)} className="rounded border p-2">
-              <div className="text-[9px] uppercase text-muted-foreground">{label}</div>
-              <div className="text-lg font-semibold">{value}</div>
-            </div>
-          ))}
+      <Card className="overflow-hidden">
+        <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+          Included Meals — Per Person Cost Breakdown
+        </div>
+        <div className="overflow-x-auto">
+          <table data-testid="included-meals-per-person-table" className="w-full text-xs">
+            <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left">Pax</th>
+                <th className="p-2 text-right">Included Lunch PP</th>
+                <th className="p-2 text-right">Included Dinner PP</th>
+                <th className="p-2 text-right">Included Meals PP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paxWiseMeals.map((row) => (
+                <tr key={row.pax} className="border-t">
+                  <td className="p-2 font-medium">{row.pax}</td>
+                  <td className="p-2 text-right">{inr(row.lunch)}</td>
+                  <td className="p-2 text-right">{inr(row.dinner)}</td>
+                  <td className="p-2 text-right font-semibold">{inr(row.lunch + row.dinner)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </Card>
       <div>
         <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 3</div>
-        <h3 className="text-sm font-semibold">Pax-wise Meal Costing</h3>
+        <h3 className="text-sm font-semibold">Optional Meals — Additional Sale</h3>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3" data-testid="optional-meal-summary-cards">
+        <MealSummaryCard
+          title="Optional Lunch"
+          count={dashboardCounts.optionalLunch}
+          subtitle="optional lunches in itinerary"
+          tone="blue"
+        />
+        <MealSummaryCard
+          title="Optional Dinner"
+          count={dashboardCounts.optionalDinner}
+          subtitle="optional dinners in itinerary"
+          tone="green"
+        />
+        <MealSummaryCard
+          title="Total Optional Meals"
+          count={dashboardCounts.optionalTotal}
+          subtitle="total optional meals"
+          tone="purple"
+          summary
+        />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MealCostingSection
+          title="Optional Lunch"
+          mealType="Lunch"
+          status="optional"
+          items={optionalLunchRows}
+          optional
+        />
+        <MealCostingSection
+          title="Optional Dinner"
+          mealType="Dinner"
+          status="optional"
+          items={optionalDinnerRows}
+          optional
+        />
       </div>
       <Card className="overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
-            <tr>
-              <th className="p-2 text-left">Pax</th>
-              <th className="p-2 text-right">Lunch (Per Person)</th>
-              <th className="p-2 text-right">Dinner (Per Person)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {getCostingPaxValues(draft).map((pax) => (
-              <tr key={pax} className="border-t">
-                <td className="p-2 font-medium">{pax}</td>
-                <td className="p-2 text-right">{inr(lunch.final)}</td>
-                <td className="p-2 text-right">{inr(dinner.final)}</td>
+        <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+          Optional Meals — Per Person Cost Breakdown
+        </div>
+        <div className="overflow-x-auto">
+          <table data-testid="optional-meals-per-person-table" className="w-full text-xs">
+            <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left">Pax</th>
+                <th className="p-2 text-right">Optional Lunch PP</th>
+                <th className="p-2 text-right">Optional Dinner PP</th>
+                <th className="p-2 text-right">Optional Meals PP</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paxWiseMeals.map((row) => (
+                <tr key={row.pax} className="border-t">
+                  <td className="p-2 font-medium">{row.pax}</td>
+                  <td className="p-2 text-right">{inr(row.optionalLunch)}</td>
+                  <td className="p-2 text-right">{inr(row.optionalDinner)}</td>
+                  <td className="p-2 text-right font-semibold">
+                    {inr(row.optionalLunch + row.optionalDinner)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

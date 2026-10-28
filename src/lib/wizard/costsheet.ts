@@ -40,6 +40,7 @@ import {
   getEscortRangeBase,
   isEscortEnabled,
   guideRawRateForPax,
+  guideSelectionStatusForPax,
 } from "./guide-pricing";
 
 // ---------------------------------------------------------------- Land part
@@ -218,7 +219,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   const paxForGuide = Math.max(1, effectivePaxForPricing(draft));
   const selectedGuideLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((l) => {
-    if (l.inclusion_status === "optional") return;
+    if (l.is_escort && l.inclusion_status === "optional") return;
     const target = targetDays(l.from_routing_days, all);
     if (!target.length) return;
     const g = d.guides?.find((x) => x.id === l.guide_id);
@@ -242,7 +243,20 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
     const defaultLang = l.language as GuideLangOpt;
     target.forEach((day) => {
       if (!guideTourSelected(draft, g, day)) return;
-      const checked = guideLangPicked(draft, day, l.id, defaultLang, defaultLang);
+      const serviceKey = `${g?.city ?? g?.destination ?? ""}||${g?.tour_program ?? g?.name ?? ""}`;
+      const status = guideSelectionStatusForPax(
+        draft,
+        day,
+        serviceKey,
+        l.guide_id,
+        defaultLang,
+        paxForGuide,
+        l.inclusion_status === "optional" ? "optional" : "included",
+        l.id,
+      );
+      if (status === "removed") return;
+      const checked =
+        status === "included" && guideLangPicked(draft, day, l.id, defaultLang, defaultLang);
       const rate = guideRawRateForPax(l, g, defaultLang, paxForGuide, paxForGuide) ?? 0;
       if (rate <= 0) return;
       if (checked) selectedGuideLanguages.add(defaultLang);

@@ -8,7 +8,12 @@ import {
   type HotelOption,
 } from "./types";
 import { addDaysISO } from "@/lib/format";
-import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
+import {
+  getEscortPricingMode,
+  guideRawRateForPax,
+  guideSelectionStatusForPax,
+  isEscortEnabled,
+} from "./guide-pricing";
 import { getQuotationScope } from "@/lib/query-for";
 
 export interface OptionTotals {
@@ -57,10 +62,29 @@ export function applyRateOverride(
   plan: RatePlan | null,
   ovr: import("./types").DayRateOverride | undefined,
 ): RatePlan | null {
-  if (!plan || !ovr) return plan;
+  if (!ovr) return plan;
   const hasAny = [ovr.sgl, ovr.dbl, ovr.trp, ovr.quad].some((v) => typeof v === "number" && v > 0);
   if (!hasAny) return plan;
-  const out: RatePlan = { ...plan };
+  // An authorized quotation-level manual rate can supply a genuine gap in
+  // Hotel Master coverage. It remains audit-marked on the draft and never
+  // mutates or invents a Hotel Master rate plan.
+  const now = ovr.changed_at || new Date().toISOString();
+  const out: RatePlan = plan
+    ? { ...plan }
+    : {
+        id: "manual-quotation-override",
+        room_category_id: "",
+        validity_start: "",
+        validity_end: "",
+        season_label: "Manual quotation rate",
+        meal_plan: "EP",
+        double_rate: 0,
+        single_rate: 0,
+        extra_bed_rate: 0,
+        include_in_quote: true,
+        created_at: now,
+        updated_at: now,
+      };
   if (typeof ovr.sgl === "number" && ovr.sgl > 0) out.single_rate = ovr.sgl;
   if (typeof ovr.dbl === "number" && ovr.dbl > 0) out.double_rate = ovr.dbl;
   if (typeof ovr.trp === "number" && ovr.trp > 0)
@@ -137,7 +161,16 @@ function resolveDynamicAccommodationRoomLines(
       return;
     }
     const date = day.date || addDaysISO(draft.start_date, index);
-    (option.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
+    const allocations = option.dynamic_allocations?.[day.day] ?? [];
+    const hotel = d.hotels.find((item) => item.id === selection.hotel_id);
+    const blackout = hotel?.blackout_ranges?.some(
+      (range) => range.from <= date && range.to >= date,
+    );
+    if (blackout) {
+      missing += Math.max(1, allocations.length);
+      return;
+    }
+    allocations.forEach((allocation) => {
       const rooms = Math.max(0, allocation.rooms);
       if (!allocation.room_id || rooms === 0) {
         missing++;
@@ -151,11 +184,17 @@ function resolveDynamicAccommodationRoomLines(
       const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date);
       const masterNet = plan
         ? allocation.occupancy === "single"
-          ? plan.single_rate
+          ? plan.single_rate_missing
+            ? 0
+            : plan.single_rate
           : allocation.occupancy === "double"
-            ? plan.double_rate
+            ? plan.double_rate_missing
+              ? 0
+              : plan.double_rate
             : allocation.occupancy === "triple"
-              ? plan.double_rate + (plan.extra_bed_rate || 0)
+              ? plan.double_rate_missing
+                ? 0
+                : plan.double_rate + (plan.extra_bed_rate || 0)
               : (plan.quad_rate ?? 0)
         : 0;
       const netRate = allocation.manual_net_rate ?? masterNet;
@@ -277,6 +316,20 @@ export interface MealDayRow {
   total: number;
 }
 
+export interface MealCostingRow extends MealDayRow {
+  status: "included" | "optional" | "hotel_plan";
+}
+
+export interface MealCostingTotal {
+  rows: MealCostingRow[];
+  base_total: number;
+  markup: number;
+  gst: number;
+  final_total: number;
+  pax: number;
+  per_person: number;
+}
+
 /** Markup / GST percentages, split into Land Part vs Hotels & Meals. */
 export function landMarkup(d: QuoteDraft): number {
   return (d.land_markup_percent ?? d.markup_percent ?? 0) / 100;
@@ -312,16 +365,28 @@ export function computeMealDays(
   d: import("@/lib/mock-store").DB,
   optionKey?: string,
 ): { rows: MealDayRow[]; total: number } {
+  const rows = calculateMealCostingRows(draft, d, optionKey).filter(
+    (row) => row.status === "included",
+  );
+  return { rows, total: rows.reduce((sum, row) => sum + row.total, 0) };
+}
+
+/** Shared meal projection for Step 8 and the final reviews. Optional rows never enter computeMealDays. */
+export function calculateMealCostingRows(
+  draft: QuoteDraft,
+  d: import("@/lib/mock-store").DB,
+  optionKey?: string,
+  paxOverride?: number,
+): MealCostingRow[] {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const opt = scope.accommodationPart
     ? (draft.hotel_options?.find((o) => o.key === optionKey) ?? draft.hotel_options?.[0])
     : undefined;
-  const pax = opt
-    ? effectiveAccommodationPax(draft, opt)
-    : Math.max(1, effectivePaxForPricing(draft));
+  const pax =
+    paxOverride ??
+    (opt ? effectiveAccommodationPax(draft, opt) : Math.max(1, effectivePaxForPricing(draft)));
   const selections = mealSelectionsFor(draft, optionKey);
-  const rows: MealDayRow[] = [];
-  let total = 0;
+  const rows: MealCostingRow[] = [];
 
   draft.routing.forEach((day, i) => {
     const date = day.date || addDaysISO(draft.start_date, i);
@@ -331,9 +396,15 @@ export function computeMealDays(
     )?.id;
     const cityIds = Array.from(
       new Set(
-        [fromCityId, ...(day.to_city_ids ?? []), day.to_city_id, day.city_id].filter(
-          Boolean,
-        ) as string[],
+        [
+          fromCityId,
+          ...(day.to_city_ids ?? []),
+          day.to_city_id,
+          day.city_id,
+          d.cities.find(
+            (city) => city.name.trim().toLowerCase() === (day.to_city ?? "").trim().toLowerCase(),
+          )?.id,
+        ].filter(Boolean) as string[],
       ),
     );
     cityIds.forEach((cityId) => {
@@ -348,15 +419,25 @@ export function computeMealDays(
         day.overnight && day.city_id === cityId ? hotelSelectionForDay(opt, day) : undefined;
       const covered = mealPlanCoverage(overnightSelection?.meal_plan);
       (["lunch", "dinner"] as const).forEach((mealKey) => {
-        if (covered[mealKey]) return;
-        const choice = selected[mealKey];
-        if (
-          !choice ||
-          choice.source === "none" ||
-          choice.inclusion_status === "optional" ||
-          choice.inclusion_status === "removed"
-        )
+        const meal_type = mealKey === "lunch" ? "Lunch" : "Dinner";
+        if (covered[mealKey]) {
+          rows.push({
+            day: day.day,
+            date,
+            city,
+            city_id: cityId,
+            meal_type,
+            source: "none",
+            label: "Included in Hotel Plan",
+            per_person: 0,
+            pax,
+            total: 0,
+            status: "hotel_plan",
+          });
           return;
+        }
+        const choice = selected[mealKey];
+        if (!choice || choice.source === "none" || choice.inclusion_status === "removed") return;
         let perPerson = choice.per_person_rate ?? 0;
         let label = choice.label || "";
         if (choice.source === "restaurant") {
@@ -375,24 +456,51 @@ export function computeMealDays(
           label ||= d.hotels.find((hotel) => hotel.id === choice.hotel_id)?.name || "Hotel";
         }
         const rowTotal = perPerson * pax;
-        total += rowTotal;
         rows.push({
           day: day.day,
           date,
           city,
           city_id: cityId,
-          meal_type: mealKey === "lunch" ? "Lunch" : "Dinner",
+          meal_type,
           source: choice.source,
           label,
           per_person: perPerson,
           pax,
           total: rowTotal,
+          status: choice.inclusion_status === "optional" ? "optional" : "included",
         });
       });
     });
   });
 
-  return { rows, total };
+  return rows;
+}
+
+export function mealCostingTotal(
+  draft: QuoteDraft,
+  rows: MealCostingRow[],
+  mealType: "Lunch" | "Dinner",
+  status: "included" | "optional",
+): MealCostingTotal {
+  const selected = rows.filter((row) => row.meal_type === mealType && row.status === status);
+  const base_total = selected.reduce((sum, row) => sum + row.total, 0);
+  const commercial = hotelMealCommercials(draft, base_total);
+  const pax = selected[0]?.pax ?? rows.find((row) => row.status === "hotel_plan")?.pax ?? 0;
+  return {
+    rows: selected,
+    base_total,
+    markup: commercial.markup,
+    gst: commercial.gst,
+    final_total: commercial.final,
+    pax,
+    per_person: pax > 0 ? commercial.final / pax : 0,
+  };
+}
+
+export function hotelMealCommercials(draft: QuoteDraft, base: number) {
+  const markup = base * hotelsMarkup(draft);
+  const gst = (base + markup) * hotelsGst(draft);
+  return { base, markup, gst, final: base + markup + gst };
 }
 
 export function computeMealsTotal(
@@ -456,14 +564,43 @@ export function computeAddonsTotal(draft: QuoteDraft, d?: import("@/lib/mock-sto
   const g = scope.landPart
     ? draft.guides.reduce((sum, line) => {
         if (line.is_escort && isEscortEnabled(draft) && getEscortPricingMode(draft)) return sum;
-        if (!line.is_escort && line.inclusion_status === "optional") return sum;
-        if (
-          d &&
-          !line.is_escort &&
-          !isSelectedLandServiceValid("guide", line.guide_id, line.from_routing_days?.[0], draft, d)
-        )
-          return sum;
-        return sum + line.rate * line.guides * line.days;
+        if (line.is_escort) return sum + line.rate * line.guides * line.days;
+        const master = d?.guides.find((guide) => guide.id === line.guide_id);
+        const language = line.language;
+        if (!(language === "Hindi" || language === "English" || language === "Language")) {
+          return line.inclusion_status === "optional"
+            ? sum
+            : sum + line.rate * line.guides * line.days;
+        }
+        const targetDays = line.from_routing_days?.length
+          ? line.from_routing_days
+          : draft.routing.map((day) => day.day);
+        if (!targetDays.length) return sum;
+        const serviceKey = `${master?.city ?? master?.destination ?? ""}||${master?.tour_program ?? master?.name ?? ""}`;
+        const pricingPax = effectivePaxForPricing(draft);
+        return targetDays.reduce((lineTotal, day) => {
+          if (d && !isSelectedLandServiceValid("guide", line.guide_id, day, draft, d))
+            return lineTotal;
+          const tourSelection = draft.guide_tour_selected_by_day?.[day];
+          if (tourSelection !== undefined && !tourSelection.includes(serviceKey)) return lineTotal;
+          const legacySelected = line.inclusion_status === "optional" ? "optional" : "included";
+          const status = guideSelectionStatusForPax(
+            draft,
+            day,
+            serviceKey,
+            line.guide_id,
+            language,
+            pricingPax,
+            legacySelected,
+            line.id,
+          );
+          if (status !== "included") return lineTotal;
+          const daySelections = draft.costing_selection?.guide?.[day];
+          if (daySelections !== undefined && !daySelections.includes(`${line.id}::${language}`))
+            return lineTotal;
+          const rate = guideRawRateForPax(line, master, language, pricingPax, pricingPax) ?? 0;
+          return lineTotal + (rate * line.guides * line.days) / targetDays.length;
+        }, sum);
       }, 0)
     : 0;
   const m = scope.landPart

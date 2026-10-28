@@ -7,8 +7,63 @@ function isNewSupabaseApiKey(value: string): boolean {
   return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
 }
 
+export interface SupabaseRequestDiagnostic {
+  url: string;
+  status: number | null;
+  durationMs: number;
+  completedAt: number;
+  transportError?: string;
+  responseBody?: string;
+  postgrestCode?: string;
+  requestId?: string;
+  gatewayVersion?: string;
+  responseBytes?: number;
+  attempt?: number;
+}
+
+const requestDiagnostics: SupabaseRequestDiagnostic[] = [];
+const inFlightReads = new Map<string, Promise<Response>>();
+const requestCounts = new Map<string, number>();
+const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+export function getSupabaseTrafficDiagnostics() {
+  const repeatedEndpoints = [...requestCounts.entries()]
+    .map(([endpoint, count]) => ({ endpoint, count }))
+    .sort((a, b) => b.count - a.count);
+  const largestResponses = [...requestDiagnostics]
+    .filter((item) => item.responseBytes !== undefined)
+    .sort((a, b) => (b.responseBytes ?? 0) - (a.responseBytes ?? 0))
+    .slice(0, 20)
+    .map(({ url, status, durationMs, responseBytes }) => ({
+      endpoint: new URL(url).pathname,
+      status,
+      durationMs,
+      responseBytes,
+    }));
+  return {
+    totalRequests: repeatedEndpoints.reduce((total, item) => total + item.count, 0),
+    repeatedEndpoints,
+    largestResponses,
+  };
+}
+
+export function getLatestSupabaseRequestDiagnostic(
+  pathname: string,
+  startedAfter: number,
+  queryParameter?: string,
+): SupabaseRequestDiagnostic | undefined {
+  return requestDiagnostics.find((item) => {
+    const url = new URL(item.url);
+    return (
+      item.completedAt >= startedAfter &&
+      url.pathname === pathname &&
+      (!queryParameter || url.searchParams.has(queryParameter))
+    );
+  });
+}
+
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
-  return (input, init) => {
+  return async (input, init) => {
     const headers = new Headers(
       typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined,
     );
@@ -26,7 +81,82 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     }
 
     headers.set("apikey", supabaseKey);
-    return fetch(input, { ...init, headers });
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    const parsedUrl = new URL(url);
+    const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const endpoint = `${method} ${parsedUrl.pathname}`;
+    requestCounts.set(endpoint, (requestCounts.get(endpoint) ?? 0) + 1);
+    const captureDiagnostic =
+      parsedUrl.pathname === "/rest/v1/crm_employees" &&
+      parsedUrl.searchParams.has("data->>auth_user_id");
+    const readKey =
+      method === "GET"
+        ? `${headers.get("authorization") ?? "public"}|${url}`
+        : undefined;
+    const existing = readKey ? inFlightReads.get(readKey) : undefined;
+    if (existing) return (await existing).clone();
+
+    const execute = async () => {
+      const startedAt = performance.now();
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch(input, { ...init, headers });
+          if (method === "GET" && TRANSIENT_STATUSES.has(response.status) && attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+            continue;
+          }
+          const diagnostic: SupabaseRequestDiagnostic = {
+            url,
+            status: response.status,
+            durationMs: Math.round(performance.now() - startedAt),
+            completedAt: Date.now(),
+            responseBytes: Number(response.headers.get("content-length")) || undefined,
+            postgrestCode:
+              response.headers.get("code") ?? response.headers.get("sb-error-code") ?? undefined,
+            requestId: response.headers.get("sb-request-id") ?? undefined,
+            gatewayVersion: response.headers.get("sb-gateway-version") ?? undefined,
+            attempt,
+          };
+          if (captureDiagnostic) {
+            diagnostic.responseBody = await response
+              .clone()
+              .text()
+              .then((body) => body.slice(0, 1_000))
+              .catch(() => undefined);
+          }
+          requestDiagnostics.unshift(diagnostic);
+          requestDiagnostics.length = Math.min(requestDiagnostics.length, 200);
+          return response;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3 && method === "GET") {
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+            continue;
+          }
+          if (captureDiagnostic) {
+            requestDiagnostics.unshift({
+              url,
+              status: null,
+              durationMs: Math.round(performance.now() - startedAt),
+              completedAt: Date.now(),
+              transportError: error instanceof Error ? error.name : "unknown",
+              attempt,
+            });
+          }
+          throw error;
+        }
+      }
+      throw lastError;
+    };
+
+    const request = execute();
+    if (readKey) inFlightReads.set(readKey, request);
+    try {
+      return readKey ? (await request).clone() : await request;
+    } finally {
+      if (readKey && inFlightReads.get(readKey) === request) inFlightReads.delete(readKey);
+    }
   };
 }
 

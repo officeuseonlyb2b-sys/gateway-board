@@ -29,8 +29,12 @@ export interface ImportRowError {
 export interface ImportSummary {
   totalRows: number;
   hotelsAdded: number;
+  hotelsUpdated: number;
   roomsAdded: number;
+  plansUpdated: number;
   plansCreated: number;
+  rateCellsImported: number;
+  skippedRows: number;
   errors: ImportRowError[];
 }
 
@@ -90,6 +94,10 @@ const COL = {
     "validity 2026–2027",
     "validity 2026–27",
   ],
+
+  validityFrom: ["validity from", "valid from", "season from", "start date", "from date"],
+
+  validityTo: ["validity to", "valid to", "season to", "end date", "to date"],
 
   meal: [
     "rates standard meal plan",
@@ -329,6 +337,13 @@ function pick(
   row: Record<string, unknown>,
   keys: string[],
 ): string {
+  return normalizeText(pickValue(row, keys));
+}
+
+function pickValue(
+  row: Record<string, unknown>,
+  keys: string[],
+): unknown {
   const normalizedRowKeys = new Map<string, string>();
 
   Object.keys(row).forEach((key) => {
@@ -343,13 +358,7 @@ function pick(
     if (actualKey != null) {
       const value = row[actualKey];
 
-      if (
-        value !== null &&
-        value !== undefined &&
-        normalizeText(value) !== ""
-      ) {
-        return normalizeText(value);
-      }
+      if (value !== null && value !== undefined && normalizeText(value) !== "") return value;
     }
   }
 
@@ -372,13 +381,7 @@ function pick(
     if (matched) {
       const value = row[actualKey];
 
-      if (
-        value !== null &&
-        value !== undefined &&
-        normalizeText(value) !== ""
-      ) {
-        return normalizeText(value);
-      }
+      if (value !== null && value !== undefined && normalizeText(value) !== "") return value;
     }
   }
 
@@ -466,6 +469,7 @@ function parseMealPlan(
 
   if (t.startsWith("MAP")) return "MAP";
   if (t.startsWith("CP")) return "CP";
+  if (t.startsWith("EP")) return "EP";
   if (t.startsWith("AP")) return "AP";
 
   if (t === "BREAKFAST") return "CP";
@@ -1096,11 +1100,16 @@ function parseDateCell(
 /* -------------------------------------------------------------------------- */
 
 function parseBlackouts(
-  v: string,
+  v: unknown,
 ): BlackoutRange[] {
-  if (!v) return [];
+  if (v === null || v === undefined || normalizeText(v) === "") return [];
 
-  const chunks = v
+  if (typeof v === "number" || v instanceof Date) {
+    const date = parseSingleDate(v);
+    return date ? [{ id: `bo_${Math.random().toString(36).slice(2, 9)}`, from: date, to: date }] : [];
+  }
+
+  const chunks = normalizeText(v)
     .split(/[;|]/)
     .map((x) => x.trim())
     .filter(Boolean);
@@ -1340,17 +1349,8 @@ function findHotelRatesSheet(
  *
  * from becoming import errors.
  */
-const DEFAULT_MEAL_PLAN: MealPlan =
-  "CP";
-
 const DEFAULT_ROOM_NAME =
   "As Per Portal";
-
-const DEFAULT_VALIDITY_START =
-  "2026-04-01";
-
-const DEFAULT_VALIDITY_END =
-  "2027-03-31";
 
 /* -------------------------------------------------------------------------- */
 /*                              IMPORT                                        */
@@ -1365,8 +1365,12 @@ export async function importExcel(
   const summary: ImportSummary = {
     totalRows: 0,
     hotelsAdded: 0,
+    hotelsUpdated: 0,
     roomsAdded: 0,
+    plansUpdated: 0,
     plansCreated: 0,
+    rateCellsImported: 0,
+    skippedRows: 0,
     errors: [],
   };
 
@@ -1435,6 +1439,7 @@ export async function importExcel(
 
     const beforeHotels =
       db.get().hotels.length;
+    const beforeHotelIds = new Set(db.get().hotels.map((hotel) => hotel.id));
 
     const beforeRooms =
       db.get().room_categories.length;
@@ -1465,6 +1470,7 @@ export async function importExcel(
         >
       >
     >();
+    const updatedHotelIds = new Set<string>();
 
     for (
       let i = 0;
@@ -1485,10 +1491,13 @@ export async function importExcel(
         let roomName =
           pick(raw, COL.room);
 
-        let validityRaw =
+        const validityRaw =
           pick(raw, COL.validity);
+        const validityFromRaw = pickValue(raw, COL.validityFrom);
+        const validityToRaw = pickValue(raw, COL.validityTo);
+        const validityCell = pickValue(raw, COL.validity);
 
-        let mealRaw =
+        const mealRaw =
           pick(raw, COL.meal);
 
         /**
@@ -1509,6 +1518,7 @@ export async function importExcel(
           !validityRaw &&
           !mealRaw
         ) {
+          summary.skippedRows++;
           onProgress?.({
             done: i + 1,
             total: rows.length,
@@ -1529,6 +1539,7 @@ export async function importExcel(
           ).toLowerCase() ===
             "hotel"
         ) {
+          summary.skippedRows++;
           onProgress?.({
             done: i + 1,
             total: rows.length,
@@ -1553,6 +1564,7 @@ export async function importExcel(
         }
 
         if (missingCore.length > 0) {
+          summary.skippedRows++;
           summary.errors.push({
             row: rowNum,
             reason: `Missing required field(s): ${missingCore.join(
@@ -1579,75 +1591,47 @@ export async function importExcel(
             DEFAULT_ROOM_NAME;
         }
 
-        /**
-         * Missing meal:
-         *
-         * Use CP as the default standard meal plan.
-         */
-        if (!mealRaw) {
-          mealRaw =
-            DEFAULT_MEAL_PLAN;
-        }
-
-        /**
-         * Validity:
-         *
-         * First try the Excel value.
-         *
-         * If the source has no date at all, use the
-         * standard 2026-27 operating validity.
-         */
-        let range =
-          parseValidity(
-            validityRaw,
-          );
-
+        const separateStart = parseSingleDate(validityFromRaw);
+        const separateEnd = parseSingleDate(validityToRaw);
+        const range =
+          separateStart && separateEnd
+            ? {
+                start: separateStart <= separateEnd ? separateStart : separateEnd,
+                end: separateStart <= separateEnd ? separateEnd : separateStart,
+              }
+            : parseValidity(validityCell);
         if (!range) {
-          range = {
-            start:
-              DEFAULT_VALIDITY_START,
-            end:
-              DEFAULT_VALIDITY_END,
-          };
-
-          /**
-           * If there is a textual season name,
-           * preserve it in the Season column.
-           */
-          if (
-            validityRaw &&
-            !pick(raw, COL.season)
-          ) {
-            // Nothing else required here.
-            // The original value is handled below
-            // as seasonLabel.
-          }
+          summary.skippedRows++;
+          summary.errors.push({
+            row: rowNum,
+            reason: `Missing or unparseable validity dates${validityRaw ? `: ${validityRaw}` : ""}. No season was invented.`,
+            raw,
+          });
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
         }
 
-        const meal =
-          parseMealPlan(mealRaw);
+        const meal = parseMealPlan(mealRaw);
+        if (!meal) {
+          summary.skippedRows++;
+          summary.errors.push({
+            row: rowNum,
+            reason: `Missing or unsupported meal plan${mealRaw ? `: ${mealRaw}` : ""}. No CP rate was substituted.`,
+            raw,
+          });
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
+        }
+        const finalMeal: MealPlan = meal;
 
-        /**
-         * If Excel contains an unusual meal value,
-         * use CP rather than rejecting the complete row.
-         */
-        const finalMeal: MealPlan =
-          meal ?? DEFAULT_MEAL_PLAN;
-
-        const category =
-          coerceCategory(
-            pick(raw, COL.category),
-          ) ?? "3 Star";
+        const sourceCategory = coerceCategory(pick(raw, COL.category));
 
         const contact =
           splitContact(
             pick(raw, COL.ratesFrom),
           );
 
-        const hotelType =
-          coerceHotelType(
-            pick(raw, COL.hotelType),
-          );
+        const sourceHotelType = coerceHotelType(pick(raw, COL.hotelType));
 
         const cwb =
           parseCwb(
@@ -1659,10 +1643,7 @@ export async function importExcel(
 
         /* ----------------------------- CITY ----------------------------- */
 
-        const cityKey =
-          cityName
-            .toLowerCase()
-            .trim();
+        const cityKey = cityName.toLowerCase().trim().replace(/\s+/g, " ");
 
         let city =
           cityCache.get(cityKey);
@@ -1679,13 +1660,50 @@ export async function importExcel(
           );
         }
 
+        const existingHotel = db.get().hotels.find(
+          (candidate) =>
+            candidate.city_id === city.id &&
+            candidate.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+              hotelName.trim().replace(/\s+/g, " ").toLowerCase(),
+        );
+        if (existingHotel && beforeHotelIds.has(existingHotel.id)) {
+          updatedHotelIds.add(existingHotel.id);
+        }
+        const rawCategory = pick(raw, COL.category);
+        if (rawCategory && !sourceCategory) {
+          summary.skippedRows++;
+          summary.errors.push({
+            row: rowNum,
+            reason: `Unsupported hotel category: ${rawCategory}.`,
+            raw,
+          });
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
+        }
+        const category = sourceCategory ?? existingHotel?.hotel_category;
+        if (!category) {
+          summary.skippedRows++;
+          summary.errors.push({
+            row: rowNum,
+            reason: "Missing Hotel Category for a new hotel; no default category was assigned.",
+            raw,
+          });
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
+        }
+        const hotelType = sourceHotelType ?? existingHotel?.hotel_type;
+        const blackoutRaw = pickValue(raw, COL.blackout);
+        const wifiRaw = pick(raw, COL.wifi);
+        const poolRaw = pick(raw, COL.pool);
+
         /* ----------------------------- HOTEL ---------------------------- */
 
         const hotelKey = [
           city.id,
           hotelName
             .toLowerCase()
-            .trim(),
+            .trim()
+            .replace(/\s+/g, " "),
         ].join("|");
 
         let hotel =
@@ -1702,42 +1720,29 @@ export async function importExcel(
                 hotel_category:
                   category,
                 contact_name:
-                  contact.name,
+                  contact.name || existingHotel?.contact_name || "",
                 contact_phone:
-                  contact.phone,
+                  contact.phone || existingHotel?.contact_phone || "",
                 email:
                   pick(
                     raw,
                     COL.email,
-                  ),
+                  ) || existingHotel?.email || "",
                 address:
                   pick(
                     raw,
                     COL.address,
-                  ),
+                  ) || existingHotel?.address || "",
                 hotel_type:
                   hotelType,
                 blackout_ranges:
-                  parseBlackouts(
-                    pick(
-                      raw,
-                      COL.blackout,
-                    ),
-                  ),
+                  blackoutRaw
+                    ? parseBlackouts(blackoutRaw)
+                    : existingHotel?.blackout_ranges ?? [],
                 has_wifi:
-                  parseBool(
-                    pick(
-                      raw,
-                      COL.wifi,
-                    ),
-                  ),
+                  wifiRaw ? parseBool(wifiRaw) : existingHotel?.has_wifi ?? true,
                 has_pool:
-                  parseBool(
-                    pick(
-                      raw,
-                      COL.pool,
-                    ),
-                  ),
+                  poolRaw ? parseBool(poolRaw) : existingHotel?.has_pool ?? false,
               },
             );
 
@@ -1776,21 +1781,8 @@ export async function importExcel(
 
         /* ----------------------------- RATES ---------------------------- */
 
-        const doubleRate =
-          parseNum(
-            pick(
-              raw,
-              COL.double,
-            ),
-          );
-
-        const singleRate =
-          parseNum(
-            pick(
-              raw,
-              COL.single,
-            ),
-          );
+        const doubleRate = parseNumOrNull(pick(raw, COL.double));
+        const singleRate = parseNumOrNull(pick(raw, COL.single));
 
         const quadRate =
           parseNumOrNull(
@@ -1800,13 +1792,7 @@ export async function importExcel(
             ),
           );
 
-        const extraBedRate =
-          parseNum(
-            pick(
-              raw,
-              COL.extraBed,
-            ),
-          );
+        const extraBedRate = parseNumOrNull(pick(raw, COL.extraBed));
 
         const lunchRate =
           parseNumOrNull(
@@ -1850,7 +1836,7 @@ export async function importExcel(
 
         const xmasFrom =
           parseDateCell(
-            pick(
+            pickValue(
               raw,
               COL.xmasFrom,
             ),
@@ -1858,7 +1844,7 @@ export async function importExcel(
 
         const xmasTo =
           parseDateCell(
-            pick(
+            pickValue(
               raw,
               COL.xmasTo,
             ),
@@ -1866,7 +1852,7 @@ export async function importExcel(
 
         const newYearFrom =
           parseDateCell(
-            pick(
+            pickValue(
               raw,
               COL.nyFrom,
             ),
@@ -1874,7 +1860,7 @@ export async function importExcel(
 
         const newYearTo =
           parseDateCell(
-            pick(
+            pickValue(
               raw,
               COL.nyTo,
             ),
@@ -1965,9 +1951,56 @@ export async function importExcel(
           cwb.rule ||
           null;
 
+        const matchingPlan = db.get().rate_plans
+          .filter((plan) =>
+            plan.room_category_id === room.id &&
+            plan.validity_start === range.start &&
+            plan.validity_end === range.end &&
+            plan.season_label.trim().toLowerCase() === seasonLabel.trim().toLowerCase() &&
+            plan.meal_plan === finalMeal,
+          )
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        const resolvedSingleRate = singleRate ?? matchingPlan?.single_rate ?? null;
+        const resolvedDoubleRate = doubleRate ?? matchingPlan?.double_rate ?? null;
+        const singleRateMissing =
+          singleRate === null
+            ? matchingPlan
+              ? matchingPlan.single_rate_missing ?? false
+              : true
+            : false;
+        const doubleRateMissing =
+          doubleRate === null
+            ? matchingPlan
+              ? matchingPlan.double_rate_missing ?? false
+              : true
+            : false;
+        if (resolvedSingleRate === null && resolvedDoubleRate === null) {
+          summary.skippedRows++;
+          summary.errors.push({
+            row: rowNum,
+            reason: "Missing or invalid SGL and DBL rates. No zero price was substituted.",
+            raw,
+          });
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
+        }
+        if (singleRateMissing || doubleRateMissing) {
+          const missingOccupancies = [
+            singleRateMissing ? "SGL" : "",
+            doubleRateMissing ? "DBL" : "",
+          ].filter(Boolean);
+          if (missingOccupancies.length) {
+            summary.errors.push({
+              row: rowNum,
+              reason: `Imported supplied occupancy price(s); missing ${missingOccupancies.join(" and ")} remains unavailable, not ₹0.`,
+              raw,
+            });
+          }
+        }
+
         /* -------------------------- RATE PLAN --------------------------- */
 
-        await ratePlanService.createMany(
+        const importedPlan = await ratePlanService.createMany(
           [
             {
               room_category_id:
@@ -1986,76 +2019,82 @@ export async function importExcel(
                 finalMeal,
 
               double_rate:
-                doubleRate,
+                resolvedDoubleRate ?? 0,
+
+              double_rate_missing:
+                doubleRateMissing,
 
               single_rate:
-                singleRate,
+                resolvedSingleRate ?? 0,
+
+              single_rate_missing:
+                singleRateMissing,
 
               quad_rate:
-                quadRate,
+                quadRate ?? matchingPlan?.quad_rate ?? null,
 
               extra_bed_rate:
-                extraBedRate,
+                extraBedRate ?? matchingPlan?.extra_bed_rate ?? 0,
 
               cwb_rate:
-                cwb.amount,
+                cwb.amount ?? matchingPlan?.cwb_rate ?? null,
 
               cwb_rule_text:
-                cwbRule,
+                cwbRule ?? matchingPlan?.cwb_rule_text ?? null,
 
               lunch_rate:
-                lunchRate,
+                lunchRate ?? matchingPlan?.lunch_rate ?? null,
 
               dinner_rate:
-                dinnerRate,
+                dinnerRate ?? matchingPlan?.dinner_rate ?? null,
 
               extra_breakfast_rate:
-                extraBreakfastRate,
+                extraBreakfastRate ?? matchingPlan?.extra_breakfast_rate ?? null,
 
               xmas_supplement:
-                xmasSupplement,
+                xmasSupplement ?? matchingPlan?.xmas_supplement ?? null,
 
               xmas_supplement_type:
-                parseSupType(
-                  pick(
-                    raw,
-                    COL.xmasType,
-                  ),
-                ),
+                pick(raw, COL.xmasType)
+                  ? parseSupType(pick(raw, COL.xmasType))
+                  : matchingPlan?.xmas_supplement_type ?? "per_person",
 
               xmas_date_from:
-                xmasFrom,
+                xmasFrom ?? matchingPlan?.xmas_date_from ?? null,
 
               xmas_date_to:
-                xmasTo,
+                xmasTo ?? matchingPlan?.xmas_date_to ?? null,
 
               newyear_supplement:
-                newYearSupplement,
+                newYearSupplement ?? matchingPlan?.newyear_supplement ?? null,
 
               newyear_supplement_type:
-                parseSupType(
-                  pick(
-                    raw,
-                    COL.nyType,
-                  ),
-                ),
+                pick(raw, COL.nyType)
+                  ? parseSupType(pick(raw, COL.nyType))
+                  : matchingPlan?.newyear_supplement_type ?? "per_person",
 
               newyear_date_from:
-                newYearFrom,
+                newYearFrom ?? matchingPlan?.newyear_date_from ?? null,
 
               newyear_date_to:
-                newYearTo,
+                newYearTo ?? matchingPlan?.newyear_date_to ?? null,
 
               include_in_quote:
-                includeInQuote,
+                includeRaw === "" ? matchingPlan?.include_in_quote ?? true : includeInQuote,
 
-              remarks,
+              remarks: remarks ?? matchingPlan?.remarks ?? null,
             },
           ],
         );
-
-        summary.plansCreated++;
+        summary.plansCreated += importedPlan.created;
+        summary.plansUpdated += importedPlan.updated;
+        summary.rateCellsImported += [
+          pick(raw, COL.single), pick(raw, COL.double), pick(raw, COL.quad),
+          pick(raw, COL.extraBed), pick(raw, COL.cwb), pick(raw, COL.lunch),
+          pick(raw, COL.dinner), pick(raw, COL.extraBkf), pick(raw, COL.xmas), pick(raw, COL.ny),
+        ].filter((value) => value !== "").length;
       } catch (err) {
+        summary.skippedRows++;
         let reason =
           "Unknown error while importing this row.";
 
@@ -2110,6 +2149,7 @@ export async function importExcel(
     summary.roomsAdded =
       db.get().room_categories.length -
       beforeRooms;
+    summary.hotelsUpdated = updatedHotelIds.size;
 
     return summary;
   } catch (err) {

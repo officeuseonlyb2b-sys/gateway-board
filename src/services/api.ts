@@ -33,13 +33,23 @@ export const hotelService = {
   async remove(id: string): Promise<void> { await delay(); db.deleteHotel(id); },
   async findOrCreate(input: Omit<Hotel, "id" | "created_at" | "updated_at">): Promise<Hotel> {
     const existing = db.get().hotels.find(
-      (h) => h.name.toLowerCase() === input.name.toLowerCase() && h.city_id === input.city_id,
+      (h) =>
+        h.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+          input.name.trim().replace(/\s+/g, " ").toLowerCase() &&
+        h.city_id === input.city_id,
     );
     if (existing) {
       db.updateHotel(existing.id, {
-        hotel_category: input.hotel_category, contact_name: input.contact_name,
-        contact_phone: input.contact_phone, email: input.email,
-        has_wifi: input.has_wifi, has_pool: input.has_pool, address: input.address,
+        hotel_category: input.hotel_category ?? existing.hotel_category,
+        hotel_type: input.hotel_type ?? existing.hotel_type,
+        contact_name: input.contact_name?.trim() ? input.contact_name : existing.contact_name,
+        contact_phone: input.contact_phone?.trim() ? input.contact_phone : existing.contact_phone,
+        email: input.email?.trim() ? input.email : existing.email,
+        has_wifi: input.has_wifi ?? existing.has_wifi,
+        has_pool: input.has_pool ?? existing.has_pool,
+        address: input.address?.trim() ? input.address : existing.address,
+        blackout_ranges:
+          input.blackout_ranges?.length ? input.blackout_ranges : existing.blackout_ranges,
       });
       return db.get().hotels.find((h) => h.id === existing.id)!;
     }
@@ -64,7 +74,31 @@ export const roomService = {
 // ---------- Rate Plans ----------
 export const ratePlanService = {
   async listByRoom(room_category_id: string): Promise<RatePlan[]> { await delay(); return db.get().rate_plans.filter((p) => p.room_category_id === room_category_id); },
-  async createMany(plans: Omit<RatePlan, "id" | "created_at" | "updated_at">[]): Promise<void> { await delay(); db.addRatePlans(plans); },
+  async createMany(
+    plans: Omit<RatePlan, "id" | "created_at" | "updated_at">[],
+  ): Promise<{ created: number; updated: number }> {
+    await delay();
+    let created = 0;
+    let updated = 0;
+    for (const plan of plans) {
+      const existing = db.get().rate_plans.find(
+        (candidate) =>
+          candidate.room_category_id === plan.room_category_id &&
+          candidate.validity_start === plan.validity_start &&
+          candidate.validity_end === plan.validity_end &&
+          candidate.season_label.trim().toLowerCase() === plan.season_label.trim().toLowerCase() &&
+          candidate.meal_plan === plan.meal_plan,
+      );
+      if (existing) {
+        db.updateRatePlan(existing.id, plan);
+        updated++;
+      } else {
+        db.addRatePlans([plan]);
+        created++;
+      }
+    }
+    return { created, updated };
+  },
   async update(id: string, patch: Partial<RatePlan>): Promise<void> { await delay(); db.updateRatePlan(id, patch); },
   async remove(id: string): Promise<void> { await delay(); db.deleteRatePlan(id); },
   // Find the rate plan matching hotel + room + meal + check-in date

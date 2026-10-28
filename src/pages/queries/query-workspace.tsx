@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -6,11 +6,13 @@ import {
   CheckCircle2,
   Circle,
   Download,
+  FileDown,
   FileText,
   Mail,
   MessageCircle,
   Phone,
   Plus,
+  Printer,
   Sparkles,
   UserRoundCheck,
 } from "lucide-react";
@@ -130,20 +132,31 @@ export default function QueryWorkspace() {
   const [supportNote, setSupportNote] = useState("");
   const [supportPriority, setSupportPriority] = useState<"Normal" | "High" | "Urgent">("Normal");
   const [assistanceArea, setAssistanceArea] = useState("Costing");
-  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsError, setVersionsError] = useState<string | null>(null);
   const [viewingQuote, setViewingQuote] = useState<SavedQuote | null>(null);
-  useEffect(() => {
+  const refreshVersions = useCallback(() => {
+    const target = existingQuery?.id || query?.id || id;
+    if (!target) return;
     let active = true;
     setVersionsLoading(true);
-    void refreshCrmQuery(existingQuery?.id || id)
-      .catch((error) => console.error("[crm] costing version refresh failed", error))
+    setVersionsError(null);
+    void refreshCrmQuery(target)
+      .catch((error) => {
+        console.error("[crm] costing version refresh failed", error);
+        if (active)
+          setVersionsError(
+            error instanceof Error ? error.message : "Could not load costing versions.",
+          );
+      })
       .finally(() => {
         if (active) setVersionsLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [existingQuery?.id, id]);
+  }, [existingQuery?.id, query?.id, id]);
+  useEffect(() => refreshVersions(), [existingQuery?.id, query?.id, id]);
   const events = useMemo(
     () =>
       allEvents
@@ -155,7 +168,7 @@ export default function QueryWorkspace() {
     (item) => item.id === query?.program_id || item.name === query?.program_name,
   );
   const versions = [...(query?.costing_versions || [])].sort((a, b) => b.version - a.version);
-  const versionsPending = versionsLoading || crmHydrationStatus === "loading";
+  const versionsPending = versionsLoading;
   const linkedDrafts = useMemo(() => {
     const merged = new Map(
       allDrafts
@@ -1104,7 +1117,17 @@ export default function QueryWorkspace() {
                 </CardContent>
               </Card>
             )}
-            {!versionsPending && versions.length === 0 && (
+            {!versionsPending && versionsError && (
+              <Card className="border-amber-200">
+                <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-amber-800">
+                  <span>{versionsError}</span>
+                  <Button variant="outline" size="sm" onClick={refreshVersions}>
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+            {!versionsPending && !versionsError && versions.length === 0 && (
               <Card>
                 <CardContent className="p-10 text-center text-slate-500">
                   No linked costing version yet.
@@ -1128,6 +1151,16 @@ export default function QueryWorkspace() {
                           Costing V{version.version} · {version.quote.quote_number}
                         </p>
                         {index === 0 && <Badge variant="secondary">Current latest</Badge>}
+                        <Badge
+                          className={
+                            version.quote.status === "In Progress"
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          }
+                          variant="outline"
+                        >
+                          {version.quote.status === "In Progress" ? "Incomplete / In Progress" : "Saved"}
+                        </Badge>
                         {review && <Badge variant="outline">Review: {review.status}</Badge>}
                       </div>
                       <p className="text-sm text-slate-500">
@@ -1139,6 +1172,27 @@ export default function QueryWorkspace() {
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={() => setViewingQuote(version.quote)}>
                         View V{version.version}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setViewingQuote(version.quote);
+                          window.setTimeout(() => window.print(), 0);
+                        }}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        Print
+                      </Button>
+                      <Button
+                        variant="outline"
+                        title="Choose Save as PDF in the print dialog"
+                        onClick={() => {
+                          setViewingQuote(version.quote);
+                          window.setTimeout(() => window.print(), 0);
+                        }}
+                      >
+                        <FileDown className="mr-2 h-4 w-4" />
+                        Export PDF
                       </Button>
                       {canRequestSupport && (
                         <>

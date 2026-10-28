@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
+  getLatestSupabaseRequestDiagnostic,
   supabase,
   supabaseProjectHost,
   supabasePublicConfig,
@@ -176,7 +177,7 @@ function profileMessage(code: ProfileResolutionCode, detail?: string) {
     case "profile_invalid":
       return "The linked Employee Master profile is malformed or uses an unsupported role.";
     case "profile_network_error":
-      return `Employee access details could not be refreshed${detail ? ` (${detail})` : ""}. Your session is preserved; retry when connected.`;
+      return `Employee verification temporarily unavailable${detail ? ` (${detail})` : ""}. Your session is preserved; use Retry to check this employee record again.`;
     default:
       return undefined;
   }
@@ -192,6 +193,9 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
   }
 
   profileQueries++;
+  const lookupStartedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("employee-profile-timeout"), 15_000);
   debugAuth(
     `profile lookup started user=${requestUserId} source=${source} session=true host=${supabaseProjectHost} query_count=${profileQueries}`,
   );
@@ -199,13 +203,15 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
     const profileLookup = supabase
       .from("crm_employees")
       .select("id,data")
-      .eq("data->>auth_user_id", requestUserId);
-    const { data, error } = await Promise.race([
-      profileLookup,
-      new Promise<never>((_, reject) => {
-        window.setTimeout(() => reject(new Error("Employee profile check timed out.")), 15_000);
-      }),
-    ]);
+      .eq("data->>auth_user_id", requestUserId)
+      .limit(2)
+      .abortSignal(controller.signal);
+    const { data, error } = await profileLookup;
+    const request = getLatestSupabaseRequestDiagnostic(
+      "/rest/v1/crm_employees",
+      lookupStartedAt,
+      "data->>auth_user_id",
+    );
 
     if (requestGeneration !== generation || authUser?.id !== requestUserId) {
       debugAuth(`profile result ignored as stale user=${requestUserId}`);
@@ -215,19 +221,25 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       const errorCode = "code" in error && typeof error.code === "string" ? error.code : "unknown";
       const errorMessage = error.message || "Supabase profile query failed";
       const isRls =
+        request?.status === 401 ||
+        request?.status === 403 ||
         errorCode === "42501" ||
         errorCode === "PGRST301" ||
         /row.level security|permission denied|jwt/i.test(errorMessage);
       const category: ProfileResolutionCode = isRls
         ? "profile_rls_denied"
         : "profile_network_error";
+      const diagnosticCode =
+        request?.status === 503
+          ? "HTTP 503 Service Unavailable"
+          : (request?.postgrestCode ?? errorCode);
       console.warn(
-        `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} count=0 category=${category} supabase_code=${errorCode} supabase_message=${errorMessage}; session preserved`,
+        `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} status=${request?.status ?? "no_response"} duration_ms=${request?.durationMs ?? Date.now() - lookupStartedAt} count=0 category=${category} supabase_code=${request?.postgrestCode ?? errorCode} supabase_message=${errorMessage} request_id=${request?.requestId ?? "none"} gateway=${request?.gatewayVersion ?? "none"} response_body=${request?.responseBody ?? "none"}; session preserved`,
       );
       updateLifecycle({
         profileStatus: lifecycle.profileStatus === "ready" ? "ready" : "error",
         profileErrorCode: category,
-        profileError: profileMessage(category, errorCode),
+        profileError: profileMessage(category, diagnosticCode),
       });
       return "error" as const;
     }
@@ -239,7 +251,7 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       const category: ProfileResolutionCode =
         count === 0 ? "profile_not_linked" : "profile_invalid";
       console.warn(
-        `[AUTH] profile lookup completed user=${requestUserId} host=${supabaseProjectHost} count=${count} category=${category}`,
+        `[AUTH] profile lookup completed user=${requestUserId} host=${supabaseProjectHost} status=${request?.status ?? "unknown"} duration_ms=${request?.durationMs ?? Date.now() - lookupStartedAt} count=${count} category=${category}`,
       );
       updateLifecycle({
         profileStatus: "error",
@@ -279,7 +291,7 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
     bootTiming("auth ready");
     publishEmployeeToCrmStore(employee);
     debugAuth(
-      `profile lookup completed user=${requestUserId} host=${supabaseProjectHost} count=1 category=profile_success role=${employee.role}`,
+      `profile lookup completed user=${requestUserId} host=${supabaseProjectHost} status=${request?.status ?? "unknown"} duration_ms=${request?.durationMs ?? Date.now() - lookupStartedAt} count=1 category=profile_success role=${employee.role}`,
     );
     return "ready" as const;
   } catch (error) {
@@ -291,16 +303,33 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
       error && typeof error === "object" && "code" in error && typeof error.code === "string"
         ? error.code
         : "network_or_unknown";
-    const errorMessage = error instanceof Error ? error.message : "Unknown profile request failure";
+    const request = getLatestSupabaseRequestDiagnostic(
+      "/rest/v1/crm_employees",
+      lookupStartedAt,
+      "data->>auth_user_id",
+    );
+    const timedOut = controller.signal.aborted;
+    const diagnosticCode = timedOut
+      ? "request_timeout"
+      : request?.status === 503
+        ? "HTTP 503 Service Unavailable"
+        : (request?.postgrestCode ?? errorCode);
+    const errorMessage = timedOut
+      ? "Employee profile request timed out and was cancelled."
+      : error instanceof Error
+        ? error.message
+        : "Unknown profile request failure";
     console.warn(
-      `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} count=0 category=profile_network_error supabase_code=${errorCode} supabase_message=${errorMessage}; session preserved`,
+      `[AUTH] profile lookup failed user=${requestUserId} host=${supabaseProjectHost} status=${request?.status ?? "no_response"} duration_ms=${request?.durationMs ?? Date.now() - lookupStartedAt} count=0 category=profile_network_error supabase_code=${timedOut ? "request_timeout" : (request?.postgrestCode ?? errorCode)} supabase_message=${errorMessage} request_id=${request?.requestId ?? "none"} gateway=${request?.gatewayVersion ?? "none"} response_body=${request?.responseBody ?? "none"}; session preserved`,
     );
     updateLifecycle({
       profileStatus: lifecycle.profileStatus === "ready" ? "ready" : "error",
       profileErrorCode: "profile_network_error",
-      profileError: profileMessage("profile_network_error", errorCode),
+      profileError: profileMessage("profile_network_error", diagnosticCode),
     });
     return "error" as const;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -401,13 +430,9 @@ function init() {
   });
   authSubscription = data.subscription;
 
-  focusHandler = () => void auth.revalidate();
-  window.addEventListener("focus", focusHandler);
-  retryTimer = window.setInterval(() => {
-    if (authUser && (lifecycle.profileStatus !== "ready" || lifecycle.profileError)) {
-      void auth.revalidate();
-    }
-  }, 30_000);
+  // Employee verification is explicit after a recoverable failure. Focus and
+  // timers used to turn one 503 into repeated profile requests and overwrite
+  // the recoverable error screen with an indefinite loader.
 }
 
 function disposeAuthLifecycle() {
@@ -483,11 +508,13 @@ export const auth = {
       return;
     }
     if (authUser?.id !== user.id) acceptSession(user, "RETRY_SESSION");
-    updateLifecycle({
-      profileStatus: "loading",
-      profileError: undefined,
-      profileErrorCode: undefined,
-    });
+    if (lifecycle.profileStatus !== "ready" && !profileFlight) {
+      updateLifecycle({
+        profileStatus: "loading",
+        profileError: undefined,
+        profileErrorCode: undefined,
+      });
+    }
     await resolveEmployeeProfile(user, "retry");
   },
   subscribe(listener: () => void) {

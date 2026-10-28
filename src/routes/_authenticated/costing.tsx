@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
   Check,
@@ -122,12 +122,11 @@ import { isRoutingReady, validateQuoteForFinalization } from "@/lib/wizard/valid
 
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
-import { saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
-import { buildSavedQuote as buildSavedQuoteFromDraft } from "@/lib/wizard/build-saved-quote";
+import { getSavedQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
 import {
   getCrmQuery,
   getQueryQuotationDraft,
-  removeQueryQuotationDraft,
   upsertQueryQuotationDraft,
   useCrmQueries,
 } from "@/lib/crm/store";
@@ -257,6 +256,7 @@ function ensureProgramInMaster(
   draft: QuoteDraft,
   db: ReturnType<typeof useDB>,
   savedBy: string,
+  persist = true,
 ): QuoteDraft {
   const saveCustomizedCopy = draft.program_mode === "existing" && draft.save_program_as_new;
   const shouldCreate = draft.program_mode === "new" || saveCustomizedCopy;
@@ -264,6 +264,14 @@ function ensureProgramInMaster(
     saveCustomizedCopy || draft.program_mode === "new" ? draft.new_program_name : draft.program_name
   )?.trim();
   if (!shouldCreate || !targetName) return draft;
+  const duplicateName = getPrograms().find(
+    (program) => program.name.trim().toLocaleLowerCase() === targetName.toLocaleLowerCase(),
+  );
+  if (duplicateName) {
+    throw new Error(
+      `Programme “${duplicateName.name}” already exists (${duplicateName.code}). Select it instead of creating a duplicate.`,
+    );
+  }
   const requestedCode = (
     (saveCustomizedCopy ? draft.new_program_code : draft.program_code) || nextProgramCode()
   )
@@ -303,25 +311,27 @@ function ensureProgramInMaster(
       .map((day) => day.program)
       .filter(Boolean)
       .join(" · ");
-  addProgram({
-    id: code,
-    code,
-    name: targetName,
-    nights: draft.nights,
-    days: Math.max(1, draft.nights + 1),
-    duration_label: `${draft.nights} Nights & ${draft.nights + 1} Days`,
-    routing_summary: routingSummary,
-    routing,
-    cities,
-    categories: draft.categories,
-    departure_city: cityName(draft.departure_city) || draft.departure_city,
-    travel_modes: draft.travel_modes,
-    inclusions: draft.inclusions,
-    exclusions: draft.exclusions,
-    source: "Quotation Builder",
-    status: "Active",
-    created_by: savedBy,
-  });
+  if (persist) {
+    addProgram({
+      id: code,
+      code,
+      name: targetName,
+      nights: draft.nights,
+      days: Math.max(1, draft.nights + 1),
+      duration_label: `${draft.nights} Nights & ${draft.nights + 1} Days`,
+      routing_summary: routingSummary,
+      routing,
+      cities,
+      categories: draft.categories,
+      departure_city: cityName(draft.departure_city) || draft.departure_city,
+      travel_modes: draft.travel_modes,
+      inclusions: draft.inclusions,
+      exclusions: draft.exclusions,
+      source: "Quotation Builder",
+      status: "Active",
+      created_by: savedBy,
+    });
+  }
   const updated = {
     ...draft,
     program_id: code,
@@ -332,7 +342,7 @@ function ensureProgramInMaster(
     new_program_code: "",
     new_program_name: "",
   };
-  writeDraft(updated);
+  if (persist) writeDraft(updated);
   return updated;
 }
 
@@ -489,6 +499,8 @@ function WizardPage() {
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const saveInFlightRef = useRef(false);
+  const [lastSavedDraftFingerprint, setLastSavedDraftFingerprint] = useState<string | null>(null);
   const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [sub, setSub] = useState(0);
@@ -529,10 +541,61 @@ function WizardPage() {
       activeDraftRecord.wizard_state.commercial_mode,
     ).queryFor !== scope.queryFor,
   );
-  const canFinalize = useMemo(
-    () => (step === 10 && draft ? validateQuoteForFinalization(draft, dbData).canFinalize : false),
-    [step, draft, dbData],
+  const finalizationReview = useMemo(
+    () => (draft ? validateQuoteForFinalization(draft, dbData) : null),
+    [draft, dbData],
   );
+  const linkedQuery = draft?.linked_query_id ? getCrmQuery(draft.linked_query_id) : undefined;
+  const programmes = usePrograms();
+  const duplicateProgramme =
+    draft?.program_mode === "new" && draft.new_program_name?.trim()
+      ? programmes.find(
+          (program) =>
+            program.name.trim().toLocaleLowerCase() ===
+            draft.new_program_name?.trim().toLocaleLowerCase(),
+        )
+      : undefined;
+  const draftFingerprint = (value: QuoteDraft) =>
+    JSON.stringify({ ...value, updated_at: undefined });
+  const currentDraftFingerprint = draft ? draftFingerprint(draft) : "";
+  const latestSavedDraft = linkedQuery?.costing_versions
+    ?.slice()
+    .sort((left, right) => right.version - left.version)[0]?.quote.draft_snapshot;
+  const unchangedFromSavedVersion = Boolean(
+    draft &&
+      (lastSavedDraftFingerprint === currentDraftFingerprint ||
+        (latestSavedDraft && draftFingerprint(latestSavedDraft) === currentDraftFingerprint)),
+  );
+  const costingWarnings = [
+    ...(finalizationReview?.blockers.map((item) => `${item.section}: ${item.message}`) ?? []),
+    ...(duplicateProgramme
+      ? [
+          `Programme: “${duplicateProgramme.name}” already exists (${duplicateProgramme.code}). Select that Programme or enter a unique name; a duplicate will not be created.`,
+        ]
+      : []),
+  ];
+  const finalizationBlockers = [
+    ...(!access.employee
+      ? [
+          "Permission: An active linked CRM employee is required to save an official costing version.",
+        ]
+      : []),
+    ...(!draft?.linked_query_id
+      ? ["Linked Query: Link this quotation to a CRM Query before saving a costing version."]
+      : []),
+    ...(draft?.linked_query_id && !linkedQuery
+      ? [
+          "Linked Query: The canonical CRM Query record could not be resolved. Refresh and try again.",
+        ]
+      : []),
+    ...(unchangedFromSavedVersion
+      ? ["Snapshot: This exact costing is already saved. Change the draft before creating the next version."]
+      : []),
+  ];
+  const canFinalize = step === 10 && finalizationBlockers.length === 0;
+  const nextOfficialVersion = linkedQuery
+    ? Math.max(0, ...(linkedQuery.costing_versions ?? []).map((item) => item.version)) + 1
+    : draft?.intended_version || 1;
 
   useEffect(() => {
     if (!draft) return;
@@ -766,60 +829,79 @@ function WizardPage() {
   };
 
   const finalizeQuote = async () => {
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
     flushDraftPersistence();
     const latest = loadDraft() ?? draft;
     const review = validateQuoteForFinalization(latest, dbData);
-    if (review.blockers.length) {
-      toast.error(
-        `Resolve ${review.blockers.length} blocker${review.blockers.length === 1 ? "" : "s"} before generating this quote.`,
-      );
-      return;
-    }
     setIsFinalizing(true);
     try {
-      const preparedDraft = getQuotationScope(latest.query_for, latest.commercial_mode).program
-        ? ensureProgramInMaster(latest, dbData, user?.name || "Unknown")
-        : latest;
       const employee = access.employee;
       if (!employee)
-        throw new Error("An active linked CRM employee is required to save a quotation.");
-      let quote = buildSavedQuoteFromDraft(preparedDraft, dbData, employee.name, {
-        employeeId: employee.id,
-        authUserId: employee.auth_user_id,
-        name: employee.name,
-        role: employee.role,
+        throw new Error("An active linked CRM employee is required to save a costing version.");
+      if (!latest.linked_query_id || !getCrmQuery(latest.linked_query_id))
+        throw new Error("The canonical linked CRM Query could not be resolved before saving.");
+      const warnings = [
+        ...review.blockers.map((item) => `${item.section}: ${item.message}`),
+        ...(duplicateProgramme
+          ? [
+              `Programme: “${duplicateProgramme.name}” already exists (${duplicateProgramme.code}).`,
+            ]
+          : []),
+      ];
+      let quote = buildCostingVersionSnapshot(
+        latest,
+        dbData,
+        employee.name,
+        {
+          employeeId: employee.id,
+          authUserId: employee.auth_user_id,
+          name: employee.name,
+          role: employee.role,
+        },
+        warnings,
+      );
+      const requestDraftId = persistToDrafts(latest, { silent: true });
+      const version = await finalizeQuotationVersion(
+        latest.linked_query_id,
+        quote,
+        requestDraftId,
+      );
+      quote = version.quote;
+      if (!getSavedQuote(quote.id)) persistQuote(quote);
+      setLastSavedDraftFingerprint(draftFingerprint(latest));
+      // Rotate only the idempotency key after confirmation. The editable draft
+      // data and every unsynced selection remain active and unchanged.
+      const continuationDraftId = upsertDraft(latest, undefined, latest.program_name || undefined);
+      setCurrentDraftId(continuationDraftId);
+      if (requestDraftId !== continuationDraftId) deleteDraft(requestDraftId);
+      upsertQueryQuotationDraft(latest.linked_query_id, {
+        id: continuationDraftId,
+        based_on_version_id: quote.id,
+        based_on_version_number: quote.version,
+        draft_name: latest.program_name || "Quotation draft",
+        draft_data: latest,
+        created_by_employee_id: employee.id,
+        created_by_name: employee.name,
+        created_by_role: employee.role,
+        last_edited_by_employee_id: employee.id,
+        last_edited_by_name: employee.name,
+        last_edited_by_role: employee.role,
       });
-      if (preparedDraft.linked_query_id) {
-        const version = await finalizeQuotationVersion(
-          preparedDraft.linked_query_id,
-          quote,
-          currentDraftId ?? undefined,
-        );
-        quote = version.quote;
-      }
-      persistQuote(quote);
-      if (currentDraftId) deleteDraft(currentDraftId);
-      if (preparedDraft.linked_query_id && currentDraftId)
-        removeQueryQuotationDraft(preparedDraft.linked_query_id, currentDraftId);
-      setCurrentDraftId(null);
-      clearDraft();
-      setActiveWizard(null);
-      writeDraft(emptyDraft());
       setSavedQuote(quote);
       addNotification({
         kind: "success",
         category: "quote_saved",
-        title: `${quote.display_number || quote.quote_number} generated and locked`,
-        message: `${quote.tour_title} · ${quote.total_nights}N · revision ${quote.version}`,
-        href: "/quotes",
+        title: `Costing V${quote.version} saved`,
+        message: `${quote.tour_title} · ${quote.status}`,
+        href: `/queries/${linkedQuery?.query_id || latest.linked_query_id}`,
       });
-      toast.success(
-        `${quote.display_number || quote.quote_number} generated. This version is now read-only.`,
-      );
+      toast.success(`Costing V${quote.version} saved and confirmed by Supabase.`);
     } catch (error) {
-      console.error("Quote finalization failed", error);
-      toast.error(error instanceof Error ? error.message : "Could not generate the quote.");
+      console.error("Costing version save failed", error);
+      toast.error(error instanceof Error ? error.message : "Could not save the costing version.");
     } finally {
+      saveInFlightRef.current = false;
       setIsFinalizing(false);
     }
   };
@@ -1055,6 +1137,9 @@ function WizardPage() {
                   sub={sub}
                   setSub={setSub}
                   canFinalize={canFinalize}
+                  finalizeBlockers={finalizationBlockers}
+                  costingWarnings={costingWarnings}
+                  nextOfficialVersion={nextOfficialVersion}
                   isFinalizing={isFinalizing}
                   onFinalize={finalizeQuote}
                   onSaveDraft={() => {
@@ -1376,6 +1461,9 @@ function StepContent({
   sub,
   setSub,
   canFinalize,
+  finalizeBlockers,
+  costingWarnings,
+  nextOfficialVersion,
   isFinalizing,
   onFinalize,
   onSaveDraft,
@@ -1387,6 +1475,9 @@ function StepContent({
   sub: number;
   setSub: (n: number) => void;
   canFinalize: boolean;
+  finalizeBlockers: string[];
+  costingWarnings: string[];
+  nextOfficialVersion: number;
   isFinalizing: boolean;
   onFinalize: () => void | Promise<void>;
   onSaveDraft: () => void;
@@ -1441,7 +1532,9 @@ function StepContent({
             draft={draft}
             isFinalizing={isFinalizing}
             canFinalize={canFinalize}
-            version={draft.intended_version || 1}
+            finalizeBlockers={finalizeBlockers}
+            costingWarnings={costingWarnings}
+            version={nextOfficialVersion}
             onSaveDraft={onSaveDraft}
             onFinalize={onFinalize}
             onRequestReview={onRequestReview}
@@ -2096,7 +2189,19 @@ function Step4({ draft, set }: StepProps) {
 
       <RadioGroup
         value={draft.program_mode}
-        onValueChange={(v) => set({ program_mode: v as "existing" | "new" })}
+        onValueChange={(v) => {
+          if (v === "new") {
+            set({
+              program_mode: "new",
+              program_id: undefined,
+              program_code: "",
+              program_name: "",
+              save_program_as_new: true,
+            });
+          } else {
+            set({ program_mode: "existing", save_program_as_new: false });
+          }
+        }}
       >
         {/* ---- Existing Program ---- */}
         <div className="flex items-start gap-3 p-4 border rounded-lg relative">
@@ -2287,7 +2392,41 @@ function Step4({ draft, set }: StepProps) {
             </label>
             {draft.program_mode === "new" && (
               <div className="mt-2 space-y-4">
-                <div></div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label htmlFor="new-program-name">Programme Name *</Label>
+                    <Input
+                      id="new-program-name"
+                      className="mt-1"
+                      value={draft.new_program_name || ""}
+                      placeholder="Enter a unique Programme name"
+                      onChange={(event) =>
+                        set({ new_program_name: event.target.value, save_program_as_new: true })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="new-program-code">Programme Code</Label>
+                    <Input
+                      id="new-program-code"
+                      className="mt-1"
+                      value={draft.new_program_code || ""}
+                      placeholder="Generated automatically if blank"
+                      onChange={(event) => set({ new_program_code: event.target.value })}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm md:col-span-2">
+                    <Checkbox
+                      checked={draft.save_program_as_new === true}
+                      onCheckedChange={(checked) => set({ save_program_as_new: checked === true })}
+                    />
+                    Save this finalized customized routing as a new Programme
+                  </label>
+                  <p className="text-xs text-muted-foreground md:col-span-2">
+                    The Programme is created only when the official costing saves successfully. An
+                    existing Programme with the same name will not be duplicated.
+                  </p>
+                </div>
                 <div>
                   <Label>Program Category</Label>
                   <div className="flex flex-wrap gap-2 mt-1">

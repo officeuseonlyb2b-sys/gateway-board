@@ -47,12 +47,16 @@ let channel: ReturnType<typeof supabase.channel> | null = null;
 let syncGeneration = 0;
 let ownerUserIdByQueryId = new Map<string, string | null>();
 let cloudEventIds = new Set<string>();
+let cloudQuerySignatures = new Map<string, string>();
+let cloudTaskSignatures = new Map<string, string>();
+let cloudReviewSignatures = new Map<string, string>();
 let rejectedBackgroundQuerySignatures = new Map<string, string>();
 let assignmentDirectoryFlight: Promise<void> | null = null;
 let crmRefreshCalls = 0;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const asJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
+const signature = (value: unknown) => JSON.stringify(value);
 
 function standaloneQuotationReviewRow(review: StandaloneQuotationReviewAssignment) {
   return {
@@ -168,12 +172,19 @@ async function readCloud(): Promise<CrmSnapshot> {
     ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => [row.id, row.owner_user_id]),
   );
   cloudEventIds = new Set((eventResult.data ?? []).map((row) => row.id));
+  const queries = ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => {
+    const data = row.data as CrmQuery;
+    return { ...data, id: row.id, query_id: data.query_id || row.id };
+  });
+  const tasks = unwrap<CrmTask>(taskResult.data);
+  cloudQuerySignatures = new Map(queries.map((query) => [query.id, signature(query)]));
+  cloudTaskSignatures = new Map(tasks.map((task) => [task.id, signature(task)]));
+  cloudReviewSignatures = new Map(
+    standaloneQuotationReviews.map((review) => [review.id, signature(review)]),
+  );
   return {
-    queries: ((queryResult.data ?? []) as CloudQueryRow[]).map((row) => {
-      const data = row.data as CrmQuery;
-      return { ...data, id: row.id, query_id: data.query_id || row.id };
-    }),
-    tasks: unwrap<CrmTask>(taskResult.data),
+    queries,
+    tasks,
     employees: employeeResult,
     events: unwrap<CrmEvent>(eventResult.data),
     standaloneQuotationReviews,
@@ -226,7 +237,7 @@ function queryRow(query: CrmQuery) {
   };
 }
 
-export async function refreshCrmQuery(queryId: string): Promise<void> {
+export async function refreshCrmQuery(queryId: string): Promise<CrmQuery | undefined> {
   let result = await supabase
     .from("crm_queries")
     .select("id,data,owner_user_id")
@@ -241,10 +252,12 @@ export async function refreshCrmQuery(queryId: string): Promise<void> {
       .maybeSingle();
     if (result.error) throw result.error;
   }
-  if (!result.data) return;
+  if (!result.data) return undefined;
   ownerUserIdByQueryId.set(result.data.id, result.data.owner_user_id);
   const cloud = result.data.data as unknown as CrmQuery;
-  replaceQueryFromCloud({ ...cloud, id: result.data.id, query_id: cloud.query_id || queryId });
+  const refreshed = { ...cloud, id: result.data.id, query_id: cloud.query_id || queryId };
+  replaceQueryFromCloud(refreshed);
+  return refreshed;
 }
 
 /**
@@ -444,6 +457,7 @@ async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): 
           Boolean(actor.unit && query.participating_units?.includes(actor.unit)))));
   const writableQueries = snapshot.queries.filter((query) => {
     if (rejectedBackgroundQuerySignatures.get(query.id) === JSON.stringify(query)) return false;
+    if (cloudQuerySignatures.get(query.id) === signature(query)) return false;
     return (
       superAdmin ||
       [query.owner].includes(actor.id) ||
@@ -494,6 +508,7 @@ async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): 
     if (!batch.error) {
       queryRows.forEach(({ query }) => {
         rejectedBackgroundQuerySignatures.delete(query.id);
+        cloudQuerySignatures.set(query.id, signature(query));
         savedBusinessQueryIds.add(query.query_id);
       });
       return batch;
@@ -506,6 +521,7 @@ async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): 
       const result = await supabase.from("crm_queries").upsert(row, { onConflict: "id" });
       if (!result.error) {
         rejectedBackgroundQuerySignatures.delete(query.id);
+        cloudQuerySignatures.set(query.id, signature(query));
         savedBusinessQueryIds.add(query.query_id);
         continue;
       }
@@ -561,11 +577,16 @@ async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): 
   };
   // Confirm Query writes before considering their linked events.
   const queryResult = await persistQueries();
-  const operations = [
-    Promise.resolve(queryResult),
-    superAdmin && snapshot.tasks.length
+  const changedTasks = snapshot.tasks.filter(
+    (task) => cloudTaskSignatures.get(task.id) !== signature(task),
+  );
+  const changedReviews = snapshot.standaloneQuotationReviews.filter(
+    (review) => cloudReviewSignatures.get(review.id) !== signature(review),
+  );
+  const taskOperation =
+    superAdmin && changedTasks.length
       ? supabase.from("crm_tasks").upsert(
-          snapshot.tasks.map((task) => ({
+          changedTasks.map((task) => ({
             id: task.id,
             query_id: task.query_id || null,
             owner: task.owner,
@@ -574,17 +595,23 @@ async function upsertSnapshot(snapshot: CrmSnapshot, requiredQueryId?: string): 
           })),
           { onConflict: "id" },
         )
-      : Promise.resolve({ error: null }),
+      : Promise.resolve({ error: null });
+  const reviewOperation = changedReviews.length
+    ? supabase
+        .from("crm_standalone_quotation_reviews")
+        .upsert(changedReviews.map(standaloneQuotationReviewRow), { onConflict: "id" })
+    : Promise.resolve({ error: null });
+  const operations = [
+    Promise.resolve(queryResult),
+    taskOperation,
     persistEvents(),
-    snapshot.standaloneQuotationReviews.length
-      ? supabase
-          .from("crm_standalone_quotation_reviews")
-          .upsert(snapshot.standaloneQuotationReviews.map(standaloneQuotationReviewRow), {
-            onConflict: "id",
-          })
-      : Promise.resolve({ error: null }),
+    reviewOperation,
   ];
   const results = await Promise.all(operations);
+  if (!results[1].error)
+    changedTasks.forEach((task) => cloudTaskSignatures.set(task.id, signature(task)));
+  if (!results[3].error)
+    changedReviews.forEach((review) => cloudReviewSignatures.set(review.id, signature(review)));
   if (requiredQueryId) {
     const queryError = results[0].error;
     if (queryError) throw queryError;
@@ -668,23 +695,40 @@ export async function finalizeQuotationVersion(
   quote: import("@/lib/quotes-store").SavedQuote,
   draftId?: string,
 ) {
+  const current = getCrmSnapshot().queries.find(
+    (query) => query.query_id === queryId || query.id === queryId,
+  );
+  if (!current) throw new Error("The linked CRM Query could not be resolved before saving.");
   const { data, error } = await supabase.rpc("finalize_crm_quotation_version", {
-    p_query_id: queryId,
+    // The RPC still supports the business query number, but persistence is
+    // anchored to the canonical crm_queries primary key.
+    p_query_id: current.id,
     p_quote: asJson(quote),
     p_draft_id: draftId ?? null,
   });
   if (error) throw error;
-  const current = getCrmSnapshot().queries.find(
-    (query) => query.query_id === queryId || query.id === queryId,
-  );
   if (!current || !data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("The saved quotation could not be reconciled with its Query.");
   }
-  const updated = { ...current, ...(data as unknown as CrmQuery) };
+  const updated = {
+    ...current,
+    ...(data as unknown as CrmQuery),
+    id: current.id,
+    query_id: (data as unknown as CrmQuery).query_id || current.query_id,
+  };
   replaceQueryFromCloud(updated);
-  const version = updated.costing_versions?.at(-1);
+  const version =
+    updated.costing_versions?.find((item) => item.quote.id === quote.id) ??
+    [...(updated.costing_versions ?? [])].sort((a, b) => b.version - a.version)[0];
   if (!version) throw new Error("The database did not return the saved quotation version.");
-  return version;
+  // Confirm the committed row can be read back before the caller removes the
+  // draft or displays success. This also refreshes the Query Details state.
+  const refreshed = await refreshCrmQuery(current.id);
+  const confirmed = refreshed?.costing_versions?.find((item) => item.quote.id === version.quote.id);
+  if (!confirmed) {
+    throw new Error("Supabase did not confirm the saved costing version. The draft was preserved.");
+  }
+  return confirmed;
 }
 
 function schedulePush(snapshot: CrmSnapshot) {
@@ -963,6 +1007,9 @@ export function startCrmSync(includeBusiness = true): () => void {
     started = false;
     ownerUserIdByQueryId = new Map();
     cloudEventIds = new Set();
+    cloudQuerySignatures = new Map();
+    cloudTaskSignatures = new Map();
+    cloudReviewSignatures = new Map();
     rejectedBackgroundQuerySignatures = new Map();
   };
 }

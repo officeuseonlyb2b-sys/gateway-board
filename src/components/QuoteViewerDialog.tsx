@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Printer, FileDown, FileSpreadsheet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QuoteDocument } from "./QuoteDocument";
+import { FinalCostingWorkspace } from "./quotation/FinalCostingWorkspace";
 import { exportQuoteExcel } from "@/lib/quotes-export";
 import type { SavedQuote } from "@/lib/quotes-store";
 
@@ -49,7 +50,16 @@ export function QuoteViewerDialog({
 
       {/* Document */}
       <div className="my-6 shadow-2xl">
-        <QuoteDocument quote={quote} />
+        {quote.draft_snapshot && ["In Progress", "Saved"].includes(quote.status) ? (
+          <div className="quote-print-target bg-white">
+            <div className="border-b-2 border-amber-400 bg-amber-50 px-6 py-3 text-center text-sm font-bold uppercase text-amber-900">
+              Costing V{quote.version} · {quote.status === "In Progress" ? "Incomplete / In Progress" : "Saved Costing Snapshot"}
+            </div>
+            <FinalCostingWorkspace draft={quote.draft_snapshot} set={() => undefined} readOnly />
+          </div>
+        ) : (
+          <QuoteDocument quote={quote} />
+        )}
       </div>
     </div>
   );

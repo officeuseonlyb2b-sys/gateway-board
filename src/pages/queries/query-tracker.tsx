@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAccessibleQueries } from "@/lib/crm/access";
-import { useEmployees } from "@/lib/crm/store";
+import { useCrmHydrationStatus, useEmployees } from "@/lib/crm/store";
 import type { CrmQuery } from "@/lib/crm/types";
 
 const fmt = (value?: string) =>
@@ -77,6 +77,7 @@ function SortableHead({
 export default function QueryTracker() {
   const navigate = useNavigate();
   const queries = useAccessibleQueries();
+  const hydrationStatus = useCrmHydrationStatus();
   const employees = useEmployees();
   const ownerName = (query: CrmQuery) =>
     employees.find((employee) => employee.id === query.owner || employee.name === query.owner)?.name ||
@@ -143,6 +144,18 @@ export default function QueryTracker() {
         onReset={scope.reset}
         defaultQuickDuration="today"
       />
+      {scope.dateScopeBypassed && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          Exact Query ID search is checking all received dates. Your selected date filter remains
+          unchanged and will apply again to ordinary searches.
+        </div>
+      )}
+      {hydrationStatus === "error" && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Query Tracker could not refresh from Supabase. Any rows shown below are cached; an empty
+          result may be incomplete. Refresh the page or try again when the connection is restored.
+        </div>
+      )}
       <div className="grid gap-4 md:grid-cols-4">
         {[
           { label: "Filtered Queries", value: scope.filtered.length, Icon: Users },
@@ -281,7 +294,11 @@ export default function QueryTracker() {
                 {scope.filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="h-28 text-center text-slate-500">
-                      No Queries match this filter scope.
+                      {hydrationStatus === "error"
+                        ? "Queries could not be refreshed from Supabase."
+                        : hydrationStatus === "loading"
+                          ? "Loading Queries…"
+                          : "No Queries match this filter scope."}
                     </TableCell>
                   </TableRow>
                 )}

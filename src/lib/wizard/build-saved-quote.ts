@@ -448,3 +448,115 @@ export function buildSavedQuote(
 
   return q;
 }
+
+/**
+ * Capture a costing version without asserting that it is ready for customer
+ * delivery. The complete draft is always retained; the fallback shape exists
+ * only so an incomplete scenario can still pass through the established RPC.
+ */
+export function buildCostingVersionSnapshot(
+  draft: QuoteDraft,
+  d: DB,
+  savedBy: string,
+  preparedBy: { employeeId: string; authUserId?: string; name: string; role: string },
+  warnings: string[],
+): SavedQuote {
+  const now = new Date().toISOString();
+  const complete = warnings.length === 0;
+  try {
+    const quote = buildSavedQuote(draft, d, savedBy, preparedBy);
+    return {
+      ...quote,
+      status: complete ? "Saved" : "In Progress",
+      costing_complete: complete,
+      validation_warnings: [...warnings],
+      audit_log: [
+        {
+          at: now,
+          by: savedBy,
+          action: "generated",
+          detail: complete
+            ? "Immutable costing snapshot saved"
+            : `Incomplete costing snapshot saved with ${warnings.length} warning(s)`,
+        },
+      ],
+    };
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "Quotation has no valid costing variation to save.") {
+      throw error;
+    }
+    const identity = quoteVersionContext(draft);
+    const zeroTotals = {
+      room_net_sgl: 0,
+      room_net_dbl: 0,
+      room_net_trp: 0,
+      gst_rooms_sgl: 0,
+      gst_rooms_dbl: 0,
+      gst_rooms_trp: 0,
+      addons_total: 0,
+      markup_sgl: 0,
+      markup_dbl: 0,
+      markup_trp: 0,
+      gst_markup_sgl: 0,
+      gst_markup_dbl: 0,
+      gst_markup_trp: 0,
+      grand_sgl: 0,
+      grand_dbl: 0,
+      grand_trp: 0,
+    };
+    return {
+      id: uid(),
+      query_id: draft.linked_query_id,
+      family_id: identity.family_id,
+      version: identity.version || 1,
+      quote_number: identity.quote_number || nextQuoteNumber(),
+      status: "In Progress",
+      costing_complete: false,
+      validation_warnings: [...warnings],
+      saved_at: now,
+      saved_by: savedBy,
+      prepared_by_employee_id: preparedBy.employeeId,
+      prepared_by_auth_user_id: preparedBy.authUserId,
+      prepared_by_name: preparedBy.name,
+      prepared_by_role: preparedBy.role,
+      revision_of_quote_id: identity.revision_of_quote_id,
+      draft_snapshot: JSON.parse(JSON.stringify(draft)) as QuoteDraft,
+      tour_title: draft.program_name || "Incomplete costing",
+      cities: draft.routing.map((day) => day.to_city || day.from_city || "").filter(Boolean),
+      total_nights: draft.nights,
+      travel_start: draft.start_date,
+      travel_end: addDaysISO(draft.start_date, draft.nights),
+      itinerary: [],
+      addons: {
+        travels: [],
+        miscellaneous: [],
+        guide: [],
+        entrances: [],
+        activities: [],
+        optional_supplements: [],
+        addons_total: 0,
+      },
+      inclusions: {
+        accommodation_nights: 0,
+        breakfast_count: 0,
+        lunch_count: 0,
+        dinner_count: 0,
+        travels_included: false,
+        guide_included: false,
+      },
+      markup_percent: draft.markup_percent,
+      totals: zeroTotals,
+      include_sgl: false,
+      include_dbl: false,
+      include_trp: false,
+      audit_log: [
+        {
+          at: now,
+          by: savedBy,
+          action: "generated",
+          detail: `Incomplete costing snapshot saved with ${warnings.length} warning(s)`,
+        },
+      ],
+    };
+  }
+}

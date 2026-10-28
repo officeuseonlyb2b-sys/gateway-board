@@ -283,14 +283,20 @@ export function computeScenario(
         return;
       }
       const slots = slotsForDay(draft, opt, day.day, pax);
+      let missingRequiredTariff = false;
       for (let p = 0; p < pax; p++) {
         const type = slots[p];
         const tariff = tariffFor(type, plan);
+        if (!(tariff > 0)) {
+          missingRequiredTariff = true;
+          continue;
+        }
         const share = tariff / (SIZE[type] || 1);
         perPersonNet[p] += share;
         perPersonGst[p] += share * gstRateFor(tariff);
         perPersonTypes[p].push(type);
       }
+      if (missingRequiredTariff) missing++;
     });
 
   // ---------- Add-ons (reuse existing, already-correct formulas) ----------

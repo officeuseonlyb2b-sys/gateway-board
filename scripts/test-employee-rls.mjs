@@ -140,20 +140,34 @@ await check("Unlinked Auth user and anonymous caller cannot read Employee Master
   await assert.rejects(rows("crm_employees"), /permission denied/);
   await db.exec("RESET ROLE");
 });
-await check("Disable and delete revoke access without waiting for JWT expiration", async () => {
-  await db.query(
-    'UPDATE public.crm_employees SET data=data || \'{"active":false,"account_status":"Disabled"}\' WHERE id=$1',
-    [staff],
-  );
-  await asUser(staff, async () => assert.equal((await rows("crm_employees")).length, 0));
-  await db.query(
-    'UPDATE public.crm_employees SET data=data || \'{"active":true,"account_status":"Active"}\' WHERE id=$1',
-    [staff],
-  );
-  await asUser(staff, async () => assert.equal((await rows("crm_employees")).length, 1));
-  await db.query("DELETE FROM public.crm_employees WHERE id=$1", [other]);
-  await asUser(other, async () => assert.equal((await rows("crm_employees")).length, 0));
-});
+await check(
+  "Disable and delete revoke business access while preserving self-status diagnostics",
+  async () => {
+    await db.query(
+      'UPDATE public.crm_employees SET data=data || \'{"active":false,"account_status":"Disabled"}\' WHERE id=$1',
+      [staff],
+    );
+    await asUser(staff, async () => {
+      assert.equal(
+        (await rows("crm_employees")).length,
+        1,
+        "The self row remains readable so login can report Disabled instead of a false linkage error",
+      );
+      assert.equal(
+        (await rows("crm_queries")).length,
+        0,
+        "Disabled employees lose business access",
+      );
+    });
+    await db.query(
+      'UPDATE public.crm_employees SET data=data || \'{"active":true,"account_status":"Active"}\' WHERE id=$1',
+      [staff],
+    );
+    await asUser(staff, async () => assert.equal((await rows("crm_employees")).length, 1));
+    await db.query("DELETE FROM public.crm_employees WHERE id=$1", [other]);
+    await asUser(other, async () => assert.equal((await rows("crm_employees")).length, 0));
+  },
+);
 await check(
   "Employee IDs and Auth linkage are unique; codes are immutable; last administrator is protected",
   async () => {
@@ -674,7 +688,7 @@ await check(
   },
 );
 await check(
-  "Quotation versions allocate atomically per lineage and preserve prior snapshots",
+  "Quotation versions allocate atomically per Query, preserve snapshots and retry idempotently",
   async () => {
     const ownerId = salesIds[2];
     const queryRowId = randomUUID();
@@ -697,23 +711,31 @@ await check(
     await asUser(
       ownerId,
       async () => {
-        const save = async (id, family, amount) =>
+        const save = async (id, family, amount, draftId = null) =>
           (
             await db.query(
-              "SELECT public.finalize_crm_quotation_version($1, $2::jsonb, NULL) AS data",
-              ["Q-VERSION-TEST", JSON.stringify({ id, family_id: family, totals: { amount } })],
+              "SELECT public.finalize_crm_quotation_version($1, $2::jsonb, $3) AS data",
+              [
+                "Q-VERSION-TEST",
+                JSON.stringify({ id, family_id: family, totals: { amount } }),
+                draftId,
+              ],
             )
           ).rows[0].data;
-        const first = await save("quote-a-v1", "family-a", 100);
+        const first = await save("quote-a-v1", "family-a", 100, "draft-a-v1");
+        const retry = await save("quote-a-v1-retry", "family-a", 999, "draft-a-v1");
         const second = await save("quote-a-v2", "family-a", 200);
         const alternate = await save("quote-b-v1", "family-b", 300);
+        assert.equal(first.costing_versions.length, 1);
+        assert.equal(retry.costing_versions.length, 1);
+        assert.equal(retry.costing_versions[0].quote.totals.amount, 100);
         assert.deepEqual(
           second.costing_versions.map((version) => version.version),
           [1, 2],
         );
         assert.equal(second.costing_versions[0].quote.totals.amount, 100);
         assert.equal(second.costing_versions[1].quote.totals.amount, 200);
-        assert.equal(alternate.costing_versions[2].version, 1);
+        assert.equal(alternate.costing_versions[2].version, 3);
         assert.equal(alternate.costing_versions[2].quote.family_id, "family-b");
         assert.equal(alternate.costing_versions[2].quote.prepared_by_employee_id, ownerId);
       },

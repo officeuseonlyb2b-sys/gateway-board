@@ -4,13 +4,16 @@ import { addDaysISO, inr } from "@/lib/format";
 import { getQuotationScope } from "@/lib/query-for";
 import {
   GUIDE_LANGUAGES,
+  activitySlabsFor,
   guideConfiguredLanguages,
   guidePrimaryLanguage,
   miscRateForPax,
   useDB,
+  type Activity,
   type GuideLanguage,
 } from "@/lib/mock-store";
 import {
+  calculateMealCostingRows,
   computeMealDays,
   effectivePaxForPricing,
   getCostingPaxValues,
@@ -19,6 +22,7 @@ import {
   hotelsMarkup,
   landGst,
   landMarkup,
+  mealCostingTotal,
   mealPlanCoverage,
   transportLineTotal,
 } from "@/lib/wizard/calc";
@@ -49,6 +53,7 @@ import {
 import {
   hotelSelectionForDay,
   type HotelOption,
+  type ActivityLine,
   type LandReviewDisplaySelection,
   type QuoteDraft,
   type RoutingDay,
@@ -74,6 +79,103 @@ const grid =
   "w-full border-separate border-spacing-0 border-l border-t border-[#d7e2ed] text-[10px] text-[#1a3045] [&_td]:border-b [&_td]:border-r [&_td]:border-[#d7e2ed] [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-r [&_th]:border-[#d7e2ed] [&_th]:px-2 [&_th]:py-1.5";
 const money = (value?: number) => (value == null || !Number.isFinite(value) ? "—" : inr(value));
 const gross = (base: number, markup: number, gst: number) => base * (1 + markup) * (1 + gst);
+
+/**
+ * Step 7 persists the selected activity's active rate on the draft line. The
+ * included review may show the activity's slab schedule, but it must not turn
+ * overlapping master rows into additional selections. Master slabs have no
+ * variant label, so one row per traveller-specific Pax range is the only
+ * unambiguous presentation; the active range is anchored to the saved rate.
+ */
+export function includedActivitySellingRows(
+  draft: QuoteDraft,
+  line: ActivityLine,
+  activity: Activity,
+  pax: number,
+) {
+  const slabs = activitySlabsFor(activity, draft.traveler_type || "indian")
+    .filter(
+      (slab) =>
+        Number.isFinite(slab.from_pax) &&
+        Number.isFinite(slab.to_pax) &&
+        Number.isFinite(slab.price) &&
+        slab.from_pax > 0 &&
+        slab.to_pax >= slab.from_pax,
+    )
+    .sort((left, right) => left.from_pax - right.from_pax);
+
+  if (line.pricing_mode === "slab" || slabs.length) {
+    const schedule = slabs.length
+      ? slabs.map((slab) => ({
+          id: slab.id,
+          from_pax: slab.from_pax,
+          to_pax: slab.to_pax,
+          price: slab.price,
+        }))
+      : optionalActivitySellingRows(
+          draft,
+          activity,
+          draft.traveler_type || "indian",
+          pax,
+        ).flatMap((row) =>
+          row.rate_basis === "custom_slab" && row.min_pax && row.max_pax
+            ? [{ id: row.id, from_pax: row.min_pax, to_pax: row.max_pax, price: row.base_rate }]
+            : [],
+        );
+    const byRange = new Map<string, (typeof schedule)[number]>();
+    schedule.forEach((slab) => {
+      const key = `${slab.from_pax}-${slab.to_pax}`;
+      const savedRateMatch =
+        pax >= slab.from_pax && pax <= slab.to_pax && slab.price === line.rate;
+      if (!byRange.has(key) || savedRateMatch) byRange.set(key, slab);
+    });
+
+    return [...byRange.values()].map((slab) => {
+      const isActiveRange = pax >= slab.from_pax && pax <= slab.to_pax;
+      const base = isActiveRange ? line.rate : slab.price;
+      const commercial = applyLandCommercials(draft, base);
+      return {
+        id: `${slab.from_pax}-${slab.to_pax}`,
+        min_pax: slab.from_pax,
+        max_pax: slab.to_pax,
+        base_rate: base,
+        rate_basis: "custom_slab" as const,
+        markup: commercial.markup,
+        gst: commercial.gst,
+        selling_price: commercial.final,
+      };
+    });
+  }
+
+  const commercial = applyLandCommercials(draft, line.rate);
+  return [
+    {
+      id: "selected",
+      base_rate: line.rate,
+      rate_basis: activity.pricing_type === "per_person" ? ("per_person" as const) : ("fixed_group" as const),
+      markup: commercial.markup,
+      gst: commercial.gst,
+      selling_price: commercial.final,
+    },
+  ];
+}
+
+// Kept pure so day/activity row spans are derived from the exact pricing rows
+// that the table renders, never from the number of selected activities.
+export function includedActivityDayGroups(draft: QuoteDraft, activities: Activity[], pax: number) {
+  const included = draft.activities.filter((line) => line.inclusion_status !== "optional");
+  return draft.routing.flatMap((route) => {
+    const dayActivities = included.flatMap((line) => {
+      if (!(line.from_routing_days ?? []).includes(route.day)) return [];
+      const master = activities.find((item) => item.id === line.activity_id);
+      if (!master) return [];
+      const rows = includedActivitySellingRows(draft, line, master, pax);
+      return rows.length ? [{ line, master, rows }] : [];
+    });
+    const rowSpan = dayActivities.reduce((total, activity) => total + activity.rows.length, 0);
+    return rowSpan > 0 ? [{ route, activities: dayActivities, rowSpan }] : [];
+  });
+}
 
 /** Keep the calculation input identity stable when only Step 9 presentation
  * choices (or the autosave timestamp) changed. All pricing fields retain their
@@ -682,17 +784,26 @@ function MiscReview({ draft }: { draft: QuoteDraft }) {
           <tbody>
             {draft.misc.flatMap((line, lineIndex) => {
               const master = db.miscellaneous_items.find((item) => item.id === line.item_id);
-              const slabs = line.pax_ranges?.length
-                ? line.pax_ranges
-                : [
-                    {
-                      id: "active",
-                      from_pax: pax,
-                      to_pax: pax,
-                      rate: miscRateForPax(master ?? ({ rate: line.rate } as never), pax, line.qty)
-                        .total,
-                    },
-                  ];
+              const basis =
+                line.rate_basis ?? (line.unit === "per_person" ? "per_person" : "fixed_range");
+              const slabs =
+                basis !== "per_person" && line.pax_ranges?.length
+                  ? line.pax_ranges
+                  : [
+                      {
+                        id: "active",
+                        from_pax: pax,
+                        to_pax: pax,
+                        rate:
+                          basis === "per_person"
+                            ? line.rate
+                            : miscRateForPax(
+                                master ?? ({ rate: line.rate } as never),
+                                pax,
+                                line.qty,
+                              ).total,
+                      },
+                    ];
               return slabs.map((slab, slabIndex) => {
                 const commercial = applyLandCommercials(draft, slab.rate);
                 return (
@@ -702,7 +813,13 @@ function MiscReview({ draft }: { draft: QuoteDraft }) {
                     <td>
                       {slab.from_pax}–{slab.to_pax}
                     </td>
-                    <td>{line.rate_basis || line.unit}</td>
+                    <td>
+                      {basis === "per_person"
+                        ? "Per Person"
+                        : basis === "foc_range"
+                          ? "Fixed Total / FOC Pax Range"
+                          : "Fixed Total / Pax Range"}
+                    </td>
                     <td className="text-right tabular-nums">{money(commercial.base)}</td>
                     <td className="text-right tabular-nums">{money(commercial.markup)}</td>
                     <td className="text-right tabular-nums">{money(commercial.gst)}</td>
@@ -726,6 +843,13 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
   const lines = draft.activities.filter(
     (line) => (line.inclusion_status === "optional") === optional,
   );
+  const includedDayGroups = optional ? [] : includedActivityDayGroups(draft, db.activities, pax);
+  const rateBasisLabel = (basis: string) =>
+    basis === "per_person"
+      ? "Per Person"
+      : basis === "fixed_group"
+        ? "Fixed Group"
+        : "Custom Pax Slabs";
   return (
     <Panel
       title={
@@ -761,7 +885,61 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
             </tr>
           </thead>
           <tbody>
-            {lines.length ? (
+            {!optional && includedDayGroups.length ? (
+              includedDayGroups.flatMap((dayGroup) =>
+                dayGroup.activities.flatMap((activity, activityIndex) =>
+                  activity.rows.map((row, slabIndex) => {
+                    const firstDayRow = activityIndex === 0 && slabIndex === 0;
+                    const firstActivityRow = slabIndex === 0;
+                    const city =
+                      db.cities.find((item) => item.id === dayGroup.route.city_id)?.name ||
+                      dayGroup.route.to_city ||
+                      "—";
+                    return (
+                      <tr
+                        key={`${dayGroup.route.day}-${activity.line.id}-${row.id}`}
+                        className={slabIndex ? "bg-[#fbfcfd]" : ""}
+                      >
+                        {firstDayRow && (
+                          <>
+                            <td rowSpan={dayGroup.rowSpan} className="align-top font-semibold">
+                              {dayGroup.route.day}
+                            </td>
+                            <td rowSpan={dayGroup.rowSpan} className="align-top">
+                              {landReviewRouteLabel(
+                                dayGroup.route,
+                                db,
+                                draft.tour_start_city || draft.departure_city,
+                              )}
+                            </td>
+                          </>
+                        )}
+                        {firstActivityRow && (
+                          <>
+                            <td rowSpan={activity.rows.length} className="align-top font-medium">
+                              {activity.master.activity_name}
+                              <div className="text-[8px] font-normal text-[#73849b]">{city}</div>
+                            </td>
+                            <td rowSpan={activity.rows.length} className="align-top text-center">
+                              {rateBasisLabel(activity.rows[0].rate_basis)}
+                            </td>
+                          </>
+                        )}
+                        <td>
+                          {row.min_pax && row.max_pax ? `${row.min_pax}–${row.max_pax}` : pax}
+                        </td>
+                        <td className="text-right tabular-nums">{money(row.base_rate)}</td>
+                        <td className="text-right tabular-nums">{money(row.markup)}</td>
+                        <td className="text-right tabular-nums">{money(row.gst)}</td>
+                        <td className="bg-[#eaf8ef] text-right font-semibold tabular-nums">
+                          {money(row.selling_price)}
+                        </td>
+                      </tr>
+                    );
+                  }),
+                ),
+              )
+            ) : lines.length ? (
               lines.flatMap((line) => {
                 const master = db.activities.find((item) => item.id === line.activity_id);
                 if (!master) return [];
@@ -846,6 +1024,14 @@ function LandReview({
     paxDisplay: draft.pax_mode === "range" ? "ranges" : "exact",
     exactPax: effectivePaxForPricing(draft),
   };
+  const daywiseFilters: LandReviewFilters = {
+    ...filters,
+    activities: false,
+    misc: false,
+    activityIncluded: false,
+    activityOptional: false,
+    miscIncluded: false,
+  };
   const changeSelection = <K extends keyof LandReviewDisplaySelection>(
     key: K,
     value: LandReviewDisplaySelection[K],
@@ -859,8 +1045,14 @@ function LandReview({
             : `Costing Mode: Exact Travellers · ${effectivePaxForPricing(draft)} Pax`}
         </div>
         {!readOnly && <LandReviewControls filters={filters} onChange={changeSelection} />}
-        <LandDaywiseReview draft={costingDraft} filters={filters} />
-        {filters.transport && <TransportReview draft={costingDraft} />}
+        <LandDaywiseReview draft={costingDraft} filters={daywiseFilters} />
+        {(costingDraft.transport_options?.length ?? 0) > 0 && (
+          <TransportReview draft={costingDraft} />
+        )}
+        {costingDraft.misc.length > 0 && <MiscReview draft={costingDraft} />}
+        {costingDraft.activities.some((line) => line.inclusion_status !== "optional") && (
+          <ActivitiesReview draft={costingDraft} />
+        )}
       </div>
     </Section>
   );
@@ -1137,71 +1329,158 @@ function AccommodationReview({
 
 function SeparateMealsReview({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const rows = useMemo(() => computeMealDays(draft, db, "A").rows, [draft, db]);
-  const finalValue = (value: number) => gross(value, hotelsMarkup(draft), hotelsGst(draft));
-  const lunch = rows
-    .filter((row) => row.meal_type === "Lunch")
-    .reduce((sum, row) => sum + row.per_person, 0);
-  const dinner = rows
-    .filter((row) => row.meal_type === "Dinner")
-    .reduce((sum, row) => sum + row.per_person, 0);
+  const rows = useMemo(() => calculateMealCostingRows(draft, db, "A"), [draft, db]);
+  const includedLunch = mealCostingTotal(draft, rows, "Lunch", "included");
+  const includedDinner = mealCostingTotal(draft, rows, "Dinner", "included");
+  const optionalLunch = mealCostingTotal(draft, rows, "Lunch", "optional");
+  const optionalDinner = mealCostingTotal(draft, rows, "Dinner", "optional");
+  const includedRows = rows.filter(
+    (row) => row.status === "included" || row.status === "hotel_plan",
+  );
+  const optionalRows = rows.filter((row) => row.status === "optional");
 
   return (
     <Section number={3} title="Meals — Separate Meals Review">
-      <div className="space-y-2 p-2">
-        <Panel
-          title="Selected Lunch / Dinner"
-          helper="Final selling values from the shared meal-costing output"
-        >
-          {rows.length ? (
-            <div className="overflow-x-auto">
-              <table className={`${grid} min-w-[760px]`}>
-                <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]">
-                  <tr>
-                    <th>Day</th>
-                    <th>Date</th>
-                    <th className="text-left">City</th>
-                    <th className="text-left">Meal / Venue</th>
-                    <th className="text-right">Final Selling PP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
-                      <td>{row.day}</td>
-                      <td>{row.date}</td>
-                      <td>{row.city}</td>
-                      <td>
-                        {row.meal_type} · {row.label}
-                      </td>
-                      <td className="text-right tabular-nums">
-                        {money(finalValue(row.per_person))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-[#eaf8ef] font-semibold text-[#103353]">
-                  {lunch > 0 && (
+      <div className="space-y-3 p-2">
+        <div className="grid gap-2 lg:grid-cols-2">
+          {(
+            [
+              ["Lunch", includedLunch],
+              ["Dinner", includedDinner],
+            ] as const
+          ).map(([meal, total]) => (
+            <Panel
+              key={meal}
+              title={`Included ${meal}`}
+              helper="Included meals only; Hotel Plan coverage is not charged again"
+            >
+              <div className="overflow-x-auto">
+                <table className={`${grid} min-w-[760px]`}>
+                  <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]">
                     <tr>
-                      <td colSpan={4}>Lunch PP</td>
-                      <td className="text-right tabular-nums">{money(finalValue(lunch))}</td>
+                      <th>Day</th>
+                      <th>Date</th>
+                      <th>City</th>
+                      <th className="text-left">Meal / Venue</th>
+                      <th className="text-right">Base Rate</th>
+                      <th className="text-right">Pax</th>
+                      <th className="text-right">Included Cost</th>
                     </tr>
-                  )}
-                  {dinner > 0 && (
+                  </thead>
+                  <tbody>
+                    {includedRows
+                      .filter((row) => row.meal_type === meal)
+                      .map((row) => (
+                        <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
+                          <td>{row.day}</td>
+                          <td>{row.date}</td>
+                          <td>{row.city}</td>
+                          <td>{row.label}</td>
+                          <td className="text-right">
+                            {row.status === "hotel_plan" ? "—" : money(row.per_person)}
+                          </td>
+                          <td className="text-right">{row.pax}</td>
+                          <td className="text-right">
+                            {row.status === "hotel_plan"
+                              ? "Included in Hotel Plan"
+                              : money(row.total)}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                  <tfoot className="bg-[#eaf8ef] font-semibold text-[#103353]">
                     <tr>
-                      <td colSpan={4}>Dinner PP</td>
-                      <td className="text-right tabular-nums">{money(finalValue(dinner))}</td>
+                      <td colSpan={6}>Base {meal} Total</td>
+                      <td className="text-right">{money(total.base_total)}</td>
                     </tr>
-                  )}
-                </tfoot>
-              </table>
-            </div>
-          ) : (
-            <div className="p-3 text-[10px] text-[#73849b]">
-              No separately selected Lunch or Dinner.
-            </div>
-          )}
-        </Panel>
+                    <tr>
+                      <td colSpan={6}>Markup</td>
+                      <td className="text-right">{money(total.markup)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6}>GST</td>
+                      <td className="text-right">{money(total.gst)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6}>Final Included {meal} Total</td>
+                      <td className="text-right">{money(total.final_total)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6}>Per Person</td>
+                      <td className="text-right">{money(total.per_person)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Panel>
+          ))}
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          {(
+            [
+              ["Lunch", optionalLunch],
+              ["Dinner", optionalDinner],
+            ] as const
+          ).map(([meal, total]) => (
+            <Panel
+              key={meal}
+              title={`Optional ${meal} — Additional Sale`}
+              helper="Not included in package meal totals"
+            >
+              {optionalRows.some((row) => row.meal_type === meal) ? (
+                <div className="overflow-x-auto">
+                  <table className={`${grid} min-w-[760px]`}>
+                    <thead className="bg-amber-50 text-[9px] uppercase text-amber-900">
+                      <tr>
+                        <th>Day</th>
+                        <th>Date</th>
+                        <th>City</th>
+                        <th className="text-left">Meal / Venue</th>
+                        <th className="text-right">Base</th>
+                        <th className="text-right">Pax</th>
+                        <th className="text-right">Final Selling Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {optionalRows
+                        .filter((row) => row.meal_type === meal)
+                        .map((row) => (
+                          <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
+                            <td>{row.day}</td>
+                            <td>{row.date}</td>
+                            <td>{row.city}</td>
+                            <td>{row.label}</td>
+                            <td className="text-right">{money(row.total)}</td>
+                            <td className="text-right">{row.pax}</td>
+                            <td className="text-right">
+                              {money(gross(row.total, hotelsMarkup(draft), hotelsGst(draft)))}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                    <tfoot className="border-t bg-amber-50 font-semibold">
+                      {[
+                        ["Base Total", total.base_total],
+                        ["Markup", total.markup],
+                        ["GST", total.gst],
+                        [`Optional ${meal} Final Selling Price`, total.final_total],
+                      ].map(([label, value]) => (
+                        <tr key={String(label)}>
+                          <td colSpan={6}>{label}</td>
+                          <td className="text-right">{money(Number(value))}</td>
+                        </tr>
+                      ))}
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-3 text-[10px] text-[#73849b]">
+                  No optional {meal.toLowerCase()} selected.
+                </div>
+              )}
+            </Panel>
+          ))}
+        </div>
       </div>
     </Section>
   );

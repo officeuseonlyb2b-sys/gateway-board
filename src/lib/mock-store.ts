@@ -98,6 +98,9 @@ export interface RatePlan {
   meal_plan: MealPlan;
   double_rate: number;
   single_rate: number;
+  /** Import/editor metadata: a blank source cell is not a contracted ₹0 rate. */
+  double_rate_missing?: boolean;
+  single_rate_missing?: boolean;
   quad_rate?: number | null;
   extra_bed_rate: number;
   cwb_rate?: number | null;

@@ -90,19 +90,23 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
     }
     const seasons: SeasonBlock[] = [];
     for (const grp of groups.values()) {
-      const ep = grp.find((p) => p.meal_plan === "EP");
-      const cp = grp.find((p) => p.meal_plan === "CP");
-      const map = grp.find((p) => p.meal_plan === "MAP");
-      const ap = grp.find((p) => p.meal_plan === "AP");
-      const base = grp[0];
+      const latest = (meal: RatePlan["meal_plan"]) =>
+        grp
+          .filter((p) => p.meal_plan === meal)
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+      const ep = latest("EP");
+      const cp = latest("CP");
+      const map = latest("MAP");
+      const ap = latest("AP");
+      const base = [...grp].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
       seasons.push({
         season_label: base.season_label ?? "",
         validity_start: base.validity_start,
         validity_end: base.validity_end,
-        ep_single: s(ep?.single_rate), ep_double: s(ep?.double_rate),
-        cp_single: s(cp?.single_rate), cp_double: s(cp?.double_rate),
-        map_single: s(map?.single_rate), map_double: s(map?.double_rate),
-        ap_single: s(ap?.single_rate), ap_double: s(ap?.double_rate),
+        ep_single: ep?.single_rate_missing ? "" : s(ep?.single_rate), ep_double: ep?.double_rate_missing ? "" : s(ep?.double_rate),
+        cp_single: cp?.single_rate_missing ? "" : s(cp?.single_rate), cp_double: cp?.double_rate_missing ? "" : s(cp?.double_rate),
+        map_single: map?.single_rate_missing ? "" : s(map?.single_rate), map_double: map?.double_rate_missing ? "" : s(map?.double_rate),
+        ap_single: ap?.single_rate_missing ? "" : s(ap?.single_rate), ap_double: ap?.double_rate_missing ? "" : s(ap?.double_rate),
         has_quad: !!(ep?.quad_rate || cp?.quad_rate || map?.quad_rate || ap?.quad_rate),
         ep_quad: s(ep?.quad_rate ?? ""), cp_quad: s(cp?.quad_rate ?? ""), map_quad: s(map?.quad_rate ?? ""), ap_quad: s(ap?.quad_rate ?? ""),
         extra_bed: s(base.extra_bed_rate),
@@ -128,7 +132,8 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
   });
 }
 
-// Persist rooms+seasons for a hotel: wipes previous rooms/plans then re-creates.
+// Reconcile room/season/meal records while retaining stable IDs and values omitted
+// from the editor. Removed rooms/seasons are still removed when explicitly deleted.
 export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
   const num = (v: string) => {
     const n = parseFloat(v);
@@ -141,43 +146,106 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
     return Number.isFinite(n) ? n : null;
   };
 
-  const existing = db.get().room_categories.filter((r) => r.hotel_id === hotelId);
-  for (const r of existing) db.deleteRoom(r.id);
-
+  const existingRooms = db.get().room_categories.filter((r) => r.hotel_id === hotelId);
+  const retainedRoomIds = new Set<string>();
   for (const r of rooms) {
-    const room = db.addRoom(hotelId, r.name.trim());
-    const plans = r.seasons.flatMap((sn) => {
-      const single = { EP: num(sn.ep_single), CP: num(sn.cp_single), MAP: num(sn.map_single), AP: num(sn.ap_single) };
-      const dbl = { EP: num(sn.ep_double), CP: num(sn.cp_double), MAP: num(sn.map_double), AP: num(sn.ap_double) };
-      const quad = { EP: numOrNull(sn.ep_quad), CP: numOrNull(sn.cp_quad), MAP: numOrNull(sn.map_quad), AP: numOrNull(sn.ap_quad) };
-      return MEAL_PLANS.map((mp) => ({
-        room_category_id: room.id,
-        validity_start: sn.validity_start,
-        validity_end: sn.validity_end,
-        season_label: sn.season_label.trim() || "Season",
-        meal_plan: mp,
-        double_rate: dbl[mp],
-        single_rate: single[mp],
-        quad_rate: sn.has_quad ? quad[mp] : null,
-        extra_bed_rate: num(sn.extra_bed),
-        cwb_rate: sn.cwb_mode === "amount" ? numOrNull(sn.cwb_amount) : null,
-        cwb_rule_text: sn.cwb_mode === "rule" ? (sn.cwb_rule.trim() || null) : null,
-        lunch_rate: numOrNull(sn.lunch),
-        dinner_rate: numOrNull(sn.dinner),
-        extra_breakfast_rate: numOrNull(sn.extra_breakfast),
-        xmas_supplement: numOrNull(sn.xmas),
-        xmas_supplement_type: sn.xmas_type,
-        xmas_date_from: sn.xmas_date_from || null,
-        xmas_date_to: sn.xmas_date_to || null,
-        newyear_supplement: numOrNull(sn.newyear),
-        newyear_supplement_type: sn.newyear_type,
-        newyear_date_from: sn.newyear_date_from || null,
-        newyear_date_to: sn.newyear_date_to || null,
-        remarks: sn.remarks.trim() || null,
-        include_in_quote: sn.include_in_quote !== false,
-      }));
+    const existingRoom = existingRooms.find((candidate) => candidate.id === r.id) ??
+      existingRooms.find(
+        (candidate) => candidate.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+          r.name.trim().replace(/\s+/g, " ").toLowerCase(),
+      );
+    const room = existingRoom
+      ? (db.updateRoom(existingRoom.id, r.name.trim()), existingRoom)
+      : db.addRoom(hotelId, r.name.trim());
+    retainedRoomIds.add(room.id);
+    const existingPlans = db.get().rate_plans.filter((plan) => plan.room_category_id === room.id);
+    const retainedPlanIds = new Set<string>();
+    r.seasons.forEach((sn) => {
+      const single = { EP: sn.ep_single, CP: sn.cp_single, MAP: sn.map_single, AP: sn.ap_single };
+      const dbl = { EP: sn.ep_double, CP: sn.cp_double, MAP: sn.map_double, AP: sn.ap_double };
+      const quad = { EP: sn.ep_quad, CP: sn.cp_quad, MAP: sn.map_quad, AP: sn.ap_quad };
+      const seasonLabel = sn.season_label.trim() || "Season";
+      MEAL_PLANS.forEach((mp) => {
+        const existing = existingPlans
+          .filter(
+            (plan) =>
+              plan.validity_start === sn.validity_start &&
+              plan.validity_end === sn.validity_end &&
+              plan.season_label === seasonLabel &&
+              plan.meal_plan === mp,
+          )
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        const plan = {
+          room_category_id: room.id,
+          validity_start: sn.validity_start,
+          validity_end: sn.validity_end,
+          season_label: seasonLabel,
+          meal_plan: mp,
+          double_rate: dbl[mp].trim() ? num(dbl[mp]) : existing?.double_rate ?? 0,
+          single_rate: single[mp].trim() ? num(single[mp]) : existing?.single_rate ?? 0,
+          double_rate_missing: dbl[mp].trim()
+            ? false
+            : existing?.double_rate_missing ?? !existing,
+          single_rate_missing: single[mp].trim()
+            ? false
+            : existing?.single_rate_missing ?? !existing,
+          quad_rate: sn.has_quad
+            ? quad[mp].trim()
+              ? numOrNull(quad[mp])
+              : existing?.quad_rate ?? null
+            : null,
+          extra_bed_rate: sn.extra_bed.trim() ? num(sn.extra_bed) : existing?.extra_bed_rate ?? 0,
+          cwb_rate:
+            sn.cwb_mode === "amount"
+              ? sn.cwb_amount.trim()
+                ? numOrNull(sn.cwb_amount)
+                : existing?.cwb_rate ?? null
+              : null,
+          cwb_rule_text:
+            sn.cwb_mode === "rule"
+              ? sn.cwb_rule.trim() || existing?.cwb_rule_text || null
+              : null,
+          lunch_rate: sn.lunch.trim() ? numOrNull(sn.lunch) : existing?.lunch_rate ?? null,
+          dinner_rate: sn.dinner.trim() ? numOrNull(sn.dinner) : existing?.dinner_rate ?? null,
+          extra_breakfast_rate: sn.extra_breakfast.trim()
+            ? numOrNull(sn.extra_breakfast)
+            : existing?.extra_breakfast_rate ?? null,
+          xmas_supplement: sn.xmas.trim() ? numOrNull(sn.xmas) : existing?.xmas_supplement ?? null,
+          xmas_supplement_type: sn.xmas_type,
+          xmas_date_from: sn.xmas_date_from || existing?.xmas_date_from || null,
+          xmas_date_to: sn.xmas_date_to || existing?.xmas_date_to || null,
+          newyear_supplement: sn.newyear.trim()
+            ? numOrNull(sn.newyear)
+            : existing?.newyear_supplement ?? null,
+          newyear_supplement_type: sn.newyear_type,
+          newyear_date_from: sn.newyear_date_from || existing?.newyear_date_from || null,
+          newyear_date_to: sn.newyear_date_to || existing?.newyear_date_to || null,
+          remarks: sn.remarks.trim() || existing?.remarks || null,
+          include_in_quote: sn.include_in_quote !== false,
+        };
+        if (existing) {
+          retainedPlanIds.add(existing.id);
+          db.updateRatePlan(existing.id, plan);
+        } else {
+          db.addRatePlans([plan]);
+          const added = db.get().rate_plans.find(
+            (candidate) =>
+              candidate.room_category_id === room.id &&
+              candidate.validity_start === sn.validity_start &&
+              candidate.validity_end === sn.validity_end &&
+              candidate.season_label === seasonLabel &&
+              candidate.meal_plan === mp,
+          );
+          if (added) retainedPlanIds.add(added.id);
+        }
+      });
     });
-    db.addRatePlans(plans);
+    for (const plan of existingPlans) {
+      if (!retainedPlanIds.has(plan.id)) db.deleteRatePlan(plan.id);
+    }
+  }
+  for (const room of existingRooms) {
+    if (!retainedRoomIds.has(room.id)) db.deleteRoom(room.id);
   }
 }
 

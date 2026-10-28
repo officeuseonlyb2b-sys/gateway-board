@@ -61,10 +61,12 @@ function HotelsListPage() {
     try {
       const result = await importExcel(file, (p) => setProgress(p));
       setSummary(result);
-      toast.success(`Import complete — ${result.plansCreated} rate plans created.`);
+      toast.success(
+        `Import complete — ${result.plansCreated} rate plans created, ${result.plansUpdated} updated.`,
+      );
       notify.success(
         "Import Complete",
-        `Imported ${result.hotelsAdded} hotels, ${result.roomsAdded} rooms, ${result.plansCreated} rate plans.`,
+        `Hotels: ${result.hotelsAdded} created / ${result.hotelsUpdated} updated; rooms: ${result.roomsAdded} created; rate plans: ${result.plansCreated} created / ${result.plansUpdated} updated.`,
         "/hotels",
         "import",
       );
@@ -433,10 +435,14 @@ function HotelsListPage() {
                 <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
                   <div className="font-semibold text-emerald-800 mb-1">Import complete</div>
                   <div className="text-emerald-900/80 text-xs space-y-0.5">
-                    <div>{summary.hotelsAdded} hotels added</div>
-                    <div>{summary.roomsAdded} rooms added</div>
+                    <div>{summary.hotelsAdded} hotels created</div>
+                    <div>{summary.hotelsUpdated} hotels updated</div>
+                    <div>{summary.roomsAdded} room categories created</div>
                     <div>{summary.plansCreated} rate plans created</div>
-                    <div>{summary.errors.length} errors</div>
+                    <div>{summary.plansUpdated} rate plans updated</div>
+                    <div>{summary.rateCellsImported} populated rate cells read</div>
+                    <div>{summary.skippedRows} rows skipped</div>
+                    <div>{summary.errors.length} row errors / missing fields</div>
                   </div>
                 </div>
                 {summary.errors.length > 0 && (

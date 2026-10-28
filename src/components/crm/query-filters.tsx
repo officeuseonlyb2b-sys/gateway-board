@@ -60,6 +60,64 @@ const fy = (value: string) => {
 };
 const unique = (values: string[]) => [...new Set(values.filter(Boolean))].sort();
 
+// Exact business-ID lookup is intentionally date-independent. All access,
+// ownership, stage, advisor and advanced predicates continue to apply.
+// eslint-disable-next-line react-refresh/only-export-components
+export function isExactCrmQueryIdSearch(queries: CrmQuery[], search: string) {
+  const term = search.trim().toLocaleLowerCase();
+  return Boolean(term && queries.some((query) => query.query_id.toLocaleLowerCase() === term));
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function filterCrmQueries(
+  queries: CrmQuery[],
+  filters: QueryFilterState,
+  now = new Date(),
+) {
+  const exactQueryId = isExactCrmQueryIdSearch(queries, filters.search);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const next7 = new Date(today.getTime() + 7 * 86400000);
+  return queries.filter((query) => {
+    const haystack = [
+      query.query_id,
+      query.lead_id,
+      query.customer,
+      query.contact_person,
+      query.destination,
+      query.owner,
+      query.program_name,
+      query.mobile,
+      query.email,
+    ]
+      .join(" ")
+      .toLowerCase();
+    const receivedDateKey = kolkataDateKey(query.created_at);
+    const due = query.followup_due ? new Date(query.followup_due) : null;
+    const dueMatch =
+      filters.dueWindow === "all" ||
+      (filters.dueWindow === "overdue" && due && due < now) ||
+      (filters.dueWindow === "today" && due && due.toDateString() === today.toDateString()) ||
+      (filters.dueWindow === "next7" && due && due >= today && due <= next7);
+    return (
+      (!filters.search || haystack.includes(filters.search.trim().toLowerCase())) &&
+      (filters.owner === "all" || query.owner === filters.owner) &&
+      (filters.stage === "all" || query.stage === filters.stage) &&
+      (filters.financialYear === "all" || fy(query.created_at) === filters.financialYear) &&
+      (!filters.receivedMonths.length ||
+        filters.receivedMonths.includes(monthKey(query.created_at))) &&
+      (exactQueryId || !filters.dateFrom || receivedDateKey >= filters.dateFrom) &&
+      (exactQueryId || !filters.dateTo || receivedDateKey <= filters.dateTo) &&
+      (filters.travelMonth === "all" || monthKey(query.travel_start) === filters.travelMonth) &&
+      (filters.customer === "all" || query.customer === filters.customer) &&
+      (filters.costingBasis === "all" ||
+        (query.costing_basis || query.travel_type) === filters.costingBasis) &&
+      (filters.priority === "all" || query.priority === filters.priority) &&
+      Boolean(dueMatch)
+    );
+  });
+}
+
 // Shared with every Query view so one filter state model drives all counters and lists.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useQueryFilters(queries: CrmQuery[], initialDuration: "all" | "today" = "all") {
@@ -76,54 +134,18 @@ export function useQueryFilters(queries: CrmQuery[], initialDuration: "all" | "t
     }),
     [queries],
   );
-  const filtered = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const next7 = new Date(today.getTime() + 7 * 86400000);
-    return queries.filter((query) => {
-      const haystack = [
-        query.query_id,
-        query.lead_id,
-        query.customer,
-        query.contact_person,
-        query.destination,
-        query.owner,
-        query.program_name,
-        query.mobile,
-        query.email,
-      ]
-        .join(" ")
-        .toLowerCase();
-      const receivedDateKey = kolkataDateKey(query.created_at);
-      const due = query.followup_due ? new Date(query.followup_due) : null;
-      const dueMatch =
-        filters.dueWindow === "all" ||
-        (filters.dueWindow === "overdue" && due && due < now) ||
-        (filters.dueWindow === "today" && due && due.toDateString() === today.toDateString()) ||
-        (filters.dueWindow === "next7" && due && due >= today && due <= next7);
-      return (
-        (!filters.search || haystack.includes(filters.search.toLowerCase())) &&
-        (filters.owner === "all" || query.owner === filters.owner) &&
-        (filters.stage === "all" || query.stage === filters.stage) &&
-        (filters.financialYear === "all" || fy(query.created_at) === filters.financialYear) &&
-        (!filters.receivedMonths.length ||
-          filters.receivedMonths.includes(monthKey(query.created_at))) &&
-        (!filters.dateFrom || receivedDateKey >= filters.dateFrom) &&
-        (!filters.dateTo || receivedDateKey <= filters.dateTo) &&
-        (filters.travelMonth === "all" || monthKey(query.travel_start) === filters.travelMonth) &&
-        (filters.customer === "all" || query.customer === filters.customer) &&
-        (filters.costingBasis === "all" ||
-          (query.costing_basis || query.travel_type) === filters.costingBasis) &&
-        (filters.priority === "all" || query.priority === filters.priority) &&
-        Boolean(dueMatch)
-      );
-    });
-  }, [queries, filters]);
+  const dateScopeBypassed = useMemo(
+    () =>
+      Boolean(filters.dateFrom || filters.dateTo) &&
+      isExactCrmQueryIdSearch(queries, filters.search),
+    [queries, filters.dateFrom, filters.dateTo, filters.search],
+  );
+  const filtered = useMemo(() => filterCrmQueries(queries, filters), [queries, filters]);
   return {
     filters,
     setFilters,
     filtered,
+    dateScopeBypassed,
     options,
     reset: () => setFilters(initial(initialDuration)),
   };

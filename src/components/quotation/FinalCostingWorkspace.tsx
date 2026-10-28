@@ -4,6 +4,7 @@ import { addDaysISO, inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import { getQuotationScope } from "@/lib/query-for";
 import {
+  calculateMealCostingRows,
   computeMealDays,
   dynamicAccommodationBreakdown,
   effectiveAccommodationPax,
@@ -13,6 +14,8 @@ import {
   hotelsMarkup,
 } from "@/lib/wizard/calc";
 import { buildLandPart, buildRateSheet } from "@/lib/wizard/costsheet";
+import { guideLanguageCostingForPax, guideServicesForPax } from "@/lib/wizard/guide-costing";
+import { applyLandCommercials } from "@/lib/wizard/land-pricing";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
 import { hotelSelectionForDay, type HotelOption, type QuoteDraft } from "@/lib/wizard/types";
 import { CommercialPackageMatrix } from "./CommercialPackageMatrix";
@@ -541,29 +544,53 @@ function LandCommercialMatrix({ draft }: { draft: QuoteDraft }) {
 
 function OptionalServices({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const optionalGuides = draft.guides.filter((item) => item.inclusion_status === "optional");
+  const guideSlabs = [
+    { label: "1–6 Pax", pax: 6 },
+    { label: "7–14 Pax", pax: 14 },
+    { label: "15+ Pax", pax: 15 },
+  ];
+  const guideRows = guideSlabs.flatMap((slab) =>
+    ["Hindi", "English", "Language"].flatMap((language) => {
+      const costing = guideLanguageCostingForPax(draft, db, slab.pax, language as "Hindi" | "English" | "Language");
+      return costing.optionalRows.map((row) => ({
+        kind: "Guide",
+        group: `${language === "Language" ? "Other Language" : language} · ${slab.label}`,
+        label: `${language === "Language" ? "Other Language" : language} · ${slab.label} · Day ${row.day} · ${row.tour} · ${row.guideName}`,
+        base: row.base,
+      }));
+    }),
+  );
   const optionalActivities = draft.activities.filter(
     (item) => item.inclusion_status === "optional",
   );
-  const optionalMeals = Object.values(draft.meal_selections_by_option ?? {}).flatMap((selection) =>
-    Object.values(selection).flatMap((day) =>
-      [day.lunch, day.dinner].filter((item) => item?.inclusion_status === "optional"),
-    ),
+  const options = new Set([
+    ...Object.keys(draft.meal_selections_by_option ?? {}),
+    ...(draft.meal_selections ? ["A"] : []),
+  ]);
+  const optionalMeals = [...options].flatMap((key) =>
+    calculateMealCostingRows(draft, db, key as "A" | "B" | "C" | "D")
+      .filter((row) => row.status === "optional")
+      .map((row) => ({
+        kind: "Meal",
+        group: `Option ${key} · Optional ${row.meal_type}`,
+        label: `Option ${key} · Day ${row.day} · ${row.date} · ${row.meal_type} · ${row.label}`,
+        base: row.total,
+      })),
   );
   const rows = [
-    ...optionalGuides.map((item) => [
-      "Guide",
-      db.guides.find((guide) => guide.id === item.guide_id)?.name || "Guide",
-      item.rate,
-    ]),
-    ...optionalActivities.map((item) => [
-      "Activity",
-      db.activities.find((activity) => activity.id === item.activity_id)?.activity_name ||
-        "Activity",
-      item.rate,
-    ]),
-    ...optionalMeals.map((item) => ["Meal", item?.label || "Meal", item?.per_person_rate || 0]),
+    ...guideRows,
+    ...optionalActivities.map((item) => ({
+      kind: "Activity",
+      group: "Optional Activities",
+      label: db.activities.find((activity) => activity.id === item.activity_id)?.activity_name || "Activity",
+      base: item.rate * item.qty,
+    })),
+    ...optionalMeals,
   ];
+  const groupTotals = Array.from(
+    rows.reduce((groups, row) => groups.set(row.group, (groups.get(row.group) ?? 0) + row.base), new Map<string, number>()),
+    ([group, base]) => ({ group, commercial: applyLandCommercials(draft, base, 0.05) }),
+  );
   return (
     <Section title="Optional Services — Additional Sale">
       <div className="overflow-x-auto">
@@ -572,26 +599,41 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
             <tr>
               <th className="text-left">Type</th>
               <th className="text-left">Service</th>
-              <th className="text-right">Selling Price</th>
+              <th className="text-right">Base Total</th>
+              <th className="text-right">Markup</th>
+              <th className="text-right">GST</th>
+              <th className="text-right">Final Selling Price</th>
             </tr>
           </thead>
           <tbody>
             {rows.length ? (
-              rows.map(([type, label, value], index) => (
-                <tr key={`${type}-${label}-${index}`}>
-                  <td>{type}</td>
-                  <td>{label}</td>
-                  <td className="text-right tabular-nums">{money(Number(value))}</td>
+              rows.map((row, index) => {
+                const commercial = applyLandCommercials(draft, row.base, 0.05);
+                return (
+                <tr key={`${row.kind}-${row.label}-${index}`}>
+                  <td>{row.kind}</td>
+                  <td>{row.label}</td>
+                  <td className="text-right tabular-nums">{money(row.base)}</td>
+                  <td className="text-right tabular-nums">{money(commercial.markup)}</td>
+                  <td className="text-right tabular-nums">{money(commercial.gst)}</td>
+                  <td className="text-right tabular-nums">{money(commercial.final)}</td>
                 </tr>
-              ))
+              );})
             ) : (
               <tr>
-                <td colSpan={3} className="text-center text-muted-foreground">
+                <td colSpan={6} className="text-center text-muted-foreground">
                   No optional services selected.
                 </td>
               </tr>
             )}
           </tbody>
+          {rows.length > 0 && (
+            <tfoot className="border-t bg-amber-50 font-semibold">
+              {groupTotals.map(({ group, commercial }) => (
+                <tr key={group}><td colSpan={2}>{group} Total</td><td className="text-right">{money(commercial.base)}</td><td className="text-right">{money(commercial.markup)}</td><td className="text-right">{money(commercial.gst)}</td><td className="text-right">{money(commercial.final)}</td></tr>
+              ))}
+            </tfoot>
+          )}
         </table>
       </div>
     </Section>

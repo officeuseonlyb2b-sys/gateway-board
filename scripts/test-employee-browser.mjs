@@ -38,6 +38,7 @@ const passwords = new Map([[adminId, adminPassword]]);
 const banned = new Set();
 const refreshTokenOwners = new Map();
 let failNextProfileRead = false;
+let profileRequestCount = 0;
 let refreshRequestCount = 0;
 let signOutRequestCount = 0;
 let sequence = 0;
@@ -160,6 +161,7 @@ await context.route("**/*", async (route) => {
     return respond({ error: "Unexpected test action" }, 400);
   }
   if (url.pathname === "/rest/v1/crm_employees") {
+    if (url.searchParams.has("data->>auth_user_id")) profileRequestCount++;
     if (failNextProfileRead && url.searchParams.has("data->>auth_user_id")) {
       failNextProfileRead = false;
       return respond({ message: "Temporary profile network failure" }, 503);
@@ -293,21 +295,33 @@ try {
   await check(
     "Temporary employee-profile request failure preserves the authenticated Super Admin session",
     async () => {
+      const profileRequestsBeforeFailure = profileRequestCount;
       failNextProfileRead = true;
       const failedProfileResponse = page.waitForResponse(
         (response) =>
           response.url().includes("/rest/v1/crm_employees") && response.status() === 503,
       );
-      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await page.reload();
       await failedProfileResponse;
-      await page.getByRole("heading", { name: "Admin Console", exact: true }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: "Employee verification temporarily unavailable",
+          exact: true,
+        })
+        .waitFor();
       assert.equal(new URL(page.url()).pathname, "/admin-console");
+      await page.waitForTimeout(300);
+      assert.equal(
+        profileRequestCount,
+        profileRequestsBeforeFailure + 1,
+        "503 does not auto-retry",
+      );
 
       const recoveredProfileResponse = page.waitForResponse(
         (response) =>
           response.url().includes("/rest/v1/crm_employees") && response.status() === 200,
       );
-      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await page.getByRole("button", { name: "Retry access check", exact: true }).click();
       await recoveredProfileResponse;
       await page.getByRole("heading", { name: "Admin Console", exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/admin-console");
@@ -538,7 +552,7 @@ try {
         new URL(response.url()).searchParams.has("data->>auth_user_id") &&
         response.status() === 200,
     );
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.getByRole("button", { name: "Retry access check", exact: true }).click();
     await profileResponse;
     await page.waitForURL("**/login");
     await waitForLoginReady();

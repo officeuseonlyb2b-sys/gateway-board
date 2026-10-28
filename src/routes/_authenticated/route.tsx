@@ -125,7 +125,7 @@ function AuthenticatedLayout() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="w-full max-w-lg rounded-2xl border bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-bold">Your session is still active</h1>
+          <h1 className="text-xl font-bold">Employee verification temporarily unavailable</h1>
           <p role="alert" className="mt-3 text-sm text-slate-600">
             {authState.profileError || "Employee access details are temporarily unavailable."}
           </p>

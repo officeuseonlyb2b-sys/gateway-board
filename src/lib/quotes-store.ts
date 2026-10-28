@@ -153,7 +153,14 @@ export interface SavedQuerySnapshot {
   bottom_line: number;
   top_line: number;
 }
-export type SavedQuoteStatus = "Generated" | "Sent" | "Superseded" | "Accepted" | "Void";
+export type SavedQuoteStatus =
+  | "In Progress"
+  | "Saved"
+  | "Generated"
+  | "Sent"
+  | "Superseded"
+  | "Accepted"
+  | "Void";
 export interface SavedQuoteAuditEvent {
   at: string;
   by: string;
@@ -169,6 +176,9 @@ export interface SavedQuote {
   quote_number: string;
   display_number?: string;
   status: SavedQuoteStatus;
+  /** Readiness at the time this immutable costing snapshot was captured. */
+  costing_complete?: boolean;
+  validation_warnings?: string[];
   saved_at: string;
   saved_by: string;
   /** Stable CRM identity. Display names are descriptive only. */

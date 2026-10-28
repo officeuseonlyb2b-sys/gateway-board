@@ -277,9 +277,45 @@ export interface HotelOption {
 /** Resolve a stay by its routing night, retaining safe support for legacy city-keyed drafts. */
 export function hotelSelectionForDay(option: HotelOption | undefined, day: RoutingDay) {
   if (!option) return undefined;
+
+  const routeIds = new Set<string>(
+    (day.city_id
+      ? [day.city_id]
+      : [day.to_city_id ?? "", ...(day.to_city_ids ?? [])]
+    ).filter(Boolean),
+  );
+  const routeHasExplicitIds = routeIds.size > 0 && [...routeIds].some((id) => !!id && id !== "");
+  const routeCityKeys = new Set<string>(
+    [day.to_city]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim().toLowerCase()),
+  );
+
+  const matchesCity = (selection: { city_id: string }) => {
+    if (!selection.city_id) return false;
+    if (routeIds.has(selection.city_id)) return true;
+    if (!routeHasExplicitIds) {
+      const selectionKey = selection.city_id.trim().toLowerCase();
+      return [...routeCityKeys].some(
+        (routeKey) =>
+          routeKey === selectionKey ||
+          routeKey.includes(selectionKey) ||
+          selectionKey.includes(routeKey),
+      );
+    }
+    return false;
+  };
+
+  const explicitMatch = option.selections.find(
+    (selection) =>
+      selection.routing_day === day.day &&
+      (matchesCity(selection) || (!selection.city_id && selection.routing_day === day.day)),
+  );
+  if (explicitMatch) return explicitMatch;
+
   return (
     option.selections.find(
-      (selection) => selection.routing_day === day.day && selection.city_id === day.city_id,
+      (selection) => selection.routing_day == null && matchesCity(selection),
     ) ??
     option.selections.find(
       (selection) => selection.routing_day == null && selection.city_id === day.city_id,
@@ -428,6 +464,11 @@ export interface QuoteDraft {
   guide_tour_disabled_by_day?: Record<number, string[]>;
   /** Explicit per-day parent Tour selections; absent days are normalized from legacy included Guide lines. */
   guide_tour_selected_by_day?: Record<number, string[]>;
+  /** Per-day, per-service, per-language Guide selection status by costing alternative slab. */
+  guide_slab_selection_by_day?: Record<
+    number,
+    Record<string, "included" | "optional" | "removed">
+  >;
   guide_day_escort?: Record<number, number>;
   guide_day_escort_enabled?: Record<number, boolean>;
   /** Routing day → Escort slab ID → base rate. Blank/zero means no Escort that day. */

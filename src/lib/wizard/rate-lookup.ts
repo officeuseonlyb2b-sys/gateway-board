@@ -1,67 +1,94 @@
-// Shared season/rate matching. Handles both:
-//  (a) exact ISO-date range match (validity_start <= date <= validity_end), and
-//  (b) year-agnostic recurring seasons — matches by month/day so that a
-//      season imported as e.g. "2022-10-01 → 2023-09-30" still matches a
-//      travel date in a later year. Also handles year-wrap seasons
-//      (start_md > end_md, e.g. "Oct 1 → Sep 30").
 import type { RatePlan } from "@/lib/mock-store";
 
-function md(iso: string): number {
-  // Encode month*100 + day for cheap comparison; ignore the year.
-  const [, m, d] = iso.split("-").map((x) => parseInt(x, 10));
-  if (!m || !d) return -1;
-  return m * 100 + d;
+/** Return a sortable calendar date without applying a timezone conversion. */
+export function calendarDateKey(value: string | null | undefined): string | null {
+  const input = (value ?? "").trim();
+  const iso = input.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+  const dmy = input.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  const year = Number(iso?.[1] ?? dmy?.[3]);
+  const month = Number(iso?.[2] ?? dmy?.[2]);
+  const day = Number(iso?.[3] ?? dmy?.[1]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > new Date(year, month, 0).getDate()) {
+    return null;
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function rangeMatches(p: RatePlan, dateISO: string): boolean {
-  // (a) exact ISO range
-  if (p.validity_start <= dateISO && p.validity_end >= dateISO) return true;
-  // (b) recurring month/day range
-  const t = md(dateISO);
-  const s = md(p.validity_start);
-  const e = md(p.validity_end);
-  if (t < 0 || s < 0 || e < 0) return false;
-  return s <= e ? t >= s && t <= e : t >= s || t <= e;
+/** Hotel eligibility is controlled solely by its inclusive saved validity dates. */
+export function ratePlanMatchesDate(
+  p: Pick<RatePlan, "validity_start" | "validity_end">,
+  stayDate: string,
+): boolean {
+  const start = calendarDateKey(p.validity_start);
+  const end = calendarDateKey(p.validity_end);
+  const date = calendarDateKey(stayDate);
+  return Boolean(start && end && date && start <= date && date <= end);
 }
 
-/** A season is expired when its Validity To date is strictly before today. */
-export function isExpiredPlan(p: RatePlan, todayISO = new Date().toISOString().slice(0, 10)): boolean {
-  return !!p.validity_end && p.validity_end < todayISO;
+/** A plan is expired only relative to the supplied calendar date. */
+export function isExpiredPlan(p: RatePlan, calendarDate: string): boolean {
+  const end = calendarDateKey(p.validity_end);
+  const date = calendarDateKey(calendarDate);
+  return Boolean(end && date && end < date);
 }
 
-/**
- * Rows usable in quotation costing: explicitly de-selected components are
- * dropped, and expired seasons are dropped whenever a non-expired season
- * exists for the same room + meal plan (legacy-only data still resolves).
- */
+/** Exclude only rate plans explicitly disabled for quotation use. */
 export function usablePlans(plans: RatePlan[]): RatePlan[] {
-  const selected = plans.filter((p) => p.include_in_quote !== false);
-  const live = selected.filter((p) => !isExpiredPlan(p));
-  const keys = new Set(live.map((p) => `${p.room_category_id}|${p.meal_plan}`));
-  return selected.filter((p) => !isExpiredPlan(p) || !keys.has(`${p.room_category_id}|${p.meal_plan}`));
+  return plans.filter((p) => p.include_in_quote !== false);
+}
+
+export function ratePlanHasPrice(plan: {
+  single_rate?: number | null;
+  double_rate?: number | null;
+  quad_rate?: number | null;
+  single_rate_missing?: boolean;
+  double_rate_missing?: boolean;
+}): boolean {
+  return (
+    (!plan.single_rate_missing && (plan.single_rate ?? 0) > 0) ||
+    (!plan.double_rate_missing && (plan.double_rate ?? 0) > 0) ||
+    (plan.quad_rate ?? 0) > 0
+  );
 }
 
 export function findRatePlan(
   plans: RatePlan[],
   room_id: string,
   meal: string,
-  dateISO: string,
+  stayDate: string,
 ): RatePlan | null {
-  const pool = usablePlans(plans).filter((p) => p.room_category_id === room_id && p.meal_plan === meal);
-  // Prefer exact-year range, then recurring month/day, then latest-updated as tiebreak.
-  const exact = pool.filter((p) => p.validity_start <= dateISO && p.validity_end >= dateISO);
-  const cands = exact.length ? exact : pool.filter((p) => rangeMatches(p, dateISO));
-  return cands.sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))[0] ?? null;
+  const candidates = usablePlans(plans).filter(
+    (plan) =>
+      plan.room_category_id === room_id &&
+      plan.meal_plan === meal &&
+      ratePlanHasPrice(plan) &&
+      ratePlanMatchesDate(plan, stayDate),
+  );
+  // Keep the existing explicit overlap rule: distinct date ranges need a
+  // master-data decision, rather than choosing an arbitrary tariff.
+  const validityRanges = new Set(
+    candidates.map(
+      (plan) => `${calendarDateKey(plan.validity_start)}|${calendarDateKey(plan.validity_end)}`,
+    ),
+  );
+  if (validityRanges.size > 1) return null;
+  return candidates.sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))[0] ?? null;
 }
 
 export function availableMealPlans(
   plans: RatePlan[],
   room_id: string,
-  dateISO?: string,
+  stayDate?: string,
 ): string[] {
   const pool = usablePlans(plans).filter((p) => p.room_category_id === room_id);
-  const filtered = dateISO ? pool.filter((p) => rangeMatches(p, dateISO)) : pool;
-  const set = new Set(filtered.map((p) => p.meal_plan));
-  // Preserve canonical order
-  return ["EP", "CP", "MAP", "AP"].filter((m) => set.has(m as never));
+  const filtered = (stayDate ? pool.filter((p) => ratePlanMatchesDate(p, stayDate)) : pool).filter(
+    ratePlanHasPrice,
+  );
+  return ["EP", "CP", "MAP", "AP"].filter((meal) =>
+    filtered.some(
+      (plan) =>
+        plan.meal_plan === meal &&
+        (!stayDate || findRatePlan(plans, room_id, meal, stayDate) !== null),
+    ),
+  );
 }

@@ -231,7 +231,14 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
         ),
       );
     } else {
-      issues.push(issue("PROGRAM_REQUIRED", "blocker", "Program", "Select or create a program."));
+      issues.push(
+        issue(
+          "PROGRAM_REQUIRED",
+          "blocker",
+          "Programme",
+          `Please select a Programme before saving Costing V${draft.intended_version || 1}.`,
+        ),
+      );
     }
   }
   if (scope.program && draft.save_program_as_new && !draft.new_program_name?.trim()) {
@@ -346,21 +353,48 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
           return;
         }
         const date = day.date || addDaysISO(draft.start_date, index);
+        const selectedHotel = db.hotels.find((item) => item.id === selection.hotel_id);
+        const blackout = selectedHotel?.blackout_ranges?.some(
+          (range) => range.from <= date && date <= range.to,
+        );
         const plan =
-          !dynamic && selection?.room_id
+          !dynamic && selection?.room_id && !blackout
             ? planForDay(
                 option,
                 day.day,
                 findRatePlan(db.rate_plans, selection.room_id, selection.meal_plan, date),
               )
             : null;
-        if (!dynamic && !plan) {
+        if (!dynamic && blackout) {
+          const city =
+            db.cities.find((item) => item.id === day.city_id)?.name ||
+            day.to_city ||
+            "Unknown city";
+          issues.push(
+            issue(
+              `HOTEL_BLACKOUT_${option.key}_${day.day}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key} (${option.category || option.label || "Accommodation"}): ${selectedHotel?.name || "Selected hotel"} is blacked out in ${city} on ${date}. Select an available hotel; a price override cannot bypass a blackout.`,
+            ),
+          );
+        }
+        if (!dynamic && !plan && !blackout) {
+          const city =
+            db.cities.find((item) => item.id === day.city_id)?.name ||
+            day.to_city ||
+            "Unknown city";
+          const hotel =
+            db.hotels.find((item) => item.id === selection.hotel_id)?.name || "selected hotel";
+          const room =
+            db.room_categories.find((item) => item.id === selection.room_id)?.name ||
+            "selected room";
           issues.push(
             issue(
               `RATE_MISSING_${option.key}_${day.day}`,
               "blocker",
               "Accommodation",
-              `Option ${option.key}: no valid contracted/manual rate is available for Day ${day.day}.`,
+              `Option ${option.key} (${option.category || option.label || "Accommodation"}): ${city} on ${date} needs a valid ${selection.meal_plan} rate for ${hotel} / ${room}. Select a valid Hotel Master rate or enter an authorized manual rate with a reason.`,
             ),
           );
         }
@@ -474,7 +508,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   const scenarioOptions = requiresAccommodation ? selectedOptions : draft.hotel_options.slice(0, 1);
   const scenarioDefs: CostScenario[] =
     draft.scenarios?.length && !draft.transport_options?.length
-      ? draft.scenarios
+      ? draft.scenarios.filter(
+          (scenario) => !requiresAccommodation || included.has(scenario.option_key),
+        )
       : scenarioOptions.flatMap((option) => {
           if (draft.transport_options?.length) {
             return draft.transport_options.map((transport) => ({

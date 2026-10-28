@@ -19,15 +19,470 @@ try {
   const masterPricing = await vite.ssrLoadModule("/src/lib/mock-store.ts");
   const landEligibility = await vite.ssrLoadModule("/src/lib/wizard/land-eligibility.ts");
   const guidePricing = await vite.ssrLoadModule("/src/lib/wizard/guide-pricing.ts");
+  const guideCosting = await vite.ssrLoadModule("/src/lib/wizard/guide-costing.ts");
   const dynamicReview = await vite.ssrLoadModule(
     "/src/components/quotation/AccommodationDynamicCostingReview.tsx",
   );
   const landDaywiseReview = await vite.ssrLoadModule(
     "/src/components/quotation/LandDaywiseReview.tsx",
   );
+  const packageStandardReview = await vite.ssrLoadModule(
+    "/src/components/quotation/PackageStandardCostingReview.tsx",
+  );
   const landReview = await vite.ssrLoadModule("/src/lib/wizard/land-review.ts");
   const landPricing = await vite.ssrLoadModule("/src/lib/wizard/land-pricing.ts");
   const mealsStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepMeals.tsx");
+  const guideStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepGuide.tsx");
+  const hotelsStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepHotels.tsx");
+  const hotelAvailability = await vite.ssrLoadModule("/src/lib/wizard/hotel-availability.ts");
+  const hotelRateLookup = await vite.ssrLoadModule("/src/lib/wizard/rate-lookup.ts");
+  const queryFilters = await vite.ssrLoadModule("/src/components/crm/query-filters.tsx");
+
+  const historicalQuery = {
+    id: "excel_EMP26-27EMP0044",
+    query_id: "EMP26-27EMP0044",
+    lead_id: "LD-IMPORT-0044",
+    created_at: "2026-04-09T03:30:00.000Z",
+    customer: "Joshi Tours & Travels",
+    contact_person: "Khusboo Soni",
+    destination: "Madhya Pradesh",
+    owner: "Bhumika Prajapati",
+    program_name: "",
+    mobile: "6394127091",
+    email: "info@joshitours.org",
+    stage: "Lost",
+    travel_start: "2026-05-01",
+    costing_basis: "FIT",
+    travel_type: "FIT",
+    priority: "Normal",
+    followup_due: "",
+  };
+  const todayFilters = {
+    search: "EMP26-27EMP0044",
+    owner: "all",
+    stage: "all",
+    financialYear: "all",
+    receivedMonths: [],
+    dateFrom: "2026-10-28",
+    dateTo: "2026-10-28",
+    travelMonth: "all",
+    customer: "all",
+    costingBasis: "all",
+    priority: "all",
+    dueWindow: "all",
+  };
+  assert.deepEqual(
+    queryFilters.filterCrmQueries([historicalQuery], todayFilters, new Date("2026-10-28T06:00:00Z")),
+    [historicalQuery],
+    "exact CRM Query ID search bypasses only the received-date scope",
+  );
+  assert.deepEqual(
+    queryFilters.filterCrmQueries(
+      [historicalQuery],
+      { ...todayFilters, search: "Joshi Tours" },
+      new Date("2026-10-28T06:00:00Z"),
+    ),
+    [],
+    "ordinary searches still honor the Today received-date filter",
+  );
+  assert.deepEqual(
+    queryFilters.filterCrmQueries(
+      [historicalQuery],
+      { ...todayFilters, stage: "Won" },
+      new Date("2026-10-28T06:00:00Z"),
+    ),
+    [],
+    "exact ID lookup does not bypass non-date filters or access scope",
+  );
+
+  const categoryReset = hotelsStep.categoryChangePatch("3 Star", ["Breakfast"]);
+  assert.deepEqual(
+    categoryReset,
+    {
+      category: "3 Star",
+      label: "3 Star",
+      inclusions: ["Breakfast"],
+      selections: [],
+      rate_overrides: {},
+      dynamic_allocations: {},
+    },
+    "changing a hotel option category clears only its dependent hotel and rate state",
+  );
+  const inclusionSummaryDraft = {
+    routing: [
+      { day: 1, city_id: "city-1", overnight: true },
+      { day: 2, city_id: "city-2", overnight: true },
+      { day: 3, city_id: "city-2", overnight: false },
+    ],
+  };
+  const inclusionOptionA = {
+    key: "A",
+    label: "3 Star",
+    category: "3 Star",
+    inclusions: ["Accommodation on twin sharing", "All applicable taxes"],
+    selections: [
+      {
+        routing_day: 1,
+        city_id: "city-1",
+        hotel_id: "hotel-1",
+        room_id: "room-1",
+        meal_plan: "CP",
+      },
+      {
+        routing_day: 2,
+        city_id: "city-2",
+        hotel_id: "hotel-2",
+        room_id: "room-2",
+        meal_plan: "AP",
+      },
+    ],
+  };
+  assert.deepEqual(
+    hotelsStep.optionInclusionSummary(inclusionSummaryDraft, inclusionOptionA),
+    { nights: 2, breakfasts: 2, lunches: 1, dinners: 1, taxes: "Applicable" },
+    "Option inclusion summary reflects its resolved nightly stays and meal plans",
+  );
+  assert.deepEqual(
+    hotelsStep.optionInclusionSummary(inclusionSummaryDraft, {
+      ...inclusionOptionA,
+      key: "B",
+      inclusions: [],
+      selections: [],
+    }),
+    { nights: 0, breakfasts: 0, lunches: 0, dinners: 0, taxes: "—" },
+    "Option inclusion summaries remain independent",
+  );
+
+  const hotelCities = [{ id: "hotel-city-ujjain", name: " Ujjain " }];
+  const destinationCities = [{ id: "destination-city-ujjain", name: "UJJAIN" }];
+  assert.deepEqual(
+    hotelAvailability.resolveAccommodationCity(
+      { city_id: "", to_city: "  ujjain  " },
+      hotelCities,
+      destinationCities,
+    ),
+    hotelCities[0],
+    "text-only Ujjain routing resolves to the canonical Hotels city",
+  );
+  assert.deepEqual(
+    hotelAvailability.resolveAccommodationCity(
+      { city_id: "destination-city-ujjain" },
+      hotelCities,
+      destinationCities,
+    ),
+    hotelCities[0],
+    "destination IDs resolve to the matching Hotels city without changing hotel IDs",
+  );
+  assert.deepEqual(
+    hotelAvailability.resolveAccommodationCity(
+      { city_id: "omkareshwar", to_city: "Ujjain" },
+      [...hotelCities, { id: "omkareshwar", name: "Omkareshwar" }],
+      destinationCities,
+    ),
+    { id: "omkareshwar", name: "Omkareshwar" },
+    "accommodation follows the overnight city ID rather than a different sightseeing destination",
+  );
+  assert.equal(
+    hotelAvailability.resolveAccommodationCity(
+      { city_id: "hotel-city-ujjain", to_city: "Omkareshwar" },
+      [...hotelCities, { id: "omkareshwar", name: "Omkareshwar" }],
+      destinationCities,
+    )?.id,
+    "hotel-city-ujjain",
+    "the canonical overnight city ID takes precedence over sightseeing destination text",
+  );
+  assert.equal(
+    hotelAvailability.normalizeHotelLookupValue("  3   STAR "),
+    hotelAvailability.normalizeHotelLookupValue("3 Star"),
+    "hotel categories compare case-insensitively with repeated whitespace normalized",
+  );
+  const savedUjjainHotels = [
+    { id: "perfectstayz", city_id: "hotel-city-ujjain", hotel_category: " 3  Star " },
+    { id: "playotel", city_id: "hotel-city-ujjain", hotel_category: "3 Star" },
+    { id: "radisson", city_id: "hotel-city-ujjain", hotel_category: "5 Star" },
+    { id: "om-hotel", city_id: "omkareshwar", hotel_category: "3 Star" },
+    { id: "other-city", city_id: "indore", hotel_category: "3 Star" },
+  ];
+  const availability = hotelAvailability.hotelsForAccommodation(
+    savedUjjainHotels,
+    " ujjain ",
+    "3 Star",
+    [...hotelCities, { id: "omkareshwar", name: "Omkareshwar" }, { id: "indore", name: "Indore" }],
+    destinationCities,
+  );
+  assert.deepEqual(
+    availability.inCategory.map((hotel) => hotel.id),
+    ["perfectstayz", "playotel"],
+    "a saved Ujjain 3 Star hotel is available to costing without hardcoded hotel names",
+  );
+  const savedRooms = [
+    { id: "deluxe-room", hotel_id: "perfectstayz", name: "Deluxe Room" },
+    { id: "play-room", hotel_id: "playotel", name: "Premium Room" },
+    { id: "radisson-room", hotel_id: "radisson", name: "Superior Room" },
+    { id: "om-room", hotel_id: "om-hotel", name: "Deluxe Room" },
+  ];
+  const savedRates = [
+    {
+      id: "ujjain-cp-rate",
+      room_category_id: "deluxe-room",
+      meal_plan: "CP",
+      validity_start: "2026-10-01",
+      validity_end: "2026-11-30",
+      single_rate: 3200,
+      double_rate: 4000,
+      extra_bed_rate: 1000,
+    },
+    ...[
+      ["play-rate", "play-room", 4200],
+      ["radisson-rate", "radisson-room", 8500],
+      ["om-rate", "om-room", 3600],
+    ].map(([id, room_category_id, double_rate]) => ({
+      id,
+      room_category_id,
+      meal_plan: "CP",
+      validity_start: "2026-10-01",
+      validity_end: "2026-11-30",
+      single_rate: Number(double_rate) - 500,
+      double_rate: Number(double_rate),
+      extra_bed_rate: 1000,
+    })),
+  ];
+  const availableRooms = savedRooms.filter(
+    (room) => room.hotel_id === availability.inCategory[0].id,
+  );
+  assert.deepEqual(
+    availableRooms.map((room) => room.id),
+    ["deluxe-room"],
+    "the selected stable hotel ID loads its saved room categories",
+  );
+  assert.deepEqual(
+    hotelRateLookup.availableMealPlans(savedRates, "deluxe-room", "2026-10-26"),
+    ["CP"],
+    "the selected room loads its date-valid meal plans",
+  );
+  assert.equal(
+    hotelRateLookup.findRatePlan(savedRates, "deluxe-room", "CP", "2026-10-26")?.double_rate,
+    4000,
+    "the selected room and meal plan load the correct persisted rate",
+  );
+  assert.equal(
+    hotelRateLookup.findRatePlan(
+      [{ ...savedRates[0], validity_start: "2026-11-01", validity_end: "2027-03-31" }],
+      "deluxe-room",
+      "CP",
+      "2026-10-19",
+    ),
+    null,
+    "October travel is not incorrectly covered by a November-starting season",
+  );
+  const winterLabelButOctoberRate = {
+    ...savedRates[0],
+    season_label: "Winter",
+    validity_start: "01-10-2026",
+    validity_end: "31-03-2027",
+  };
+  assert.equal(
+    hotelRateLookup.findRatePlan([winterLabelButOctoberRate], "deluxe-room", "CP", "19-10-2026")
+      ?.double_rate,
+    4000,
+    "a Winter-labelled rate is available when its saved October validity date applies",
+  );
+  for (const date of ["2026-10-01", "2026-10-20", "2027-03-31"]) {
+    assert.ok(hotelRateLookup.ratePlanMatchesDate(winterLabelButOctoberRate, date));
+  }
+  assert.ok(!hotelRateLookup.ratePlanMatchesDate(winterLabelButOctoberRate, "2027-04-01"));
+  const historicalStartRate = {
+    ...savedRates[0],
+    validity_start: "01-01-2025",
+    validity_end: "25-11-2026",
+  };
+  const currentRangeRate = {
+    ...savedRates[0],
+    validity_start: "25-10-2026",
+    validity_end: "25-11-2026",
+  };
+  assert.ok(hotelRateLookup.ratePlanMatchesDate(currentRangeRate, "2026-10-27"));
+  assert.ok(hotelRateLookup.ratePlanMatchesDate(currentRangeRate, "2026-11-15"));
+  assert.ok(!hotelRateLookup.ratePlanMatchesDate(currentRangeRate, "2026-10-19"));
+  assert.ok(hotelRateLookup.ratePlanMatchesDate(historicalStartRate, "2026-10-19"));
+  assert.ok(!hotelRateLookup.ratePlanMatchesDate(currentRangeRate, "2026-11-26"));
+  const manualOnlyPlan = calc.applyRateOverride(null, {
+    sgl: 4200,
+    dbl: 5200,
+    trp: 6500,
+    reason: "Supplier rate confirmed for this quotation",
+    changed_by: "Audit User",
+    changed_at: "2026-10-01T00:00:00.000Z",
+  });
+  assert.equal(manualOnlyPlan?.single_rate, 4200);
+  assert.equal(manualOnlyPlan?.double_rate, 5200);
+  assert.equal(manualOnlyPlan?.double_rate + manualOnlyPlan?.extra_bed_rate, 6500);
+  assert.equal(
+    calc.applyRateOverride(null, undefined),
+    null,
+    "A missing master rate remains missing unless an authorized manual rate is entered",
+  );
+  const overlappingSeasons = [
+    {
+      ...savedRates[0],
+      season_label: "Winter",
+      validity_start: "2026-10-01",
+      validity_end: "2026-11-30",
+    },
+    {
+      ...savedRates[0],
+      season_label: "Special Event",
+      validity_start: "2026-10-20",
+      validity_end: "2026-10-30",
+      updated_at: "2099-01-01",
+    },
+  ];
+  assert.equal(
+    hotelRateLookup.findRatePlan(overlappingSeasons, "deluxe-room", "CP", "2026-10-26"),
+    null,
+    "overlapping distinct seasons remain unavailable rather than picking the newest record",
+  );
+  assert.equal(
+    hotelRateLookup.findRatePlan(
+      [{ ...savedRates[0], single_rate: 0, double_rate: 0 }],
+      "deluxe-room",
+      "CP",
+      "2026-10-26",
+    ),
+    null,
+    "a date-matching row with no valid occupancy price is unavailable, not a zero tariff",
+  );
+  const legacyHotelSelection = {
+    city_id: "destination-city-ujjain",
+    routing_day: 1,
+    hotel_id: "perfectstayz",
+    room_id: "deluxe-room",
+    meal_plan: "CP",
+  };
+  assert.equal(
+    types.hotelSelectionForDay(
+      { selections: [legacyHotelSelection] },
+      { day: 1, city_id: "destination-city-ujjain" },
+    ),
+    legacyHotelSelection,
+    "canonical city repair preserves an existing selection by its stable routing day",
+  );
+  const staleCitySelection = {
+    city_id: "stale-city-id",
+    routing_day: 1,
+    hotel_id: "perfectstayz",
+    room_id: "deluxe-room",
+    meal_plan: "CP",
+  };
+  assert.equal(
+    types.hotelSelectionForDay(
+      { selections: [staleCitySelection] },
+      {
+        day: 1,
+        city_id: "stale-city-id",
+        to_city_id: "hotel-city-ujjain",
+        to_city_ids: ["hotel-city-ujjain"],
+        to_city: "Ujjain",
+      },
+    ),
+    staleCitySelection,
+    "legacy stale city IDs still resolve when the displayed destination resolves to the same canonical city",
+  );
+  const hotelCityDirectory = [
+    ...hotelCities,
+    { id: "omkareshwar", name: "Omkareshwar" },
+    { id: "indore", name: "Indore" },
+  ];
+  const ujjainCurrent = hotelAvailability.diagnoseHotelAvailability(
+    savedUjjainHotels,
+    savedRooms,
+    savedRates,
+    "Ujjain",
+    "3 Star",
+    "2026-10-19",
+    hotelCityDirectory,
+    destinationCities,
+  );
+  assert.equal(ujjainCurrent.finalDropdownCount, 2, "Ujjain 3 Star lists both saved hotels");
+  assert.equal(ujjainCurrent.validForDate, 2, "both Ujjain 3 Star hotels have current rates");
+  assert.equal(
+    hotelAvailability.diagnoseHotelAvailability(
+      savedUjjainHotels,
+      savedRooms,
+      savedRates,
+      "Ujjain",
+      "5 Star",
+      "2026-10-19",
+      hotelCityDirectory,
+      destinationCities,
+    ).finalDropdownCount,
+    1,
+    "Ujjain 5 Star includes Radisson when its inventory is applicable",
+  );
+  assert.equal(
+    hotelAvailability.diagnoseHotelAvailability(
+      savedUjjainHotels,
+      savedRooms,
+      savedRates,
+      "Omkareshwar",
+      "3 Star",
+      "2026-10-19",
+      hotelCityDirectory,
+      destinationCities,
+    ).finalDropdownCount,
+    1,
+    "Omkareshwar 3 Star availability remains intact",
+  );
+  const blackoutHotel = {
+    ...savedUjjainHotels[0],
+    blackout_ranges: [{ from: "2026-10-19", to: "2026-10-20" }],
+  };
+  const blackoutReport = hotelAvailability.diagnoseHotelAvailability(
+    [blackoutHotel],
+    savedRooms,
+    savedRates,
+    "Ujjain",
+    "3 Star",
+    "2026-10-19",
+    hotelCityDirectory,
+    destinationCities,
+  );
+  assert.equal(
+    blackoutReport.finalDropdownCount,
+    1,
+    "a blackout does not hide an otherwise matching hotel",
+  );
+  assert.equal(blackoutReport.validForDate, 0, "a blackout prevents pricing for the selected date");
+  assert.equal(
+    hotelAvailability.diagnoseHotelAvailability(
+      savedUjjainHotels,
+      savedRooms,
+      savedRates,
+      "Ujjain",
+      "3 Star",
+      "2027-10-19",
+      hotelCityDirectory,
+      destinationCities,
+    ).validForDate,
+    0,
+    "expired rate plans are not repeated into a later year",
+  );
+  const invalidDate = hotelAvailability.diagnoseHotelAvailability(
+    savedUjjainHotels,
+    savedRooms,
+    savedRates,
+    "Ujjain",
+    "3 Star",
+    "2026-12-15",
+    hotelCityDirectory,
+    destinationCities,
+  );
+  assert.equal(invalidDate.finalDropdownCount, 2, "missing pricing does not hide real hotels");
+  assert.equal(invalidDate.validForDate, 0, "invalid travel dates are reported as unpriced");
+  assert.match(
+    invalidDate.details.find((hotel) => hotel.id === "playotel").rejectionReason,
+    /rate/,
+  );
 
   const mealCities = [
     { id: "indore", name: "Indore" },
@@ -597,6 +1052,27 @@ try {
   );
 
   assert.equal(validation.isRoutingReady(baseDraft()), true, "Every overnight city is present");
+  const packageWithoutProgramme = { ...baseDraft(), program_name: "", program_mode: "existing" };
+  const packageProgrammeIssue = validation
+    .validateQuoteForFinalization(packageWithoutProgramme, db)
+    .blockers.find((item) => item.code === "PROGRAM_REQUIRED");
+  assert.equal(
+    packageProgrammeIssue?.message,
+    "Please select a Programme before saving Costing V1.",
+    "Package quotations explain the exact Programme save blocker",
+  );
+  const accommodationWithoutProgramme = {
+    ...packageWithoutProgramme,
+    query_for: "Accommodation Part",
+    commercial_mode: "accommodation_only",
+  };
+  assert.equal(
+    validation
+      .validateQuoteForFinalization(accommodationWithoutProgramme, db)
+      .blockers.some((item) => item.code === "PROGRAM_REQUIRED"),
+    false,
+    "Accommodation-only custom quotations do not require a Programme",
+  );
   const incompleteRoutingDraft = baseDraft();
   incompleteRoutingDraft.routing[0].city_id = "";
   assert.equal(validation.isRoutingReady(incompleteRoutingDraft), false);
@@ -784,6 +1260,39 @@ try {
         activity_name: "Optional Activity",
         price: 1500,
       },
+      {
+        ...db.activities[0],
+        id: "activity-day-1-six-slabs",
+        activity_name: "Day 1 Six Slab Activity",
+        slab_pricing_type: "slab",
+        pricing_slabs: Array.from({ length: 6 }, (_, index) => ({
+          id: `day-1-slab-${index + 1}`,
+          from_pax: index * 5 + 1,
+          to_pax: (index + 1) * 5,
+          price: (index + 1) * 100,
+          type: "indian",
+        })),
+      },
+      {
+        ...db.activities[0],
+        id: "activity-day-1-flat",
+        activity_name: "Day 1 Flat Activity",
+        pricing_type: "per_person",
+        slab_pricing_type: "per_person",
+        pricing_slabs: [],
+        price: 275,
+        indian_price: 275,
+      },
+      {
+        ...db.activities[0],
+        id: "activity-day-2-slabs",
+        activity_name: "Day 2 Slab Activity",
+        slab_pricing_type: "slab",
+        pricing_slabs: [
+          { id: "day-2-slab-1", from_pax: 1, to_pax: 10, price: 800, type: "indian" },
+          { id: "day-2-slab-2", from_pax: 11, to_pax: 20, price: 1200, type: "indian" },
+        ],
+      },
     ],
   };
   const displayDraft = {
@@ -910,6 +1419,102 @@ try {
   const displayDraftBeforeRender = structuredClone(displayDraft);
   const originalMasterDb = masterPricing.db.get();
   masterPricing.db.hydrateAll(renderedReviewDb);
+  const renderedGuideStep = renderToStaticMarkup(
+    createElement(guideStep.Step13, {
+      draft: {
+        ...displayDraft,
+        guide_language: "Hindi",
+        pax_mode: "range",
+        pax_min: 1,
+        pax_max: 15,
+      },
+      set: () => {},
+    }),
+  );
+  const guideChargesTable =
+    renderedGuideStep.match(/data-testid="guide-charges-table"[\s\S]*?<\/table>/)?.[0] ?? "";
+  const includedGuideReviewTable =
+    renderedGuideStep.match(/data-testid="included-guide-review-table"[\s\S]*?<\/table>/)?.[0] ??
+    "";
+  const optionalGuideReviewTable =
+    renderedGuideStep.match(/data-testid="optional-guide-review-table"[\s\S]*?<\/table>/)?.[0] ??
+    "";
+  const includedGuidePerPersonTable =
+    renderedGuideStep.match(
+      /data-testid="included-guide-per-person-table"[\s\S]*?<\/table>/,
+    )?.[0] ?? "";
+  const optionalGuidePerPersonTable =
+    renderedGuideStep.match(
+      /data-testid="optional-guide-per-person-table"[\s\S]*?<\/table>/,
+    )?.[0] ?? "";
+  assert.ok(
+    renderedGuideStep.includes("Included Guides — Range-wise Costing") &&
+      renderedGuideStep.includes("Optional Guides — Additional Sale"),
+    "Guide step renders distinct Included and Optional range-wise tables",
+  );
+  assert.equal(
+    (optionalGuideReviewTable.match(/<th/g) ?? []).length,
+    (includedGuideReviewTable.match(/<th/g) ?? []).length,
+    "Included and Optional tables expose the same column structure",
+  );
+  assert.ok(
+    optionalGuideReviewTable.includes("Final Selling Total"),
+    "Optional guide table keeps selling totals separate from Included totals",
+  );
+  assert.ok(
+    !includedGuideReviewTable.includes("<input") && !optionalGuideReviewTable.includes("<input"),
+    "Included and Optional guide reviews are read-only",
+  );
+  assert.ok(
+    renderedGuideStep.indexOf('data-testid="included-guide-review-table"') <
+      renderedGuideStep.indexOf('data-testid="included-guide-per-person-table"') &&
+      renderedGuideStep.indexOf('data-testid="included-guide-per-person-table"') <
+        renderedGuideStep.indexOf('data-testid="optional-guide-review-table"') &&
+      renderedGuideStep.indexOf('data-testid="optional-guide-review-table"') <
+        renderedGuideStep.indexOf('data-testid="optional-guide-per-person-table"'),
+    "Guide summaries and per-person tables render in Included-then-Optional order",
+  );
+  assert.ok(
+    includedGuidePerPersonTable.includes("Included Base Total") &&
+      includedGuidePerPersonTable.includes("Included Final Total") &&
+      includedGuidePerPersonTable.includes("Included Per Person") &&
+      !includedGuidePerPersonTable.includes("Optional Per Person"),
+    "Included per-person table contains Included values only",
+  );
+  assert.ok(
+    optionalGuidePerPersonTable.includes("Optional Base Total") &&
+      optionalGuidePerPersonTable.includes("Optional Final Total") &&
+      optionalGuidePerPersonTable.includes("Optional Per Person") &&
+      !optionalGuidePerPersonTable.includes("Included Per Person"),
+    "Optional per-person table contains Optional values only",
+  );
+  assert.ok(
+    !renderedGuideStep.includes(">Per Person Guide Cost Breakdown<"),
+    "the old combined Guide per-person table is removed",
+  );
+  assert.equal(
+    (guideChargesTable.match(/>1–5 Pax<\/th>/g) ?? []).length,
+    1,
+    "Guide Charges renders exactly one 1–5 Pax column header for the selected language",
+  );
+  assert.equal(
+    (guideChargesTable.match(/>6–14 Pax<\/th>/g) ?? []).length,
+    1,
+    "Guide Charges renders exactly one 6–14 Pax column header for the selected language",
+  );
+  assert.equal(
+    (guideChargesTable.match(/>15\+ Pax<\/th>/g) ?? []).length,
+    1,
+    "Guide Charges renders exactly one 15+ Pax column header for the selected language",
+  );
+  assert.ok(
+    !guideChargesTable.includes("1–5 / 6–14 Pax"),
+    "Guide Charges has no legacy combined slab header",
+  );
+  assert.ok(
+    !guideChargesTable.includes(" / ₹"),
+    "Guide Charges has no slash-concatenated Guide price cells",
+  );
   const renderedReview = renderToStaticMarkup(
     createElement(landDaywiseReview.LandDaywiseReview, {
       draft: displayDraft,
@@ -1043,6 +1648,144 @@ try {
     renderedReview.indexOf("</thead>", activityHeaderStart),
   );
   assert.ok(activityHeader.includes(">Included</th>") && activityHeader.includes(">Optional</th>"));
+  const finalReviewMarkup = renderToStaticMarkup(
+    createElement(packageStandardReview.PackageStandardCostingReview, {
+      draft: {
+        ...displayDraft,
+        transport_options: [
+          {
+            id: "audit-transport-variation",
+            name: "Audit Vehicle Variation",
+            min_pax: 1,
+            max_pax: 6,
+            vehicles: [{ transport_line_id: "transport-small", quantity: 1 }],
+          },
+        ],
+      },
+      set: () => undefined,
+      readOnly: true,
+    }),
+  );
+  const reviewSections = [
+    "A. Day-wise Land Services Pricing Review (View Only)",
+    "B. Transport Variations",
+    "C. Miscellaneous (Selected Items)",
+    "D. Included Activities / Experiences",
+    "Accommodation &amp; Meals",
+    "Commercial Package Matrix",
+  ].map((label) => finalReviewMarkup.indexOf(label));
+  assert.ok(
+    reviewSections.every((position) => position >= 0) &&
+      reviewSections.every(
+        (position, index) => index === 0 || position > reviewSections[index - 1],
+      ),
+    `Final Review sections render in required order: ${reviewSections.join(", ")}`,
+  );
+  const daywiseSection = finalReviewMarkup.slice(reviewSections[0], reviewSections[1]);
+  assert.ok(!daywiseSection.includes("Activities / Experiences"));
+  assert.ok(!daywiseSection.includes("Miscellaneous · Included"));
+  const includedActivitiesSection = finalReviewMarkup.slice(reviewSections[3], reviewSections[4]);
+  assert.ok(includedActivitiesSection.includes("Included Activity"));
+  const groupedActivityDraft = {
+    ...displayDraft,
+    activities: [
+      {
+        id: "day-1-six-slabs-line",
+        activity_id: "activity-day-1-six-slabs",
+        qty: 1,
+        rate: 100,
+        pricing_mode: "slab",
+        inclusion_status: "included",
+        from_routing_days: [1],
+      },
+      {
+        id: "day-1-flat-line",
+        activity_id: "activity-day-1-flat",
+        qty: 1,
+        rate: 275,
+        pricing_mode: "per_person",
+        inclusion_status: "included",
+        from_routing_days: [1],
+      },
+      {
+        id: "day-2-slabs-line",
+        activity_id: "activity-day-2-slabs",
+        qty: 1,
+        rate: 800,
+        pricing_mode: "slab",
+        inclusion_status: "included",
+        from_routing_days: [2],
+      },
+    ],
+  };
+  const activityDayGroups = packageStandardReview.includedActivityDayGroups(
+    groupedActivityDraft,
+    renderedReviewDb.activities,
+    2,
+  );
+  assert.deepEqual(
+    activityDayGroups.map((group) => ({
+      day: group.route.day,
+      rowSpan: group.rowSpan,
+      activities: group.activities.map((activity) => ({
+        name: activity.master.activity_name,
+        rowSpan: activity.rows.length,
+      })),
+    })),
+    [
+      {
+        day: 1,
+        rowSpan: 7,
+        activities: [
+          { name: "Day 1 Six Slab Activity", rowSpan: 6 },
+          { name: "Day 1 Flat Activity", rowSpan: 1 },
+        ],
+      },
+      {
+        day: 2,
+        rowSpan: 2,
+        activities: [{ name: "Day 2 Slab Activity", rowSpan: 2 }],
+      },
+    ],
+    "Day and activity row spans use rendered slab counts without crossing itinerary days",
+  );
+  const duplicateRikshawSlabs = {
+    ...renderedReviewDb.activities[0],
+    id: "e-rikshaw-indore",
+    activity_name: "E Rikshaw at Indore",
+    slab_pricing_type: "slab",
+    pricing_slabs: [
+      { id: "selected-1-4", from_pax: 1, to_pax: 4, price: 300, type: "indian" },
+      { id: "alternative-1-4", from_pax: 1, to_pax: 4, price: 375, type: "indian" },
+      { id: "selected-5-8", from_pax: 5, to_pax: 8, price: 450, type: "indian" },
+      { id: "alternative-5-8", from_pax: 5, to_pax: 8, price: 550, type: "indian" },
+      { id: "selected-9-12", from_pax: 9, to_pax: 12, price: 600, type: "indian" },
+      { id: "alternative-9-12", from_pax: 9, to_pax: 12, price: 750, type: "indian" },
+    ],
+  };
+  const rikshawRows = packageStandardReview.includedActivitySellingRows(
+    { ...groupedActivityDraft, adults: 12 },
+    {
+      id: "e-rikshaw-line",
+      activity_id: duplicateRikshawSlabs.id,
+      qty: 1,
+      rate: 600,
+      pricing_mode: "slab",
+      inclusion_status: "included",
+      from_routing_days: [1],
+    },
+    duplicateRikshawSlabs,
+    12,
+  );
+  assert.deepEqual(
+    rikshawRows.map((row) => [row.min_pax, row.max_pax, row.base_rate]),
+    [
+      [1, 4, 300],
+      [5, 8, 450],
+      [9, 12, 600],
+    ],
+    "Included E Rikshaw presentation collapses unlabeled duplicate ranges and retains Step 7's selected 12-pax rate",
+  );
   masterPricing.db.hydrateAll(originalMasterDb);
   assert.deepEqual(
     displayDraft,
@@ -1151,6 +1894,208 @@ try {
         landPricing.applyLandCommercials(exactGuideMatrixDraft, 3500 / 16, 0.05).final,
     ) < 0.01,
     "Exact Guide package PP divides the finalized group slab by exact pax once",
+  );
+  db.guides[0].languages = ["Hindi", "English"];
+  db.guides[0].language_rates = {
+    English: { rate_1_to_5: 1000, rate_6_to_14: 1500, rate_15_plus: 2000 },
+    Hindi: { rate_1_to_5: 800, rate_6_to_14: 1300, rate_15_plus: 1800 },
+  };
+  const slabGuideDraft = {
+    ...baseDraft(),
+    guides: [{ ...baseDraft().guides[0], rate: 0, inclusion_status: "included" }],
+    guide_reporting_cost_english: 100,
+    guide_reporting_cost_hindi: 50,
+    guide_tour_selected_by_day: { 1: ["Indore||Audit Guide"] },
+    guide_slab_selection_by_day: {
+      1: {
+        [guidePricing.guideSlabSelectionKey(
+          "Indore||Audit Guide",
+          "guide-master",
+          "English",
+          "1-5",
+        )]: "included",
+        [guidePricing.guideSlabSelectionKey(
+          "Indore||Audit Guide",
+          "guide-master",
+          "English",
+          "6-14",
+        )]: "optional",
+        [guidePricing.guideSlabSelectionKey(
+          "Indore||Audit Guide",
+          "guide-master",
+          "English",
+          "15+",
+        )]: "removed",
+        [guidePricing.guideSlabSelectionKey("Indore||Audit Guide", "guide-master", "Hindi", "1-5")]:
+          "included",
+      },
+    },
+  };
+  const english5 = guideCosting.guideLanguageCostingForPax(slabGuideDraft, db, 5, "English");
+  assert.equal(
+    english5.baseTotal,
+    1100,
+    "English 1–5 included uses the master 1–5 rate plus reporting",
+  );
+  assert.equal(english5.includedRows[0].rate, 1000);
+  const oneSlabOnlyDraft = {
+    ...slabGuideDraft,
+    costing_selection: { guide: { 1: ["guide-line::English"] } },
+    guide_slab_selection_by_day: {
+      1: {
+        [guidePricing.guideSlabSelectionKey(
+          "Indore||Audit Guide",
+          "guide-master",
+          "English",
+          "1-5",
+        )]: "included",
+      },
+    },
+  };
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(oneSlabOnlyDraft, db, 14, "English").baseTotal,
+    1600,
+    "the single 1-5 price checkbox includes the guide for every pricing slab",
+  );
+  assert.equal(
+    landPricing.applyLandCommercials(slabGuideDraft, english5.baseTotal).final / 5,
+    254.1,
+    "Guide per-person price applies configured markup/GST once then divides by pax",
+  );
+  const english14 = guideCosting.guideLanguageCostingForPax(slabGuideDraft, db, 14, "English");
+  assert.equal(english14.baseTotal, 1600, "the checked price control includes the 6-14 rate");
+  assert.equal(
+    english14.optionalBaseTotal,
+    0,
+    "a price-checked guide cannot also appear in Optional totals",
+  );
+  const legacyOptionalGuideDraft = {
+    ...slabGuideDraft,
+    guides: [
+      { ...slabGuideDraft.guides[0], id: "optional-english", inclusion_status: "optional" },
+      {
+        ...slabGuideDraft.guides[0],
+        id: "optional-hindi",
+        language: "Hindi",
+        inclusion_status: "optional",
+      },
+    ],
+    costing_selection: { guide: { 1: [] } },
+    guide_slab_selection_by_day: undefined,
+  };
+  assert.deepEqual(
+    [5, 14, 15].map(
+      (pax) =>
+        guideCosting.guideLanguageCostingForPax(legacyOptionalGuideDraft, db, pax, "English")
+          .optionalBaseTotal,
+    ),
+    [1000, 1500, 2000],
+    "a saved Optional guide retains three independent slab totals",
+  );
+  assert.equal(
+    ["English", "Hindi"].reduce(
+      (sum, language) =>
+        sum +
+        guideCosting.guideLanguageCostingForPax(legacyOptionalGuideDraft, db, 14, language)
+          .optionalBaseTotal,
+      0,
+    ),
+    2800,
+    "multiple Optional guide services are summed within the applicable slab only",
+  );
+  const optionalCommercialAudit = landPricing.applyLandCommercials(legacyOptionalGuideDraft, 1000);
+  assert.equal(optionalCommercialAudit.base, 1000);
+  assert.equal(
+    optionalCommercialAudit.markup,
+    100,
+    "Optional Guides use the configured 10% markup",
+  );
+  assert.equal(
+    optionalCommercialAudit.final,
+    optionalCommercialAudit.base + optionalCommercialAudit.markup + optionalCommercialAudit.gst,
+    "Optional Guide final selling total uses the shared GST and rounding formula",
+  );
+  const removedOptionalGuideDraft = {
+    ...legacyOptionalGuideDraft,
+    guide_slab_selection_by_day: {
+      1: Object.fromEntries(
+        ["1-5", "6-14", "15+"].map((slab) => [
+          guidePricing.guideSlabSelectionKey(
+            "Indore||Audit Guide",
+            "guide-master",
+            "English",
+            slab,
+          ),
+          "removed",
+        ]),
+      ),
+    },
+  };
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(removedOptionalGuideDraft, db, 14, "English")
+      .optionalBaseTotal,
+    1500,
+    "Tour checked plus price unchecked is Optional regardless of an old removed status",
+  );
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(
+      { ...removedOptionalGuideDraft, guide_tour_selected_by_day: { 1: [] } },
+      db,
+      14,
+      "English",
+    ).optionalBaseTotal,
+    0,
+    "Tour unchecked excludes the guide from both Included and Optional totals",
+  );
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(
+      { ...legacyOptionalGuideDraft, guides: [], guide_tour_selected_by_day: { 1: [] } },
+      db,
+      14,
+      "English",
+    ).optionalBaseTotal,
+    0,
+    "no Optional guides produces a zero Optional total",
+  );
+  assert.equal(
+    JSON.parse(JSON.stringify(legacyOptionalGuideDraft)).guides[0].inclusion_status,
+    "optional",
+    "saved Optional selection survives draft serialization and reload",
+  );
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(slabGuideDraft, db, 15, "English").baseTotal,
+    2100,
+    "the checked price control includes the 15+ rate",
+  );
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(slabGuideDraft, db, 5, "Hindi").baseTotal,
+    850,
+    "Hindi selection remains independent while English selections are stored",
+  );
+  const stepNineExcludedGuide = {
+    ...slabGuideDraft,
+    costing_selection: { guide: { 1: [] } },
+  };
+  assert.equal(
+    guideCosting.guideLanguageCostingForPax(stepNineExcludedGuide, db, 5, "English", true)
+      .baseTotal,
+    0,
+    "Step 9 daywise exclusion removes an Included slab choice from final totals",
+  );
+  assert.equal(
+    stepNineExcludedGuide.guide_slab_selection_by_day[1][
+      guidePricing.guideSlabSelectionKey("Indore||Audit Guide", "guide-master", "English", "1-5")
+    ],
+    "included",
+    "Step 9 exclusion does not rewrite the persisted Step 7 slab selection",
+  );
+  const slabGuideReviewRow = costsheet
+    .buildLandPart(slabGuideDraft, db)
+    .rows.find((row) => row.day === 1);
+  assert.equal(
+    slabGuideReviewRow.guide,
+    1100,
+    "Step 9 checked Guide amount matches included selected language rate plus reporting",
   );
   const combinedGuideCommercial = landPricing.applyLandCommercials(
     { ...baseDraft(), land_markup_percent: 10, land_gst_percent: 5 },
@@ -1513,12 +2458,98 @@ try {
   // CP: both meals chargeable; MAP: dinner included; AP: both included.
   const cp = baseDraft();
   close(calc.computeMealDays(cp, db, "A").total, 1000, "CP meal total");
+  const cpRows = calc.calculateMealCostingRows(cp, db, "A");
+  assert.equal(cpRows.filter((row) => row.status === "included").length, 2);
+  assert.deepEqual(mealsStep.mealDashboardCounts(cpRows), {
+    includedLunch: 1,
+    includedDinner: 1,
+    includedTotal: 2,
+    optionalLunch: 0,
+    optionalDinner: 0,
+    optionalTotal: 0,
+  });
+  close(
+    calc.mealCostingTotal(cp, cpRows, "Lunch", "included").base_total,
+    400,
+    "Included Lunch group base includes applicable pax",
+  );
+  close(
+    calc.mealCostingTotal(cp, cpRows, "Dinner", "included").base_total,
+    600,
+    "Included Dinner group base is independent",
+  );
+  const optionalDinnerState = structuredClone(cp);
+  optionalDinnerState.meal_selections_by_option.A["1:city-1"].dinner.inclusion_status = "optional";
+  const optionalDinnerRows = calc.calculateMealCostingRows(optionalDinnerState, db, "A");
+  assert.deepEqual(mealsStep.mealDashboardCounts(optionalDinnerRows), {
+    includedLunch: 1,
+    includedDinner: 0,
+    includedTotal: 1,
+    optionalLunch: 0,
+    optionalDinner: 1,
+    optionalTotal: 1,
+  });
+  close(
+    calc.computeMealDays(optionalDinnerState, db, "A").total,
+    400,
+    "moving Dinner to Optional removes it immediately from Included costing",
+  );
+  close(
+    calc.mealCostingTotal(optionalDinnerState, optionalDinnerRows, "Dinner", "optional").base_total,
+    600,
+    "Optional Dinner remains independently priced",
+  );
+  const removedDinnerState = structuredClone(optionalDinnerState);
+  removedDinnerState.meal_selections_by_option.A["1:city-1"].dinner.inclusion_status = "removed";
+  const removedDinnerRows = calc.calculateMealCostingRows(removedDinnerState, db, "A");
+  assert.equal(mealsStep.mealDashboardCounts(removedDinnerRows).optionalTotal, 0);
+  close(
+    calc.computeMealDays(removedDinnerState, db, "A").total,
+    400,
+    "Removed Dinner contributes nothing",
+  );
+  assert.equal(
+    removedDinnerRows.some((row) => row.meal_type === "Dinner" && row.status !== "hotel_plan"),
+    false,
+  );
+  const reopenedRemovedDinner = JSON.parse(JSON.stringify(removedDinnerState));
+  assert.equal(
+    reopenedRemovedDinner.meal_selections_by_option.A["1:city-1"].dinner.inclusion_status,
+    "removed",
+    "Removed state survives draft JSON save/reopen",
+  );
+  close(
+    calc.mealCostingTotal(cp, cpRows, "Lunch", "included").per_person,
+    231,
+    "Included Lunch per-person final matches existing 10%/5% commercials",
+  );
   const map = baseDraft();
   map.hotel_options[0].selections[0].meal_plan = "MAP";
   close(calc.computeMealDays(map, db, "A").total, 400, "MAP lunch-only total");
+  const mapRows = calc.calculateMealCostingRows(map, db, "A");
+  assert.equal(
+    mealsStep.mealDashboardCounts(mapRows).includedDinner,
+    1,
+    "zero-additional-charge Hotel Plan dinner still counts as one included meal entry",
+  );
+  assert.equal(
+    mapRows.some((row) => row.meal_type === "Dinner" && row.status === "hotel_plan"),
+    true,
+    "MAP Dinner is visible as Included in Hotel Plan and not charged separately",
+  );
+  close(
+    calc.mealCostingTotal(map, mapRows, "Dinner", "included").base_total,
+    0,
+    "Hotel-plan Dinner is excluded from separately chargeable totals",
+  );
   const ap = baseDraft();
   ap.hotel_options[0].selections[0].meal_plan = "AP";
   close(calc.computeMealDays(ap, db, "A").total, 0, "AP must clear stale meal charges");
+  assert.equal(
+    calc.calculateMealCostingRows(ap, db, "A").filter((row) => row.status === "hotel_plan").length,
+    2,
+    "AP covers both separately selected meals without double-counting",
+  );
 
   const daySpecificHotels = baseDraft();
   daySpecificHotels.nights = 2;
@@ -1556,6 +2587,40 @@ try {
     400,
     "Optional meals stay out of base meal costing",
   );
+  const noMeals = baseDraft();
+  noMeals.meal_selections_by_option.A = {};
+  noMeals.meal_selections = {};
+  assert.equal(
+    mealsStep.mealDashboardCounts(calc.calculateMealCostingRows(noMeals, db, "A")).includedTotal,
+    0,
+    "No Meal selections do not appear in dashboard counts",
+  );
+  const independentOptions = structuredClone(cp);
+  independentOptions.hotel_options.push({
+    ...structuredClone(independentOptions.hotel_options[0]),
+    key: "B",
+    label: "Excellent Budget",
+  });
+  independentOptions.meal_selections_by_option.B = {
+    "1:city-1": {
+      lunch: {
+        source: "hotel",
+        hotel_id: "hotel-1",
+        label: "Audit Hotel",
+        per_person_rate: 200,
+        inclusion_status: "optional",
+      },
+    },
+  };
+  const optionACounts = mealsStep.mealDashboardCounts(
+    calc.calculateMealCostingRows(independentOptions, db, "A"),
+  );
+  const optionBCounts = mealsStep.mealDashboardCounts(
+    calc.calculateMealCostingRows(independentOptions, db, "B"),
+  );
+  assert.equal(optionACounts.includedTotal, 2);
+  assert.equal(optionBCounts.includedTotal, 0);
+  assert.equal(optionBCounts.optionalLunch, 1, "meal dashboard counts remain option-specific");
 
   const landMeals = baseDraft();
   landMeals.query_for = "Land Part + Meals";
@@ -2345,6 +3410,55 @@ try {
     "Selected misc items persist in the saved draft",
   );
   const v1 = quoteBuilder.buildSavedQuote(baseDraft(), db, "Audit User");
+  const incompleteDraft = {
+    ...baseDraft(),
+    program_id: undefined,
+    program_name: "",
+    program_mode: "existing",
+  };
+  const incompleteWarnings = validation
+    .validateQuoteForFinalization(incompleteDraft, db)
+    .blockers.map((item) => `${item.section}: ${item.message}`);
+  const incompleteVersion = quoteBuilder.buildCostingVersionSnapshot(
+    incompleteDraft,
+    db,
+    "Audit User",
+    {
+      employeeId: "employee-audit",
+      authUserId: "auth-audit",
+      name: "Audit User",
+      role: "Sales Executive",
+    },
+    incompleteWarnings,
+  );
+  assert.equal(incompleteVersion.status, "In Progress");
+  assert.equal(incompleteVersion.costing_complete, false);
+  assert.ok(incompleteVersion.validation_warnings.length > 0);
+  assert.deepEqual(
+    incompleteVersion.draft_snapshot,
+    JSON.parse(JSON.stringify(incompleteDraft)),
+    "Incomplete costing versions retain the exact editable draft snapshot",
+  );
+  const noScenarioVersion = quoteBuilder.buildCostingVersionSnapshot(
+    { ...incompleteDraft, hotel_options: [], scenarios: [], transport_options: [] },
+    db,
+    "Audit User",
+    {
+      employeeId: "employee-audit",
+      authUserId: "auth-audit",
+      name: "Audit User",
+      role: "Sales Executive",
+    },
+    [...incompleteWarnings, "Accommodation: No valid costing variation"],
+  );
+  assert.equal(noScenarioVersion.status, "In Progress");
+  assert.deepEqual(noScenarioVersion.draft_snapshot.hotel_options, []);
+  const slabSelectionSnapshot = quoteBuilder.buildSavedQuote(slabGuideDraft, db, "Audit User");
+  assert.deepEqual(
+    slabSelectionSnapshot.draft_snapshot.guide_slab_selection_by_day,
+    slabGuideDraft.guide_slab_selection_by_day,
+    "Immutable quotation snapshots retain per-day, language, service, and Guide slab choices",
+  );
   quoteStore.saveQuote(v1);
   assert.throws(() => quoteStore.saveQuote(v1), /immutable/i);
   assert.throws(() => quoteStore.quoteToRevisionDraft(v1, ""), /reason/i);

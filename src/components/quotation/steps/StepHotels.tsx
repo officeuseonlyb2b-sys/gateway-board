@@ -1,8 +1,8 @@
 // src/components/quotation/steps/StepHotels.tsx (Step15)
 // Standard & Dynamic Layouts Combined.
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AlertCircle, Check, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import {
   Dialog,
@@ -56,26 +56,34 @@ import type {
 } from "@/lib/wizard/types";
 import { hotelSelectionForDay } from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
+import {
+  diagnoseHotelAvailability,
+  hotelsForAccommodation,
+  normalizeHotelLookupValue,
+  resolveAccommodationCity,
+} from "@/lib/wizard/hotel-availability";
+import { getMasterSyncState, subscribeMasterSync } from "@/lib/masters-remote";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { useAuth } from "@/lib/auth-mock";
 import { WIZARD_HOTEL_CATEGORIES } from "../shared";
 import type { StepProps } from "../shared";
 
-const CATEGORY_RANK: Record<string, number> = {
-  "Excellent Budget": 1,
-  "Home Stay": 1,
-  "3 Star": 2,
-  "3 Star Deluxe": 3,
-  "4 Star": 4,
-  Heritage: 4,
-  Experiential: 4,
-  "4 Star Superior": 5,
-  "5 Star": 6,
-  "5 Star Deluxe": 7,
-  "5 Star Luxury": 7,
-};
 const QUOTATION_MEAL_PLANS = MEAL_PLANS;
+
+/** Category changes must not retain dependent hotel or rate state. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const categoryChangePatch = (
+  category: string,
+  inclusions: string[],
+): Partial<HotelOption> => ({
+  category,
+  label: category,
+  inclusions,
+  selections: [],
+  rate_overrides: {},
+  dynamic_allocations: {},
+});
 
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
@@ -146,12 +154,12 @@ export function Step15({ draft, set }: StepProps) {
 
   const applyCategory = (v: string) => {
     if (!activeOption) return;
+    if (normalizeHotelLookupValue(activeOption.category) === normalizeHotelLookupValue(v)) return;
     const def = defaultsForCategory(v);
-    updateOption(activeOption.key, {
-      category: v,
-      label: v,
-      inclusions: def.inclusions,
-    });
+    // Category determines the eligible hotel directory.  Retaining a prior
+    // selection, override, or dynamic allocation would price the new category
+    // with the old hotel's data, so clear only this option atomically.
+    updateOption(activeOption.key, categoryChangePatch(v, def.inclusions));
   };
 
   const copyFromOption = (sourceKey: OptionKey) => {
@@ -452,6 +460,11 @@ function AccommodationSelectionTable({
   splitAllocation: ReturnType<typeof splitAccommodationAllocation>;
 }) {
   const d = useDB();
+  const masterSync = useSyncExternalStore(
+    subscribeMasterSync,
+    getMasterSyncState,
+    getMasterSyncState,
+  );
   const user = useAuth();
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const [showQuadPref, setShowQuad] = useState(false);
@@ -546,57 +559,35 @@ function AccommodationSelectionTable({
 
   // Build the rows
   const rows = overnightRouting.map((day) => {
-    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "";
-    const cityKey = cityName.trim().toLowerCase();
-    const catKey = activeCategory.trim().toLowerCase();
-    const sel = hotelSelectionForDay(option, day);
+    const resolvedCity = resolveAccommodationCity(day, d.cities, d.destination_cities);
+    const cityName = resolvedCity?.name || day.to_city?.trim() || "";
+    const cityId = resolvedCity?.id || day.city_id;
+    const selectionDay = cityId === day.city_id ? day : { ...day, city_id: cityId };
+    const sel = hotelSelectionForDay(option, day) ?? hotelSelectionForDay(option, selectionDay);
 
-    const hotelCityName = (h: (typeof d.hotels)[number]) =>
-      (d.cities.find((c) => c.id === h.city_id)?.name || "").trim().toLowerCase();
-    const allCityHotels = cityKey ? d.hotels.filter((h) => hotelCityName(h) === cityKey) : [];
-    const cityHotels = allCityHotels.filter(
-      (h) => h.hotel_category.trim().toLowerCase() === catKey,
+    const { inCategory: cityHotels } = hotelsForAccommodation(
+      d.hotels,
+      cityName,
+      activeCategory,
+      d.cities,
+      d.destination_cities,
+      cityId,
+    );
+    const availability = diagnoseHotelAvailability(
+      d.hotels,
+      d.room_categories,
+      d.rate_plans,
+      cityName,
+      activeCategory,
+      day.date,
+      d.cities,
+      d.destination_cities,
+      cityId,
     );
     const noCategoryMatch = cityHotels.length === 0;
-    const lowerCategoryHotels = allCityHotels.filter((h) => {
-      const rank = CATEGORY_RANK[h.hotel_category] ?? 0;
-      return (
-        (CATEGORY_RANK[activeCategory] ?? 0) > 0 &&
-        rank > 0 &&
-        rank < (CATEGORY_RANK[activeCategory] ?? 0)
-      );
-    });
-    const fallbackHotels = (lowerCategoryHotels.length > 0 ? lowerCategoryHotels : allCityHotels)
-      .slice()
-      .sort((a, b) => {
-        const rankDiff =
-          (CATEGORY_RANK[b.hotel_category] ?? 0) - (CATEGORY_RANK[a.hotel_category] ?? 0);
-        if (rankDiff !== 0) return rankDiff;
-        const roomIdsA = d.room_categories
-          .filter((room) => room.hotel_id === a.id)
-          .map((room) => room.id);
-        const bestRateA = d.rate_plans
-          .filter(
-            (plan) =>
-              roomIdsA.includes(plan.room_category_id) &&
-              day.date >= plan.validity_start &&
-              day.date <= plan.validity_end,
-          )
-          .reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
-        const roomIdsB = d.room_categories
-          .filter((room) => room.hotel_id === b.id)
-          .map((room) => room.id);
-        const bestRateB = d.rate_plans
-          .filter(
-            (plan) =>
-              roomIdsB.includes(plan.room_category_id) &&
-              day.date >= plan.validity_start &&
-              day.date <= plan.validity_end,
-          )
-          .reduce((max, plan) => Math.max(max, plan.double_rate || 0), 0);
-        return bestRateB - bestRateA;
-      });
-    let hotelPool = noCategoryMatch ? fallbackHotels : cityHotels;
+    // Never substitute a lower-ranked or another category: the selected
+    // option category and the overnight city are both mandatory filters.
+    let hotelPool = cityHotels;
 
     const needsQuad = showQuad || (isDynamicGlobal && (dayMixFor(day.day).quad ?? 0) > 0);
     const quadPool = hotelPool.filter((h) => hotelHasQuad(h.id, day.date));
@@ -605,12 +596,24 @@ function AccommodationSelectionTable({
 
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
     const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
+    const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
+    const selectedAvailability = availability.details.find((hotel) => hotel.id === selHotel?.id);
     const baseRate =
       sel && sel.room_id ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
     const dayOverride = overrides[day.day];
-    const rate = applyRateOverride(baseRate, dayOverride);
-    const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
+    const rate = selectedAvailability?.blackout ? null : applyRateOverride(baseRate, dayOverride);
     const isFallback = sel?.is_fallback || false;
+    const pricingMessage = selectedAvailability
+      ? selectedAvailability.roomCount === 0
+        ? "Hotel available, but no room categories are linked."
+        : selectedAvailability.blackout
+          ? `Hotel available — selected date is blacked out (${fmtDateShort(day.date)}).`
+          : selectedAvailability.applicableRateCount === 0
+            ? `Hotel available — no applicable rate for selected date (${fmtDateShort(day.date)}).`
+            : ""
+      : cityHotels.length > 0 && availability.validForDate === 0
+        ? `Hotels are available — no applicable rate for selected date (${fmtDateShort(day.date)}).`
+        : "";
 
     let sglNet = 0,
       dblNet = 0,
@@ -628,8 +631,8 @@ function AccommodationSelectionTable({
     let hasRate = false;
 
     if (rate) {
-      const dbl = rate.double_rate;
-      const sgl = rate.single_rate;
+      const dbl = rate.double_rate_missing ? 0 : rate.double_rate;
+      const sgl = rate.single_rate_missing ? 0 : rate.single_rate;
       const extra = rate.extra_bed_rate || 0;
       const quad = (rate.quad_rate ?? 0) > 0 ? (rate.quad_rate as number) : 0;
       const gst = gstRateFor;
@@ -656,19 +659,21 @@ function AccommodationSelectionTable({
 
     const setSel = (patch: Partial<typeof sel> & object) => {
       const others = option.selections.filter(
-        (selection) => selection.routing_day !== day.day || selection.city_id !== day.city_id,
+        (selection) => selection.routing_day !== day.day || selection.city_id !== cityId,
       );
       const cur = sel || {
-        city_id: day.city_id,
+        city_id: cityId,
         routing_day: day.day,
         hotel_id: "",
         room_id: "",
         meal_plan: "CP" as MealPlan,
       };
-      const merged = { ...cur, ...patch, city_id: day.city_id, routing_day: day.day };
+      const merged = { ...cur, ...patch, city_id: cityId, routing_day: day.day };
       if ("hotel_id" in patch) {
         const h = d.hotels.find((x) => x.id === merged.hotel_id);
-        merged.is_fallback = !!h && h.hotel_category !== activeCategory;
+        merged.is_fallback =
+          !!h &&
+          normalizeHotelLookupValue(h.hotel_category) !== normalizeHotelLookupValue(activeCategory);
       }
       onUpdate({ selections: [...others, merged] });
     };
@@ -677,7 +682,7 @@ function AccommodationSelectionTable({
       day: day.day,
       date: day.date,
       city: cityName,
-      cityId: day.city_id,
+      cityId,
       dayOverride,
       sel,
       hotelPool,
@@ -688,6 +693,9 @@ function AccommodationSelectionTable({
       isFallback,
       noCategoryMatch,
       noQuadHotel,
+      availability,
+      masterSyncStatus: masterSync.status,
+      pricingMessage,
       offSeasonText,
       hasRate,
       sglTotal,
@@ -708,6 +716,47 @@ function AccommodationSelectionTable({
       selectedMeal: sel?.meal_plan || "CP",
     };
   });
+
+  const ujjainDiagnostic = rows.find((row) => normalizeHotelLookupValue(row.city) === "ujjain");
+  const ujjainDiagnosticSignature = ujjainDiagnostic
+    ? `${activeCategory}|${JSON.stringify(ujjainDiagnostic.availability)}`
+    : "";
+  const lastUjjainDiagnostic = useRef("");
+  useEffect(() => {
+    if (
+      !import.meta.env.DEV ||
+      !ujjainDiagnostic ||
+      lastUjjainDiagnostic.current === ujjainDiagnosticSignature
+    )
+      return;
+    lastUjjainDiagnostic.current = ujjainDiagnosticSignature;
+    const report = ujjainDiagnostic.availability;
+    console.info(`[hotel-eligibility] Ujjain / ${activeCategory}`, {
+      master_sync_status: ujjainDiagnostic.masterSyncStatus,
+      master_hotel_count: d.hotels.length,
+      matching_city_hotel_count: report.cityMatches,
+      travel_date: ujjainDiagnostic.date,
+      resolved_costing_destination: ujjainDiagnostic.city,
+      matched_city_id: ujjainDiagnostic.cityId,
+      total_hotels: report.totalHotels,
+      ujjain_hotels: report.cityMatches,
+      category_matches: report.categoryMatches,
+      hotels_with_rooms: report.withRooms,
+      hotels_with_rate_plans: report.withRatePlans,
+      hotels_valid_for_travel_date: report.validForDate,
+      final_dropdown_count: report.finalDropdownCount,
+      exact_exclusions: report.details.map((hotel) => ({
+        id: hotel.id,
+        name: hotel.name,
+        city_id: hotel.city_id,
+        city_name: hotel.city_name,
+        category: hotel.hotel_category,
+        room_count: hotel.roomCount,
+        rate_plan_count: hotel.rateCount,
+        exclusion_reason: hotel.rejectionReason,
+      })),
+    });
+  }, [activeCategory, d.hotels.length, ujjainDiagnostic, ujjainDiagnosticSignature]);
 
   // Dynamic Totals
   let globalTotalPrice = 0;
@@ -921,6 +970,11 @@ function AccommodationSelectionTable({
                 <tbody>
                   {rows.map((r, idx) => {
                     const isMissingHotel = r.noCategoryMatch && r.hotelPool.length === 0;
+                    const mastersLoading =
+                      r.masterSyncStatus === "idle" || r.masterSyncStatus === "loading";
+                    const masterUnavailable = ["empty", "denied", "error"].includes(
+                      r.masterSyncStatus,
+                    );
                     return (
                       <tr
                         key={idx}
@@ -945,23 +999,37 @@ function AccommodationSelectionTable({
                                   })
                                 }
                               >
-                                <SelectTrigger className="h-8 w-full text-xs">
-                                  <SelectValue placeholder="No Hotel" />
+                                <SelectTrigger
+                                  className="h-8 w-full text-xs"
+                                  disabled={mastersLoading || masterUnavailable}
+                                >
+                                  <SelectValue
+                                    placeholder={mastersLoading ? "Loading hotels…" : "No Hotel"}
+                                  />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__no_hotel__">No Hotel</SelectItem>
                                 </SelectContent>
                               </Select>
                               <div className="flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3" /> No hotels{" "}
-                                <Button
-                                  size="sm"
-                                  variant="link"
-                                  className="h-auto p-0 text-xs"
-                                  onClick={() => onQuickAdd(r.cityId, r.city)}
-                                >
-                                  Add
-                                </Button>
+                                <AlertCircle className="h-3 w-3" />
+                                {mastersLoading ? (
+                                  "Loading the latest Hotel Master…"
+                                ) : masterUnavailable ? (
+                                  `Hotel Master is ${r.masterSyncStatus}; matching hotels cannot be confirmed.`
+                                ) : (
+                                  <>
+                                    No hotel found for {r.city} / {activeCategory}.{" "}
+                                    <Button
+                                      size="sm"
+                                      variant="link"
+                                      className="h-auto p-0 text-xs"
+                                      onClick={() => onQuickAdd(r.cityId, r.city)}
+                                    >
+                                      Add
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           ) : (
@@ -1006,6 +1074,11 @@ function AccommodationSelectionTable({
                                 {r.hotelPool.length} hotel{r.hotelPool.length !== 1 ? "s" : ""}{" "}
                                 available
                               </div>
+                              {r.pricingMessage && (
+                                <div className="mt-1 text-[10px] text-amber-700">
+                                  {r.pricingMessage}
+                                </div>
+                              )}
                             </>
                           )}
                         </td>
@@ -1066,22 +1139,28 @@ function AccommodationSelectionTable({
                         {r.hasRate ? (
                           <>
                             <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">
-                              {inr(r.sglTotal)}
-                              <div className="text-[11px] text-[#64748B] font-normal">
-                                Net: {inr(r.sglNet)} + GST {gstRateFor(r.sglNet) * 100}%
-                              </div>
+                              {r.sglNet > 0 ? inr(r.sglTotal) : "Rate Not Available"}
+                              {r.sglNet > 0 && (
+                                <div className="text-[11px] text-[#64748B] font-normal">
+                                  Net: {inr(r.sglNet)} + GST {gstRateFor(r.sglNet) * 100}%
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">
-                              {inr(r.dblTotal)}
-                              <div className="text-[11px] text-[#64748B] font-normal">
-                                Net: {inr(r.dblNet)} + GST {gstRateFor(r.dblNet) * 100}%
-                              </div>
+                              {r.dblNet > 0 ? inr(r.dblTotal) : "Rate Not Available"}
+                              {r.dblNet > 0 && (
+                                <div className="text-[11px] text-[#64748B] font-normal">
+                                  Net: {inr(r.dblNet)} + GST {gstRateFor(r.dblNet) * 100}%
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">
-                              {inr(r.trpTotal)}
-                              <div className="text-[11px] text-[#64748B] font-normal">
-                                Net: {inr(r.trpNet)} + GST {gstRateFor(r.trpNet) * 100}%
-                              </div>
+                              {r.trpNet > 0 ? inr(r.trpTotal) : "Rate Not Available"}
+                              {r.trpNet > 0 && (
+                                <div className="text-[11px] text-[#64748B] font-normal">
+                                  Net: {inr(r.trpNet)} + GST {gstRateFor(r.trpNet) * 100}%
+                                </div>
+                              )}
                             </td>
                             {standardHasQuad && (
                               <td className="py-3 px-3 text-right text-[#0F172A] font-semibold">
@@ -1113,10 +1192,11 @@ function AccommodationSelectionTable({
                             size="sm"
                             variant="outline"
                             className="h-8 text-xs gap-1.5"
-                            disabled={!r.hasRate}
+                            disabled={!r.sel?.hotel_id || !r.sel?.room_id || r.sel?.no_hotel}
                             onClick={() => setEditingDay(r.day)}
                           >
-                            <Pencil className="h-3 w-3" /> Edit
+                            <Pencil className="h-3 w-3" />
+                            {r.hasRate ? "Edit" : "Enter manual rate"}
                           </Button>
                           {r.dayOverride && Object.keys(r.dayOverride).length > 0 && (
                             <div className="text-[10px] text-amber-700 mt-1 uppercase tracking-wide">
@@ -2107,6 +2187,28 @@ function DayRateFields({
 // ------------------------------------------------------------
 // Per-option Inclusions & Exclusions editor
 // ------------------------------------------------------------
+// eslint-disable-next-line react-refresh/only-export-components
+export function optionInclusionSummary(draft: QuoteDraft, option: HotelOption) {
+  const stays = draft.routing
+    .filter((day) => day.overnight)
+    .map((day) => hotelSelectionForDay(option, day))
+    .filter(
+      (selection): selection is NonNullable<typeof selection> =>
+        Boolean(selection && !selection.no_hotel && (selection.hotel_id || selection.room_id)),
+    );
+  const plans = stays.map((selection) => selection.meal_plan);
+  return {
+    nights: stays.length,
+    breakfasts: plans.filter((plan) => plan !== "EP").length,
+    lunches: plans.filter((plan) => plan === "AP").length,
+    dinners: plans.filter((plan) => plan === "MAP" || plan === "AP").length,
+    taxes:
+      stays.length > 0 || (option.inclusions ?? []).some((item) => /tax/i.test(item))
+        ? "Applicable"
+        : "—",
+  };
+}
+
 function OptionInclusionsEditor({
   draft,
   option,
@@ -2121,83 +2223,102 @@ function OptionInclusionsEditor({
   const showLegacyExclusions: boolean = false;
   const inclusions = option.inclusions ?? [];
   const exclusions = option.exclusions ?? [];
-  const plans = option.selections.map((selection) => selection.meal_plan);
-  const summary = {
-    nights: draft.routing.filter((day) => day.overnight).length,
-    breakfasts: plans.filter((plan) => plan !== "EP").length,
-    lunches: plans.filter((plan) => plan === "AP").length,
-    dinners: plans.filter((plan) => plan === "MAP" || plan === "AP").length,
-  };
+  const summary = optionInclusionSummary(draft, option);
 
   return (
-    <div className="space-y-2">
-      <div className="text-xs text-muted-foreground italic">
-        Auto-filled for <b>{option.category || "—"}</b>. Customize as needed.
-      </div>
+    <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3">
-        <Card className="p-3">
-          <div className="section-label mb-2">Inclusions · Option {option.key}</div>
-          <div className="mb-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-            <div className="rounded border p-2">
-              Nights
-              <br />
-              <b>{summary.nights}</b>
+        <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4">
+            <div className="text-sm font-semibold text-slate-900">
+              Inclusions · Option {option.key}
             </div>
-            <div className="rounded border p-2">
-              Breakfasts
-              <br />
-              <b>{summary.breakfasts}</b>
-            </div>
-            <div className="rounded border p-2">
-              Lunches
-              <br />
-              <b>{summary.lunches}</b>
-            </div>
-            <div className="rounded border p-2">
-              Dinners
-              <br />
-              <b>{summary.dinners}</b>
-            </div>
-            <div className="rounded border p-2">
-              Taxes
-              <br />
-              <b>Applicable</b>
+            <div className="mt-1 text-xs text-slate-500">
+              Auto-derived from selected hotel, meal plan and package inclusions.
             </div>
           </div>
-          <ul className="space-y-1 mb-2">
-            {inclusions.map((x, i) => (
-              <li key={i} className="text-sm flex justify-between gap-2">
-                <span>✓ {x}</span>
-                <button
-                  onClick={() => onChange({ inclusions: inclusions.filter((_, j) => j !== i) })}
-                  className="text-destructive"
+          <div className="space-y-5 p-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {[
+                ["Nights", summary.nights],
+                ["Breakfasts", summary.breakfasts],
+                ["Lunches", summary.lunches],
+                ["Dinners", summary.dinners],
+                ["Taxes", summary.taxes],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-3"
                 >
-                  ×
-                </button>
-              </li>
-            ))}
-            {inclusions.length === 0 && (
-              <li className="text-xs text-muted-foreground">No inclusions yet.</li>
-            )}
-          </ul>
-          <div className="flex gap-2">
-            <Input
-              value={newInc}
-              onChange={(e) => setNewInc(e.target.value)}
-              placeholder="Add inclusion"
-            />
-            <Button
-              size="sm"
-              onClick={() => {
-                const v = newInc.trim();
-                if (v) {
-                  onChange({ inclusions: [...inclusions, v] });
-                  setNewInc("");
-                }
-              }}
-            >
-              Add
-            </Button>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {label}
+                  </div>
+                  <div className="mt-1 text-xl font-bold text-slate-900">{value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Package inclusions · {option.category || "Uncategorised"}
+              </div>
+              <ul className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {inclusions.map((item, index) => (
+                  <li
+                    key={`${item}-${index}`}
+                    className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2.5 last:border-b-0"
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5 text-sm text-slate-700">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <Check className="h-3.5 w-3.5" />
+                      </span>
+                      <span>{item}</span>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove inclusion: ${item}`}
+                      title="Remove inclusion"
+                      onClick={() =>
+                        onChange({ inclusions: inclusions.filter((_, itemIndex) => itemIndex !== index) })
+                      }
+                      className="rounded-md p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-destructive"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+                {inclusions.length === 0 && (
+                  <li className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No inclusions yet.
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-3">
+              <div className="mb-2 text-xs font-medium text-slate-600">Add inclusion</div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  className="bg-white"
+                  value={newInc}
+                  onChange={(event) => setNewInc(event.target.value)}
+                  placeholder="e.g. Welcome drink on arrival"
+                />
+                <Button
+                  type="button"
+                  className="sm:min-w-24"
+                  onClick={() => {
+                    const value = newInc.trim();
+                    if (value) {
+                      onChange({ inclusions: [...inclusions, value] });
+                      setNewInc("");
+                    }
+                  }}
+                >
+                  <Plus className="mr-1.5 h-4 w-4" /> Add
+                </Button>
+              </div>
+            </div>
           </div>
         </Card>
         {showLegacyExclusions && (
