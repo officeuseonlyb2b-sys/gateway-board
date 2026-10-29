@@ -1,11 +1,18 @@
-import { memo, useMemo } from "react";
+import { Fragment, memo, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { inr } from "@/lib/format";
 import { useDB } from "@/lib/mock-store";
 import { getQuotationScope } from "@/lib/query-for";
+import { dynamicAccommodationRoomLines, effectiveAccommodationPax } from "@/lib/wizard/calc";
 import { buildRateSheet, type RateSheetRow } from "@/lib/wizard/costsheet";
-import type { HotelOption, LandReviewDisplaySelection, QuoteDraft } from "@/lib/wizard/types";
+import {
+  hotelSelectionForDay,
+  isDynamicAccommodationMode,
+  type HotelOption,
+  type LandReviewDisplaySelection,
+  type QuoteDraft,
+} from "@/lib/wizard/types";
 
 type SetDraft = (patch: Partial<QuoteDraft>) => void;
 type MatrixRow = { key: string; groupKey: string; row: RateSheetRow };
@@ -23,73 +30,48 @@ function CommercialPackageMatrixImpl({
 }) {
   const db = useDB();
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  // The matrix display mode is independent from the Accommodation editor's
-  // saved allocation mode. This phase intentionally implements Standard only.
-  const matrixMode = "standard" as const;
-  const standardPricingDraft = useMemo<QuoteDraft>(
-    () => ({ ...draft, allocation_mode: "standard", dynamic_days: [] }),
-    // Matrix row selection is display state, not a costing input. Listing the
-    // pricing fields keeps checkbox clicks from rebuilding every rate sheet.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      draft.routing,
-      draft.transport,
-      draft.transport_options,
-      draft.guides,
-      draft.entrances,
-      draft.activities,
-      draft.misc,
-      draft.hotel_options,
-      draft.meal_selections,
-      draft.meal_selections_by_option,
-      draft.costing_selection,
-      draft.adults,
-      draft.ss,
-      draft.children,
-      draft.pax_mode,
-      draft.pax_min,
-      draft.pax_max,
-      draft.pax_range,
-      draft.traveler_type,
-      draft.group_room_mix,
-      draft.markup_percent,
-      draft.land_markup_percent,
-      draft.land_gst_percent,
-      draft.hotel_markup_percent,
-      draft.hotel_gst_percent,
-      draft.escort_enabled,
-      draft.escort_pricing_mode,
-      draft.escort_per_person_rate,
-      draft.escort_ranges,
-      draft.escort_day_rates_by_slab,
-      draft.guide_day_escort,
-      draft.guide_day_escort_enabled,
-      draft.guide_reporting_by_pax,
-      draft.guide_reporting_cost,
-      draft.guide_reporting_cost_hindi,
-      draft.guide_reporting_cost_english,
-      draft.guide_reporting_cost_language,
-      draft.guide_escort_reporting,
-    ],
-  );
+  const dynamicMode = isDynamicAccommodationMode(draft);
   const options = useMemo<HotelOption[]>(() => {
     if (!scope.accommodationPart) return [{ key: "A", label: "Land Part", selections: [] }];
     return draft.hotel_options
-      .filter((option) => option.selections.some((selection) => selection.room_id))
+      .filter((option) =>
+        dynamicMode
+          ? option.selections.length > 0 || Object.keys(option.dynamic_allocations ?? {}).length > 0
+          : option.selections.some((selection) => selection.room_id),
+      )
       .slice(0, 4);
-  }, [draft.hotel_options, scope.accommodationPart]);
+  }, [draft.hotel_options, scope.accommodationPart, dynamicMode]);
   const sheets = useMemo(
     () =>
       options.map((option) => ({
         option,
-        groups: buildRateSheet(
-          standardPricingDraft,
-          db,
-          option,
-          scope.landPart ? draft.transport : [],
-        ),
+        groups: buildRateSheet(draft, db, option, scope.landPart ? draft.transport : []),
       })),
-    [options, standardPricingDraft, db, scope.landPart, draft.transport],
+    [options, draft, db, scope.landPart],
+  );
+  const dynamicOptionValidity = useMemo(
+    () =>
+      new Map(
+        options.map((option) => {
+          const resolution = dynamicAccommodationRoomLines(draft, option, db);
+          const requiredPax = effectiveAccommodationPax(draft, option);
+          const dynamicNights = draft.routing.filter(
+            (day) =>
+              day.overnight && dynamicMode,
+          );
+          const incomplete = dynamicNights.some((day) => {
+            const selection = hotelSelectionForDay(option, day, true);
+            if (selection?.no_hotel) return false;
+            const lines = resolution.lines.filter((line) => line.day === day.day);
+            return (
+              resolution.missing > 0 ||
+              lines.reduce((sum, line) => sum + line.capacity, 0) !== requiredPax
+            );
+          });
+          return [option.key, !incomplete] as const;
+        }),
+      ),
+    [options, draft, db],
   );
   const primary = sheets[0];
   const rows = useMemo<MatrixRow[]>(
@@ -193,7 +175,13 @@ function CommercialPackageMatrixImpl({
         </div>
         <div className={readOnly ? "hidden" : "flex flex-wrap gap-2"}>
           <Button size="sm" className="pointer-events-none">
-            {landMeals ? "Land + Meals Mode" : landOnly ? "Land Only Mode" : "Standard Hotel Mode"}
+            {landMeals
+              ? "Land + Meals Mode"
+              : landOnly
+                ? "Land Only Mode"
+                : dynamicMode
+                  ? "Dynamic Hotel Mode"
+                  : "Standard Hotel Mode"}
           </Button>
           <Button
             size="sm"
@@ -227,7 +215,7 @@ function CommercialPackageMatrixImpl({
         </div>
       </div>
 
-      {matrixMode === "standard" && !rows.length ? (
+      {!rows.length ? (
         <Card className="p-5 text-sm text-muted-foreground">
           {landScoped
             ? "Add a valid transport variation to generate Land commercial matrix rows."
@@ -287,7 +275,7 @@ function CommercialPackageMatrixImpl({
                     .map((option) => (
                       <th
                         key={option.key}
-                        colSpan={8}
+                        colSpan={dynamicMode ? 4 : 8}
                         className="bg-emerald-50 p-2 text-center text-emerald-900"
                       >
                         Option {option.key} - {option.category || option.label || "Accommodation"}
@@ -312,7 +300,7 @@ function CommercialPackageMatrixImpl({
                   {options
                     .filter((option) => scope.accommodationPart)
                     .map((option) => (
-                      <>
+                      <Fragment key={option.key}>
                         <th
                           key={`${option.key}-meals`}
                           colSpan={2}
@@ -322,28 +310,31 @@ function CommercialPackageMatrixImpl({
                         </th>
                         <th
                           key={`${option.key}-accommodation`}
-                          colSpan={3}
+                          colSpan={dynamicMode ? 1 : 3}
                           className="bg-indigo-50 p-2 text-center"
                         >
                           Accommodation · PP
                         </th>
                         <th
                           key={`${option.key}-package`}
-                          colSpan={3}
+                          colSpan={dynamicMode ? 1 : 3}
                           className="bg-emerald-50 p-2 text-center"
                         >
                           {accommodationOnly
                             ? "Final Accommodation + Meals Price · PP"
                             : "Package Price · PP"}
                         </th>
-                      </>
+                      </Fragment>
                     ))}
                 </tr>
                 <tr className="bg-slate-50">
                   {options
                     .filter((option) => scope.accommodationPart)
                     .flatMap((option) =>
-                      ["Lunch", "Dinner", "SGL", "DBL", "TRP", "SGL", "DBL", "TRP"].map((label) => (
+                      (dynamicMode
+                        ? ["Lunch", "Dinner", "Allocated Rooms", "Package"]
+                        : ["Lunch", "Dinner", "SGL", "DBL", "TRP", "SGL", "DBL", "TRP"]
+                      ).map((label) => (
                         <th key={`${option.key}-${label}`} className="p-2 text-right">
                           {label}
                         </th>
@@ -416,26 +407,52 @@ function CommercialPackageMatrixImpl({
                           const value = rowByOptionGroupPax.get(
                             `${option.key}|${matrixRow.groupKey}|${matrixRow.row.pax}`,
                           );
-                          return value ? (
-                            <>
+                          const dynamicValid = dynamicOptionValidity.get(option.key) !== false;
+                          return value && (!dynamicMode || dynamicValid) ? (
+                            <Fragment key={option.key}>
                               <td className="p-2 text-right tabular-nums">{inr(value.lunch)}</td>
                               <td className="p-2 text-right tabular-nums">{inr(value.dinner)}</td>
-                              <td className="p-2 text-right tabular-nums">{inr(value.single)}</td>
-                              <td className="p-2 text-right tabular-nums">{inr(value.double)}</td>
-                              <td className="p-2 text-right tabular-nums">{inr(value.triple)}</td>
-                              <td className="p-2 text-right font-semibold tabular-nums">
-                                {inr(value.pkg_single)}
-                              </td>
-                              <td className="p-2 text-right font-semibold tabular-nums">
-                                {inr(value.pkg_double)}
-                              </td>
-                              <td className="p-2 text-right font-semibold tabular-nums">
-                                {inr(value.pkg_triple)}
-                              </td>
-                            </>
+                              {dynamicMode ? (
+                                <>
+                                  <td className="p-2 text-right tabular-nums">
+                                    {inr(value.single)}
+                                  </td>
+                                  <td className="p-2 text-right font-semibold tabular-nums">
+                                    {inr(value.pkg_single)}
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className="p-2 text-right tabular-nums">
+                                    {inr(value.single)}
+                                  </td>
+                                  <td className="p-2 text-right tabular-nums">
+                                    {inr(value.double)}
+                                  </td>
+                                  <td className="p-2 text-right tabular-nums">
+                                    {inr(value.triple)}
+                                  </td>
+                                  <td className="p-2 text-right font-semibold tabular-nums">
+                                    {inr(value.pkg_single)}
+                                  </td>
+                                  <td className="p-2 text-right font-semibold tabular-nums">
+                                    {inr(value.pkg_double)}
+                                  </td>
+                                  <td className="p-2 text-right font-semibold tabular-nums">
+                                    {inr(value.pkg_triple)}
+                                  </td>
+                                </>
+                              )}
+                            </Fragment>
                           ) : (
-                            <td colSpan={8} className="p-2 text-center text-muted-foreground">
-                              Not available
+                            <td
+                              key={option.key}
+                              colSpan={dynamicMode ? 4 : 8}
+                              className="p-2 text-center font-medium text-amber-800"
+                            >
+                              {dynamicMode
+                                ? "Allocation or rate validation pending"
+                                : "Not available"}
                             </td>
                           );
                         })}
@@ -454,7 +471,9 @@ function CommercialPackageMatrixImpl({
             ? "Land Part: selected land services only. Accommodation, hotel meals and room pricing are excluded."
             : accommodationOnly
               ? "Accommodation Part: selected hotel rooms and meals only. Land services are excluded."
-              : "Standard: common Land PP + option Lunch PP + Dinner PP + relevant SGL/DBL/TRP Accommodation PP. Dynamic accommodation matrix pricing is intentionally not included yet."}
+              : dynamicMode
+                ? "Dynamic: common Land PP + option meals + the actual allocated-room accommodation PP. Incomplete allocations remain pending."
+                : "Standard: common Land PP + option Lunch PP + Dinner PP + relevant SGL/DBL/TRP Accommodation PP."}
       </p>
     </div>
   );

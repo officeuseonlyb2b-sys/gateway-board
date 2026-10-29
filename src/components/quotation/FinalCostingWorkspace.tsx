@@ -17,7 +17,12 @@ import { buildLandPart, buildRateSheet } from "@/lib/wizard/costsheet";
 import { guideLanguageCostingForPax, guideServicesForPax } from "@/lib/wizard/guide-costing";
 import { applyLandCommercials } from "@/lib/wizard/land-pricing";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
-import { hotelSelectionForDay, type HotelOption, type QuoteDraft } from "@/lib/wizard/types";
+import {
+  hotelSelectionForDay,
+  isDynamicAccommodationMode,
+  type HotelOption,
+  type QuoteDraft,
+} from "@/lib/wizard/types";
 import { CommercialPackageMatrix } from "./CommercialPackageMatrix";
 import { PackageStandardCostingReview } from "./PackageStandardCostingReview";
 import { AccommodationDynamicCostingReview } from "./AccommodationDynamicCostingReview";
@@ -169,7 +174,15 @@ function LandReview({ draft }: { draft: QuoteDraft }) {
   );
 }
 
-function StayPlan({ draft, options }: { draft: QuoteDraft; options: HotelOption[] }) {
+function StayPlan({
+  draft,
+  options,
+  dynamic = false,
+}: {
+  draft: QuoteDraft;
+  options: HotelOption[];
+  dynamic?: boolean;
+}) {
   const db = useDB();
   const city = (id: string) => db.cities.find((item) => item.id === id)?.name || "—";
   return (
@@ -199,7 +212,7 @@ function StayPlan({ draft, options }: { draft: QuoteDraft; options: HotelOption[
                   <td>{city(day.city_id)}</td>
                   <td>1</td>
                   {options.map((option) => {
-                    const selection = hotelSelectionForDay(option, day);
+                    const selection = hotelSelectionForDay(option, day, dynamic);
                     const hotel = db.hotels.find((item) => item.id === selection?.hotel_id);
                     const room = db.room_categories.find((item) => item.id === selection?.room_id);
                     return (
@@ -323,7 +336,7 @@ function DynamicAccommodationReview({
   const db = useDB();
   return (
     <div className="space-y-3">
-      <StayPlan draft={draft} options={options} />
+      <StayPlan draft={draft} options={options} dynamic />
       <Section title="Accommodation & Meals — Dynamic Mode Verification">
         <div className="overflow-x-auto">
           <table className={`${table} min-w-[900px]`}>
@@ -348,7 +361,9 @@ function DynamicAccommodationReview({
                       const room = db.room_categories.find(
                         (item) => item.id === allocation.room_id,
                       );
-                      const selection = day ? hotelSelectionForDay(option, day) : undefined;
+                      const selection = day
+                        ? hotelSelectionForDay(option, day, true)
+                        : undefined;
                       const hotel = selection
                         ? db.hotels.find((item) => item.id === selection.hotel_id)
                         : undefined;
@@ -551,7 +566,12 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
   ];
   const guideRows = guideSlabs.flatMap((slab) =>
     ["Hindi", "English", "Language"].flatMap((language) => {
-      const costing = guideLanguageCostingForPax(draft, db, slab.pax, language as "Hindi" | "English" | "Language");
+      const costing = guideLanguageCostingForPax(
+        draft,
+        db,
+        slab.pax,
+        language as "Hindi" | "English" | "Language",
+      );
       return costing.optionalRows.map((row) => ({
         kind: "Guide",
         group: `${language === "Language" ? "Other Language" : language} · ${slab.label}`,
@@ -582,13 +602,18 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
     ...optionalActivities.map((item) => ({
       kind: "Activity",
       group: "Optional Activities",
-      label: db.activities.find((activity) => activity.id === item.activity_id)?.activity_name || "Activity",
+      label:
+        db.activities.find((activity) => activity.id === item.activity_id)?.activity_name ||
+        "Activity",
       base: item.rate * item.qty,
     })),
     ...optionalMeals,
   ];
   const groupTotals = Array.from(
-    rows.reduce((groups, row) => groups.set(row.group, (groups.get(row.group) ?? 0) + row.base), new Map<string, number>()),
+    rows.reduce(
+      (groups, row) => groups.set(row.group, (groups.get(row.group) ?? 0) + row.base),
+      new Map<string, number>(),
+    ),
     ([group, base]) => ({ group, commercial: applyLandCommercials(draft, base, 0.05) }),
   );
   return (
@@ -610,15 +635,16 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
               rows.map((row, index) => {
                 const commercial = applyLandCommercials(draft, row.base, 0.05);
                 return (
-                <tr key={`${row.kind}-${row.label}-${index}`}>
-                  <td>{row.kind}</td>
-                  <td>{row.label}</td>
-                  <td className="text-right tabular-nums">{money(row.base)}</td>
-                  <td className="text-right tabular-nums">{money(commercial.markup)}</td>
-                  <td className="text-right tabular-nums">{money(commercial.gst)}</td>
-                  <td className="text-right tabular-nums">{money(commercial.final)}</td>
-                </tr>
-              );})
+                  <tr key={`${row.kind}-${row.label}-${index}`}>
+                    <td>{row.kind}</td>
+                    <td>{row.label}</td>
+                    <td className="text-right tabular-nums">{money(row.base)}</td>
+                    <td className="text-right tabular-nums">{money(commercial.markup)}</td>
+                    <td className="text-right tabular-nums">{money(commercial.gst)}</td>
+                    <td className="text-right tabular-nums">{money(commercial.final)}</td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={6} className="text-center text-muted-foreground">
@@ -630,7 +656,13 @@ function OptionalServices({ draft }: { draft: QuoteDraft }) {
           {rows.length > 0 && (
             <tfoot className="border-t bg-amber-50 font-semibold">
               {groupTotals.map(({ group, commercial }) => (
-                <tr key={group}><td colSpan={2}>{group} Total</td><td className="text-right">{money(commercial.base)}</td><td className="text-right">{money(commercial.markup)}</td><td className="text-right">{money(commercial.gst)}</td><td className="text-right">{money(commercial.final)}</td></tr>
+                <tr key={group}>
+                  <td colSpan={2}>{group} Total</td>
+                  <td className="text-right">{money(commercial.base)}</td>
+                  <td className="text-right">{money(commercial.markup)}</td>
+                  <td className="text-right">{money(commercial.gst)}</td>
+                  <td className="text-right">{money(commercial.final)}</td>
+                </tr>
               ))}
             </tfoot>
           )}
@@ -650,12 +682,9 @@ function FinalCostingWorkspaceImpl({
   readOnly?: boolean;
 }) {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const dynamic = draft.allocation_mode === "dynamic" || (draft.dynamic_days ?? []).length > 0;
+  const dynamic = isDynamicAccommodationMode(draft);
   const options = draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4);
-  if (
-    (scope.landPart && (!scope.accommodationPart || !dynamic)) ||
-    (!scope.landPart && scope.accommodationPart)
-  ) {
+  if (scope.landPart || (!scope.landPart && scope.accommodationPart)) {
     return <PackageStandardCostingReview draft={draft} set={set} readOnly={readOnly} />;
   }
   if (!scope.landPart && scope.accommodationPart && dynamic) {

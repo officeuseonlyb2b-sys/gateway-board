@@ -72,7 +72,11 @@ try {
     dueWindow: "all",
   };
   assert.deepEqual(
-    queryFilters.filterCrmQueries([historicalQuery], todayFilters, new Date("2026-10-28T06:00:00Z")),
+    queryFilters.filterCrmQueries(
+      [historicalQuery],
+      todayFilters,
+      new Date("2026-10-28T06:00:00Z"),
+    ),
     [historicalQuery],
     "exact CRM Query ID search bypasses only the received-date scope",
   );
@@ -3219,6 +3223,357 @@ try {
   close(dynamicBreakdown.supplier_gst, 200, "Dynamic shared resolver GST total");
   close(dynamicBreakdown.total, 4200, "Dynamic shared resolver StepHotels total");
   assert.equal(dynamicBreakdown.capacity, 2);
+
+  // The routing-night key remains authoritative when Step 8's accommodation
+  // city uses a different master-ID namespace from the itinerary city.
+  const fourNightDb = structuredClone(db);
+  fourNightDb.cities = [1, 2, 3, 4].map((day) => ({
+    id: `route-city-${day}`,
+    name: ["Ujjain", "Indore", "Indore", "Bhopal"][day - 1],
+  }));
+  fourNightDb.hotels = [1, 2, 3, 4].map((day) => ({
+    ...db.hotels[0],
+    id: `hotel-${day}`,
+    city_id: `accommodation-city-${day}`,
+    name: ["Perfectstayz Premium Shree Narayana", "Kyraid by OTHPL", "Kyraid by OTHPL", "Subh Inn"][
+      day - 1
+    ],
+  }));
+  fourNightDb.room_categories = [1, 2, 3, 4].map((day) => ({
+    id: `room-${day}`,
+    hotel_id: `hotel-${day}`,
+    name: "Deluxe",
+    created_at: now,
+  }));
+  fourNightDb.rate_plans = [1, 2, 3, 4].map((day) => ({
+    ...db.rate_plans[0],
+    id: `four-night-rate-${day}`,
+    room_category_id: `room-${day}`,
+    single_rate: day === 4 ? 2000 : day === 3 ? 2850 : 3000,
+    double_rate: 2850,
+    extra_bed_rate: day === 4 ? 2150 : 1000,
+  }));
+  const fourNightDynamic = {
+    ...baseDraft(),
+    adults: 4,
+    nights: 4,
+    allocation_mode: "dynamic",
+    dynamic_days: [1, 2, 3, 4],
+    routing: [1, 2, 3, 4]
+      .map((day) => ({
+        ...baseDraft().routing[0],
+        day,
+        date: `2026-11-0${day + 2}`,
+        city_id: `route-city-${day}`,
+        overnight: true,
+      }))
+      .concat({
+        ...baseDraft().routing[1],
+        day: 5,
+        date: "2026-11-07",
+      }),
+    hotel_options: [
+      {
+        ...structuredClone(baseDraft().hotel_options[0]),
+        selections: [
+          ...[1, 2, 3].map((day) => ({
+            routing_day: day,
+            city_id: `accommodation-city-${day}`,
+            hotel_id: `hotel-${day}`,
+            room_id: `room-${day}`,
+            meal_plan: "CP",
+          })),
+          {
+            routing_day: 4,
+            city_id: "route-city-4",
+            hotel_id: "",
+            room_id: "",
+            meal_plan: "CP",
+            no_hotel: true,
+            accommodation_status: "no_hotel_required",
+          },
+          {
+            routing_day: 4,
+            city_id: "accommodation-city-4",
+            hotel_id: "hotel-4",
+            room_id: "room-4",
+            meal_plan: "CP",
+            no_hotel: false,
+          },
+        ],
+        dynamic_allocations: {
+          1: [{ id: "day-1-double", room_id: "room-1", occupancy: "double", rooms: 2 }],
+          2: [{ id: "day-2-double", room_id: "room-2", occupancy: "double", rooms: 2 }],
+          3: [{ id: "day-3-single", room_id: "room-3", occupancy: "single", rooms: 4 }],
+          4: [
+            { id: "day-4-triple", room_id: "room-4", occupancy: "triple", rooms: 1 },
+            { id: "day-4-single", room_id: "room-4", occupancy: "single", rooms: 1 },
+          ],
+        },
+      },
+    ],
+  };
+  assert.equal(
+    types.accommodationMode(fourNightDynamic),
+    "dynamic",
+    "Explicit Dynamic mode is authoritative for the active accommodation option",
+  );
+  const standardWithStaleDynamicData = {
+    ...fourNightDynamic,
+    allocation_mode: "standard",
+    // Simulates a draft switched back to Standard before legacy Dynamic data
+    // (days, mixes and room combinations) is retained for a later switch.
+    dynamic_days: [1, 2, 3, 4],
+  };
+  assert.equal(
+    types.accommodationMode(standardWithStaleDynamicData),
+    "standard",
+    "Explicit Standard mode ignores retained Dynamic day state",
+  );
+  close(
+    calc.dynamicAccommodationBreakdown(
+      standardWithStaleDynamicData,
+      standardWithStaleDynamicData.hotel_options[0],
+      fourNightDb,
+    ).total,
+    0,
+    "Inactive Dynamic room combinations do not contribute while Standard is active",
+  );
+  const legacyDynamicMode = { ...fourNightDynamic, allocation_mode: undefined };
+  assert.equal(
+    types.accommodationMode(legacyDynamicMode),
+    "dynamic",
+    "Legacy drafts without allocation_mode retain their saved Dynamic state",
+  );
+  assert.equal(
+    types.accommodationMode(JSON.parse(JSON.stringify(standardWithStaleDynamicData))),
+    "standard",
+    "Save and reload retain the explicitly selected Standard mode",
+  );
+  assert.equal(
+    types.hotelSelectionForDay(fourNightDynamic.hotel_options[0], fourNightDynamic.routing[3], true)
+      ?.hotel_id,
+    "hotel-4",
+    "Day 4 resolves by routing-night identity across city ID namespaces",
+  );
+  const resumedFourNightDynamic = JSON.parse(JSON.stringify(fourNightDynamic));
+  assert.equal(
+    types.hotelSelectionForDay(
+      resumedFourNightDynamic.hotel_options[0],
+      resumedFourNightDynamic.routing[3],
+      true,
+    )?.hotel_id,
+    "hotel-4",
+    "Day 4 Subh Inn survives draft serialization and resume",
+  );
+  const dayFourNoHotelOnly = structuredClone(fourNightDynamic.hotel_options[0]);
+  dayFourNoHotelOnly.selections = dayFourNoHotelOnly.selections.filter(
+    (selection) => selection.routing_day !== 4 || selection.no_hotel,
+  );
+  assert.equal(
+    types.hotelSelectionForDay(dayFourNoHotelOnly, fourNightDynamic.routing[3], true)
+      ?.accommodation_status,
+    "no_hotel_required",
+    "An explicit No Hotel Required selection is not converted into a failed hotel lookup",
+  );
+  const latestNoHotel = structuredClone(fourNightDynamic.hotel_options[0]);
+  latestNoHotel.selections.push({
+    routing_day: 4,
+    city_id: "route-city-4",
+    hotel_id: "",
+    room_id: "",
+    meal_plan: "CP",
+    no_hotel: true,
+    accommodation_status: "no_hotel_required",
+  });
+  assert.equal(
+    types.resolveHotelSelectionForDay(latestNoHotel, fourNightDynamic.routing[3], true).reason,
+    "latest_explicit_exemption",
+    "The most recent explicit No Hotel Required choice supersedes stale hotel allocations",
+  );
+  const ambiguousDayFour = structuredClone(fourNightDynamic.hotel_options[0]);
+  ambiguousDayFour.selections.splice(ambiguousDayFour.selections.length - 1, 0, {
+    routing_day: 4,
+    city_id: "another-accommodation-city-4",
+    hotel_id: "another-hotel-4",
+    room_id: "room-4",
+    meal_plan: "CP",
+    no_hotel: false,
+  });
+  ambiguousDayFour.selections.push({
+    routing_day: 4,
+    city_id: "route-city-4",
+    hotel_id: "",
+    room_id: "",
+    meal_plan: "CP",
+    no_hotel: false,
+  });
+  assert.equal(
+    types.resolveHotelSelectionForDay(ambiguousDayFour, fourNightDynamic.routing[3], true).reason,
+    "ambiguous",
+    "An incomplete latest record exposes a duplicate conflict instead of choosing arbitrarily",
+  );
+  assert.equal(
+    types.hotelSelectionForDay(ambiguousDayFour, fourNightDynamic.routing[3], true),
+    undefined,
+    "An ambiguous Dynamic night does not silently resolve through the legacy city fallback",
+  );
+  const contradictoryDayFour = structuredClone(fourNightDynamic);
+  const contradictorySelection = contradictoryDayFour.hotel_options[0].selections.at(-1);
+  contradictorySelection.no_hotel = true;
+  contradictorySelection.accommodation_status = "own_arrangement";
+  contradictorySelection.room_id = "";
+  assert.equal(
+    types.hasHotelExemptionConflict(contradictorySelection),
+    true,
+    "A saved hotel ID plus Own Arrangement is surfaced as a conflict",
+  );
+  assert.equal(
+    types.resolveHotelSelectionForDay(
+      contradictoryDayFour.hotel_options[0],
+      contradictoryDayFour.routing[3],
+      true,
+    ).reason,
+    "conflicting_hotel_exemption",
+    "The real contradictory record shape is not silently reinterpreted as a booking",
+  );
+  close(
+    calc.dynamicAccommodationBreakdown(
+      contradictoryDayFour,
+      contradictoryDayFour.hotel_options[0],
+      fourNightDb,
+    ).total,
+    23940,
+    "A genuine Own Arrangement exemption remains excluded before confirmation",
+  );
+  contradictoryDayFour.hotel_options[0].selections[
+    contradictoryDayFour.hotel_options[0].selections.length - 1
+  ] = {
+    ...contradictorySelection,
+    ...hotelsStep.hotelBookingConfirmationPatch(),
+  };
+  assert.equal(
+    types.hasHotelExemptionConflict(
+      contradictoryDayFour.hotel_options[0].selections.at(-1),
+    ),
+    false,
+    "Explicit hotel confirmation clears only contradictory exemption state",
+  );
+  close(
+    calc.dynamicAccommodationBreakdown(
+      contradictoryDayFour,
+      contradictoryDayFour.hotel_options[0],
+      fourNightDb,
+    ).total,
+    31290,
+    "Confirmed hotel booking restores the existing Day 4 allocations exactly once",
+  );
+  assert.deepEqual(
+    contradictoryDayFour.hotel_options[0].dynamic_allocations[4].map((allocation) => allocation.id),
+    ["day-4-triple", "day-4-single"],
+    "Confirmation preserves both saved Day 4 room combinations",
+  );
+  const unrelatedAllocatedRoom = structuredClone(fourNightDynamic.hotel_options[0]);
+  unrelatedAllocatedRoom.dynamic_allocations[4] = [
+    { id: "unrelated-room", room_id: "room-not-on-selection", occupancy: "double", rooms: 2 },
+  ];
+  assert.equal(
+    types.hotelSelectionForDay(unrelatedAllocatedRoom, fourNightDynamic.routing[3], true)
+      ?.hotel_id,
+    "hotel-4",
+    "A sole valid hotel row remains authoritative when a stale allocation cannot identify it",
+  );
+  const fourNightLines = calc.dynamicAccommodationRoomLines(
+    fourNightDynamic,
+    fourNightDynamic.hotel_options[0],
+    fourNightDb,
+  );
+  assert.deepEqual(
+    fourNightLines.lines.map((line) => line.day),
+    [1, 2, 3, 4, 4],
+    "Final Review receives every night and both Day 4 room combinations",
+  );
+  assert.equal(
+    fourNightLines.lines
+      .filter((line) => line.day === 4)
+      .reduce((sum, line) => sum + line.capacity, 0),
+    4,
+    "Day 4 Triple + Single allocation covers all four travellers",
+  );
+  close(
+    fourNightLines.lines
+      .filter((line) => line.day === 4)
+      .reduce((sum, line) => sum + line.line_total, 0),
+    7350,
+    "Day 4 Triple + Single supplier-inclusive cost is included exactly once",
+  );
+  const fourNightBreakdown = calc.dynamicAccommodationBreakdown(
+    fourNightDynamic,
+    fourNightDynamic.hotel_options[0],
+    fourNightDb,
+  );
+  close(
+    fourNightBreakdown.total,
+    fourNightLines.lines.reduce((sum, line) => sum + line.line_total, 0),
+    "Four-night Final Review total uses every authoritative room line exactly once",
+  );
+  close(fourNightBreakdown.total, 31290, "Four-night supplier-inclusive total");
+  close(
+    fourNightBreakdown.total * calc.hotelsMarkup(fourNightDynamic),
+    3129,
+    "Four-night accommodation markup",
+  );
+  close(
+    fourNightBreakdown.total *
+      (1 + calc.hotelsMarkup(fourNightDynamic)) *
+      calc.hotelsGst(fourNightDynamic),
+    1720.95,
+    "Four-night accommodation GST",
+  );
+  close(
+    fourNightBreakdown.total *
+      (1 + calc.hotelsMarkup(fourNightDynamic)) *
+      (1 + calc.hotelsGst(fourNightDynamic)),
+    36139.95,
+    "Four-night final accommodation total rounds to 36,140",
+  );
+  close(
+    (fourNightBreakdown.total *
+      (1 + calc.hotelsMarkup(fourNightDynamic)) *
+      (1 + calc.hotelsGst(fourNightDynamic))) /
+      4,
+    (fourNightBreakdown.total * 1.1 * 1.05) / 4,
+    "Dynamic accommodation PP uses the authoritative four-night total",
+  );
+  const fourNightMatrixRows = costsheet
+    .buildRateSheet(fourNightDynamic, fourNightDb, fourNightDynamic.hotel_options[0], [])
+    .flatMap((group) => group.rows);
+  const fourPaxMatrixRow = fourNightMatrixRows.find((row) => row.pax === 4);
+  assert.ok(fourPaxMatrixRow, "Commercial Package Matrix exposes the four-pax Dynamic row");
+  close(
+    fourPaxMatrixRow.single,
+    36139.95 / 4,
+    "Commercial Package Matrix uses the same Dynamic accommodation total",
+  );
+  const priorMasterDb = masterPricing.db.get();
+  masterPricing.db.hydrateAll(fourNightDb);
+  const fourNightMarkup = renderToStaticMarkup(
+    createElement(dynamicReview.AccommodationDynamicCostingReview, {
+      draft: fourNightDynamic,
+      options: fourNightDynamic.hotel_options,
+      embedded: true,
+    }),
+  );
+  masterPricing.db.hydrateAll(priorMasterDb);
+  assert.ok(fourNightMarkup.includes("Subh Inn"), "Rendered Final Review contains Day 4 hotel");
+  assert.ok(
+    fourNightMarkup.includes("Deluxe Triple") && fourNightMarkup.includes("Deluxe Single"),
+    "Rendered Final Review contains both Day 4 room combinations",
+  );
+  assert.ok(
+    !fourNightMarkup.includes("No Hotel Required") && !fourNightMarkup.includes("Own Arrangement"),
+    "Completed Day 4 hotel is not rendered as an accommodation exemption",
+  );
   const standardBeforeDynamicReview = costsheet.buildRateSheet(
     { ...dynamicValid, allocation_mode: "standard", dynamic_days: [] },
     db,

@@ -203,6 +203,22 @@ export interface HotelSelection {
 export type OptionKey = "A" | "B" | "C" | "D";
 export type PersonRoomType = "single" | "double" | "triple" | "quad" | "extra_bed" | "cwb";
 export type AllocationMode = "standard" | "dynamic";
+
+/**
+ * The explicit persisted mode is authoritative. Only older drafts without it
+ * infer Dynamic mode from legacy dynamic_days.
+ */
+export function accommodationMode(
+  draft: Pick<QuoteDraft, "allocation_mode" | "dynamic_days">,
+): AllocationMode {
+  return draft.allocation_mode ?? ((draft.dynamic_days?.length ?? 0) > 0 ? "dynamic" : "standard");
+}
+
+export function isDynamicAccommodationMode(
+  draft: Pick<QuoteDraft, "allocation_mode" | "dynamic_days">,
+) {
+  return accommodationMode(draft) === "dynamic";
+}
 export interface DayRoomMix {
   single: number;
   double: number;
@@ -276,15 +292,112 @@ export interface HotelOption {
   allocated_pax?: number;
 }
 
+export type HotelSelectionResolutionReason =
+  | "latest_explicit_hotel"
+  | "latest_explicit_exemption"
+  | "conflicting_hotel_exemption"
+  | "single_allocation_match"
+  | "legacy_city_match"
+  | "missing"
+  | "ambiguous";
+
+export interface HotelSelectionResolution {
+  selection?: HotelSelection;
+  reason: HotelSelectionResolutionReason;
+  /** Zero-based position in HotelOption.selections when a record was selected. */
+  selectionIndex?: number;
+  candidateIndexes: number[];
+}
+
+/** A saved hotel ID must never silently negate an explicit accommodation exemption. */
+export function hasHotelExemptionConflict(selection: HotelSelection | undefined) {
+  return Boolean(selection?.hotel_id && selection.no_hotel && selection.accommodation_status);
+}
+
+/**
+ * Resolve one saved stay and explain the decision. Step 8 always appends an
+ * explicit change, so the last same-night record is the authoritative user
+ * choice. This preserves a later No Hotel Required choice even when stale room
+ * allocations remain, while a later hotel choice supersedes an older exemption.
+ */
+export function resolveHotelSelectionForDay(
+  option: HotelOption | undefined,
+  day: RoutingDay,
+  routingDayAuthoritative = false,
+): HotelSelectionResolution {
+  if (!option) return { reason: "missing", candidateIndexes: [] };
+
+  const indexed = option.selections.map((selection, index) => ({ selection, index }));
+  const dayMatches = indexed.filter(({ selection }) => selection.routing_day === day.day);
+  if (routingDayAuthoritative && dayMatches.length > 0) {
+    const latest = dayMatches.at(-1)!;
+    if (hasHotelExemptionConflict(latest.selection)) {
+      return {
+        selection: latest.selection,
+        reason: "conflicting_hotel_exemption",
+        selectionIndex: latest.index,
+        candidateIndexes: dayMatches.map((item) => item.index),
+      };
+    }
+    if (
+      latest.selection.no_hotel &&
+      (latest.selection.accommodation_status === "no_hotel_required" ||
+        latest.selection.accommodation_status === "own_arrangement")
+    ) {
+      return {
+        selection: latest.selection,
+        reason: "latest_explicit_exemption",
+        selectionIndex: latest.index,
+        candidateIndexes: dayMatches.map((item) => item.index),
+      };
+    }
+    if (!latest.selection.no_hotel && latest.selection.hotel_id) {
+      return {
+        selection: latest.selection,
+        reason: "latest_explicit_hotel",
+        selectionIndex: latest.index,
+        candidateIndexes: dayMatches.map((item) => item.index),
+      };
+    }
+
+    const allocatedRoomIds = new Set(
+      (option.dynamic_allocations?.[day.day] ?? []).map((allocation) => allocation.room_id),
+    );
+    const allocationMatches = dayMatches.filter(
+      ({ selection }) =>
+        !selection.no_hotel &&
+        Boolean(selection.hotel_id) &&
+        Boolean(selection.room_id) &&
+        allocatedRoomIds.has(selection.room_id),
+    );
+    if (allocationMatches.length === 1) {
+      return {
+        selection: allocationMatches[0].selection,
+        reason: "single_allocation_match",
+        selectionIndex: allocationMatches[0].index,
+        candidateIndexes: dayMatches.map((item) => item.index),
+      };
+    }
+    return {
+      reason: allocationMatches.length > 1 || dayMatches.length > 1 ? "ambiguous" : "missing",
+      candidateIndexes: dayMatches.map((item) => item.index),
+    };
+  }
+  return { reason: "missing", candidateIndexes: [] };
+}
+
 /** Resolve a stay by its routing night, retaining safe support for legacy city-keyed drafts. */
-export function hotelSelectionForDay(option: HotelOption | undefined, day: RoutingDay) {
+export function hotelSelectionForDay(
+  option: HotelOption | undefined,
+  day: RoutingDay,
+  routingDayAuthoritative = false,
+) {
   if (!option) return undefined;
 
   const routeIds = new Set<string>(
-    (day.city_id
-      ? [day.city_id]
-      : [day.to_city_id ?? "", ...(day.to_city_ids ?? [])]
-    ).filter(Boolean),
+    (day.city_id ? [day.city_id] : [day.to_city_id ?? "", ...(day.to_city_ids ?? [])]).filter(
+      Boolean,
+    ),
   );
   const routeHasExplicitIds = routeIds.size > 0 && [...routeIds].some((id) => !!id && id !== "");
   const routeCityKeys = new Set<string>(
@@ -308,11 +421,16 @@ export function hotelSelectionForDay(option: HotelOption | undefined, day: Routi
     return false;
   };
 
-  const explicitMatch = option.selections.find(
-    (selection) =>
-      selection.routing_day === day.day &&
-      (matchesCity(selection) || (!selection.city_id && selection.routing_day === day.day)),
-  );
+  if (routingDayAuthoritative) {
+    const resolution = resolveHotelSelectionForDay(option, day, true);
+    if (resolution.candidateIndexes.length > 0) return resolution.selection;
+  }
+
+  const dayMatches = option.selections.filter((selection) => selection.routing_day === day.day);
+  const explicitMatch = dayMatches.find(
+        (selection) =>
+          matchesCity(selection) || (!selection.city_id && selection.routing_day === day.day),
+      );
   if (explicitMatch) return explicitMatch;
 
   return (
@@ -467,10 +585,7 @@ export interface QuoteDraft {
   /** Explicit per-day parent Tour selections; absent days are normalized from legacy included Guide lines. */
   guide_tour_selected_by_day?: Record<number, string[]>;
   /** Per-day, per-service, per-language Guide selection status by costing alternative slab. */
-  guide_slab_selection_by_day?: Record<
-    number,
-    Record<string, "included" | "optional" | "removed">
-  >;
+  guide_slab_selection_by_day?: Record<number, Record<string, "included" | "optional" | "removed">>;
   guide_day_escort?: Record<number, number>;
   guide_day_escort_enabled?: Record<number, boolean>;
   /** Routing day → Escort slab ID → base rate. Blank/zero means no Escort that day. */

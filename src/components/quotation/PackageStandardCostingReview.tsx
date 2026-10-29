@@ -52,6 +52,7 @@ import {
 } from "@/lib/wizard/land-review";
 import {
   hotelSelectionForDay,
+  isDynamicAccommodationMode,
   type HotelOption,
   type OptionKey,
   type ActivityLine,
@@ -73,6 +74,7 @@ import {
   getEscortRangeDayCharge,
 } from "@/lib/wizard/guide-pricing";
 import { CommercialPackageMatrix } from "./CommercialPackageMatrix";
+import { AccommodationDynamicCostingReview } from "./AccommodationDynamicCostingReview";
 import { LandDaywiseReview, type LandReviewFilters } from "./LandDaywiseReview";
 
 type SetDraft = (patch: Partial<QuoteDraft>) => void;
@@ -113,27 +115,21 @@ export function includedActivitySellingRows(
           to_pax: slab.to_pax,
           price: slab.price,
         }))
-      : optionalActivitySellingRows(
-          draft,
-          activity,
-          draft.traveler_type || "indian",
-          pax,
-        ).flatMap((row) =>
-          row.rate_basis === "custom_slab" && row.min_pax && row.max_pax
-            ? [{ id: row.id, from_pax: row.min_pax, to_pax: row.max_pax, price: row.base_rate }]
-            : [],
+      : optionalActivitySellingRows(draft, activity, draft.traveler_type || "indian", pax).flatMap(
+          (row) =>
+            row.rate_basis === "custom_slab" && row.min_pax && row.max_pax
+              ? [{ id: row.id, from_pax: row.min_pax, to_pax: row.max_pax, price: row.base_rate }]
+              : [],
         );
     const byRange = new Map<string, (typeof schedule)[number]>();
     schedule.forEach((slab) => {
       const key = `${slab.from_pax}-${slab.to_pax}`;
-      const savedRateMatch =
-        pax >= slab.from_pax && pax <= slab.to_pax && slab.price === line.rate;
+      const savedRateMatch = pax >= slab.from_pax && pax <= slab.to_pax && slab.price === line.rate;
       if (!byRange.has(key) || savedRateMatch) byRange.set(key, slab);
     });
 
     const displayedSlabs = [...byRange.values()].filter(
-      (slab) =>
-        draft.pax_mode === "range" || (pax >= slab.from_pax && pax <= slab.to_pax),
+      (slab) => draft.pax_mode === "range" || (pax >= slab.from_pax && pax <= slab.to_pax),
     );
     return displayedSlabs.map((slab) => {
       const isActiveRange = pax >= slab.from_pax && pax <= slab.to_pax;
@@ -157,7 +153,8 @@ export function includedActivitySellingRows(
     {
       id: "selected",
       base_rate: line.rate,
-      rate_basis: activity.pricing_type === "per_person" ? ("per_person" as const) : ("fixed_group" as const),
+      rate_basis:
+        activity.pricing_type === "per_person" ? ("per_person" as const) : ("fixed_group" as const),
       markup: commercial.markup,
       gst: commercial.gst,
       selling_price: commercial.final,
@@ -1019,12 +1016,14 @@ function LandReview({
           <TransportReview draft={costingDraft} />
         )}
         {filters.misc && costingDraft.misc.length > 0 && <MiscReview draft={costingDraft} />}
-        {filters.activities && costingDraft.activities.some((line) => line.inclusion_status !== "optional") && (
-          <ActivitiesReview draft={costingDraft} />
-        )}
-        {filters.activities && costingDraft.activities.some((line) => line.inclusion_status === "optional") && (
-          <ActivitiesReview draft={costingDraft} optional />
-        )}
+        {filters.activities &&
+          costingDraft.activities.some((line) => line.inclusion_status !== "optional") && (
+            <ActivitiesReview draft={costingDraft} />
+          )}
+        {filters.activities &&
+          costingDraft.activities.some((line) => line.inclusion_status === "optional") && (
+            <ActivitiesReview draft={costingDraft} optional />
+          )}
       </div>
     </Section>
   );
@@ -1437,17 +1436,19 @@ function SeparateMealsReview({
                           const markup = markedUp - base;
                           const final = markedUp * (1 + hotelsGst(draft));
                           const gst = final - markedUp;
-                          return <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
-                            <td>{row.day}</td>
-                            <td>{row.date}</td>
-                            <td>{row.city}</td>
-                            <td>{row.label}</td>
-                            <td className="text-right">{money(base)}</td>
-                            <td className="text-right">{row.pax}</td>
-                            <td className="text-right">{money(markup)}</td>
-                            <td className="text-right">{money(gst)}</td>
-                            <td className="text-right">{money(final)}</td>
-                          </tr>
+                          return (
+                            <tr key={`${row.day}-${row.city_id}-${row.meal_type}`}>
+                              <td>{row.day}</td>
+                              <td>{row.date}</td>
+                              <td>{row.city}</td>
+                              <td>{row.label}</td>
+                              <td className="text-right">{money(base)}</td>
+                              <td className="text-right">{row.pax}</td>
+                              <td className="text-right">{money(markup)}</td>
+                              <td className="text-right">{money(gst)}</td>
+                              <td className="text-right">{money(final)}</td>
+                            </tr>
+                          );
                         })}
                     </tbody>
                     <tfoot className="border-t bg-amber-50 font-semibold">
@@ -1492,9 +1493,7 @@ function PackageStandardCostingReviewImpl({
   const landMeals = scope.queryFor === "Land Part + Meals";
   const landOnly = scope.queryFor === "Land Part";
   const accommodationOnly = !scope.landPart && scope.accommodationPart;
-  const optionalCount = draft.activities.filter(
-    (line) => line.inclusion_status === "optional",
-  ).length;
+  const dynamicAccommodation = isDynamicAccommodationMode(draft);
   return (
     <div
       className={`print-quotation-pages space-y-3 rounded-sm bg-white p-1 ${
@@ -1507,7 +1506,17 @@ function PackageStandardCostingReviewImpl({
         {scope.landPart && (
           <LandReview draft={draft} costingDraft={costingDraft} set={set} readOnly={readOnly} />
         )}
-        {accommodationOnly && <AccommodationReview draft={costingDraft} sectionNumber={2} />}
+        {accommodationOnly &&
+          (dynamicAccommodation ? (
+            <AccommodationDynamicCostingReview
+              draft={costingDraft}
+              options={costingDraft.hotel_options.slice(0, 4)}
+              embedded
+              embeddedSectionNumber={2}
+            />
+          ) : (
+            <AccommodationReview draft={costingDraft} sectionNumber={2} />
+          ))}
       </div>
       {!landOnly &&
         !accommodationOnly &&
@@ -1517,7 +1526,15 @@ function PackageStandardCostingReviewImpl({
           </div>
         ) : (
           <div className="print-accommodation-section">
-            <AccommodationReview draft={costingDraft} />
+            {dynamicAccommodation ? (
+              <AccommodationDynamicCostingReview
+                draft={costingDraft}
+                options={costingDraft.hotel_options.slice(0, 4)}
+                embedded
+              />
+            ) : (
+              <AccommodationReview draft={costingDraft} />
+            )}
           </div>
         ))}
       {scope.accommodationPart && (
@@ -1535,24 +1552,6 @@ function PackageStandardCostingReviewImpl({
           displaySelection={draft.land_review_display_selection}
         />
       </div>
-      {false && optionalCount > 0 && (
-          <div
-            className="print-optional-activities"
-            aria-label="5. Optional Activities & Experiences — Additional Sale"
-          >
-            <Section
-              number={landOnly ? 4 : landMeals ? 5 : 5}
-              title="Optional Activities & Experiences — Additional Sale"
-            >
-              <div className="p-2">
-                <ActivitiesReview draft={costingDraft} optional />
-              </div>
-              <div className="border-t border-[#d7e2ed] px-3 py-1 text-[9px] text-[#73849b]">
-                Optional activities rendered: {optionalCount} · excluded from package totals
-              </div>
-            </Section>
-          </div>
-        )}
     </div>
   );
 }

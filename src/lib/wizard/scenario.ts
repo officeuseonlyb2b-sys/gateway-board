@@ -26,6 +26,7 @@ import { buildLandPart } from "./costsheet";
 import { getQuotationScope } from "@/lib/query-for";
 import {
   hotelSelectionForDay,
+  isDynamicAccommodationMode,
   type QuoteDraft,
   type HotelOption,
   type DayRoomMix,
@@ -136,8 +137,7 @@ export function slotsForDay(
   pax: number,
 ): PersonRoomType[] {
   if (optionUsesCustomAllocation(opt)) return slotsFromAllocations(opt, pax);
-  const isDynamic =
-    (draft.dynamic_days ?? []).includes(dayNumber) || draft.allocation_mode === "dynamic";
+  const isDynamic = isDynamicAccommodationMode(draft);
   const mix = (isDynamic && draft.day_room_mix?.[dayNumber]) || defaultDayMix(pax);
   const slots = expandMixToSlots(mix);
   const out: PersonRoomType[] = [];
@@ -218,11 +218,7 @@ export function computeScenario(
   const perPersonGst = Array(pax).fill(0) as number[];
   const perPersonTypes: PersonRoomType[][] = Array.from({ length: pax }, () => []);
   let missing = 0;
-  const dynamicDaySet = new Set(draft.dynamic_days ?? []);
-  const dynamicMode =
-    includesAccommodation &&
-    (draft.allocation_mode === "dynamic" ||
-      draft.routing.some((day) => day.overnight && dynamicDaySet.has(day.day)));
+  const dynamicMode = includesAccommodation && isDynamicAccommodationMode(draft);
   const splitAccommodation = dynamicMode && isSplitAccommodation(draft);
   const splitOptions = splitAccommodation
     ? draft.hotel_options.filter((option) => (option.allocated_pax ?? 0) > 0)
@@ -247,10 +243,7 @@ export function computeScenario(
     }
     const capacity: Record<DynamicOccupancy, number> = { single: 1, double: 2, triple: 3, quad: 4 };
     draft.routing
-      .filter(
-        (day) =>
-          day.overnight && (draft.allocation_mode === "dynamic" || dynamicDaySet.has(day.day)),
-      )
+      .filter((day) => day.overnight && dynamicMode)
       .forEach((day) => {
         let person = 0;
         (opt.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
@@ -264,8 +257,7 @@ export function computeScenario(
   if (includesAccommodation)
     draft.routing.forEach((day, i) => {
       if (!day.overnight) return;
-      if (dynamicMode && (draft.allocation_mode === "dynamic" || dynamicDaySet.has(day.day)))
-        return;
+      if (dynamicMode) return;
       const sel = hotelSelectionForDay(opt, day);
       if (sel?.no_hotel) return;
       if (!sel) {

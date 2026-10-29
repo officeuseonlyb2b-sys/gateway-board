@@ -155,6 +155,7 @@ import { Step14 } from "@/components/quotation/steps/StepMisc";
 import { Step15 } from "@/components/quotation/steps/StepHotels";
 import { Step16 } from "@/components/quotation/steps/StepCosting";
 import { CustomerQuotationPreview } from "@/components/quotation/CustomerQuotationPreview";
+import { DynamicAccommodationDiagnostic } from "@/components/quotation/DynamicAccommodationDiagnostic";
 import { QuotationReviewRequestDialog } from "@/components/quotation/QuotationReviewRequestDialog";
 
 import { StepMeals } from "@/components/quotation/steps/StepMeals";
@@ -989,6 +990,7 @@ function WizardPage() {
       )}
 
       <div className="max-w-[1800px] mx-auto p-4 lg:p-6 xl:p-8">
+        <DynamicAccommodationDiagnostic draft={draft} />
         {/* Header */}
         <div className="flex flex-col gap-4 rounded-t-xl border border-b-0 bg-background px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-3">

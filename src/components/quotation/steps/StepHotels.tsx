@@ -54,7 +54,11 @@ import type {
   DynamicOccupancy,
   DynamicRoomAllocation,
 } from "@/lib/wizard/types";
-import { hotelSelectionForDay } from "@/lib/wizard/types";
+import {
+  hasHotelExemptionConflict,
+  hotelSelectionForDay,
+  isDynamicAccommodationMode,
+} from "@/lib/wizard/types";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import {
   diagnoseHotelAvailability,
@@ -85,6 +89,13 @@ export const categoryChangePatch = (
   dynamic_allocations: {},
 });
 
+/** Explicit user confirmation is required before repairing a contradictory saved stay. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const hotelBookingConfirmationPatch = () => ({
+  no_hotel: false,
+  accommodation_status: undefined,
+});
+
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
@@ -95,7 +106,7 @@ export function Step15({ draft, set }: StepProps) {
   const canUseDynamic = canUseDynamicAccommodation(draft);
 
   // Global Mode Toggle (Standard vs Dynamic)
-  const isDynamicGlobal = canUseDynamic && (draft.dynamic_days ?? []).length > 0;
+  const isDynamicGlobal = canUseDynamic && isDynamicAccommodationMode(draft);
   const isSplitGroup = isDynamicGlobal && isSplitAccommodation(draft);
   const splitAllocation = splitAccommodationAllocation(draft);
   const setGlobalMode = (isDynamic: boolean) => {
@@ -106,7 +117,7 @@ export function Step15({ draft, set }: StepProps) {
       days.forEach((dayNo) => {
         if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix);
       });
-      set({ dynamic_days: days, day_room_mix: mixes });
+      set({ allocation_mode: "dynamic", dynamic_days: days, day_room_mix: mixes });
     } else {
       // Switch to Standard: set a double-occupancy mix for all overnight days
       // so that the Per-Person Preview uses double rooms (no Quad).
@@ -117,7 +128,7 @@ export function Step15({ draft, set }: StepProps) {
       overnightRouting.forEach((r) => {
         mixes[r.day] = { ...doubleMix };
       });
-      set({ dynamic_days: [], day_room_mix: mixes });
+      set({ allocation_mode: "standard", dynamic_days: [], day_room_mix: mixes });
     }
   };
 
@@ -563,7 +574,9 @@ function AccommodationSelectionTable({
     const cityName = resolvedCity?.name || day.to_city?.trim() || "";
     const cityId = resolvedCity?.id || day.city_id;
     const selectionDay = cityId === day.city_id ? day : { ...day, city_id: cityId };
-    const sel = hotelSelectionForDay(option, day) ?? hotelSelectionForDay(option, selectionDay);
+    const sel = isDynamicGlobal
+      ? hotelSelectionForDay(option, day, true)
+      : hotelSelectionForDay(option, day) ?? hotelSelectionForDay(option, selectionDay);
 
     const { inCategory: cityHotels } = hotelsForAccommodation(
       d.hotels,
@@ -659,7 +672,7 @@ function AccommodationSelectionTable({
 
     const setSel = (patch: Partial<typeof sel> & object) => {
       const others = option.selections.filter(
-        (selection) => selection.routing_day !== day.day || selection.city_id !== cityId,
+        (selection) => selection !== sel && selection.routing_day !== day.day,
       );
       const cur = sel || {
         city_id: cityId,
@@ -712,8 +725,15 @@ function AccommodationSelectionTable({
       quadGst,
       setSel,
       selectedHotelId: sel?.hotel_id || "",
+      hotelChoiceValue:
+        sel?.accommodation_status === "own_arrangement"
+          ? "__own_arrangement__"
+          : sel?.no_hotel
+            ? "__no_hotel__"
+            : sel?.hotel_id || "",
       selectedRoomId: sel?.room_id || "",
       selectedMeal: sel?.meal_plan || "CP",
+      hasHotelExemptionConflict: hasHotelExemptionConflict(sel),
     };
   });
 
@@ -1019,7 +1039,9 @@ function AccommodationSelectionTable({
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
-                                  <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
+                                  <SelectItem value="__own_arrangement__">
+                                    Own Arrangement
+                                  </SelectItem>
                                 </SelectContent>
                               </Select>
                               <div className="flex items-center gap-1">
@@ -1078,7 +1100,9 @@ function AccommodationSelectionTable({
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
-                                  <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
+                                  <SelectItem value="__own_arrangement__">
+                                    Own Arrangement
+                                  </SelectItem>
                                   {r.hotelPool.map((h) => (
                                     <SelectItem key={h.id} value={h.id}>
                                       {h.name}
@@ -1707,10 +1731,12 @@ type DynamicHotelRow = {
   rooms: ReturnType<typeof useDB>["room_categories"];
   meals: string[];
   selectedHotelId: string;
+  hotelChoiceValue: string;
   selectedMeal: string;
   sel?: HotelOption["selections"][number];
   selHotel: ReturnType<typeof useDB>["hotels"][number] | null | undefined;
   hotelPool: ReturnType<typeof useDB>["hotels"];
+  hasHotelExemptionConflict: boolean;
   setSel: (patch: Record<string, unknown>) => void;
 };
 
@@ -1812,13 +1838,27 @@ function DynamicAccommodation({
               <div className="text-xs text-muted-foreground">{row.city}</div>
             </div>
             <Select
-              value={row.selectedHotelId}
-              onValueChange={(value) => row.setSel({ hotel_id: value, room_id: "" })}
+              value={row.hotelChoiceValue}
+              onValueChange={(value) =>
+                value === "__no_hotel__" || value === "__own_arrangement__"
+                  ? row.setSel({
+                      no_hotel: true,
+                      accommodation_status:
+                        value === "__own_arrangement__" ? "own_arrangement" : "no_hotel_required",
+                    })
+                  : row.setSel({
+                      hotel_id: value,
+                      room_id: "",
+                      ...hotelBookingConfirmationPatch(),
+                    })
+              }
             >
               <SelectTrigger className="h-9">
                 <SelectValue placeholder="Select hotel" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
+                <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
                 {row.hotelPool.map((hotel) => (
                   <SelectItem key={hotel.id} value={hotel.id}>
                     {hotel.name}
@@ -1856,6 +1896,23 @@ function DynamicAccommodation({
               </div>
             </div>
           </div>
+          {row.hasHotelExemptionConflict && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-950 md:col-span-4">
+              <div className="font-semibold">Hotel booking conflicts with Own Arrangement.</div>
+              <p className="mt-1">
+                This saved night has a hotel and room allocation, but is currently an explicit
+                accommodation exemption. It remains zero-cost until you confirm the booking.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 border-amber-400 bg-white"
+                onClick={() => row.setSel(hotelBookingConfirmationPatch())}
+              >
+                Confirm {row.selHotel?.name || "hotel"} booking
+              </Button>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1050px] text-xs">
               <thead className="bg-muted/30 text-[10px] uppercase text-muted-foreground">
@@ -2219,9 +2276,8 @@ export function optionInclusionSummary(draft: QuoteDraft, option: HotelOption) {
   const stays = draft.routing
     .filter((day) => day.overnight)
     .map((day) => hotelSelectionForDay(option, day))
-    .filter(
-      (selection): selection is NonNullable<typeof selection> =>
-        Boolean(selection && !selection.no_hotel && (selection.hotel_id || selection.room_id)),
+    .filter((selection): selection is NonNullable<typeof selection> =>
+      Boolean(selection && !selection.no_hotel && (selection.hotel_id || selection.room_id)),
     );
   const plans = stays.map((selection) => selection.meal_plan);
   return {

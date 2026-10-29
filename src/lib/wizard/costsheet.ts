@@ -23,6 +23,7 @@ import {
 } from "./calc";
 import {
   hotelSelectionForDay,
+  isDynamicAccommodationMode,
   type QuoteDraft,
   type HotelOption,
   type TransportLine,
@@ -609,7 +610,7 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     const quad = plan ? plan.quad_rate || dbl + eb * 2 : 0;
 
     // Dynamic mode — this night is priced from the allocated room mix.
-    const isDynamic = (draft.dynamic_days ?? []).includes(day.day);
+    const isDynamic = isDynamicAccommodationMode(draft);
     const mix = isDynamic ? draft.day_room_mix?.[day.day] : undefined;
     const mixNet = mix
       ? mix.single * sgl + mix.double * dbl + mix.triple * trp + mix.quad * quad
@@ -888,12 +889,10 @@ export function buildRateSheet(
   const splitOptions = splitAccommodation
     ? draft.hotel_options.filter((option) => (option.allocated_pax ?? 0) > 0)
     : [];
-  const dynamicDaySet = new Set(draft.dynamic_days ?? []);
-  const isDynamicDay = (day: number) =>
-    draft.allocation_mode === "dynamic" || dynamicDaySet.has(day);
+  const isDynamicDay = () => isDynamicAccommodationMode(draft);
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
-      if (isDynamicDay(r.day)) return s;
+      if (isDynamicDay()) return s;
       if (r.dynamic) return s + mixTotals(r).total / actualPax;
       const tariff = pick(r);
       return s + (tariff + tariff * gstRateFor(tariff)) / size;
@@ -901,8 +900,7 @@ export function buildRateSheet(
     return gross(net, mk.h, mk.hg);
   };
 
-  const dynamicMode =
-    includeAccommodation && draft.routing.some((day) => day.overnight && isDynamicDay(day.day));
+  const dynamicMode = includeAccommodation && isDynamicAccommodationMode(draft);
   const dynamicBase = dynamicMode
     ? splitAccommodation
       ? splitOptions.reduce(

@@ -3,6 +3,7 @@ import type { DB, RatePlan } from "@/lib/mock-store";
 import { miscRateForPax } from "@/lib/mock-store";
 import {
   hotelSelectionForDay,
+  isDynamicAccommodationMode,
   type DynamicRoomAllocation,
   type QuoteDraft,
   type HotelOption,
@@ -15,6 +16,8 @@ import {
   isEscortEnabled,
 } from "./guide-pricing";
 import { getQuotationScope } from "@/lib/query-for";
+
+const warnedDynamicStayMappings = new Set<string>();
 
 export interface OptionTotals {
   key: string;
@@ -148,13 +151,34 @@ function resolveDynamicAccommodationRoomLines(
 ): DynamicAccommodationRoomResolution {
   const lines: DynamicAccommodationRoomLine[] = [];
   let missing = 0;
-  const dynamicDays = new Set(draft.dynamic_days ?? []);
   const capacityFor = { single: 1, double: 2, triple: 3, quad: 4 } as const;
 
   draft.routing.forEach((day, index) => {
-    const isDynamic = draft.allocation_mode === "dynamic" || dynamicDays.has(day.day);
+    const isDynamic = isDynamicAccommodationMode(draft);
     if (!day.overnight || !isDynamic) return;
-    const selection = hotelSelectionForDay(option, day);
+    const selection = hotelSelectionForDay(option, day, true);
+    if (import.meta.env.DEV) {
+      const daySelections = option.selections.filter((item) => item.routing_day === day.day);
+      const warningKey = `${option.key}:${day.day}:${day.date}`;
+      if (
+        !warnedDynamicStayMappings.has(warningKey) &&
+        (daySelections.length > 1 || (option.dynamic_allocations?.[day.day]?.length && !selection))
+      ) {
+        warnedDynamicStayMappings.add(warningKey);
+        const hotel = d.hotels.find((item) => item.id === selection?.hotel_id);
+        console.warn("[dynamic-accommodation] resolved conflicting stay mapping", {
+          option: option.key,
+          routingDay: day.day,
+          stayDate: day.date,
+          routingCityId: day.city_id,
+          selectedHotelId: selection?.hotel_id || null,
+          selectedHotelName: hotel?.name || null,
+          accommodationStatus: selection?.accommodation_status || null,
+          roomCombinations: option.dynamic_allocations?.[day.day]?.length ?? 0,
+          resolvedSelectionCount: daySelections.length,
+        });
+      }
+    }
     if (selection?.no_hotel) return;
     if (!selection?.hotel_id) {
       missing++;
@@ -260,7 +284,7 @@ export function isSplitAccommodation(draft: QuoteDraft): boolean {
   return (
     draft.accommodation_planning_mode === "split_group" &&
     draft.pax_mode !== "range" &&
-    (draft.allocation_mode === "dynamic" || (draft.dynamic_days ?? []).length > 0)
+    isDynamicAccommodationMode(draft)
   );
 }
 
