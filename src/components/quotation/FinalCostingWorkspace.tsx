@@ -19,6 +19,7 @@ import { guideLanguageCostingForPax, guideServicesForPax } from "@/lib/wizard/gu
 import { applyLandCommercials } from "@/lib/wizard/land-pricing";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
 import {
+  isAccommodationNightForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type HotelOption,
@@ -178,14 +179,12 @@ function LandReview({ draft }: { draft: QuoteDraft }) {
 function StayPlan({
   draft,
   options,
-  dynamic = false,
 }: {
   draft: QuoteDraft;
   options: HotelOption[];
-  dynamic?: boolean;
 }) {
   const db = useDB();
-  const city = (id: string) => db.cities.find((item) => item.id === id)?.name || "—";
+  const city = (id: string) => db.cities.find((item) => item.id === id)?.name;
   return (
     <Section title="Hotel Foreseen / Stay Plan">
       <div className="overflow-x-auto">
@@ -204,37 +203,58 @@ function StayPlan({
             </tr>
           </thead>
           <tbody>
-            {draft.routing
-              .filter((day) => day.overnight)
-              .map((day, index) => (
+            {draft.routing.map((day) => {
+              const isNight = options.some((option) => isAccommodationNightForOption(option, day));
+              const staySelection = options
+                .map((option) => hotelSelectionForDay(option, day, true))
+                .find((selection) => selection?.city_id);
+              const fromCity = db.cities.find(
+                (item) =>
+                  item.id === day.from_city ||
+                  item.name.trim().toLowerCase() === day.from_city?.trim().toLowerCase(),
+              );
+              const dayCity = city(day.city_id) || city(staySelection?.city_id || "") || fromCity?.name || "—";
+              return (
                 <tr key={day.day}>
                   <td>{day.date}</td>
-                  <td>{draft.routing.find((item) => item.day === day.day + 1)?.date || "—"}</td>
-                  <td>{city(day.city_id)}</td>
-                  <td>1</td>
-                  {options.map((option) => {
-                    const selection = hotelSelectionForDay(option, day, dynamic);
-                    const hotel = db.hotels.find((item) => item.id === selection?.hotel_id);
-                    const room = db.room_categories.find((item) => item.id === selection?.room_id);
-                    return (
-                      <td key={option.key} className="whitespace-normal">
-                        {selection?.no_hotel ? (
-                          "No Hotel"
-                        ) : selection ? (
-                          <>
-                            <div className="font-medium">{hotel?.name || "Rate not available"}</div>
-                            <div className="text-muted-foreground">
-                              {room?.name || "—"} · {selection.meal_plan}
-                            </div>
-                          </>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    );
-                  })}
+                  <td>
+                    {isNight
+                      ? draft.routing.find((item) => item.day === day.day + 1)?.date ||
+                        addDaysISO(day.date, 1)
+                      : "—"}
+                  </td>
+                  <td>{dayCity}</td>
+                  <td>{isNight ? "1" : "0"}</td>
+                {options.map((option) => {
+                    const selection = hotelSelectionForDay(option, day, true);
+                  const hotel = db.hotels.find((item) => item.id === selection?.hotel_id);
+                  const room = db.room_categories.find((item) => item.id === selection?.room_id);
+                  const exemptionLabel =
+                    selection?.accommodation_status === "own_arrangement"
+                      ? "Own Arrangement"
+                      : "No Hotel Required";
+                  return (
+                    <td key={option.key} className="whitespace-normal">
+                      {selection?.no_hotel ? (
+                        exemptionLabel
+                      ) : selection ? (
+                        <>
+                          <div className="font-medium">{hotel?.name || "Rate not available"}</div>
+                          <div className="text-muted-foreground">
+                            {room?.name || "—"} · {selection.meal_plan}
+                          </div>
+                        </>
+                      ) : day.overnight ? (
+                        "Not selected"
+                      ) : (
+                        "No Hotel Required"
+                      )}
+                    </td>
+                  );
+                })}
                 </tr>
-              ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -337,7 +357,7 @@ function DynamicAccommodationReview({
   const db = useDB();
   return (
     <div className="space-y-3">
-      <StayPlan draft={draft} options={options} dynamic />
+      <StayPlan draft={draft} options={options} />
       <Section title="Accommodation & Meals — Dynamic Mode Verification">
         <div className="overflow-x-auto">
           <table className={`${table} min-w-[900px]`}>
@@ -355,7 +375,12 @@ function DynamicAccommodationReview({
             </thead>
             <tbody>
               {options.flatMap((option) =>
-                Object.entries(option.dynamic_allocations ?? {}).flatMap(
+                Object.entries(option.dynamic_allocations ?? {})
+                  .filter(([dayNumber]) => {
+                    const day = draft.routing.find((item) => item.day === Number(dayNumber));
+                    return Boolean(day && isAccommodationNightForOption(option, day));
+                  })
+                  .flatMap(
                   ([dayNumber, allocations]) =>
                     allocations.map((allocation) => {
                       const day = draft.routing.find((item) => item.day === Number(dayNumber));

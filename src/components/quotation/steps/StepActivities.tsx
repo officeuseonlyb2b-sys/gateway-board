@@ -17,7 +17,9 @@ import {
 import { applyLandCommercials, optionalActivitySellingRows } from "@/lib/wizard/land-pricing";
 import {
   eligibleActivitiesForDay,
+  eligibleActivitiesForExplicitDayZero,
   isSelectedLandServiceValid,
+  landDayContext,
 } from "@/lib/wizard/land-eligibility";
 import { uid, dayDestInfo, type StepProps } from "../shared";
 
@@ -64,6 +66,10 @@ export function Step11({ draft, set }: StepProps) {
     }
 
     const resolved = activityPricingForPax(a, pax, traveler);
+    const routingDay = draft.routing.find((route) => route.day === day);
+    const independentDayZero =
+      Boolean(routingDay?.is_day_zero || routingDay?.day === 0) &&
+      Boolean(routingDay && landDayContext(draft, routingDay, d).selectedTours.length === 0);
 
     /*
      * IMPORTANT:
@@ -87,6 +93,7 @@ export function Step11({ draft, set }: StepProps) {
           pricing_mode: resolved.pricing_mode,
           inclusion_status: "included",
           from_routing_days: [day],
+          ...(independentDayZero ? { independent_day_zero: true } : {}),
         },
       ],
     });
@@ -245,7 +252,9 @@ export function Step11({ draft, set }: StepProps) {
                     {!hasAny ? (
                       <div className="space-y-2">
                         <div className="text-[11px] text-muted-foreground italic">
-                          No activities selected for this day.
+                          {r.is_day_zero || r.day === 0
+                            ? "No sightseeing tours selected for Day 0."
+                            : "No activities selected for this day."}
                         </div>
                         <Button size="sm" variant="outline" onClick={() => setAddForDay(r.day)}>
                           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -454,7 +463,12 @@ export function Step11({ draft, set }: StepProps) {
             {(() => {
               const route = draft.routing.find((day) => day.day === addForDay);
               if (!route) return null;
-              const eligible = eligibleActivitiesForDay(draft, route, d).filter(
+              const activityChoices =
+                (route.is_day_zero || route.day === 0) &&
+                landDayContext(draft, route, d).selectedTours.length === 0
+                  ? eligibleActivitiesForExplicitDayZero(route, d)
+                  : eligibleActivitiesForDay(draft, route, d);
+              const eligible = activityChoices.filter(
                 (activity) =>
                   !findLine(activity.id, route.day) &&
                   activity.activity_name

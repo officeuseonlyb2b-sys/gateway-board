@@ -135,10 +135,15 @@ export function buildSavedQuote(
   const selectedMisc = aggregateSelected("misc_opts");
 
   const itinerary = draft.routing.map((day) => {
-    const sel = hotelSelectionForDay(recOpt, day);
+    const sel = hotelSelectionForDay(recOpt, day, true);
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id) : null;
-    const cityName = d.cities.find((c) => c.id === day.city_id)?.name || "—";
+    const cityName =
+      d.cities.find((c) => c.id === day.city_id || c.id === sel?.city_id)?.name ||
+      d.cities.find(
+        (city) => city.name.trim().toLowerCase() === day.from_city?.trim().toLowerCase(),
+      )?.name ||
+      "—";
     const plan = sel ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date, recOpt.category) : null;
     const dbl = plan?.double_rate || 0;
     const sgl = plan?.single_rate || 0;

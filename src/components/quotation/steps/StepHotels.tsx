@@ -56,6 +56,8 @@ import type {
 } from "@/lib/wizard/types";
 import {
   hasHotelExemptionConflict,
+  accommodationNightsForOption,
+  isAccommodationNightForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
 } from "@/lib/wizard/types";
@@ -70,7 +72,7 @@ import { getMasterSyncState, subscribeMasterSync } from "@/lib/masters-remote";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { useAuth } from "@/lib/auth-mock";
-import { WIZARD_HOTEL_CATEGORIES } from "../shared";
+import { NumericStepper, WIZARD_HOTEL_CATEGORIES } from "../shared";
 import type { StepProps } from "../shared";
 
 const QUOTATION_MEAL_PLANS = MEAL_PLANS;
@@ -100,11 +102,44 @@ export const hotelBookingConfirmationPatch = () => ({
 // eslint-disable-next-line react-refresh/only-export-components
 export const isDynamicHotelMode = (draft: QuoteDraft) => isDynamicAccommodationMode(draft);
 
+/** Display projection only; pricing continues to use each row's overnight flag. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function accommodationScheduleRows(
+  routing: QuoteDraft["routing"],
+  option?: HotelOption,
+) {
+  return routing.map((day, index) => ({
+    day,
+    is_day_zero: day.is_day_zero || day.day === 0,
+    is_departure: index === routing.length - 1 && !(day.is_day_zero || day.day === 0),
+    is_booked_night: option
+      ? isAccommodationNightForOption(option, day)
+      : Boolean(day.overnight),
+  }));
+}
+
+/** Day 0's From City is the arrival/stay city when no explicit city ID exists. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function accommodationCityForDay(
+  day: QuoteDraft["routing"][number],
+  cities: ReturnType<typeof useDB>["cities"],
+) {
+  if (!(day.is_day_zero || day.day === 0)) return day;
+  const from = day.from_city?.trim();
+  if (from) {
+    const fromCity = cities.find(
+      (item) => item.id === from || item.name.trim().toLowerCase() === from.toLowerCase(),
+    );
+    if (fromCity) return { ...day, city_id: fromCity.id };
+    return { ...day, city_id: "" };
+  }
+  return day;
+}
+
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
   const [quickAdd, setQuickAdd] = useState<{ cityId: string; cityName: string } | null>(null);
-  const overnightRouting = draft.routing.filter((r) => r.overnight && (r.city_id || r.to_city));
   const paxForMix = Math.max(1, effectivePaxForPricing(draft));
   const exactTravellingPax = totalPax(draft);
   const canUseDynamic = canUseDynamicAccommodation(draft);
@@ -117,9 +152,12 @@ export function Step15({ draft, set }: StepProps) {
   const isSplitGroup = isDynamicGlobal && isSplitAccommodation(draft);
   const splitAllocation = splitAccommodationAllocation(draft);
   const setGlobalMode = (isDynamic: boolean) => {
+    const bookedNights = draft.routing.filter((day) =>
+      draft.hotel_options.some((option) => isAccommodationNightForOption(option, day)),
+    );
     if (isDynamic) {
       if (!canUseDynamic) return;
-      const days = overnightRouting.map((r) => r.day);
+      const days = bookedNights.map((r) => r.day);
       const mixes = { ...(draft.day_room_mix ?? {}) };
       days.forEach((dayNo) => {
         if (!mixes[dayNo]) mixes[dayNo] = defaultDayMix(paxForMix);
@@ -132,7 +170,7 @@ export function Step15({ draft, set }: StepProps) {
       const single = paxForMix % 2;
       const doubleMix: DayRoomMix = { single, double: doubles, triple: 0, quad: 0 };
       const mixes: Record<number, DayRoomMix> = {};
-      overnightRouting.forEach((r) => {
+      bookedNights.forEach((r) => {
         mixes[r.day] = { ...doubleMix };
       });
       set({ allocation_mode: "standard", dynamic_days: [], day_room_mix: mixes });
@@ -169,6 +207,11 @@ export function Step15({ draft, set }: StepProps) {
   const activeOption =
     draft.hotel_options.find((o) => o.key === activeOpt) || draft.hotel_options[0];
   const activeCategory = activeOption?.category || "";
+  const overnightRouting = activeOption
+    ? accommodationNightsForOption(draft.routing, activeOption).map((day) =>
+        accommodationCityForDay(day, d.cities),
+      )
+    : [];
 
   const applyCategory = (v: string) => {
     if (!activeOption) return;
@@ -208,6 +251,139 @@ export function Step15({ draft, set }: StepProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Accommodation Options (up to 4)</h2>
+
+      <Card className="overflow-hidden">
+        <div className="border-b bg-muted/30 px-3 py-2">
+          <div className="text-sm font-semibold">Complete Itinerary Day Schedule</div>
+          <p className="text-xs text-muted-foreground">
+            Day 0 starts as No Hotel Required. Select Hotel to add a separate pre-tour night for
+            this option; regular tour dates and other options stay unchanged.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-155 text-xs">
+            <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left">Day</th>
+                <th className="p-2 text-left">Date</th>
+                <th className="p-2 text-left">City</th>
+                <th className="p-2 text-left">Stay Plan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accommodationScheduleRows(draft.routing, activeOption).map(
+                ({ day, is_departure: isDeparture, is_booked_night: bookedNight }, index) => {
+                  const isDayZero = day.is_day_zero || day.day === 0;
+                  const stayDay = accommodationCityForDay(day, d.cities);
+                  const resolvedCity = d.cities.find((item) => item.id === stayDay.city_id)?.name;
+                  const city = isDayZero
+                    ? resolvedCity || ""
+                    : resolvedCity || day.to_city || (isDeparture ? draft.tour_end_city : "—");
+                  const selection = hotelSelectionForDay(activeOption, stayDay, true);
+                  const selectedStatus = selection?.accommodation_status;
+                  const statusValue =
+                    selection?.pre_tour_night && !selection.no_hotel
+                      ? "__select_hotel__"
+                      : selectedStatus === "own_arrangement"
+                        ? "__own_arrangement__"
+                        : "__no_hotel__";
+                  return (
+                    <tr key={`${day.day}-${index}`} className="border-t">
+                      <td className="p-2 font-medium">
+                        {isDeparture ? "Last Departure Day" : `Day ${day.day}`}
+                      </td>
+                      <td className="p-2">{day.date ? fmtDateShort(day.date) : "—"}</td>
+                      <td className="p-2">
+                        {city ? (
+                          city
+                        ) : isDayZero ? (
+                          <Select
+                            value=""
+                            onValueChange={(cityId) => {
+                              const cityName = d.cities.find((item) => item.id === cityId)?.name || "";
+                              set({
+                                routing: draft.routing.map((route) =>
+                                  route.day === 0 || route.is_day_zero
+                                    ? { ...route, city_id: cityId, from_city: cityName }
+                                    : route,
+                                ),
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-44 text-xs">
+                              <SelectValue placeholder="Choose arrival city" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {d.cities.map((item) => (
+                                <SelectItem key={item.id} value={item.id}>
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {bookedNight && !isDayZero ? (
+                          <span className="text-muted-foreground">
+                            Overnight stay · configure hotel and room below
+                          </span>
+                        ) : (
+                          <Select
+                            value={statusValue}
+                            onValueChange={(value) => {
+                              const cityId = stayDay.city_id || day.to_city_id || day.to_city_ids?.[0] || "";
+                              if (value === "__select_hotel__" && !cityId) return;
+                              const selection = {
+                                city_id: cityId,
+                                routing_day: day.day,
+                                hotel_id: "",
+                                room_id: "",
+                                meal_plan: "CP" as MealPlan,
+                                no_hotel: value !== "__select_hotel__",
+                                pre_tour_night: value === "__select_hotel__",
+                                accommodation_status:
+                                  value === "__own_arrangement__"
+                                    ? ("own_arrangement" as const)
+                                    : value === "__no_hotel__"
+                                      ? ("no_hotel_required" as const)
+                                      : undefined,
+                              };
+                              updateOption(activeOption.key, {
+                                selections: [
+                                  ...activeOption.selections.filter(
+                                    (item) => item.routing_day !== day.day,
+                                  ),
+                                  selection,
+                                ],
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-52 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {isDayZero && (
+                                <SelectItem value="__select_hotel__" disabled={!stayDay.city_id}>
+                                  Select Hotel / Hotel Required
+                                </SelectItem>
+                              )}
+                              <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>
+                              <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                },
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       <div className="flex gap-2 border-b">
         {draft.hotel_options.map((o) => (
@@ -578,7 +754,7 @@ function AccommodationSelectionTable({
     const cityName = resolvedCity?.name || day.to_city?.trim() || "";
     const cityId = resolvedCity?.id || day.city_id;
     const selectionDay = cityId === day.city_id ? day : { ...day, city_id: cityId };
-    const sel = isDynamicGlobal
+    const sel = isDynamicGlobal || day.is_day_zero || day.day === 0
       ? hotelSelectionForDay(option, day, true)
       : hotelSelectionForDay(option, day) ?? hotelSelectionForDay(option, selectionDay);
 
@@ -931,17 +1107,14 @@ function AccommodationSelectionTable({
             {isSplitGroup && (
               <label className="flex items-center gap-2 text-xs font-medium">
                 Pax for Option {option.key}
-                <Input
-                  type="number"
+                <NumericStepper
+                  ariaLabel={`Pax for Option ${option.key}`}
                   min={0}
                   max={exactTravellingPax}
                   value={option.allocated_pax ?? 0}
-                  onChange={(event) =>
-                    onUpdate({
-                      allocated_pax: Math.max(0, Math.trunc(Number(event.target.value) || 0)),
-                    })
-                  }
-                  className="h-8 w-20 text-right"
+                  onChange={(allocated_pax) => onUpdate({ allocated_pax })}
+                  className="w-37.5"
+                  inputClassName="px-1"
                 />
               </label>
             )}
@@ -1124,7 +1297,10 @@ function AccommodationSelectionTable({
                                       })
                                 }
                               >
-                                <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full">
+                                <SelectTrigger
+                                  className="h-8 text-xs border-[#E2E8F0] w-full"
+                                  data-testid={`hotel-selector-day-${r.day}`}
+                                >
                                   <SelectValue placeholder="Select hotel…" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1171,7 +1347,10 @@ function AccommodationSelectionTable({
                               onValueChange={(v) => r.setSel({ room_id: v })}
                               disabled={!r.sel?.hotel_id}
                             >
-                              <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full">
+                              <SelectTrigger
+                                className="h-8 text-xs border-[#E2E8F0] w-full"
+                                data-testid={`room-selector-day-${r.day}`}
+                              >
                                 <SelectValue placeholder="Select room…" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1201,7 +1380,10 @@ function AccommodationSelectionTable({
                               }
                               disabled={r.meals.length === 0}
                             >
-                              <SelectTrigger className="h-8 text-xs border-[#E2E8F0] w-full">
+                              <SelectTrigger
+                                className="h-8 text-xs border-[#E2E8F0] w-full"
+                                data-testid={`meal-plan-selector-day-${r.day}`}
+                              >
                                 <SelectValue placeholder={r.meals.length === 0 ? "—" : "Select…"} />
                               </SelectTrigger>
                               <SelectContent>
@@ -1562,17 +1744,16 @@ function AccommodationSelectionTable({
                         <Label className="text-[10px] uppercase text-muted-foreground">
                           {k} rooms
                         </Label>
-                        <Input
-                          type="number"
+                        <NumericStepper
+                          ariaLabel={`${k} rooms on Day ${r.day}`}
                           min={0}
                           max={maxAllowed}
-                          className="h-8 text-xs"
+                          className="w-37.5"
+                          inputClassName="px-1"
                           value={currentVal}
                           disabled={unavailable}
-                          onChange={(e) =>
-                            setDayMix(r.day, {
-                              [k]: Math.min(maxAllowed, Math.max(0, parseInt(e.target.value) || 0)),
-                            } as Partial<DayRoomMix>)
+                          onChange={(value) =>
+                            setDayMix(r.day, { [k]: value } as Partial<DayRoomMix>)
                           }
                         />
                         {hasRate && currentVal > 0 && (
@@ -2082,16 +2263,13 @@ function DynamicAccommodation({
                       {pricing.net > 0 ? inr(pricing.inclusive) : "—"}
                     </td>
                     <td className="p-2">
-                      <Input
-                        className="mx-auto h-8 w-20 text-center"
-                        type="number"
+                      <NumericStepper
+                        ariaLabel={`Number of rooms on Day ${row.day}`}
+                        className="mx-auto w-37.5"
+                        inputClassName="px-1"
                         min={1}
                         value={allocation.rooms}
-                        onChange={(event) =>
-                          patchAllocation(row.day, allocation.id, {
-                            rooms: Math.max(1, Number(event.target.value) || 1),
-                          })
-                        }
+                        onChange={(rooms) => patchAllocation(row.day, allocation.id, { rooms })}
                       />
                     </td>
                     <td className="p-2 text-right font-semibold">
@@ -2302,9 +2480,8 @@ function DayRateFields({
 // ------------------------------------------------------------
 // eslint-disable-next-line react-refresh/only-export-components
 export function optionInclusionSummary(draft: QuoteDraft, option: HotelOption) {
-  const stays = draft.routing
-    .filter((day) => day.overnight)
-    .map((day) => hotelSelectionForDay(option, day))
+  const stays = accommodationNightsForOption(draft.routing, option)
+    .map((day) => hotelSelectionForDay(option, day, true))
     .filter((selection): selection is NonNullable<typeof selection> =>
       Boolean(selection && !selection.no_hotel && (selection.hotel_id || selection.room_id)),
     );
@@ -2572,7 +2749,7 @@ export function OptionPerPersonPreview({
 }) {
   const d = useDB();
   const rows = useMemo(() => computePersonTotals(draft, option, d), [draft, option, d]);
-  const nights = draft.routing.filter((r) => r.overnight && r.city_id).length;
+  const nights = accommodationNightsForOption(draft.routing, option).length;
   if (!rows.length) return null;
   const nameById = new Map(rows.map((r) => [r.person_id, r.label]));
   return (

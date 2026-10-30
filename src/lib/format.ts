@@ -1,4 +1,5 @@
 // Indian numbering & date formatting helpers.
+import type { QuoteDraft, TravelDetail } from "@/lib/wizard/types";
 
 export function inr(n: number): string {
   if (!isFinite(n)) return "₹0";
@@ -30,17 +31,131 @@ export function todayISO(): string {
   return d.toISOString().slice(0, 10);
 }
 
+export function isISOCalendarDate(iso: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+/** Calendar-day difference for date keys; independent of timezone and DST. */
+export function calendarDaysBetween(fromISO: string, toISO: string): number | null {
+  if (!isISOCalendarDate(fromISO) || !isISOCalendarDate(toISO)) return null;
+  const [fromYear, fromMonth, fromDay] = fromISO.split("-").map(Number);
+  const [toYear, toMonth, toDay] = toISO.split("-").map(Number);
+  return (Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86_400_000;
+}
+
 export function addDaysISO(iso: string, n: number): string {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + n);
+  if (!isISOCalendarDate(iso)) return iso;
+  const [year, month, day] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 
 export function nightsBetween(fromISO: string, toISO: string): number {
   if (!fromISO || !toISO) return 0;
-  const from = new Date(fromISO); const to = new Date(toISO);
-  const ms = +to - +from;
-  return Math.max(0, Math.round(ms / 86400000));
+  return Math.max(0, calendarDaysBetween(fromISO, toISO) ?? 0);
+}
+
+export type TripDateEdit =
+  | { source: "start"; value: string }
+  | { source: "end"; value: string }
+  | { source: "duration"; value: number }
+  | { source: "arrival" | "departure"; value: string };
+
+export interface TripDateReconciliation {
+  patch: Partial<Pick<QuoteDraft, "start_date" | "nights">>;
+  valid: boolean;
+  boundaryConflict: boolean;
+}
+
+export function isCalendarDate(value: string): boolean {
+  return isISOCalendarDate(value);
+}
+
+export function calendarDateDifference(start: string, end: string): number | null {
+  return calendarDaysBetween(start, end);
+}
+
+function travelDate(draft: QuoteDraft, side: "arrival" | "departure"): string {
+  const mode = side === "arrival" ? draft.arrival_mode : draft.departure_mode;
+  const detail: TravelDetail | undefined =
+    side === "arrival"
+      ? mode === "flight"
+        ? draft.arrival_flight
+        : mode === "train"
+          ? draft.arrival_train
+          : draft.arrival_other
+      : mode === "flight"
+        ? draft.departure_flight
+        : mode === "train"
+          ? draft.departure_train
+          : draft.departure_other;
+  return detail?.date || "";
+}
+
+/** Reconcile only explicit edits; Day 0 remains a separate pre-tour boundary. */
+export function reconcileTripDateEdit(
+  draft: QuoteDraft,
+  edit: TripDateEdit,
+): TripDateReconciliation {
+  if (edit.source === "duration") {
+    const nights = Math.trunc(edit.value);
+    const valid = Number.isFinite(nights) && nights >= 0;
+    return { patch: valid ? { nights } : {}, valid, boundaryConflict: false };
+  }
+  if (!isCalendarDate(edit.value)) {
+    return { patch: {}, valid: false, boundaryConflict: false };
+  }
+  if (edit.source === "start") {
+    return { patch: { start_date: edit.value }, valid: true, boundaryConflict: false };
+  }
+  if (edit.source === "end") {
+    const nights = calendarDateDifference(draft.start_date, edit.value);
+    const valid = nights !== null && nights >= 0;
+    return { patch: valid ? { nights: nights! } : {}, valid, boundaryConflict: false };
+  }
+  if (draft.has_dates === false) {
+    return { patch: {}, valid: true, boundaryConflict: false };
+  }
+
+  const arrival = edit.source === "arrival" ? edit.value : travelDate(draft, "arrival");
+  const departure = edit.source === "departure" ? edit.value : travelDate(draft, "departure");
+  if (!isCalendarDate(arrival) || !isCalendarDate(departure)) {
+    return { patch: {}, valid: true, boundaryConflict: false };
+  }
+  const nights = calendarDateDifference(arrival, departure);
+  if (nights === null || nights < 0) {
+    return { patch: {}, valid: false, boundaryConflict: false };
+  }
+  if (draft.routing.some((day) => day.is_day_zero || day.day === 0)) {
+    return { patch: {}, valid: true, boundaryConflict: true };
+  }
+  return { patch: { start_date: arrival, nights }, valid: true, boundaryConflict: false };
+}
+
+export function hasReversedTravelBoundaryDates(draft: QuoteDraft): boolean {
+  const difference = calendarDateDifference(
+    travelDate(draft, "arrival"),
+    travelDate(draft, "departure"),
+  );
+  return difference !== null && difference < 0;
+}
+
+export function hasCompleteTravelBoundaryDates(draft: QuoteDraft): boolean {
+  return (
+    isCalendarDate(travelDate(draft, "arrival")) &&
+    isCalendarDate(travelDate(draft, "departure"))
+  );
 }
 
 // Parse validity text like "01 Oct 22 - 30 Sep 23" or "01-Oct-2022 to 30-Sep-2023"

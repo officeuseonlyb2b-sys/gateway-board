@@ -1,7 +1,7 @@
 import type { DB } from "@/lib/mock-store";
 import { findRatePlan } from "./rate-lookup";
-import { addDaysISO } from "@/lib/format";
 import {
+  accommodationNightDate,
   effectivePaxForPricing,
   effectiveAccommodationPax,
   isSplitAccommodation,
@@ -11,6 +11,7 @@ import {
 } from "./calc";
 import { computeScenario, type ScenarioResult } from "./scenario";
 import {
+  accommodationNightsForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type CostScenario,
@@ -343,9 +344,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
 
   if (requiresAccommodation)
     selectedOptions.forEach((option) => {
-      overnight.forEach((day, index) => {
+      accommodationNightsForOption(draft.routing, option).forEach((day) => {
         const dynamic = isDynamicAccommodationMode(draft);
-        const selection = hotelSelectionForDay(option, day, dynamic);
+        const selection = hotelSelectionForDay(option, day, true);
         if (selection?.no_hotel) return;
         if (!selection?.hotel_id || (!dynamic && !selection.room_id)) {
           issues.push(
@@ -358,7 +359,7 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
           );
           return;
         }
-        const date = day.date || addDaysISO(draft.start_date, index);
+        const date = accommodationNightDate(draft, day, draft.routing.indexOf(day));
         const selectedHotel = db.hotels.find((item) => item.id === selection.hotel_id);
         const blackout = selectedHotel?.blackout_ranges?.some(
           (range) => range.from <= date && date <= range.to,

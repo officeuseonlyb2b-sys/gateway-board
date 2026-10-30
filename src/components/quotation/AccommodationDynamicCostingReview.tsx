@@ -14,6 +14,7 @@ import {
   mealPlanCoverage,
 } from "@/lib/wizard/calc";
 import {
+  accommodationNightsForOption,
   hotelSelectionForDay,
   type HotelOption,
   type OptionKey,
@@ -186,9 +187,8 @@ export function AccommodationDynamicCostingReview({
       visibleOptions.map((option) => {
         const pax = effectiveAccommodationPax(draft, option);
         const resolution = dynamicAccommodationRoomLines(draft, option, db);
-        const allocationIssueDays = draft.routing
-          .filter((day) => day.overnight)
-          .filter((day) => {
+        const allocationIssueDays = accommodationNightsForOption(draft.routing, option).filter(
+          (day) => {
             if (hotelSelectionForDay(option, day, true)?.no_hotel) return false;
             const validLines = resolution.lines.filter((line) => line.day === day.day);
             const capacity = validLines.reduce((sum, line) => sum + line.capacity, 0);
@@ -212,7 +212,9 @@ export function AccommodationDynamicCostingReview({
       }),
     [visibleOptions, draft, db],
   );
-  const stays = draft.routing.filter((day) => day.overnight);
+  const stays = draft.routing.filter((day) =>
+    options.some((option) => accommodationNightsForOption([day], option).length > 0),
+  );
   const optionPaxSummary = visibleOptions
     .map((option) => `Option ${option.key}: ${effectiveAccommodationPax(draft, option)} Pax`)
     .join(" · ");
@@ -353,7 +355,13 @@ export function AccommodationDynamicCostingReview({
                       day.date ||
                       addDaysISO(draft.start_date, Math.max(0, draft.routing.indexOf(day)));
                     const checkOut = nextDay?.date || addDaysISO(checkIn, 1);
-                    const city = db.cities.find((item) => item.id === day.city_id)?.name || "—";
+                    const city =
+                      db.cities.find((item) => item.id === day.city_id)?.name ||
+                      db.cities.find(
+                        (item) =>
+                          item.name.trim().toLowerCase() === day.from_city?.trim().toLowerCase(),
+                      )?.name ||
+                      "—";
                     return (
                       <tr key={`${day.day}-${index}`} className="align-top">
                         <td className="whitespace-nowrap">{fmtDateShort(checkIn)}</td>

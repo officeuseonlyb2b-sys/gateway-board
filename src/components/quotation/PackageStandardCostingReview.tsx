@@ -53,6 +53,7 @@ import {
 } from "@/lib/wizard/land-review";
 import {
   hotelSelectionForDay,
+  isAccommodationNightForOption,
   isDynamicAccommodationMode,
   type HotelOption,
   type OptionKey,
@@ -1050,7 +1051,13 @@ function AccommodationReview({
     () => draft.hotel_options.filter((option) => option.selections.length > 0).slice(0, 4),
     [draft.hotel_options],
   );
-  const nights = useMemo(() => draft.routing.filter((day) => day.overnight), [draft.routing]);
+  const nights = useMemo(
+    () =>
+      draft.routing.filter((day) =>
+        options.some((option) => isAccommodationNightForOption(option, day)),
+      ),
+    [draft.routing, options],
+  );
   const standardDraft = useMemo(
     () => ({ ...draft, allocation_mode: "standard" as const, dynamic_days: [] }),
     [draft],
@@ -1103,10 +1110,18 @@ function AccommodationReview({
                         {draft.routing.find((item) => item.day === day.day + 1)?.date ||
                           addDaysISO(day.date, 1)}
                       </td>
-                      <td>{db.cities.find((city) => city.id === day.city_id)?.name || "—"}</td>
+                      <td>
+                        {db.cities.find((city) => city.id === day.city_id)?.name ||
+                          db.cities.find(
+                            (city) =>
+                              city.name.trim().toLowerCase() ===
+                              day.from_city?.trim().toLowerCase(),
+                          )?.name ||
+                          "—"}
+                      </td>
                       <td>1</td>
                       {options.map((option) => {
-                        const selection = hotelSelectionForDay(option, day);
+                        const selection = hotelSelectionForDay(option, day, true);
                         const hotel = db.hotels.find((item) => item.id === selection?.hotel_id);
                         const room = db.room_categories.find(
                           (item) => item.id === selection?.room_id,
@@ -1175,7 +1190,7 @@ function AccommodationReview({
                         </div>
                       </td>
                       {options.flatMap((option) => {
-                        const selection = hotelSelectionForDay(option, day);
+                        const selection = hotelSelectionForDay(option, day, true);
                         const plan =
                           selection && !selection.no_hotel
                             ? findRatePlan(
@@ -1335,7 +1350,10 @@ function SeparateMealsReview({
   const optionalRows = rows.filter((row) => row.status === "optional");
 
   return (
-    <Section number={sectionNumber} title={`Meals — Option ${optionKey} Included & Optional Review`}>
+    <Section
+      number={sectionNumber}
+      title={`Meals — Option ${optionKey} Included & Optional Review`}
+    >
       <div className="space-y-3 p-2">
         <div className="grid gap-2 lg:grid-cols-2">
           {(

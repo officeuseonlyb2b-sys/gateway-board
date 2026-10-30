@@ -512,7 +512,10 @@ export function Step12({ draft, set }: StepProps) {
                     <td className="p-2 font-semibold">Day {day.route.day}</td>
                     <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
                     <td colSpan={2} className="p-2 italic text-muted-foreground">
-                      No entrance sites are mapped to this day's selected tours.
+                      {(day.route.is_day_zero || day.route.day === 0) &&
+                      landDayContext(draft, day.route, db).selectedTours.length === 0
+                        ? "No sightseeing tours selected for Day 0."
+                        : "No entrance sites are mapped to this day's selected tours."}
                     </td>
                     <td className="p-2 text-right text-muted-foreground">—</td>
                   </tr>

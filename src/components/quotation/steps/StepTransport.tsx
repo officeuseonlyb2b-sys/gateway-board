@@ -26,7 +26,7 @@ import {
   parsePaxRange,
   transportLineTotal,
 } from "@/lib/wizard/calc";
-import { uid, type StepProps } from "../shared";
+import { NumericStepper, uid, type StepProps } from "../shared";
 
 // ============================================================
 // STEP 10 — Transport
@@ -45,8 +45,9 @@ export function Step10({ draft, set }: StepProps) {
 
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
 
-  // Optional pre-tour Day 0 must not silently add a transport day charge.
-  const routing = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  const routing = draft.routing;
+  const regularRouting = routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  const regularIndexForDay = new Map(regularRouting.map((day, index) => [day.day, index]));
 
   // ============================================================
   // ALL ACTIVE VEHICLES
@@ -103,12 +104,13 @@ export function Step10({ draft, set }: StepProps) {
           id: uid(),
           travel_id: first.id,
           vehicles: 1,
-          days: routing.length || 1,
+          days: regularRouting.length || 1,
 
           rate: defaultRate,
           rate_format: "per_route",
 
-          per_route_rates: Array(routing.length).fill(defaultRate),
+          per_route_rates: Array(regularRouting.length).fill(defaultRate),
+          per_route_day_rates: {},
 
           reporting_cost: 0,
           remarks: "",
@@ -308,7 +310,7 @@ export function Step10({ draft, set }: StepProps) {
                           const perDay = selected?.rate_per_day || 0;
 
                           const existingRates =
-                            transport.per_route_rates ?? Array(routing.length).fill(0);
+                            transport.per_route_rates ?? Array(regularRouting.length).fill(0);
 
                           patchLine(index, {
                             travel_id: value,
@@ -340,16 +342,13 @@ export function Step10({ draft, set }: StepProps) {
                     <div>
                       <Label className="text-[10px]"># Veh</Label>
 
-                      <Input
-                        type="number"
+                      <NumericStepper
+                        ariaLabel={`Vehicle quantity ${index + 1}`}
                         min={1}
                         value={transport.vehicles}
-                        className="h-8 text-xs"
-                        onChange={(event) =>
-                          patchLine(index, {
-                            vehicles: parseInt(event.target.value) || 1,
-                          })
-                        }
+                        onChange={(vehicles) => patchLine(index, { vehicles })}
+                        className="w-37.5"
+                        inputClassName="h-8 text-xs px-1"
                       />
                     </div>
                   </div>
@@ -409,7 +408,7 @@ export function Step10({ draft, set }: StepProps) {
                           onChange={(event) => {
                             const totalValue = parseFloat(event.target.value) || 0;
 
-                            const days = routing.length;
+                            const days = regularRouting.length;
 
                             const distributedValue = days > 0 ? totalValue / days : 0;
 
@@ -476,9 +475,13 @@ export function Step10({ draft, set }: StepProps) {
                       <td className="p-2 text-muted-foreground">{route}</td>
 
                       {draft.transport.map((transport, transportIndex) => {
-                        const rates = transport.per_route_rates ?? Array(routing.length).fill(0);
-
-                        const value = rates[routeIndex] ?? 0;
+                        const dayZero = routeItem.is_day_zero || routeItem.day === 0;
+                        const regularIndex = regularIndexForDay.get(routeItem.day) ?? 0;
+                        const rates =
+                          transport.per_route_rates ?? Array(regularRouting.length).fill(0);
+                        const value = dayZero
+                          ? (transport.per_route_day_rates?.[routeItem.day] ?? 0)
+                          : (rates[regularIndex] ?? 0);
 
                         const isTotalMode = transport.rate_mode === "total";
 
@@ -495,18 +498,29 @@ export function Step10({ draft, set }: StepProps) {
                                 className="h-7 text-xs text-right"
                                 value={value || ""}
                                 onChange={(event) => {
+                                  const nextRate = Number(event.target.value) || 0;
+                                  if (dayZero) {
+                                    patchLine(transportIndex, {
+                                      per_route_day_rates: {
+                                        ...(transport.per_route_day_rates ?? {}),
+                                        [routeItem.day]: nextRate,
+                                      },
+                                    });
+                                    return;
+                                  }
                                   const next = [
-                                    ...(transport.per_route_rates ?? Array(routing.length).fill(0)),
+                                    ...(transport.per_route_rates ??
+                                      Array(regularRouting.length).fill(0)),
                                   ];
 
-                                  while (next.length < routing.length) {
+                                  while (next.length < regularRouting.length) {
                                     next.push(0);
                                   }
 
-                                  next[routeIndex] = parseFloat(event.target.value) || 0;
+                                  next[regularIndex] = nextRate;
 
                                   patchLine(transportIndex, {
-                                    per_route_rates: next.slice(0, routing.length),
+                                    per_route_rates: next.slice(0, regularRouting.length),
                                   });
                                 }}
                               />
@@ -784,41 +798,28 @@ export function Step10({ draft, set }: StepProps) {
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={`transport-option-min-${option.id}`}>Minimum Pax</Label>
-                      <Input
-                        id={`transport-option-min-${option.id}`}
-                        type="number"
+                      <NumericStepper
+                        ariaLabel={`Minimum Pax for ${option.name}`}
                         min={1}
                         max={40}
-                        step={1}
                         value={option.min_pax}
-                        onWheel={(event) => event.currentTarget.blur()}
-                        onChange={(event) => {
-                          const min = Math.min(40, Math.max(1, Number(event.target.value) || 1));
-                          updateOption({ min_pax: min, max_pax: Math.max(min, option.max_pax) });
-                        }}
+                        onChange={(min_pax) =>
+                          updateOption({ min_pax, max_pax: Math.max(min_pax, option.max_pax) })
+                        }
+                        className="w-37.5"
+                        inputClassName="px-1"
                       />
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={`transport-option-max-${option.id}`}>Maximum Pax</Label>
-                      <Input
-                        id={`transport-option-max-${option.id}`}
-                        type="number"
+                      <NumericStepper
+                        ariaLabel={`Maximum Pax for ${option.name}`}
                         min={option.min_pax}
                         max={40}
-                        step={1}
                         value={option.max_pax}
-                        onWheel={(event) => event.currentTarget.blur()}
-                        onChange={(event) =>
-                          updateOption({
-                            max_pax: Math.min(
-                              40,
-                              Math.max(
-                                option.min_pax,
-                                Number(event.target.value) || option.min_pax,
-                              ),
-                            ),
-                          })
-                        }
+                        onChange={(max_pax) => updateOption({ max_pax })}
+                        className="w-37.5"
+                        inputClassName="px-1"
                       />
                     </div>
                     <Button
@@ -878,26 +879,16 @@ export function Step10({ draft, set }: StepProps) {
                             ))}
                           </SelectContent>
                         </Select>
-                        <Input
-                          className="h-8"
-                          aria-label="Qty."
-                          type="number"
+                        <NumericStepper
+                          className="w-37.5"
+                          inputClassName="px-1"
+                          ariaLabel={`Vehicle quantity for ${option.name}`}
                           min={1}
-                          step={1}
                           value={vehicle.quantity}
-                          onWheel={(event) => event.currentTarget.blur()}
-                          onChange={(event) =>
+                          onChange={(quantity) =>
                             updateVehicles(
                               option.vehicles.map((entry, index) =>
-                                index === vehicleIndex
-                                  ? {
-                                      ...entry,
-                                      quantity: Math.max(
-                                        1,
-                                        Math.trunc(Number(event.target.value) || 1),
-                                      ),
-                                    }
-                                  : entry,
+                                index === vehicleIndex ? { ...entry, quantity } : entry,
                               ),
                             )
                           }

@@ -7,6 +7,7 @@ import { getQuotationScope } from "@/lib/query-for";
 import { dynamicAccommodationRoomLines, effectiveAccommodationPax } from "@/lib/wizard/calc";
 import { buildRateSheet, type RateSheetRow } from "@/lib/wizard/costsheet";
 import {
+  accommodationNightsForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type HotelOption,
@@ -58,9 +59,8 @@ function CommercialPackageMatrixImpl({
         options.map((option) => {
           const resolution = dynamicAccommodationRoomLines(draft, option, db);
           const requiredPax = effectiveAccommodationPax(draft, option);
-          const dynamicNights = draft.routing.filter(
-            (day) =>
-              day.overnight && dynamicMode,
+          const dynamicNights = accommodationNightsForOption(draft.routing, option).filter(
+            () => dynamicMode,
           );
           const incomplete = dynamicNights.some((day) => {
             const selection = hotelSelectionForDay(option, day, true);

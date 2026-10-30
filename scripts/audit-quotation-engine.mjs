@@ -10,6 +10,8 @@ try {
   const costsheet = await vite.ssrLoadModule("/src/lib/wizard/costsheet.ts");
   const scenarioEngine = await vite.ssrLoadModule("/src/lib/wizard/scenario.ts");
   const types = await vite.ssrLoadModule("/src/lib/wizard/types.ts");
+  const dateFormat = await vite.ssrLoadModule("/src/lib/format.ts");
+  const dateReconciliation = dateFormat;
   const quoteBuilder = await vite.ssrLoadModule("/src/lib/wizard/build-saved-quote.ts");
   const draftStore = await vite.ssrLoadModule("/src/lib/wizard/store.ts");
   const namedDraftStore = await vite.ssrLoadModule("/src/lib/drafts-store.ts");
@@ -155,6 +157,33 @@ try {
     }),
     { nights: 0, breakfasts: 0, lunches: 0, dinners: 0, taxes: "—" },
     "Option inclusion summaries remain independent",
+  );
+  const accommodationSchedule = hotelsStep.accommodationScheduleRows([
+    { day: 0, is_day_zero: true, date: "2026-09-21", city_id: "city-1", overnight: false },
+    { day: 1, date: "2026-09-22", city_id: "city-1", overnight: true },
+    { day: 2, date: "2026-09-23", city_id: "city-2", overnight: true },
+    { day: 3, date: "2026-09-24", city_id: "", overnight: false },
+  ]);
+  assert.equal(accommodationSchedule[0].is_day_zero, true, "Accommodation shows Day 0");
+  assert.equal(
+    accommodationSchedule.at(-1).is_departure,
+    true,
+    "Accommodation shows the last departure day",
+  );
+  assert.equal(
+    accommodationSchedule.filter((row) => row.is_booked_night).length,
+    2,
+    "Informational Day 0 and departure rows do not create extra hotel nights",
+  );
+  const overnightDayZeroSchedule = hotelsStep.accommodationScheduleRows([
+    { day: 0, is_day_zero: true, date: "2026-09-21", city_id: "city-1", overnight: true },
+    { day: 1, date: "2026-09-22", city_id: "city-1", overnight: true },
+    { day: 2, date: "2026-09-23", city_id: "", overnight: false },
+  ]);
+  assert.equal(
+    overnightDayZeroSchedule.filter((row) => row.is_booked_night).length,
+    2,
+    "Day 0 counts only after Routing explicitly marks it as an overnight stay",
   );
 
   const hotelCities = [{ id: "hotel-city-ujjain", name: " Ujjain " }];
@@ -808,6 +837,71 @@ try {
     ["activity-master"],
     "Selected Tour destination resolves Activity eligibility",
   );
+  const dayZeroNoTourRoute = {
+    ...selectedRoute,
+    day: 0,
+    is_day_zero: true,
+    tours_selected_by_city: undefined,
+    tour_ids_by_city: undefined,
+    tour_titles_by_city: undefined,
+    tour_title: undefined,
+  };
+  const dayZeroNoTourDraft = { ...types.emptyDraft(), routing: [dayZeroNoTourRoute] };
+  assert.deepEqual(
+    landEligibility.eligibleEntrancesForDay(dayZeroNoTourDraft, dayZeroNoTourRoute, landDb),
+    [],
+    "Day 0 without a selected Routing tour does not auto-populate city entrances",
+  );
+  assert.deepEqual(
+    landEligibility.eligibleGuidesForDay(dayZeroNoTourDraft, dayZeroNoTourRoute, landDb),
+    [],
+    "Day 0 without a selected Routing tour does not auto-populate city guides",
+  );
+  assert.deepEqual(
+    landEligibility.eligibleActivitiesForDay(dayZeroNoTourDraft, dayZeroNoTourRoute, landDb),
+    [],
+    "Day 0 without a selected Routing tour does not auto-populate city activities",
+  );
+  const explicitlyAddedDayZeroActivity = {
+    ...dayZeroNoTourDraft,
+    activities: [
+      {
+        id: "explicit-day-zero-activity",
+        activity_id: "activity-master",
+        qty: 2,
+        rate: 100,
+        independent_day_zero: true,
+        from_routing_days: [0],
+      },
+    ],
+  };
+  assert.deepEqual(
+    landEligibility
+      .eligibleActivitiesForDay(explicitlyAddedDayZeroActivity, dayZeroNoTourRoute, landDb)
+      .map((activity) => activity.id),
+    ["activity-master"],
+    "Explicitly added independent Day 0 activities remain eligible",
+  );
+  assert.equal(
+    landEligibility.isSelectedLandServiceValid(
+      "activity",
+      "activity-master",
+      0,
+      dayZeroNoTourDraft,
+      landDb,
+    ),
+    false,
+    "Legacy unmarked city-wide Day 0 activity is excluded from active costing for reselection",
+  );
+  const dayZeroSelectedTour = { ...selectedRoute, day: 0, is_day_zero: true };
+  const dayZeroSelectedTourDraft = { ...types.emptyDraft(), routing: [dayZeroSelectedTour] };
+  assert.deepEqual(
+    landEligibility
+      .eligibleEntrancesForDay(dayZeroSelectedTourDraft, dayZeroSelectedTour, landDb)
+      .map((row) => row.id),
+    ["site-1"],
+    "Explicitly selected Day 0 tour resolves its mapped Entrance source ID",
+  );
   const manduDb = structuredClone(landDb);
   manduDb.cities.push({ id: "city-mandu", name: "Mandu" });
   manduDb.destination_cities.push({ id: "destination-city-mandu", name: "Mandu", created_at: now });
@@ -1060,6 +1154,115 @@ try {
     hotel_gst_percent: 5,
   });
 
+  const arrivalFirst = {
+    ...types.emptyDraft(),
+    arrival_mode: "flight",
+    departure_mode: "train",
+    arrival_flight: { date: "2026-12-10" },
+    departure_train: { date: "2026-12-15" },
+  };
+  const arrivalBoundary = dateReconciliation.reconcileTripDateEdit(arrivalFirst, {
+    source: "departure",
+    value: "2026-12-15",
+  });
+  assert.deepEqual(
+    arrivalBoundary.patch,
+    { start_date: "2026-12-10", nights: 5 },
+    "Different arrival/departure modes synchronize tour boundaries when both dates are entered",
+  );
+  assert.deepEqual(
+    dateReconciliation.reconcileTripDateEdit(
+      { ...arrivalFirst, departure_train: { date: "2026-12-09" } },
+      { source: "arrival", value: "2026-12-10" },
+    ).patch,
+    {},
+    "Arrival-first edits reject an already-entered earlier departure",
+  );
+  assert.equal(
+    dateReconciliation.hasReversedTravelBoundaryDates({
+      ...arrivalFirst,
+      departure_train: { date: "2026-12-09" },
+    }),
+    true,
+    "Reversed Arrival/Departure dates can be surfaced as a targeted review warning",
+  );
+  assert.equal(dateFormat.addDaysISO("2026-12-10", 5), "2026-12-15");
+  assert.equal(dateFormat.nightsBetween("2026-12-10", "2026-12-15"), 5);
+
+  const durationFirst = { ...types.emptyDraft(), start_date: "2026-12-10", nights: 3 };
+  assert.deepEqual(
+    dateReconciliation.reconcileTripDateEdit(durationFirst, {
+      source: "start",
+      value: "2026-12-10",
+    }).patch,
+    { start_date: "2026-12-10" },
+    "Tour Starting Date first retains the established duration",
+  );
+  assert.equal(
+    dateFormat.addDaysISO(
+      durationFirst.start_date,
+      dateReconciliation.reconcileTripDateEdit(durationFirst, {
+        source: "duration",
+        value: 3,
+      }).patch.nights,
+    ),
+    "2026-12-13",
+    "Duration-first planning derives the ending date from a known start",
+  );
+  assert.deepEqual(
+    dateReconciliation.reconcileTripDateEdit(durationFirst, {
+      source: "end",
+      value: "2026-12-15",
+    }).patch,
+    { nights: 5 },
+    "Direct Tour Ending Date calculates nights without a separate duration entry",
+  );
+  assert.equal(
+    dateReconciliation.reconcileTripDateEdit(durationFirst, {
+      source: "end",
+      value: "2026-12-10",
+    }).patch.nights,
+    0,
+    "A supported same-day itinerary has zero nights and one calendar day",
+  );
+  assert.equal(
+    dateReconciliation.reconcileTripDateEdit(durationFirst, {
+      source: "end",
+      value: "2026-12-09",
+    }).valid,
+    false,
+    "Tour dates earlier than the start are rejected",
+  );
+  assert.equal(dateReconciliation.isCalendarDate("2026-02-30"), false);
+
+  const dayZeroDateDraft = {
+    ...arrivalFirst,
+    routing: [
+      { day: 0, is_day_zero: true, date: "2026-12-09", city_id: "city-1", overnight: false },
+    ],
+  };
+  const dayZeroBoundary = dateReconciliation.reconcileTripDateEdit(dayZeroDateDraft, {
+    source: "departure",
+    value: "2026-12-15",
+  });
+  assert.equal(dayZeroBoundary.boundaryConflict, true);
+  assert.deepEqual(dayZeroBoundary.patch, {}, "Day 0 prevents silent boundary shifts");
+  const withoutDates = { ...arrivalFirst, has_dates: false };
+  assert.deepEqual(
+    dateReconciliation.reconcileTripDateEdit(withoutDates, {
+      source: "departure",
+      value: "2026-12-15",
+    }).patch,
+    {},
+    "Without Dates retains day-number planning instead of deriving calendar dates",
+  );
+  const reloadedDateDraft = draftStore.normalizeDraft(
+    JSON.parse(JSON.stringify({ ...arrivalFirst, ...arrivalBoundary.patch })),
+  );
+  assert.equal(reloadedDateDraft.start_date, "2026-12-10");
+  assert.equal(reloadedDateDraft.nights, 5);
+  assert.equal(reloadedDateDraft.arrival_flight?.date, "2026-12-10");
+
   const reachedDraftRecord = {
     id: "draft-progress",
     draft_name: "Progress audit",
@@ -1150,6 +1353,23 @@ try {
     true,
     "Optional Day 0 does not invalidate a complete Day 1 onward routing",
   );
+  const explicitDayZeroHotelNight = structuredClone(dayZeroDraft);
+  explicitDayZeroHotelNight.routing[0].overnight = true;
+  explicitDayZeroHotelNight.allocation_mode = "dynamic";
+  explicitDayZeroHotelNight.dynamic_days = [0, 1];
+  explicitDayZeroHotelNight.hotel_options[0].selections.push({
+    routing_day: 0,
+    city_id: "city-1",
+    hotel_id: "hotel-1",
+    room_id: "room-1",
+    meal_plan: "CP",
+  });
+  assert.ok(
+    validation
+      .validateQuoteForFinalization(explicitDayZeroHotelNight, db)
+      .blockers.some((item) => item.code === "DYNAMIC_CAPACITY_A_0"),
+    "An explicitly booked Dynamic Day 0 hotel night requires its own room allocation",
+  );
   const ordinaryLand = costsheet.buildLandPart(baseDraft(), db);
   const dayZeroLand = costsheet.buildLandPart(dayZeroDraft, db);
   assert.equal(
@@ -1158,6 +1378,87 @@ try {
     "Optional Day 0 does not add an automatic transport charge",
   );
   assert.equal(dayZeroLand.rows.find((row) => row.day === 0)?.total, 0);
+  const selectedDayZeroCostDraft = {
+    ...baseDraft(),
+    routing: [dayZeroSelectedTour],
+    activities: [
+      {
+        ...baseDraft().activities[0],
+        from_routing_days: [0],
+      },
+    ],
+    entrances: [{ ...baseDraft().entrances[0], from_routing_days: [0] }],
+    guides: [{ ...baseDraft().guides[0], from_routing_days: [0] }],
+  };
+  const selectedDayZeroLand = costsheet.buildLandPart(selectedDayZeroCostDraft, landDb);
+  const selectedDayZeroRow = selectedDayZeroLand.rows.find((row) => row.day === 0);
+  assert.ok(selectedDayZeroRow?.entrances > 0, "Selected Day 0 tour can cost its mapped Entrance");
+  assert.ok(selectedDayZeroRow?.guide > 0, "Selected Day 0 tour can cost its mapped Guide");
+  assert.ok(selectedDayZeroRow?.activities > 0, "Selected Day 0 tour can cost mapped Activities");
+  const independentDayZeroCostDraft = {
+    ...selectedDayZeroCostDraft,
+    routing: [dayZeroNoTourRoute],
+    activities: [
+      {
+        ...selectedDayZeroCostDraft.activities[0],
+        independent_day_zero: true,
+      },
+    ],
+    entrances: [],
+    guides: [],
+  };
+  assert.ok(
+    costsheet.buildLandPart(independentDayZeroCostDraft, landDb).rows.find((row) => row.day === 0)
+      ?.activities > 0,
+    "An intentionally added independent Day 0 activity is costed without city-wide auto-selection",
+  );
+  const legacyDayZeroCostDraft = {
+    ...independentDayZeroCostDraft,
+    activities: [{ ...independentDayZeroCostDraft.activities[0], independent_day_zero: undefined }],
+  };
+  assert.equal(
+    costsheet.buildLandPart(legacyDayZeroCostDraft, landDb).rows.find((row) => row.day === 0)
+      ?.activities,
+    0,
+    "Unmarked legacy Day 0 activity remains excluded from active costing",
+  );
+  const dayZeroRatedDraft = structuredClone(dayZeroDraft);
+  dayZeroRatedDraft.transport[0].per_route_day_rates = { 0: 2000 };
+  const dayZeroRatedLand = costsheet.buildLandPart(dayZeroRatedDraft, db);
+  assert.equal(
+    dayZeroRatedLand.transport_total,
+    ordinaryLand.transport_total + 2000,
+    "An intentionally configured Day 0 rate is included exactly once in Day-wise transport",
+  );
+  assert.equal(dayZeroRatedLand.rows.find((row) => row.day === 0)?.transport, 2000);
+  const savedDayZeroTransport = draftStore.normalizeDraft(
+    JSON.parse(JSON.stringify(dayZeroRatedDraft)),
+  );
+  assert.equal(
+    savedDayZeroTransport.transport[0].per_route_day_rates[0],
+    2000,
+    "Day 0 transport rate survives save/reload draft normalization",
+  );
+  const dayZeroTotalModeDraft = {
+    ...dayZeroRatedDraft,
+    transport: [
+      {
+        ...dayZeroRatedDraft.transport[0],
+        rate_mode: "total",
+        total_rate: 10000,
+      },
+    ],
+  };
+  assert.equal(
+    calc.transportLineTotal(dayZeroTotalModeDraft.transport[0]),
+    10000,
+    "Total mode remains authoritative and ignores the separate Day 0 rate",
+  );
+  assert.equal(
+    costsheet.buildLandPart(dayZeroTotalModeDraft, db).rows.find((row) => row.day === 0)?.transport,
+    0,
+    "Total mode does not produce a second Day 0 charge",
+  );
   assert.equal(
     calc.quotationPaxLabel({ ...baseDraft(), pax_mode: "range", pax_min: 4, pax_max: 14 }),
     "4–14 Pax",
@@ -1775,12 +2076,12 @@ try {
     }),
   );
   const reviewSections = [
+    "Commercial Package Matrix",
     "A. Day-wise Land Services Pricing Review (View Only)",
     "B. Transport Variations",
     "C. Miscellaneous (Selected Items)",
     "D. Included Activities / Experiences",
     "Accommodation &amp; Meals",
-    "Commercial Package Matrix",
   ].map((label) => finalReviewMarkup.indexOf(label));
   assert.ok(
     reviewSections.every((position) => position >= 0) &&
@@ -1789,10 +2090,10 @@ try {
       ),
     `Final Review sections render in required order: ${reviewSections.join(", ")}`,
   );
-  const daywiseSection = finalReviewMarkup.slice(reviewSections[0], reviewSections[1]);
+  const daywiseSection = finalReviewMarkup.slice(reviewSections[1], reviewSections[2]);
   assert.ok(!daywiseSection.includes("Activities / Experiences"));
   assert.ok(!daywiseSection.includes("Miscellaneous · Included"));
-  const includedActivitiesSection = finalReviewMarkup.slice(reviewSections[3], reviewSections[4]);
+  const includedActivitiesSection = finalReviewMarkup.slice(reviewSections[4], reviewSections[5]);
   assert.ok(includedActivitiesSection.includes("Included Activity"));
   const groupedActivityDraft = {
     ...displayDraft,

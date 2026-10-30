@@ -2,6 +2,8 @@
 import type { DB, RatePlan } from "@/lib/mock-store";
 import { miscRateForPax } from "@/lib/mock-store";
 import {
+  accommodationNightsForOption,
+  isAccommodationNightForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type DynamicRoomAllocation,
@@ -55,6 +57,16 @@ function pickPlan(
   dateISO: string,
 ): RatePlan | null {
   return findRatePlan(plans, room_id, meal, dateISO);
+}
+
+export function accommodationNightDate(
+  draft: QuoteDraft,
+  day: QuoteDraft["routing"][number],
+  routingIndex: number,
+): string {
+  if (day.is_day_zero || day.day === 0)
+    return day.date || addDaysISO(draft.start_date, -1);
+  return addDaysISO(draft.start_date, routingIndex);
 }
 
 // Apply a per-day, per-quotation rate override on top of the hotel's saved
@@ -153,9 +165,9 @@ function resolveDynamicAccommodationRoomLines(
   let missing = 0;
   const capacityFor = { single: 1, double: 2, triple: 3, quad: 4 } as const;
 
-  draft.routing.forEach((day, index) => {
+  accommodationNightsForOption(draft.routing, option).forEach((day) => {
     const isDynamic = isDynamicAccommodationMode(draft);
-    if (!day.overnight || !isDynamic) return;
+    if (!isDynamic) return;
     const selection = hotelSelectionForDay(option, day, true);
     if (import.meta.env.DEV) {
       const daySelections = option.selections.filter((item) => item.routing_day === day.day);
@@ -184,7 +196,9 @@ function resolveDynamicAccommodationRoomLines(
       missing++;
       return;
     }
-    const date = day.date || addDaysISO(draft.start_date, index);
+    const date =
+      day.date ||
+      addDaysISO(draft.start_date, day.day === 0 ? -1 : draft.routing.indexOf(day));
     const allocations = option.dynamic_allocations?.[day.day] ?? [];
     const hotel = d.hotels.find((item) => item.id === selection.hotel_id);
     const blackout = hotel?.blackout_ranges?.some(
@@ -323,7 +337,12 @@ export function transportLineTotal(l: QuoteDraft["transport"][number]): number {
   }
   if (l.rate_format === "total") return (l.total_override ?? 0) + additions;
   if (l.rate_format === "per_route") {
-    const sum = (l.per_route_rates ?? []).reduce((s, r) => s + (Number(r) || 0), 0);
+    const regularDays = (l.per_route_rates ?? []).reduce((s, r) => s + (Number(r) || 0), 0);
+    const dayZero = Object.values(l.per_route_day_rates ?? {}).reduce(
+      (sum, rate) => sum + (Number(rate) || 0),
+      0,
+    );
+    const sum = regularDays + dayZero;
     return sum * (l.vehicles || 1) + (l.reporting_cost ?? 0) + additions;
   }
   // "per_day" or "prefilled" or undefined
@@ -844,14 +863,14 @@ export function computeOption(draft: QuoteDraft, opt: HotelOption, d: DB): Optio
     missing = 0;
 
   draft.routing.forEach((day, i) => {
-    if (!day.overnight) return;
-    const sel = hotelSelectionForDay(opt, day);
+    if (!isAccommodationNightForOption(opt, day)) return;
+    const sel = hotelSelectionForDay(opt, day, true);
     if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
     }
-    const date = addDaysISO(draft.start_date, i);
+    const date = accommodationNightDate(draft, day, i);
     const plan = planForDay(opt, day.day, pickPlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
     if (!plan) {
       missing++;
@@ -995,11 +1014,11 @@ export function computePersonTotals(
 
   // Pre-resolve day plans for this option
   const dayPlans = draft.routing.map((day, i) => {
-    if (!day.overnight) return null;
-    const sel = hotelSelectionForDay(opt, day);
+    if (!isAccommodationNightForOption(opt, day)) return null;
+    const sel = hotelSelectionForDay(opt, day, true);
     if (sel?.no_hotel) return null;
     if (!sel) return null;
-    const date = addDaysISO(draft.start_date, i);
+    const date = accommodationNightDate(draft, day, i);
     return planForDay(
       opt,
       day.day,
@@ -1148,14 +1167,14 @@ export function lookupOptionNightlyRates(
   const perNight: OptionRateLookup["perNight"] = [];
   let missing = 0;
   draft.routing.forEach((day, i) => {
-    if (!day.overnight) return;
-    const sel = hotelSelectionForDay(opt, day);
+    if (!isAccommodationNightForOption(opt, day)) return;
+    const sel = hotelSelectionForDay(opt, day, true);
     if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
     }
-    const date = addDaysISO(draft.start_date, i);
+    const date = accommodationNightDate(draft, day, i);
     const plan = planForDay(
       opt,
       day.day,
@@ -1230,14 +1249,14 @@ export function computeGroupOption(
     roomGst = 0,
     missing = 0;
   draft.routing.forEach((day, i) => {
-    if (!day.overnight) return;
-    const sel = hotelSelectionForDay(opt, day);
+    if (!isAccommodationNightForOption(opt, day)) return;
+    const sel = hotelSelectionForDay(opt, day, true);
     if (sel?.no_hotel) return;
     if (!sel) {
       missing++;
       return;
     }
-    const date = addDaysISO(draft.start_date, i);
+    const date = accommodationNightDate(draft, day, i);
     const plan = planForDay(
       opt,
       day.day,
@@ -1360,12 +1379,12 @@ export function computeDynamicOption(
   let net = 0,
     gst = 0;
   draft.routing.forEach((day, i) => {
-    if (!day.overnight) return;
+    if (!isAccommodationNightForOption(opt, day)) return;
     const mix =
       draft.day_room_mix?.[day.day] ?? defaultDayMix(Math.max(1, effectivePaxForPricing(draft)));
-    const sel = hotelSelectionForDay(opt, day);
+    const sel = hotelSelectionForDay(opt, day, true);
     if (sel?.no_hotel) return;
-    const date = addDaysISO(draft.start_date, i);
+    const date = accommodationNightDate(draft, day, i);
     const plan = sel
       ? planForDay(
           opt,
@@ -1374,7 +1393,14 @@ export function computeDynamicOption(
         )
       : null;
     if (!plan) {
-      days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });
+      days.push({
+        day: day.day,
+        city_id: selection?.city_id || day.city_id,
+        mix,
+        net: 0,
+        gst: 0,
+        missing: true,
+      });
       return;
     }
     const sgl = plan.single_rate;
@@ -1389,7 +1415,14 @@ export function computeDynamicOption(
       mix.quad * quad * gstRateFor(quad);
     net += dNet;
     gst += dGst;
-    days.push({ day: day.day, city_id: day.city_id, mix, net: dNet, gst: dGst, missing: false });
+    days.push({
+      day: day.day,
+      city_id: selection?.city_id || day.city_id,
+      mix,
+      net: dNet,
+      gst: dGst,
+      missing: false,
+    });
   });
   return { days, room_net: net, room_gst: gst };
 }

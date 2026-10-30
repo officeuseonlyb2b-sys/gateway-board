@@ -41,7 +41,14 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { inr, addDaysISO, fmtDateShort } from "@/lib/format";
+import {
+  inr,
+  addDaysISO,
+  fmtDateShort,
+  reconcileTripDateEdit,
+  hasReversedTravelBoundaryDates,
+  hasCompleteTravelBoundaryDates,
+} from "@/lib/format";
 import {
   useDB,
   MEAL_PLANS,
@@ -80,6 +87,7 @@ import type {
   PersonAllocation,
   PersonRoomType,
 } from "@/lib/wizard/types";
+import { accommodationNightsForOption, hotelSelectionForDay } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
 import {
   addProgram,
@@ -146,7 +154,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { uid, CustomAdd } from "@/components/quotation/shared";
+import { uid, CustomAdd, NumericStepper } from "@/components/quotation/shared";
 import { Step10 } from "@/components/quotation/steps/StepTransport";
 import { Step11 } from "@/components/quotation/steps/StepActivities";
 import { Step12 } from "@/components/quotation/steps/StepEntrances";
@@ -1469,13 +1477,10 @@ function validate(d: QuoteDraft, step: number): boolean {
     }
     case 8: {
       // Accommodation Part — Hotels
-      const overnightCities = d.routing
-        .filter((r) => r.overnight && r.city_id)
-        .map((r) => r.city_id);
-      if (overnightCities.length === 0) return true;
       const A = d.hotel_options.find((o) => o.key === "A");
-      if (!A) return false;
-      return overnightCities.every((cid) => A.selections.some((s) => s.city_id === cid));
+      if (!A) return !d.routing.some((route) => route.overnight);
+      const bookedNights = accommodationNightsForOption(d.routing, A);
+      return bookedNights.every((day) => Boolean(hotelSelectionForDay(A, day, true)));
     }
     default:
       return true;
@@ -2626,12 +2631,14 @@ function Step9({ draft, set }: StepProps) {
       // The last itinerary row is a departure day. Its destination is still
       // needed by land services, but it must never become an accommodation night.
       next[i].overnight =
-        !(next[i].is_day_zero || next[i].day === 0) &&
-        i < next.length - 1 &&
-        Boolean(patch.city_id);
+        next[i].is_day_zero || next[i].day === 0
+          ? Boolean(patch.city_id) && Boolean(patch.overnight ?? next[i].overnight)
+          : i < next.length - 1 && Boolean(patch.city_id);
       if (i + 1 < next.length && patch.city_id) {
         next[i + 1] = { ...next[i + 1], from_city: cityName(patch.city_id) };
       }
+    } else if (patch.overnight !== undefined) {
+      next[i].overnight = Boolean(next[i].city_id) && patch.overnight;
     }
     set({ routing: next });
   };
@@ -2686,6 +2693,12 @@ function Step9({ draft, set }: StepProps) {
         },
         ...draft.routing,
       ],
+      ...(hasCompleteTravelBoundaryDates(draft)
+        ? {
+            trip_date_review:
+              "Day 0 is a separately designated pre-tour day. Existing arrival/departure dates were preserved; review the tour boundaries and itinerary dates before continuing.",
+          }
+        : {}),
     });
   };
 
@@ -2696,7 +2709,10 @@ function Step9({ draft, set }: StepProps) {
     );
     if (populated && !window.confirm(`Delete Day ${row.day}?`)) return;
     if (row.is_day_zero || row.day === 0) {
-      set({ routing: draft.routing.filter((_, itemIndex) => itemIndex !== index) });
+      set({
+        routing: draft.routing.filter((_, itemIndex) => itemIndex !== index),
+        transport: draft.transport.map((line) => ({ ...line, per_route_day_rates: undefined })),
+      });
       return;
     }
     const dayZero = draft.routing.find((item) => item.is_day_zero || item.day === 0);
@@ -2943,6 +2959,41 @@ function Step9({ draft, set }: StepProps) {
                     <td className="p-2 align-middle w-[120px]">
                       {isLast ? (
                         <span className="text-[11px] text-muted-foreground italic">Departure</span>
+                      ) : r.is_day_zero || r.day === 0 ? (
+                        <div className="space-y-2">
+                          <Select
+                            value={r.city_id || OVERNIGHT_NONE}
+                            onValueChange={(v) =>
+                              updateRow(i, { city_id: v === OVERNIGHT_NONE ? "" : v })
+                            }
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder="Arrival city…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={OVERNIGHT_NONE}>— None —</SelectItem>
+                              {[...d.cities]
+                                .sort((a, b) =>
+                                  a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                                )
+                                .map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                          <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <Checkbox
+                              checked={!!r.overnight}
+                              disabled={!r.city_id}
+                              onCheckedChange={(checked) =>
+                                updateRow(i, { overnight: checked === true })
+                              }
+                            />
+                            Overnight stay
+                          </label>
+                        </div>
                       ) : (
                         <Select
                           value={r.city_id || OVERNIGHT_NONE}
@@ -4099,9 +4150,48 @@ function SummaryField({ label, value, detail }: { label: string; value: string; 
 // ============================================================
 // NEW STEP 3 — Pax + Tour Type (StepTripBasics and sub-steps)
 // ============================================================
+function dateReviewPatch(draft: QuoteDraft): Partial<QuoteDraft> {
+  const configured =
+    draft.routing.some(
+      (day) =>
+        day.city_id ||
+        day.to_city ||
+        day.tour_ids_by_city ||
+        day.tours_selected_by_city ||
+        day.tour_title,
+    ) ||
+    draft.hotel_options.some(
+      (option) =>
+        option.selections.length > 0 || Object.keys(option.dynamic_allocations ?? {}).length > 0,
+    );
+  return configured
+    ? {
+        trip_date_review:
+          "Trip dates changed. Review routing dates and hotel rate validity; existing selections and room allocations have been retained.",
+      }
+    : {};
+}
+
 function StepTripBasics({ draft, set }: StepProps) {
   return (
     <div className="space-y-8">
+      {draft.trip_date_review && (
+        <Card className="border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="flex-1">{draft.trip_date_review}</div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-amber-950"
+              onClick={() => set({ trip_date_review: undefined })}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </Card>
+      )}
       <Card className="border-primary/20 bg-primary/[0.03] p-4">
         <Label>Query For</Label>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -4174,20 +4264,22 @@ function StepPaxType({ draft, set }: StepProps) {
         <div className="grid grid-cols-2 gap-3 max-w-md">
           <div>
             <Label>Min Pax</Label>
-            <Input
-              type="number"
+            <NumericStepper
+              ariaLabel="Minimum Pax"
               min={1}
               value={draft.pax_min ?? 1}
-              onChange={(e) => set({ pax_min: Math.max(1, parseInt(e.target.value) || 1) })}
+              onChange={(pax_min) =>
+                set({ pax_min, pax_max: Math.max(pax_min, draft.pax_max ?? pax_min) })
+              }
             />
           </div>
           <div>
             <Label>Max Pax</Label>
-            <Input
-              type="number"
-              min={1}
+            <NumericStepper
+              ariaLabel="Maximum Pax"
+              min={draft.pax_min ?? 1}
               value={draft.pax_max ?? 1}
-              onChange={(e) => set({ pax_max: Math.max(1, parseInt(e.target.value) || 1) })}
+              onChange={(pax_max) => set({ pax_max })}
             />
           </div>
         </div>
@@ -4372,25 +4464,25 @@ function StepPaxType({ draft, set }: StepProps) {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1">
                 <Label className="text-xs">Min</Label>
-                <Input
-                  type="number"
+                <NumericStepper
+                  ariaLabel="Minimum Pax"
                   min={1}
-                  className="w-20"
-                  value={isRangeActive ? (draft.pax_min ?? "") : ""}
-                  onChange={(e) => updateRangeMin(e.target.value)}
-                  placeholder="min"
+                  value={draft.pax_min ?? 1}
+                  onChange={(value) => updateRangeMin(String(value))}
+                  className="w-37.5"
+                  inputClassName="w-14 px-1"
                 />
               </div>
               <span className="text-muted-foreground">–</span>
               <div className="flex items-center gap-1">
                 <Label className="text-xs">Max</Label>
-                <Input
-                  type="number"
+                <NumericStepper
+                  ariaLabel="Maximum Pax"
                   min={draft.pax_min ?? 1}
-                  className="w-20"
-                  value={isRangeActive ? (draft.pax_max ?? "") : ""}
-                  onChange={(e) => updateRangeMax(e.target.value)}
-                  placeholder="max"
+                  value={draft.pax_max ?? draft.pax_min ?? 1}
+                  onChange={(value) => updateRangeMax(String(value))}
+                  className="w-37.5"
+                  inputClassName="w-14 px-1"
                 />
               </div>
             </div>
@@ -4566,6 +4658,34 @@ function CityCombobox({ value, onChange }: { value: string; onChange: (v: string
 // StepTravel – Mode of Travel
 // ============================================================
 function StepTravel({ draft, set }: StepProps) {
+  const setBoundaryDate = (side: "arrival" | "departure", value: string) => {
+    const mode = side === "arrival" ? draft.arrival_mode : draft.departure_mode;
+    const field =
+      side === "arrival"
+        ? mode === "flight"
+          ? "arrival_flight"
+          : mode === "train"
+            ? "arrival_train"
+            : "arrival_other"
+        : mode === "flight"
+          ? "departure_flight"
+          : mode === "train"
+            ? "departure_train"
+            : "departure_other";
+    const current = draft[field] || {};
+    const nextDetail = { ...current, date: value };
+    const candidate = { ...draft, [field]: nextDetail };
+    const result = reconcileTripDateEdit(candidate, { source: side, value });
+    const boundaryNotice = result.boundaryConflict
+      ? "Arrival and departure dates were saved, but Day 0 is a separately designated pre-tour day. Tour boundaries were not shifted; review Day 0 and trip dates explicitly."
+      : undefined;
+    set({
+      [field]: nextDetail,
+      ...result.patch,
+      ...dateReviewPatch(draft),
+      ...(boundaryNotice ? { trip_date_review: boundaryNotice } : {}),
+    } as Partial<QuoteDraft>);
+  };
   const setJourneyMode = (side: "arrival" | "departure", value: string) => {
     const arrival = side === "arrival" ? value : draft.arrival_mode;
     const departure = side === "departure" ? value : draft.departure_mode;
@@ -4651,11 +4771,7 @@ function StepTravel({ draft, set }: StepProps) {
                   <Input
                     type="date"
                     value={draft.arrival_flight?.date || ""}
-                    onChange={(e) =>
-                      set({
-                        arrival_flight: { ...(draft.arrival_flight || {}), date: e.target.value },
-                      })
-                    }
+                    onChange={(e) => setBoundaryDate("arrival", e.target.value)}
                   />
                   <Input
                     type="time"
@@ -4700,14 +4816,7 @@ function StepTravel({ draft, set }: StepProps) {
                   <Input
                     type="date"
                     value={draft.departure_flight?.date || ""}
-                    onChange={(e) =>
-                      set({
-                        departure_flight: {
-                          ...(draft.departure_flight || {}),
-                          date: e.target.value,
-                        },
-                      })
-                    }
+                    onChange={(e) => setBoundaryDate("departure", e.target.value)}
                   />
                   <Input
                     type="time"
@@ -4763,11 +4872,7 @@ function StepTravel({ draft, set }: StepProps) {
                   <Input
                     type="date"
                     value={draft.arrival_train?.date || ""}
-                    onChange={(e) =>
-                      set({
-                        arrival_train: { ...(draft.arrival_train || {}), date: e.target.value },
-                      })
-                    }
+                    onChange={(e) => setBoundaryDate("arrival", e.target.value)}
                   />
                   <Input
                     type="time"
@@ -4821,11 +4926,7 @@ function StepTravel({ draft, set }: StepProps) {
                   <Input
                     type="date"
                     value={draft.departure_train?.date || ""}
-                    onChange={(e) =>
-                      set({
-                        departure_train: { ...(draft.departure_train || {}), date: e.target.value },
-                      })
-                    }
+                    onChange={(e) => setBoundaryDate("departure", e.target.value)}
                   />
                   <Input
                     type="time"
@@ -4850,6 +4951,13 @@ function StepTravel({ draft, set }: StepProps) {
             )}
           </div>
         </Card>
+      )}
+
+      {hasReversedTravelBoundaryDates(draft) && (
+        <p className="text-sm text-destructive">
+          Departure date is earlier than arrival date. Correct the transport dates before using them
+          as tour boundaries.
+        </p>
       )}
 
       {[draft.arrival_mode, draft.departure_mode].some(
@@ -4896,6 +5004,12 @@ function StepTravel({ draft, set }: StepProps) {
                     />
                   </div>
                   <Input
+                    type="date"
+                    value={detail.date || ""}
+                    onChange={(event) => setBoundaryDate(side, event.target.value)}
+                    aria-label={`${side} travel date`}
+                  />
+                  <Input
                     placeholder="Timing / distance / remarks"
                     value={detail.remarks || ""}
                     onChange={(event) => patch({ remarks: event.target.value })}
@@ -4914,9 +5028,16 @@ function StepTravel({ draft, set }: StepProps) {
 // StepDuration – Duration
 // ============================================================
 function StepDuration({ draft, set }: StepProps) {
+  const [dateError, setDateError] = useState("");
   const isBrochure = draft.query_type === "Brochure";
   const hasDates = draft.has_dates !== false;
   const endDate = addDaysISO(draft.start_date, draft.nights);
+  const applyDateEdit = (source: "start" | "end", value: string) => {
+    const result = reconcileTripDateEdit(draft, { source, value });
+    setDateError(result.valid ? "" : "Tour ending date must be on or after the starting date.");
+    if (!result.valid) return;
+    set({ ...result.patch, ...dateReviewPatch(draft) });
+  };
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -4924,11 +5045,17 @@ function StepDuration({ draft, set }: StepProps) {
       <div className="grid grid-cols-2 gap-3 max-w-md">
         <div>
           <Label>Nights</Label>
-          <Input
-            type="number"
+          <NumericStepper
+            ariaLabel="Nights"
             min={1}
             value={draft.nights}
-            onChange={(e) => set({ nights: Math.max(1, parseInt(e.target.value) || 1) })}
+            onChange={(nights) =>
+              set({
+                ...reconcileTripDateEdit(draft, { source: "duration", value: nights }).patch,
+                ...dateReviewPatch(draft),
+              })
+            }
+            className="max-w-55"
           />
         </div>
         <div>
@@ -4988,15 +5115,22 @@ function StepDuration({ draft, set }: StepProps) {
                 <Input
                   type="date"
                   value={draft.start_date}
-                  onChange={(e) => set({ start_date: e.target.value })}
+                  onChange={(e) => applyDateEdit("start", e.target.value)}
                 />
               </div>
               <div>
                 <Label>Tour Ending Date</Label>
-                <Input value={fmtDateShort(endDate)} readOnly className="bg-muted" />
+                <Input
+                  type="date"
+                  min={draft.start_date}
+                  value={endDate}
+                  onChange={(e) => applyDateEdit("end", e.target.value)}
+                  aria-label="Tour Ending Date"
+                />
               </div>
             </div>
           )}
+          {dateError && <p className="text-xs text-destructive">{dateError}</p>}
         </Card>
       )}
 
@@ -5023,37 +5157,18 @@ function PaxRow({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
-  const [inputValue, setInputValue] = useState(String(value));
-  useEffect(() => setInputValue(String(value)), [value]);
-
-  const commitValue = () => {
-    const parsed = Number.parseInt(inputValue, 10);
-    const next = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-    setInputValue(String(next));
-    onChange(next);
-  };
-
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm">{label}</span>
-      <div className="w-20">
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          value={inputValue}
-          className="text-center"
-          disabled={disabled}
-          onChange={(event) => {
-            const nextValue = event.target.value;
-            setInputValue(nextValue);
-            if (nextValue === "") return;
-            const parsed = Number.parseInt(nextValue, 10);
-            if (Number.isInteger(parsed) && parsed >= 0) onChange(parsed);
-          }}
-          onBlur={commitValue}
-        />
-      </div>
+      <NumericStepper
+        ariaLabel={label}
+        value={value}
+        min={0}
+        disabled={disabled}
+        onChange={onChange}
+        className="w-37.5"
+        inputClassName="px-1"
+      />
     </div>
   );
 }

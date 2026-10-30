@@ -2,7 +2,7 @@
 // Extracted verbatim from src/routes/_authenticated/costing.tsx to enable
 // modular step files with zero UI/behavior change.
 import React, { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Minus, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,93 @@ import type { QuoteDraft, RoutingDay } from "@/lib/wizard/types";
 
 export type StepProps = { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void };
 export type CityRef = { id: string; name: string };
+
+export function NumericStepper({
+  value,
+  onChange,
+  min = 0,
+  max,
+  step = 1,
+  className,
+  inputClassName,
+  ariaLabel,
+  disabled = false,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  className?: string;
+  inputClassName?: string;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(String(value));
+  React.useEffect(() => setText(String(value)), [value]);
+
+  const clamp = (candidate: number) =>
+    Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min, candidate));
+  const commit = () => {
+    if (text === String(value)) return;
+    const parsed = Number(text);
+    const next = clamp(Number.isFinite(parsed) ? Math.trunc(parsed) : min);
+    setText(String(next));
+    if (next !== value) onChange(next);
+  };
+  const bump = (amount: number) => {
+    const next = clamp(value + amount * step);
+    setText(String(next));
+    if (next !== value) onChange(next);
+  };
+
+  return (
+    <div className={cn("flex items-center gap-1", className)}>
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className="h-8 w-8 shrink-0"
+        aria-label={`Decrease ${ariaLabel}`}
+        disabled={disabled || value <= min}
+        onClick={() => bump(-1)}
+      >
+        <Minus className="h-3.5 w-3.5" />
+      </Button>
+      <Input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={text}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        className={cn("h-8 text-center", inputClassName)}
+        onWheel={(event) => event.currentTarget.blur()}
+        onChange={(event) => {
+          const nextText = event.target.value;
+          setText(nextText);
+          if (nextText === "") return;
+          const parsed = Number(nextText);
+          if (Number.isInteger(parsed) && parsed >= min && (max === undefined || parsed <= max))
+            onChange(parsed);
+        }}
+        onBlur={commit}
+      />
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className="h-8 w-8 shrink-0"
+        aria-label={`Increase ${ariaLabel}`}
+        disabled={disabled || (max !== undefined && value >= max)}
+        onClick={() => bump(1)}
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
 
 export function uid() { return Math.random().toString(36).slice(2, 10); }
 

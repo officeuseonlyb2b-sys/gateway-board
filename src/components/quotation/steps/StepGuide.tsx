@@ -2029,7 +2029,10 @@ export function Step13({ draft, set }: StepProps) {
                       <td className="p-2 text-[11px] text-muted-foreground">{day.routeLabel}</td>
                       <td colSpan={2 + visibleLanguages.length * 3} className="p-2">
                         <span className="italic text-muted-foreground">
-                          No guides are eligible for this routing day.
+                          {(day.route.is_day_zero || day.route.day === 0) &&
+                          landDayContext(draft, day.route, db).selectedTours.length === 0
+                            ? "No sightseeing tours selected for Day 0."
+                            : "No guides are eligible for this routing day."}
                         </span>
                       </td>
                     </tr>

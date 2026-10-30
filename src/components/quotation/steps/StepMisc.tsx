@@ -14,7 +14,7 @@ import { useDB } from "@/lib/mock-store";
 import { getCostingPaxValues } from "@/lib/wizard/calc";
 import { applyLandCommercials, miscPerPersonForPax } from "@/lib/wizard/land-pricing";
 import type { MiscLine, PaxRangePrice } from "@/lib/wizard/types";
-import { uid, type StepProps } from "../shared";
+import { NumericStepper, uid, type StepProps } from "../shared";
 
 const basisOf = (item: MiscLine) =>
   item.rate_basis ?? (item.unit === "per_person" ? "per_person" : "fixed_range");
@@ -45,9 +45,11 @@ export function Step14({ draft, set }: StepProps) {
     });
   const updateRange = (item: MiscLine, index: number, patch: Partial<PaxRangePrice>) =>
     patchItem(item.id, {
-      pax_ranges: (item.pax_ranges ?? []).map((range, i) =>
-        i === index ? { ...range, ...patch } : range,
-      ),
+      pax_ranges: (
+        item.pax_ranges?.length
+          ? item.pax_ranges
+          : [{ from_pax: 1, to_pax: 1, rate: 0 }]
+      ).map((range, i) => (i === index ? { ...range, ...patch } : range)),
     });
   const addRange = (item: MiscLine) =>
     patchItem(item.id, {
@@ -115,30 +117,29 @@ export function Step14({ draft, set }: StepProps) {
                       <span className="text-muted-foreground">All applicable</span>
                     ) : (
                       <div className="flex items-center gap-1">
-                        <Input
-                          className="h-8 w-20"
-                          type="number"
+                        <NumericStepper
+                          ariaLabel="Minimum Pax"
+                          className="w-37.5"
+                          inputClassName="px-1"
                           min={1}
                           max={40}
                           value={range?.from_pax ?? 1}
-                          onChange={(e) =>
+                          onChange={(from_pax) =>
                             updateRange(item, rangeIndex, {
-                              from_pax: Math.max(1, Number(e.target.value) || 1),
+                              from_pax,
+                              to_pax: Math.max(from_pax, range?.to_pax ?? from_pax),
                             })
                           }
                         />
                         <span>–</span>
-                        <Input
-                          className="h-8 w-20"
-                          type="number"
+                        <NumericStepper
+                          ariaLabel="Maximum Pax"
+                          className="w-37.5"
+                          inputClassName="px-1"
                           min={range?.from_pax ?? 1}
                           max={40}
                           value={range?.to_pax ?? 1}
-                          onChange={(e) =>
-                            updateRange(item, rangeIndex, {
-                              to_pax: Math.max(range?.from_pax ?? 1, Number(e.target.value) || 1),
-                            })
-                          }
+                          onChange={(to_pax) => updateRange(item, rangeIndex, { to_pax })}
                         />
                       </div>
                     )}

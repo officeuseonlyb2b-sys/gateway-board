@@ -6,11 +6,11 @@
 // Misc / Meals / Transport amounts — it reuses the exact same formulas already
 // used elsewhere in the wizard and only splits them per person.
 import type { DB } from "@/lib/mock-store";
-import { addDaysISO } from "@/lib/format";
 import { findRatePlan } from "./rate-lookup";
 import {
   gstRateFor,
   planForDay,
+  accommodationNightDate,
   computeMealsTotal,
   effectivePaxForPricing,
   optionUsesCustomAllocation,
@@ -25,6 +25,8 @@ import {
 import { buildLandPart } from "./costsheet";
 import { getQuotationScope } from "@/lib/query-for";
 import {
+  accommodationNightsForOption,
+  isAccommodationNightForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type QuoteDraft,
@@ -242,8 +244,8 @@ export function computeScenario(
       perPersonGst[person] = dynamic.supplier_gst / pax;
     }
     const capacity: Record<DynamicOccupancy, number> = { single: 1, double: 2, triple: 3, quad: 4 };
-    draft.routing
-      .filter((day) => day.overnight && dynamicMode)
+    accommodationNightsForOption(draft.routing, opt)
+      .filter(() => dynamicMode)
       .forEach((day) => {
         let person = 0;
         (opt.dynamic_allocations?.[day.day] ?? []).forEach((allocation) => {
@@ -256,15 +258,15 @@ export function computeScenario(
   }
   if (includesAccommodation)
     draft.routing.forEach((day, i) => {
-      if (!day.overnight) return;
+      if (!isAccommodationNightForOption(opt, day)) return;
       if (dynamicMode) return;
-      const sel = hotelSelectionForDay(opt, day);
+      const sel = hotelSelectionForDay(opt, day, true);
       if (sel?.no_hotel) return;
       if (!sel) {
         missing++;
         return;
       }
-      const date = day.date || addDaysISO(draft.start_date, i);
+      const date = accommodationNightDate(draft, day, i);
       const plan = planForDay(
         opt,
         day.day,

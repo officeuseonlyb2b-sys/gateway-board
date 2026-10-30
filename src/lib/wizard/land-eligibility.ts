@@ -135,6 +135,8 @@ function warnUnmapped(kind: string, tours: DestinationTour[], mappedTourIds: Set
 
 export function eligibleEntrancesForDay(draft: QuoteDraft, routingDay: RoutingDay, db: DB) {
   const context = landDayContext(draft, routingDay, db);
+  if ((routingDay.is_day_zero || routingDay.day === 0) && context.selectedTours.length === 0)
+    return [];
   const activeForRoute = db.entrance_sites.filter(
     (site) => site.is_active && context.destinationCityIds.includes(site.city_id),
   );
@@ -157,6 +159,8 @@ export function eligibleEntrancesForDay(draft: QuoteDraft, routingDay: RoutingDa
 
 export function eligibleGuidesForDay(draft: QuoteDraft, routingDay: RoutingDay, db: DB) {
   const context = landDayContext(draft, routingDay, db);
+  if ((routingDay.is_day_zero || routingDay.day === 0) && context.selectedTours.length === 0)
+    return [];
   const activeForRoute = db.guides.filter(
     (guide) =>
       guide.is_active &&
@@ -185,12 +189,27 @@ export function eligibleGuidesForDay(draft: QuoteDraft, routingDay: RoutingDay, 
 
 export function eligibleActivitiesForDay(draft: QuoteDraft, routingDay: RoutingDay, db: DB) {
   const context = landDayContext(draft, routingDay, db);
+  const isDayZero = routingDay.is_day_zero || routingDay.day === 0;
+  if (isDayZero && context.selectedTours.length === 0) {
+    const explicitIds = new Set(
+      draft.activities
+        .filter(
+          (line) =>
+            line.independent_day_zero &&
+            (line.from_routing_days ?? []).includes(routingDay.day) &&
+            line.activity_id,
+        )
+        .map((line) => line.activity_id as string),
+    );
+    return db.activities.filter((activity) => activity.is_active && explicitIds.has(activity.id));
+  }
   // Activities are city-based, not Tour-based. A routing day can contain an
   // intermediate city even when its selected Tour belongs to another city.
-  const eligibleDestinationCityIds = unique([
-    ...context.destinationCityIds,
-    ...context.selectedTours.map((tour) => tour.city_id),
-  ]);
+  const eligibleDestinationCityIds = unique(
+    isDayZero
+      ? context.selectedTours.map((tour) => tour.city_id)
+      : [...context.destinationCityIds, ...context.selectedTours.map((tour) => tour.city_id)],
+  );
   const eligibleCityNames = db.destination_cities
     .filter((city) => eligibleDestinationCityIds.includes(city.id))
     .map((city) => city.name);
@@ -198,6 +217,19 @@ export function eligibleActivitiesForDay(draft: QuoteDraft, routingDay: RoutingD
   const destinationIds = db.activity_destinations
     .filter((destination) =>
       eligibleCityNames.some((city) => normalized(city) === normalized(destination.name)),
+    )
+    .map((destination) => destination.id);
+  return db.activities.filter(
+    (activity) => activity.is_active && destinationIds.includes(activity.destination_id),
+  );
+}
+
+/** Choices shown only after a user explicitly opens Add Activity for Day 0. */
+export function eligibleActivitiesForExplicitDayZero(routingDay: RoutingDay, db: DB) {
+  const context = landDayContext({ routing: [routingDay] } as QuoteDraft, routingDay, db);
+  const destinationIds = db.activity_destinations
+    .filter((destination) =>
+      context.cityNames.some((city) => normalized(city) === normalized(destination.name)),
     )
     .map((destination) => destination.id);
   return db.activities.filter(

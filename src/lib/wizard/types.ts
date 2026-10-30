@@ -116,6 +116,8 @@ export interface TransportLine {
   reporting_cost?: number;
   total_override?: number; // used when rate_format === "total"
   per_route_rates?: number[]; // used when rate_format === "per_route"; index matches routing[i]
+  /** Day-zero transport rate kept separate from legacy day-indexed rates. */
+  per_route_day_rates?: Record<number, number>;
   remarks?: string;
   rate_mode?: TransportRateMode; // per-vehicle toggle: "daywise" (per_route days) or "total" (one lump-sum rate)
   total_rate?: number; // used when rate_mode === "total"
@@ -149,6 +151,8 @@ export interface ActivityLine {
   pricing_mode?: "per_person" | "slab"; // NEW: chosen pricing mode in Step 10
   pax_ranges?: PaxRangePrice[]; // Brochure only
   from_routing_days?: number[]; // day numbers that added this via Step 9
+  /** Explicitly added independent activity for a Day 0 with no sightseeing tour. */
+  independent_day_zero?: boolean;
   inclusion_status?: "included" | "optional";
 }
 export interface EntranceLine {
@@ -196,6 +200,8 @@ export interface HotelSelection {
   meal_plan: MealPlan;
   /** Quotation-only, day-specific accommodation opt-out; never a master rate. */
   no_hotel?: boolean;
+  /** Option-scoped extra pre-tour night; does not change Routing or tour duration. */
+  pre_tour_night?: boolean;
   /** Explicit reason for a zero-cost accommodation night. */
   accommodation_status?: "no_hotel_required" | "own_arrangement";
   is_fallback?: boolean;
@@ -351,6 +357,18 @@ export function resolveHotelSelectionForDay(
         candidateIndexes: dayMatches.map((item) => item.index),
       };
     }
+    if (
+      (day.is_day_zero || day.day === 0) &&
+      latest.selection.pre_tour_night &&
+      !latest.selection.no_hotel
+    ) {
+      return {
+        selection: latest.selection,
+        reason: "latest_explicit_hotel",
+        selectionIndex: latest.index,
+        candidateIndexes: dayMatches.map((item) => item.index),
+      };
+    }
     if (!latest.selection.no_hotel && latest.selection.hotel_id) {
       return {
         selection: latest.selection,
@@ -443,6 +461,23 @@ export function hotelSelectionForDay(
   );
 }
 
+/** Resolve the hotel-night schedule independently for each hotel option. */
+export function isAccommodationNightForOption(option: HotelOption, day: RoutingDay): boolean {
+  if (!(day.is_day_zero || day.day === 0)) return day.overnight;
+  const selection = hotelSelectionForDay(option, day, true);
+  if (selection?.pre_tour_night !== undefined)
+    return selection.pre_tour_night && !selection.no_hotel;
+  // Preserve old Day 0 bookings only when this option already has an explicit stay.
+  return Boolean(day.overnight && selection && !selection.no_hotel);
+}
+
+export function accommodationNightsForOption(
+  routing: RoutingDay[],
+  option: HotelOption,
+): RoutingDay[] {
+  return routing.filter((day) => isAccommodationNightForOption(option, day));
+}
+
 /** Pax categories priced on a monument entrance line. */
 export type EntranceCat = "indian" | "foreign" | "student";
 
@@ -476,6 +511,8 @@ export interface QuoteDraft {
   nights: number;
   has_dates?: boolean;
   start_date: string;
+  /** Explicit review notice set only after a user-edited trip date. */
+  trip_date_review?: string;
   brochure_validity_from?: string;
   brochure_validity_till?: string;
 

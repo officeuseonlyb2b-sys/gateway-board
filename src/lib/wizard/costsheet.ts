@@ -17,11 +17,13 @@ import {
   landGst,
   hotelsMarkup,
   hotelsGst,
+  accommodationNightDate,
   computeMealDays,
   dynamicAccommodationBreakdown,
   isSplitAccommodation,
 } from "./calc";
 import {
+  isAccommodationNightForOption,
   hotelSelectionForDay,
   isDynamicAccommodationMode,
   type QuoteDraft,
@@ -169,6 +171,12 @@ function targetDays(days: number[] | undefined, all: number[]): number[] {
   return t.length ? t : [];
 }
 
+/** Day 0 only participates in explicitly assigned, validated sightseeing lines. */
+function targetServiceDays(days: number[] | undefined, regularDays: number[], allRows: number[]) {
+  if (!days?.length) return regularDays;
+  return days.filter((day) => regularDays.includes(day) || (day === 0 && allRows.includes(0)));
+}
+
 export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): LandPartSheet {
   const allRows = draft.routing.map((r) => r.day);
   const all = draft.routing.filter((r) => !(r.is_day_zero || r.day === 0)).map((r) => r.day);
@@ -196,12 +204,17 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   lines.forEach((l) => {
     const vehicle = d.travel_options.find((t) => t.id === l.travel_id)?.vehicle_type || "Vehicle";
     const rep = (l.reporting_cost || 0) * (l.vehicles || 1);
-    const target = targetDays(undefined, all);
+    const target = targetDays(undefined, l.rate_mode === "total" ? all : allRows);
     if (!target.length) return;
-    const perRoute = l.rate_format === "per_route" && l.per_route_rates?.length;
+    const perRoute =
+      l.rate_mode !== "total" &&
+      l.rate_format === "per_route" &&
+      Boolean(l.per_route_rates?.length || Object.keys(l.per_route_day_rates ?? {}).length);
     target.forEach((day) => {
       const base = perRoute
-        ? (l.per_route_rates?.[dayIndex.get(day) ?? 0] || 0) * (l.vehicles || 1)
+        ? ((day === 0
+            ? l.per_route_day_rates?.[day]
+            : l.per_route_rates?.[dayIndex.get(day) ?? 0]) || 0) * (l.vehicles || 1)
         : transportLineTotal(l) / target.length;
       const amount = base + (perRoute ? rep / target.length : 0);
       opts[day].transport.push({
@@ -222,7 +235,9 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   const selectedGuideLanguages = new Set<GuideLangOpt>();
   draft.guides.forEach((l) => {
     if (l.is_escort && l.inclusion_status === "optional") return;
-    const target = targetDays(l.from_routing_days, all);
+    const target = l.is_escort
+      ? targetDays(l.from_routing_days, all)
+      : targetServiceDays(l.from_routing_days, all, allRows);
     if (!target.length) return;
     const g = d.guides?.find((x) => x.id === l.guide_id);
     if (l.is_escort) {
@@ -244,6 +259,12 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
     if (!(GUIDE_LANGS as readonly string[]).includes(l.language || "")) return;
     const defaultLang = l.language as GuideLangOpt;
     target.forEach((day) => {
+      const route = draft.routing.find((row) => row.day === day);
+      if (
+        (route?.is_day_zero || route?.day === 0) &&
+        !isSelectedLandServiceValid("guide", l.guide_id, day, draft, d)
+      )
+        return;
       if (!guideTourSelected(draft, g, day)) return;
       const serviceKey = `${g?.city ?? g?.destination ?? ""}||${g?.tour_program ?? g?.name ?? ""}`;
       const status = guideSelectionStatusForPax(
@@ -345,7 +366,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
 
   // ------- Entrances (only the quotation's active traveller category)
   draft.entrances.forEach((l) => {
-    const target = targetDays(l.from_routing_days, all);
+    const target = targetServiceDays(l.from_routing_days, all, allRows);
     if (!target.length) return;
     target.forEach((day) => {
       if (!isSelectedLandServiceValid("entrance", l.site_id, day, draft, d)) return;
@@ -378,7 +399,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
   // ------- Activities
   draft.activities.forEach((l) => {
     if (l.inclusion_status === "optional") return;
-    const target = targetDays(l.from_routing_days, all);
+    const target = targetServiceDays(l.from_routing_days, all, allRows);
     if (!target.length) return;
     const master = l.activity_id
       ? d.activities.find((activity) => activity.id === l.activity_id)
@@ -577,11 +598,14 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
   const meals = computeMealDays(draft, d, opt.key).rows;
 
   draft.routing.forEach((day, i) => {
-    if (!day.overnight) return;
-    const date = day.date || addDaysISO(draft.start_date, i);
-    const city = d.cities.find((c) => c.id === day.city_id)?.name || "—";
-    const sel = hotelSelectionForDay(opt, day);
+    if (!isAccommodationNightForOption(opt, day)) return;
+    const sel = hotelSelectionForDay(opt, day, day.is_day_zero || day.day === 0);
     if (sel?.no_hotel) return;
+    const date = accommodationNightDate(draft, day, i);
+    const city =
+      d.cities.find((c) => c.id === day.city_id)?.name ||
+      d.cities.find((c) => c.id === sel?.city_id)?.name ||
+      "—";
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id)?.name || "—" : "—";
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id)?.name || "—" : "—";
     const plan = sel
