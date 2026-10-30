@@ -111,6 +111,18 @@ export function getEscortDayCharge(draft: QuoteDraft, day: number): number {
   return enabled === undefined ? (amount > 0 ? amount : 0) : enabled ? amount : 0;
 }
 
+/**
+ * An explicit day toggle controls both legacy day-wise Escorts and the newer
+ * day/slab matrix.  Older saved matrices did not have a toggle, so a saved
+ * non-zero rate remains included until the user makes an explicit choice.
+ */
+export function isEscortDayRequired(draft: QuoteDraft, day: number): boolean {
+  const explicitlyEnabled = draft.guide_day_escort_enabled?.[day];
+  if (explicitlyEnabled !== undefined) return explicitlyEnabled;
+  if (getEscortPricingMode(draft) === "day_wise") return (draft.guide_day_escort?.[day] ?? 0) > 0;
+  return Object.values(draft.escort_day_rates_by_slab?.[day] ?? {}).some((rate) => rate > 0);
+}
+
 export function getEscortRangeBase(
   draft: QuoteDraft,
   range: NonNullable<QuoteDraft["escort_ranges"]>[number],
@@ -122,8 +134,16 @@ export function getEscortRangeBase(
   const hasDayRates = dayRates.some((rate) => rate > 0);
   // Old quotations stored one flat charge on the slab. Preserve that value
   // until the user enters the new day/slab matrix; never invent a distribution.
-  const base = hasDayRates ? dayRates.reduce((sum, rate) => sum + rate, 0) : (range.charge ?? 0);
-  return base + (draft.guide_escort_reporting ?? 0);
+  const base = hasDayRates
+    ? draft.routing.reduce(
+        (sum, day) =>
+          isEscortDayRequired(draft, day.day)
+            ? sum + (draft.escort_day_rates_by_slab?.[day.day]?.[range.id] ?? 0)
+            : sum,
+        0,
+      )
+    : (range.charge ?? 0);
+  return base > 0 ? base + (draft.guide_escort_reporting ?? 0) : 0;
 }
 
 export function getEscortRangeDayCharge(draft: QuoteDraft, day: number, rangeId: string) {

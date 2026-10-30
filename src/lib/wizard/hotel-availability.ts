@@ -25,6 +25,7 @@ export interface HotelRoomRecord {
 
 export interface HotelRateRecord {
   room_category_id: string;
+  hotel_category?: string;
   validity_start: string;
   validity_end: string;
   single_rate?: number;
@@ -113,6 +114,7 @@ export function hotelsForAccommodation<
   THotel extends {
     city_id: string;
     hotel_category: string;
+    hotel_categories?: string[];
   },
 >(
   hotels: THotel[],
@@ -136,7 +138,10 @@ export function hotelsForAccommodation<
   return {
     inCity,
     inCategory: inCity.filter(
-      (hotel) => normalizeHotelLookupValue(hotel.hotel_category) === categoryKey,
+      (hotel) =>
+        (hotel.hotel_categories ?? [hotel.hotel_category]).some(
+          (value) => normalizeHotelLookupValue(value) === categoryKey,
+        ),
     ),
   };
 }
@@ -159,14 +164,18 @@ export function diagnoseHotelAvailability(
     const cityMatches =
       (canonicalCityId !== undefined && hotel.city_id === canonicalCityId) ||
       normalizeHotelLookupValue(storedCity) === cityKey;
-    const categoryMatches = normalizeHotelLookupValue(hotel.hotel_category) === categoryKey;
-    const blackout = (hotel.blackout_ranges ?? []).some(
-      (range) => range.from <= date && range.to >= date,
-    );
     const hotelRooms = rooms.filter((room) => room.hotel_id === hotel.id);
     const roomIds = new Set(hotelRooms.map((room) => room.id));
     const hotelRates = rates.filter((rate) => roomIds.has(rate.room_category_id));
-    const includedRates = hotelRates.filter((rate) => rate.include_in_quote !== false);
+    const categoryRates = hotelRates.filter(
+      (rate) => normalizeHotelLookupValue(rate.hotel_category ?? hotel.hotel_category) === categoryKey,
+    );
+    const categoryMatches = categoryRates.length > 0 ||
+      (hotelRates.length === 0 && normalizeHotelLookupValue(hotel.hotel_category) === categoryKey);
+    const blackout = (hotel.blackout_ranges ?? []).some(
+      (range) => range.from <= date && range.to >= date,
+    );
+    const includedRates = categoryRates.filter((rate) => rate.include_in_quote !== false);
     const applicableRates = includedRates.filter(
       (rate) => ratePlanMatchesDate(rate, date) && ratePlanHasPrice(rate),
     );

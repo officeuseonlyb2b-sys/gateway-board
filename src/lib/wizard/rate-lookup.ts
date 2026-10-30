@@ -56,11 +56,19 @@ export function findRatePlan(
   room_id: string,
   meal: string,
   stayDate: string,
+  hotelCategory?: string,
 ): RatePlan | null {
+  const categoryKey = (hotelCategory ?? "").trim().toLowerCase();
+  const roomHasCategorizedOfferings = plans.some(
+    (plan) => plan.room_category_id === room_id && Boolean(plan.hotel_category),
+  );
   const candidates = usablePlans(plans).filter(
     (plan) =>
       plan.room_category_id === room_id &&
       plan.meal_plan === meal &&
+      (!categoryKey ||
+        (!roomHasCategorizedOfferings && !plan.hotel_category) ||
+        (plan.hotel_category ?? "").trim().toLowerCase() === categoryKey) &&
       ratePlanHasPrice(plan) &&
       ratePlanMatchesDate(plan, stayDate),
   );
@@ -79,8 +87,19 @@ export function availableMealPlans(
   plans: RatePlan[],
   room_id: string,
   stayDate?: string,
+  hotelCategory?: string,
 ): string[] {
-  const pool = usablePlans(plans).filter((p) => p.room_category_id === room_id);
+  const categoryKey = (hotelCategory ?? "").trim().toLowerCase();
+  const roomHasCategorizedOfferings = plans.some(
+    (plan) => plan.room_category_id === room_id && Boolean(plan.hotel_category),
+  );
+  const pool = usablePlans(plans).filter(
+    (p) =>
+      p.room_category_id === room_id &&
+      (!categoryKey ||
+        (!roomHasCategorizedOfferings && !p.hotel_category) ||
+        (p.hotel_category ?? "").trim().toLowerCase() === categoryKey),
+  );
   const filtered = (stayDate ? pool.filter((p) => ratePlanMatchesDate(p, stayDate)) : pool).filter(
     ratePlanHasPrice,
   );
@@ -88,7 +107,7 @@ export function availableMealPlans(
     filtered.some(
       (plan) =>
         plan.meal_plan === meal &&
-        (!stayDate || findRatePlan(plans, room_id, meal, stayDate) !== null),
+        (!stayDate || findRatePlan(plans, room_id, meal, stayDate, hotelCategory) !== null),
     ),
   );
 }

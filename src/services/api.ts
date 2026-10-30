@@ -4,18 +4,30 @@
 // replace the body of each function with a supabase.from(...) call.
 
 import {
-  db, type City, type Hotel, type RoomCategory, type RatePlan,
-  type HotelCategory, type MealPlan, type Quote,
-  type Guide, type TravelOption,
+  db,
+  type City,
+  type Hotel,
+  type RoomCategory,
+  type RatePlan,
+  type HotelCategory,
+  type MealPlan,
+  type Quote,
+  type Guide,
+  type TravelOption,
 } from "@/lib/mock-store";
-
 
 const delay = (ms = 60) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ---------- Cities ----------
 export const cityService = {
-  async list(): Promise<City[]> { await delay(); return [...db.get().cities].sort((a, b) => a.name.localeCompare(b.name)); },
-  async create(name: string): Promise<City> { await delay(); return db.addCity(name); },
+  async list(): Promise<City[]> {
+    await delay();
+    return [...db.get().cities].sort((a, b) => a.name.localeCompare(b.name));
+  },
+  async create(name: string): Promise<City> {
+    await delay();
+    return db.addCity(name);
+  },
   async findOrCreate(name: string): Promise<City> {
     const trimmed = name.trim();
     const existing = db.get().cities.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
@@ -26,18 +38,34 @@ export const cityService = {
 
 // ---------- Hotels ----------
 export const hotelService = {
-  async list(): Promise<Hotel[]> { await delay(); return [...db.get().hotels]; },
-  async get(id: string): Promise<Hotel | null> { await delay(); return db.get().hotels.find((h) => h.id === id) ?? null; },
-  async create(input: Omit<Hotel, "id" | "created_at" | "updated_at">): Promise<Hotel> { await delay(); return db.addHotel(input); },
-  async update(id: string, patch: Partial<Hotel>): Promise<void> { await delay(); db.updateHotel(id, patch); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteHotel(id); },
+  async list(): Promise<Hotel[]> {
+    await delay();
+    return [...db.get().hotels];
+  },
+  async get(id: string): Promise<Hotel | null> {
+    await delay();
+    return db.get().hotels.find((h) => h.id === id) ?? null;
+  },
+  async create(input: Omit<Hotel, "id" | "created_at" | "updated_at">): Promise<Hotel> {
+    await delay();
+    return db.addHotel(input);
+  },
+  async update(id: string, patch: Partial<Hotel>): Promise<void> {
+    await delay();
+    db.updateHotel(id, patch);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteHotel(id);
+  },
   async findOrCreate(input: Omit<Hotel, "id" | "created_at" | "updated_at">): Promise<Hotel> {
-    const existing = db.get().hotels.find(
-      (h) =>
-        h.name.trim().replace(/\s+/g, " ").toLowerCase() ===
-          input.name.trim().replace(/\s+/g, " ").toLowerCase() &&
-        h.city_id === input.city_id,
-    );
+    const existing = db
+      .get()
+      .hotels.find(
+        (h) =>
+          h.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+            input.name.trim().replace(/\s+/g, " ").toLowerCase() && h.city_id === input.city_id,
+      );
     if (existing) {
       db.updateHotel(existing.id, {
         hotel_category: input.hotel_category ?? existing.hotel_category,
@@ -48,8 +76,9 @@ export const hotelService = {
         has_wifi: input.has_wifi ?? existing.has_wifi,
         has_pool: input.has_pool ?? existing.has_pool,
         address: input.address?.trim() ? input.address : existing.address,
-        blackout_ranges:
-          input.blackout_ranges?.length ? input.blackout_ranges : existing.blackout_ranges,
+        blackout_ranges: input.blackout_ranges?.length
+          ? input.blackout_ranges
+          : existing.blackout_ranges,
       });
       return db.get().hotels.find((h) => h.id === existing.id)!;
     }
@@ -59,13 +88,24 @@ export const hotelService = {
 
 // ---------- Room Categories ----------
 export const roomService = {
-  async listByHotel(hotel_id: string): Promise<RoomCategory[]> { await delay(); return db.get().room_categories.filter((r) => r.hotel_id === hotel_id); },
-  async create(hotel_id: string, name: string): Promise<RoomCategory> { await delay(); return db.addRoom(hotel_id, name); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteRoom(id); },
+  async listByHotel(hotel_id: string): Promise<RoomCategory[]> {
+    await delay();
+    return db.get().room_categories.filter((r) => r.hotel_id === hotel_id);
+  },
+  async create(hotel_id: string, name: string): Promise<RoomCategory> {
+    await delay();
+    return db.addRoom(hotel_id, name);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteRoom(id);
+  },
   async findOrCreate(hotel_id: string, name: string): Promise<RoomCategory> {
-    const existing = db.get().room_categories.find(
-      (r) => r.hotel_id === hotel_id && r.name.toLowerCase() === name.toLowerCase(),
-    );
+    const existing = db
+      .get()
+      .room_categories.find(
+        (r) => r.hotel_id === hotel_id && r.name.toLowerCase() === name.toLowerCase(),
+      );
     if (existing) return existing;
     return db.addRoom(hotel_id, name);
   },
@@ -73,7 +113,10 @@ export const roomService = {
 
 // ---------- Rate Plans ----------
 export const ratePlanService = {
-  async listByRoom(room_category_id: string): Promise<RatePlan[]> { await delay(); return db.get().rate_plans.filter((p) => p.room_category_id === room_category_id); },
+  async listByRoom(room_category_id: string): Promise<RatePlan[]> {
+    await delay();
+    return db.get().rate_plans.filter((p) => p.room_category_id === room_category_id);
+  },
   async createMany(
     plans: Omit<RatePlan, "id" | "created_at" | "updated_at">[],
   ): Promise<{ created: number; updated: number }> {
@@ -81,14 +124,16 @@ export const ratePlanService = {
     let created = 0;
     let updated = 0;
     for (const plan of plans) {
-      const existing = db.get().rate_plans.find(
-        (candidate) =>
-          candidate.room_category_id === plan.room_category_id &&
-          candidate.validity_start === plan.validity_start &&
-          candidate.validity_end === plan.validity_end &&
-          candidate.season_label.trim().toLowerCase() === plan.season_label.trim().toLowerCase() &&
-          candidate.meal_plan === plan.meal_plan,
-      );
+      const existing = db
+        .get()
+        .rate_plans.find(
+          (candidate) =>
+            candidate.room_category_id === plan.room_category_id &&
+            candidate.hotel_category === plan.hotel_category &&
+            candidate.validity_start === plan.validity_start &&
+            candidate.validity_end === plan.validity_end &&
+            candidate.meal_plan === plan.meal_plan,
+        );
       if (existing) {
         db.updateRatePlan(existing.id, plan);
         updated++;
@@ -99,21 +144,33 @@ export const ratePlanService = {
     }
     return { created, updated };
   },
-  async update(id: string, patch: Partial<RatePlan>): Promise<void> { await delay(); db.updateRatePlan(id, patch); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteRatePlan(id); },
+  async update(id: string, patch: Partial<RatePlan>): Promise<void> {
+    await delay();
+    db.updateRatePlan(id, patch);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteRatePlan(id);
+  },
   // Find the rate plan matching hotel + room + meal + check-in date
   async findMatching(opts: {
-    hotel_id: string; room_category_id: string; meal_plan: MealPlan; check_in: string;
+    hotel_id: string;
+    room_category_id: string;
+    meal_plan: MealPlan;
+    check_in: string;
   }): Promise<RatePlan | null> {
     await delay(20);
     const { room_category_id, meal_plan, check_in } = opts;
     const t = +new Date(check_in);
-    const matches = db.get().rate_plans.filter((p) =>
-      p.room_category_id === room_category_id &&
-      p.meal_plan === meal_plan &&
-      +new Date(p.validity_start) <= t &&
-      +new Date(p.validity_end) >= t,
-    );
+    const matches = db
+      .get()
+      .rate_plans.filter(
+        (p) =>
+          p.room_category_id === room_category_id &&
+          p.meal_plan === meal_plan &&
+          +new Date(p.validity_start) <= t &&
+          +new Date(p.validity_end) >= t,
+      );
     // Prefer the most specific / latest-created
     return matches.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0] ?? null;
   },
@@ -123,29 +180,70 @@ export const ratePlanService = {
 export const quoteService = {
   async list(limit?: number): Promise<Quote[]> {
     await delay();
-    const rows = [...db.get().quotes].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    const rows = [...db.get().quotes].sort(
+      (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
+    );
     return limit ? rows.slice(0, limit) : rows;
   },
-  async create(q: Omit<Quote, "id" | "created_at">): Promise<Quote> { await delay(); return db.addQuote(q); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteQuote(id); },
+  async create(q: Omit<Quote, "id" | "created_at">): Promise<Quote> {
+    await delay();
+    return db.addQuote(q);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteQuote(id);
+  },
 };
 
 // ---------- Guides ----------
 export const guideService = {
-  async list(): Promise<Guide[]> { await delay(); return [...db.get().guides]; },
-  async create(input: Omit<Guide, "id" | "created_at">): Promise<Guide> { await delay(); return db.addGuide(input); },
-  async update(id: string, patch: Partial<Guide>): Promise<void> { await delay(); db.updateGuide(id, patch); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteGuide(id); },
+  async list(): Promise<Guide[]> {
+    await delay();
+    return [...db.get().guides];
+  },
+  async create(input: Omit<Guide, "id" | "created_at">): Promise<Guide> {
+    await delay();
+    return db.addGuide(input);
+  },
+  async update(id: string, patch: Partial<Guide>): Promise<void> {
+    await delay();
+    db.updateGuide(id, patch);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteGuide(id);
+  },
 };
 
 // ---------- Travel Options ----------
 export const travelService = {
-  async list(): Promise<TravelOption[]> { await delay(); return [...db.get().travel_options]; },
-  async create(input: Omit<TravelOption, "id" | "created_at">): Promise<TravelOption> { await delay(); return db.addTravel(input); },
-  async update(id: string, patch: Partial<TravelOption>): Promise<void> { await delay(); db.updateTravel(id, patch); },
-  async remove(id: string): Promise<void> { await delay(); db.deleteTravel(id); },
+  async list(): Promise<TravelOption[]> {
+    await delay();
+    return [...db.get().travel_options];
+  },
+  async create(input: Omit<TravelOption, "id" | "created_at">): Promise<TravelOption> {
+    await delay();
+    return db.addTravel(input);
+  },
+  async update(id: string, patch: Partial<TravelOption>): Promise<void> {
+    await delay();
+    db.updateTravel(id, patch);
+  },
+  async remove(id: string): Promise<void> {
+    await delay();
+    db.deleteTravel(id);
+  },
 };
 
 // Re-export types for consumers of the service layer
-export type { City, Hotel, RoomCategory, RatePlan, HotelCategory, MealPlan, Quote, Guide, TravelOption };
-
+export type {
+  City,
+  Hotel,
+  RoomCategory,
+  RatePlan,
+  HotelCategory,
+  MealPlan,
+  Quote,
+  Guide,
+  TravelOption,
+};

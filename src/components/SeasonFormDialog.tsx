@@ -87,6 +87,7 @@ export function SeasonFormDialog({ roomId, open, onOpenChange, seed, existingGro
 
     const base = {
       room_category_id: roomId,
+      hotel_category: first?.hotel_category,
       validity_start: start, validity_end: end,
       season_label: label,
       cwb_rate: cwbMode === "fixed" ? numOrNull(cwbAmt) : null,
@@ -264,7 +265,7 @@ function SupplementField({
 export function ratePlanGroups(plans: RatePlan[]) {
   const groups = new Map<string, RatePlan[]>();
   plans.forEach((p) => {
-    const key = `${p.validity_start}__${p.validity_end}__${p.season_label}`;
+    const key = `${p.hotel_category ?? "legacy"}__${p.validity_start}__${p.validity_end}__${p.season_label}`;
     const arr = groups.get(key) ?? [];
     arr.push(p);
     groups.set(key, arr);

@@ -259,7 +259,7 @@ function RoomBlock({
     toast.info("Duplicating season — adjust dates before saving.");
   }
   function removeGroup(group: RatePlan[]) {
-    db.deleteRatePlanGroup(roomId, group[0].validity_start, group[0].validity_end);
+    group.forEach((plan) => db.deleteRatePlan(plan.id));
     toast.success("Season removed.");
   }
 
@@ -342,7 +342,12 @@ function RoomBlock({
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-border">
                     <div>
-                      <div className="font-semibold text-sm">{g[0].season_label || "Season"}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-semibold text-sm">{g[0].season_label || "Season"}</div>
+                        {g[0].hotel_category && (
+                          <CategoryBadge category={g[0].hotel_category} />
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {fmtDate(g[0].validity_start)} → {fmtDate(g[0].validity_end)}
                       </div>

@@ -562,7 +562,7 @@ function AccommodationSelectionTable({
       .map((room) => room.id);
     return roomIds.some((roomId) =>
       MEAL_PLANS.some((m) => {
-        const plan = findRatePlan(d.rate_plans, roomId, m, dateISO);
+        const plan = findRatePlan(d.rate_plans, roomId, m, dateISO, activeCategory);
         return !!plan && (plan.quad_rate ?? 0) > 0;
       }),
     );
@@ -578,8 +578,25 @@ function AccommodationSelectionTable({
       ? hotelSelectionForDay(option, day, true)
       : hotelSelectionForDay(option, day) ?? hotelSelectionForDay(option, selectionDay);
 
+    const hotelsWithCategories = d.hotels.map((hotel) => {
+      const roomIds = new Set(
+        d.room_categories.filter((room) => room.hotel_id === hotel.id).map((room) => room.id),
+      );
+      return {
+        ...hotel,
+        hotel_categories: Array.from(
+          new Set([
+            hotel.hotel_category,
+            ...d.rate_plans
+              .filter((plan) => roomIds.has(plan.room_category_id))
+              .map((plan) => plan.hotel_category)
+              .filter((value): value is NonNullable<typeof value> => Boolean(value)),
+          ]),
+        ),
+      };
+    });
     const { inCategory: cityHotels } = hotelsForAccommodation(
-      d.hotels,
+      hotelsWithCategories,
       cityName,
       activeCategory,
       d.cities,
@@ -608,11 +625,15 @@ function AccommodationSelectionTable({
     if (needsQuad && quadPool.length > 0) hotelPool = quadPool;
 
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
-    const meals = sel?.room_id ? availableMealPlans(d.rate_plans, sel.room_id, day.date) : [];
+    const meals = sel?.room_id
+      ? availableMealPlans(d.rate_plans, sel.room_id, day.date, activeCategory)
+      : [];
     const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const selectedAvailability = availability.details.find((hotel) => hotel.id === selHotel?.id);
     const baseRate =
-      sel && sel.room_id ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date) : null;
+      sel && sel.room_id
+        ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date, activeCategory)
+        : null;
     const dayOverride = overrides[day.day];
     const rate = selectedAvailability?.blackout ? null : applyRateOverride(baseRate, dayOverride);
     const isFallback = sel?.is_fallback || false;
@@ -686,7 +707,11 @@ function AccommodationSelectionTable({
         const h = d.hotels.find((x) => x.id === merged.hotel_id);
         merged.is_fallback =
           !!h &&
-          normalizeHotelLookupValue(h.hotel_category) !== normalizeHotelLookupValue(activeCategory);
+          !hotelsWithCategories
+            .find((candidate) => candidate.id === h.id)
+            ?.hotel_categories.some(
+              (category) => normalizeHotelLookupValue(category) === normalizeHotelLookupValue(activeCategory),
+            );
       }
       onUpdate({ selections: [...others, merged] });
     };

@@ -32,7 +32,14 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { HotelFormDialog } from "@/components/HotelFormDialog";
-import { importExcel, exportExcel, downloadErrorLog, type ImportSummary } from "@/lib/excel";
+import {
+  importExcel,
+  previewExcel,
+  exportExcel,
+  downloadErrorLog,
+  type ImportPreview,
+  type ImportSummary,
+} from "@/lib/excel";
 import { notify } from "@/lib/notify";
 
 export const Route = createFileRoute("/_authenticated/hotels/")({
@@ -51,16 +58,40 @@ function HotelsListPage() {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
     setImporting(true);
     setSummary(null);
+    setImportPreview(null);
+    setPendingFile(file);
     setProgress({ done: 0, total: 0 });
     try {
-      const result = await importExcel(file, (p) => setProgress(p));
+      const result = await previewExcel(file);
+      setImportPreview(result);
+      toast.success(
+        `Preview ready — ${result.totalRows} source rows read from ${result.sheetName}.`,
+      );
+    } catch (err) {
+      setPendingFile(null);
+      toast.error(`Preview failed: ${(err as Error).message}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function commitImport() {
+    if (!pendingFile) return;
+    setImporting(true);
+    setProgress({ done: 0, total: importPreview?.totalRows ?? 0 });
+    try {
+      const result = await importExcel(pendingFile, (p) => setProgress(p));
       setSummary(result);
+      setImportPreview(null);
+      setPendingFile(null);
       toast.success(
         `Import complete — ${result.plansCreated} rate plans created, ${result.plansUpdated} updated.`,
       );
@@ -89,7 +120,6 @@ function HotelsListPage() {
   const rows = useMemo(() => {
     return data.hotels
       .filter((h) => (cityFilter === "all" ? true : h.city_id === cityFilter))
-      .filter((h) => (catFilters.length === 0 ? true : catFilters.includes(h.hotel_category)))
       .filter((h) =>
         search.trim() ? h.name.toLowerCase().includes(search.trim().toLowerCase()) : true,
       )
@@ -98,13 +128,22 @@ function HotelsListPage() {
         const plans = rooms.flatMap((r) =>
           data.rate_plans.filter((p) => p.room_category_id === r.id),
         );
+        const offeringCategories = Array.from(
+          new Set([h.hotel_category, ...plans.map((p) => p.hotel_category).filter(Boolean)]),
+        ) as HotelCategory[];
         return {
           ...h,
+          offeringCategories,
           city: data.cities.find((c) => c.id === h.city_id)?.name ?? "—",
           roomCount: rooms.length,
           planCount: plans.length,
         };
-      });
+      })
+      .filter((h) =>
+        catFilters.length === 0
+          ? true
+          : catFilters.some((category) => h.offeringCategories.includes(category)),
+      );
   }, [data, search, cityFilter, catFilters]);
 
   function toggleCat(c: HotelCategory) {
@@ -296,7 +335,11 @@ function HotelsListPage() {
                   </td>
                   <td className="py-3 px-4 text-muted-foreground">{h.city}</td>
                   <td className="py-3 px-4">
-                    <CategoryBadge category={h.hotel_category} />
+                    <div className="flex flex-wrap gap-1">
+                      {h.offeringCategories.map((category) => (
+                        <CategoryBadge key={category} category={category} />
+                      ))}
+                    </div>
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center justify-center gap-2">
@@ -381,12 +424,12 @@ function HotelsListPage() {
           if (!importing) setImportOpen(v);
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Import Hotels &amp; Rates from Excel</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {!summary && !importing && (
+            {!summary && !importing && !importPreview && (
               <>
                 <p className="text-sm text-muted-foreground">
                   Upload a .xlsx or .csv file with columns:
@@ -430,6 +473,84 @@ function HotelsListPage() {
               </div>
             )}
 
+            {importPreview && !importing && (
+              <div className="space-y-3">
+                <div className="rounded-md border p-4 text-sm">
+                  <div className="font-semibold">Read-only import preview</div>
+                  <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                    <div>{importPreview.totalRows} source rows read</div>
+                    <div>{importPreview.hotelsMatched} hotels matched</div>
+                    <div>{importPreview.newHotels} new hotels</div>
+                    <div>{importPreview.newRooms} new room categories</div>
+                    <div>{importPreview.newRateCombinations} new rate combinations</div>
+                    <div>{importPreview.identicalDuplicates} identical duplicates</div>
+                    <div>{importPreview.conflictingRows} conflicting rows</div>
+                    <div>{importPreview.rejectedRows} rejected rows</div>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-auto rounded-md border text-xs">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-muted">
+                      <tr>
+                        <th className="p-2 text-left">Row</th>
+                        <th className="p-2 text-left">Hotel / City</th>
+                        <th className="p-2 text-left">Room / Plan / Validity</th>
+                        <th className="p-2 text-left">Result</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {importPreview.diagnostics.map((item) => (
+                        <tr key={`${item.row}-${item.disposition}`}>
+                          <td className="p-2 align-top">{item.row}</td>
+                          <td className="p-2 align-top">
+                            <div>{item.hotel || "—"}</div>
+                            <div className="text-muted-foreground">
+                              {item.city || "—"} / {item.category || "—"}
+                            </div>
+                          </td>
+                          <td className="p-2 align-top">
+                            <div>
+                              {item.room} / {item.plan || "—"}
+                            </div>
+                            <div className="text-muted-foreground">{item.validity || "—"}</div>
+                          </td>
+                          <td className="p-2 align-top">
+                            <div className="font-medium">{item.disposition}</div>
+                            <div className="text-muted-foreground">{item.reason}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {importPreview.conflictingRows > 0 && (
+                  <p className="text-xs text-destructive">
+                    Conflicting duplicate rows must be reviewed. Commit is disabled so existing
+                    prices cannot be overwritten silently.
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setImportPreview(null);
+                      setPendingFile(null);
+                    }}
+                  >
+                    Choose another file
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    disabled={importPreview.conflictingRows > 0}
+                    onClick={commitImport}
+                  >
+                    Commit reviewed import
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {summary && (
               <div className="space-y-3">
                 <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
@@ -440,6 +561,8 @@ function HotelsListPage() {
                     <div>{summary.roomsAdded} room categories created</div>
                     <div>{summary.plansCreated} rate plans created</div>
                     <div>{summary.plansUpdated} rate plans updated</div>
+                    <div>{summary.identicalDuplicates} identical duplicates ignored</div>
+                    <div>{summary.conflictingRows} conflicts left unchanged</div>
                     <div>{summary.rateCellsImported} populated rate cells read</div>
                     <div>{summary.skippedRows} rows skipped</div>
                     <div>{summary.errors.length} row errors / missing fields</div>

@@ -584,7 +584,7 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id)?.name || "—" : "—";
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id)?.name || "—" : "—";
     const plan = sel
-      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date))
+      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category))
       : null;
     const dbl = plan?.double_rate || 0;
     const eb = plan?.extra_bed_rate || 0;

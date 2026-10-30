@@ -268,7 +268,7 @@ export function computeScenario(
       const plan = planForDay(
         opt,
         day.day,
-        findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date),
+        findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
       );
       if (!plan) {
         missing++;

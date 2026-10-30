@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { db, useDB, MEAL_PLANS, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
+import { db, useDB, HOTEL_CATEGORIES, MEAL_PLANS, type HotelCategory, type RatePlan, type RoomCategory, type SupplementType } from "@/lib/mock-store";
 
 export type CwbMode = "amount" | "rule";
 
@@ -26,6 +26,7 @@ export function seasonPresetRange(preset: SeasonPreset, year = new Date().getFul
 }
 
 export interface SeasonBlock {
+  hotel_category?: HotelCategory;
   season_label: string;
   validity_start: string;
   validity_end: string;
@@ -84,7 +85,7 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
     const roomPlans = plans.filter((p) => p.room_category_id === r.id);
     const groups = new Map<string, RatePlan[]>();
     for (const p of roomPlans) {
-      const key = `${p.validity_start}|${p.validity_end}|${p.season_label}`;
+      const key = `${p.hotel_category ?? "legacy"}|${p.validity_start}|${p.validity_end}|${p.season_label}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(p);
     }
@@ -100,6 +101,7 @@ export function hydrateRoomsFromDb(rooms: RoomCategory[], plans: RatePlan[]): Ro
       const ap = latest("AP");
       const base = [...grp].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
       seasons.push({
+        hotel_category: base.hotel_category,
         season_label: base.season_label ?? "",
         validity_start: base.validity_start,
         validity_end: base.validity_end,
@@ -171,12 +173,14 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
             (plan) =>
               plan.validity_start === sn.validity_start &&
               plan.validity_end === sn.validity_end &&
+              plan.hotel_category === sn.hotel_category &&
               plan.season_label === seasonLabel &&
               plan.meal_plan === mp,
           )
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
         const plan = {
           room_category_id: room.id,
+          hotel_category: sn.hotel_category,
           validity_start: sn.validity_start,
           validity_end: sn.validity_end,
           season_label: seasonLabel,
@@ -231,6 +235,7 @@ export function persistRoomsForHotel(hotelId: string, rooms: RoomBlock[]) {
           const added = db.get().rate_plans.find(
             (candidate) =>
               candidate.room_category_id === room.id &&
+              candidate.hotel_category === sn.hotel_category &&
               candidate.validity_start === sn.validity_start &&
               candidate.validity_end === sn.validity_end &&
               candidate.season_label === seasonLabel &&
@@ -345,7 +350,27 @@ export function HotelRatesEditor({ rooms, setRooms, errors, cityName }: Props) {
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <Label className="text-xs">Hotel Category</Label>
+                  <Select
+                    value={sn.hotel_category ?? "legacy"}
+                    onValueChange={(value) =>
+                      setSeason(ri, si, {
+                        hotel_category:
+                          value === "legacy" ? undefined : (value as HotelCategory),
+                      })
+                    }
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="legacy">Hotel default</SelectItem>
+                      {HOTEL_CATEGORIES.map((category) => (
+                        <SelectItem key={category} value={category}>{category}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label className="text-xs">Season Label</Label>
                   <Select

@@ -58,6 +58,8 @@ import {
   getEscortBaseForPax,
   getEscortPricingMode,
   getEscortRangeBase,
+  getEscortRangeDayCharge,
+  isEscortDayRequired,
   isEscortEnabled,
   guideRawRateForPax,
 } from "@/lib/wizard/guide-pricing";
@@ -601,11 +603,6 @@ export function Step13({ draft, set }: StepProps) {
       : escortEnabled && escortMode === "day_wise"
         ? [{ id: "day-wise", label: "Day-wise", base: getEscortBaseForPax(draft, pricingPax) }]
         : [];
-  const escortCommercials = escortColumns.map((column) => ({
-    ...column,
-    commercial: applyLandCommercials(draft, column.base, 0.05),
-  }));
-
   const tourSelectionForDay = (day: number) => {
     const explicit = draft.guide_tour_selected_by_day?.[day];
     if (explicit !== undefined) return [...explicit];
@@ -1066,6 +1063,13 @@ export function Step13({ draft, set }: StepProps) {
           ...(draft.escort_day_rates_by_slab?.[day] ?? {}),
           [rangeId]: amount,
         },
+      },
+    });
+  const setEscortDayRequired = (day: number, required: boolean) =>
+    set({
+      guide_day_escort_enabled: {
+        ...(draft.guide_day_escort_enabled ?? {}),
+        [day]: required,
       },
     });
 
@@ -2395,10 +2399,10 @@ export function Step13({ draft, set }: StepProps) {
 
       {serviceView === "escort" && (
         <Card className="overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-900 p-4 text-white">
             <div>
-              <h3 className="text-sm font-semibold">Tour Escort</h3>
-              <p className="text-xs text-muted-foreground">
+              <h3 className="text-sm font-semibold">Tour Escort — Day Wise Rate Entry</h3>
+              <p className="text-xs text-slate-200">
                 Configure pax slabs, then enter an independent Escort rate for each routing day.
               </p>
             </div>
@@ -2417,12 +2421,13 @@ export function Step13({ draft, set }: StepProps) {
           </div>
           {escortEnabled && escortColumns.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-xs">
-                <thead className="bg-muted/20 text-[10px] uppercase text-muted-foreground">
+              <table className="w-full min-w-[880px] text-xs">
+                <thead className="bg-sky-50 text-[10px] uppercase text-slate-600">
                   <tr>
                     <th className="p-2 text-left">Day</th>
+                    <th className="p-2 text-left">Date</th>
                     <th className="p-2 text-left">Route</th>
-                    <th className="min-w-[220px] p-2 text-left">Tour</th>
+                    <th className="p-2 text-center">Escort Required</th>
                     {escortColumns.map((column) => (
                       <th key={column.id} className="min-w-[130px] p-2 text-right">
                         {column.label}
@@ -2432,12 +2437,26 @@ export function Step13({ draft, set }: StepProps) {
                 </thead>
                 <tbody>
                   {dayData.map((day) => {
-                    const context = landDayContext(draft, day.route, db);
+                    const required = isEscortDayRequired(draft, day.route.day);
                     return (
-                      <tr key={day.route.day} className="border-t">
+                      <tr
+                        key={day.route.day}
+                        className={cn("border-t", !required && "bg-slate-50 text-muted-foreground")}
+                      >
                         <td className="p-2 font-semibold">Day {day.route.day}</td>
+                        <td className="p-2 whitespace-nowrap">{day.route.date || "—"}</td>
                         <td className="p-2 text-muted-foreground">{day.routeLabel}</td>
-                        <td className="p-2">{context.tourTitles.join(", ") || "—"}</td>
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={required}
+                            onChange={(event) =>
+                              setEscortDayRequired(day.route.day, event.target.checked)
+                            }
+                            aria-label={`Day ${day.route.day} Escort required`}
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </td>
                         {escortColumns.map((column) => (
                           <td key={column.id} className="p-2">
                             <Input
@@ -2453,7 +2472,10 @@ export function Step13({ draft, set }: StepProps) {
                                   Number(event.target.value) || 0,
                                 )
                               }
-                              className="ml-auto h-8 w-28 text-right"
+                              className={cn(
+                                "ml-auto h-8 w-28 text-right",
+                                !required && "opacity-60",
+                              )}
                               placeholder="No Escort"
                               aria-label={`Day ${day.route.day} ${column.label} Escort rate`}
                             />
@@ -2464,7 +2486,7 @@ export function Step13({ draft, set }: StepProps) {
                   })}
                   <tr className="border-t bg-muted/10">
                     <td
-                      colSpan={3}
+                      colSpan={4}
                       className="p-2 text-right text-[10px] uppercase text-muted-foreground"
                     >
                       Escort Reporting Cost
@@ -2481,29 +2503,6 @@ export function Step13({ draft, set }: StepProps) {
                       />
                     </td>
                   </tr>
-                  {(["base", "markup", "gst", "final"] as const).map((kind) => (
-                    <tr
-                      key={kind}
-                      className={
-                        kind === "final" ? "bg-green-50 font-bold text-primary" : "border-t"
-                      }
-                    >
-                      <td colSpan={3} className="p-2 text-right uppercase">
-                        {kind === "gst"
-                          ? "GST 5%"
-                          : kind === "markup"
-                            ? `Markup (${(landMarkup(draft) * 100).toFixed(1)}%)`
-                            : kind === "final"
-                              ? "Final Total"
-                              : "Base Total"}
-                      </td>
-                      {escortCommercials.map((column) => (
-                        <td key={column.id} className="p-2 text-right tabular-nums">
-                          {inr(column.commercial[kind])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
                 </tbody>
               </table>
               {escortRanges.some(
@@ -2527,23 +2526,95 @@ export function Step13({ draft, set }: StepProps) {
         </Card>
       )}
 
+      {serviceView === "escort" && escortEnabled && (
+        <Card className="overflow-hidden">
+          <div className="border-b bg-slate-900 p-3 text-sm font-semibold text-white">
+            Tour Escort — Day-wise Costing
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-xs">
+              <thead className="bg-sky-50 text-[10px] uppercase text-slate-600">
+                <tr>
+                  <th className="p-2 text-left">Day</th>
+                  <th className="p-2 text-left">Date</th>
+                  <th className="p-2 text-left">Route</th>
+                  <th className="p-2 text-right">Applicable Rate</th>
+                  <th className="p-2 text-right">Base Total</th>
+                  <th className="p-2 text-right">Markup {(landMarkup(draft) * 100).toFixed(1)}%</th>
+                  <th className="p-2 text-right">GST 5%</th>
+                  <th className="p-2 text-right">Final Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayData.map((day) => {
+                  const slab = escortRanges.find(
+                    (item) => pricingPax >= item.min_pax && pricingPax <= item.max_pax,
+                  );
+                  const base =
+                    slab && isEscortDayRequired(draft, day.route.day)
+                      ? getEscortRangeDayCharge(draft, day.route.day, slab.id)
+                      : 0;
+                  const commercial = applyLandCommercials(draft, base, 0.05);
+                  return (
+                    <tr key={day.route.day} className="border-t">
+                      <td className="p-2 font-semibold">Day {day.route.day}</td>
+                      <td className="p-2">{day.route.date || "—"}</td>
+                      <td className="p-2">{day.routeLabel}</td>
+                      <td className="p-2 text-right">{base ? inr(base) : "—"}</td>
+                      <td className="p-2 text-right">{inr(commercial.base)}</td>
+                      <td className="p-2 text-right">{inr(commercial.markup)}</td>
+                      <td className="p-2 text-right">{inr(commercial.gst)}</td>
+                      <td className="p-2 text-right font-semibold">{inr(commercial.final)}</td>
+                    </tr>
+                  );
+                })}
+                {(() => {
+                  const commercial = applyLandCommercials(
+                    draft,
+                    getEscortBaseForPax(draft, pricingPax),
+                    0.05,
+                  );
+                  const selected = dayData.filter(
+                    (day) =>
+                      isEscortDayRequired(draft, day.route.day) &&
+                      escortRanges.some(
+                        (range) => getEscortRangeDayCharge(draft, day.route.day, range.id) > 0,
+                      ),
+                  ).length;
+                  return (
+                    <tr className="border-t bg-green-50 font-semibold">
+                      <td colSpan={3} className="p-2">
+                        Total selected Escort days: {selected}
+                      </td>
+                      <td className="p-2 text-right">—</td>
+                      <td className="p-2 text-right">{inr(commercial.base)}</td>
+                      <td className="p-2 text-right">{inr(commercial.markup)}</td>
+                      <td className="p-2 text-right">{inr(commercial.gst)}</td>
+                      <td className="p-2 text-right">{inr(commercial.final)}</td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {serviceView === "escort" && (
         <Card className="overflow-hidden">
-          <div className="border-b bg-muted/20 p-3 text-sm font-semibold">
+          <div className="border-b bg-slate-900 p-3 text-sm font-semibold text-white">
             Tour Escort — Per Person Costing
           </div>
           {escortEnabled ? (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-xs">
-                <thead className="bg-muted/10 text-[10px] uppercase text-muted-foreground">
+              <table className="w-full min-w-[720px] text-xs">
+                <thead className="bg-sky-50 text-[10px] uppercase text-slate-600">
                   <tr>
                     <th className="p-2 text-left">Pax</th>
                     <th className="p-2 text-left">Applicable Escort Slab</th>
                     <th className="p-2 text-right">Base Escort Total</th>
-                    <th className="p-2 text-right">Markup</th>
-                    <th className="p-2 text-right">GST</th>
                     <th className="p-2 text-right">Final Escort Total</th>
-                    <th className="p-2 text-right">Escort Cost Per Person</th>
+                    <th className="p-2 text-right">Per Person</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2565,8 +2636,6 @@ export function Step13({ draft, set }: StepProps) {
                                 : "—"}
                         </td>
                         <td className="p-2 text-right">{inr(commercial.base)}</td>
-                        <td className="p-2 text-right">{inr(commercial.markup)}</td>
-                        <td className="p-2 text-right">{inr(commercial.gst)}</td>
                         <td className="p-2 text-right font-semibold">{inr(commercial.final)}</td>
                         <td className="p-2 text-right font-semibold">
                           {inr(commercial.final / Math.max(1, row.pax))}
@@ -2970,6 +3039,11 @@ export function Step13({ draft, set }: StepProps) {
         <Input
           value={draft.guide_remarks ?? ""}
           onChange={(event) => set({ guide_remarks: event.target.value })}
+          placeholder={
+            serviceView === "escort"
+              ? "Add any notes about tour escort arrangements, inclusions or special instructions..."
+              : undefined
+          }
         />
       </Card>
     </div>

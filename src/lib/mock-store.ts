@@ -92,6 +92,8 @@ export interface RoomCategory {
 export interface RatePlan {
   id: string;
   room_category_id: string;
+  /** Category-specific offering; absent on legacy plans. */
+  hotel_category?: HotelCategory;
   validity_start: string;
   validity_end: string;
   season_label: string;

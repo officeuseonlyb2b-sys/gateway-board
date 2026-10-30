@@ -856,6 +856,18 @@ try {
   assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 10), 4500);
   assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 20), 6500);
   assert.equal(guidePricing.getEscortBaseForPax(escortDraft, 30), 0);
+  const deselectedEscortDayDraft = structuredClone(escortDraft);
+  deselectedEscortDayDraft.guide_day_escort_enabled = { 1: true, 2: false };
+  assert.equal(
+    guidePricing.getEscortBaseForPax(deselectedEscortDayDraft, 10),
+    2000,
+    "An explicitly unchecked Escort day preserves its rate but contributes no charge",
+  );
+  assert.equal(
+    guidePricing.isEscortDayRequired(deselectedEscortDayDraft, 2),
+    false,
+    "Explicit Escort selection remains authoritative over a saved day/slab rate",
+  );
   const legacyEscortDraft = structuredClone(escortDraft);
   legacyEscortDraft.escort_day_rates_by_slab = {};
   legacyEscortDraft.escort_ranges[0].charge = 4000;
@@ -3453,9 +3465,7 @@ try {
     ...hotelsStep.hotelBookingConfirmationPatch(),
   };
   assert.equal(
-    types.hasHotelExemptionConflict(
-      contradictoryDayFour.hotel_options[0].selections.at(-1),
-    ),
+    types.hasHotelExemptionConflict(contradictoryDayFour.hotel_options[0].selections.at(-1)),
     false,
     "Explicit hotel confirmation clears only contradictory exemption state",
   );
@@ -3478,8 +3488,7 @@ try {
     { id: "unrelated-room", room_id: "room-not-on-selection", occupancy: "double", rooms: 2 },
   ];
   assert.equal(
-    types.hotelSelectionForDay(unrelatedAllocatedRoom, fourNightDynamic.routing[3], true)
-      ?.hotel_id,
+    types.hotelSelectionForDay(unrelatedAllocatedRoom, fourNightDynamic.routing[3], true)?.hotel_id,
     "hotel-4",
     "A sole valid hotel row remains authoritative when a stale allocation cannot identify it",
   );

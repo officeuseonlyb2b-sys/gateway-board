@@ -205,7 +205,7 @@ function resolveDynamicAccommodationRoomLines(
         missing++;
         return;
       }
-      const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date);
+      const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date, option.category);
       const masterNet = plan
         ? allocation.occupancy === "single"
           ? plan.single_rate_missing
@@ -472,7 +472,7 @@ export function calculateMealCostingRows(
           const hs =
             opt?.selections.find((item) => item.hotel_id === choice.hotel_id) ??
             hotelSelectionForDay(opt, day);
-          const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date) : null;
+          const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date, opt?.category) : null;
           perPerson =
             choice.per_person_rate ??
             (mealKey === "lunch" ? plan?.lunch_rate : plan?.dinner_rate) ??
@@ -985,7 +985,7 @@ export function computePersonTotals(
     if (sel?.no_hotel) return null;
     if (!sel) return null;
     const date = addDaysISO(draft.start_date, i);
-    return planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date));
+    return planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category));
   });
 
   return allocs.map((p) => {
@@ -1140,7 +1140,7 @@ export function lookupOptionNightlyRates(
     const plan = planForDay(
       opt,
       day.day,
-      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date),
+      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
     );
     if (!plan) {
       missing++;
@@ -1222,7 +1222,7 @@ export function computeGroupOption(
     const plan = planForDay(
       opt,
       day.day,
-      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date),
+      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
     );
     if (!plan) {
       missing++;
@@ -1348,7 +1348,7 @@ export function computeDynamicOption(
     if (sel?.no_hotel) return;
     const date = addDaysISO(draft.start_date, i);
     const plan = sel
-      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date))
+      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category))
       : null;
     if (!plan) {
       days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });
