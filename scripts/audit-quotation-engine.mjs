@@ -1189,6 +1189,39 @@ try {
   assert.equal(dateFormat.addDaysISO("2026-12-10", 5), "2026-12-15");
   assert.equal(dateFormat.nightsBetween("2026-12-10", "2026-12-15"), 5);
 
+  const staleRoutingDates = {
+    ...types.emptyDraft(),
+    start_date: "2027-01-03",
+    nights: 4,
+    has_dates: true,
+    routing: [
+      { day: 0, is_day_zero: true, date: "2026-11-02", city_id: "pre-tour", overnight: false },
+      { day: 1, date: "2026-11-03", city_id: "city-1", overnight: true, program: "Tour 1" },
+      { day: 2, date: "2026-11-04", city_id: "city-2", overnight: true, program: "Tour 2" },
+      { day: 3, date: "2026-11-05", city_id: "city-3", overnight: true, program: "Tour 3" },
+      { day: 4, date: "2026-11-06", city_id: "city-4", overnight: true, program: "Tour 4" },
+      { day: 5, date: "2026-11-07", city_id: "departure", overnight: false, program: "Departure" },
+    ],
+  };
+  const synchronizedRouting = dateFormat.synchronizeRoutingDates(staleRoutingDates);
+  assert.deepEqual(
+    synchronizedRouting.routing.map((day) => day.date),
+    ["2027-01-02", "2027-01-03", "2027-01-04", "2027-01-05", "2027-01-06", "2027-01-07"],
+    "Trip Basics dates replace stale routing dates while retaining the Day 0 and departure identities",
+  );
+  assert.deepEqual(
+    synchronizedRouting.routing.map((day) => [day.city_id, day.program]),
+    staleRoutingDates.routing.map((day) => [day.city_id, day.program]),
+    "Date synchronization retains routing cities and day-specific selections",
+  );
+  assert.deepEqual(
+    dateFormat.synchronizeRoutingDates({ ...synchronizedRouting, has_dates: false }).routing.map(
+      (day) => day.date,
+    ),
+    ["", "", "", "", "", ""],
+    "Without Dates clears prior calendar dates rather than leaving stale hotel-rate dates",
+  );
+
   const durationFirst = { ...types.emptyDraft(), start_date: "2026-12-10", nights: 3 };
   assert.deepEqual(
     dateReconciliation.reconcileTripDateEdit(durationFirst, {

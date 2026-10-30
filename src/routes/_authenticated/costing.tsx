@@ -46,6 +46,7 @@ import {
   addDaysISO,
   fmtDateShort,
   reconcileTripDateEdit,
+  synchronizeRoutingDates,
   hasReversedTravelBoundaryDates,
   hasCompleteTravelBoundaryDates,
 } from "@/lib/format";
@@ -653,6 +654,15 @@ function WizardPage() {
     setSub(0);
   }, [draft, step, stepPosition, workflowSteps, reachedThroughStep, persistedScopeChanged]);
 
+  // Drafts created before the authoritative Trip Basics synchronization may
+  // contain stale stored routing dates. Reconcile them once from day identity
+  // without touching cities, services, hotel selections, or allocations.
+  useEffect(() => {
+    if (!draft) return;
+    const synchronized = synchronizeRoutingDates(draft);
+    if (synchronized !== draft) writeDraft(synchronized);
+  }, [draft]);
+
   useEffect(() => {
     if (initialized) return;
     migrateLegacyDraft();
@@ -837,7 +847,12 @@ function WizardPage() {
 
   const set = (patch: Partial<QuoteDraft>) => {
     const current = loadDraft() ?? draft;
-    writeDraft({ ...current, ...patch });
+    const next = { ...current, ...patch };
+    const tripDatesChanged =
+      (patch.start_date !== undefined && patch.start_date !== current.start_date) ||
+      (patch.nights !== undefined && patch.nights !== current.nights) ||
+      (patch.has_dates !== undefined && patch.has_dates !== current.has_dates);
+    writeDraft(tripDatesChanged ? synchronizeRoutingDates(next) : next);
   };
 
   const canProceed = validate(draft, step);
@@ -2565,12 +2580,14 @@ function Step4({ draft, set }: StepProps) {
 function Step9({ draft, set }: StepProps) {
   const d = useDB();
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
+  const routingDate = (offset: number) =>
+    draft.has_dates === false ? "" : addDaysISO(draft.start_date, offset);
   const normalizeTourRows = (rows: RoutingDay[]) =>
     rows.map((row, index) => ({
       ...row,
       is_day_zero: false,
       day: index + 1,
-      date: addDaysISO(draft.start_date, index),
+      date: routingDate(index),
       overnight: index < rows.length - 1,
       from_city:
         index > 0 && rows[index - 1]?.city_id ? cityName(rows[index - 1].city_id) : row.from_city,
@@ -2591,7 +2608,7 @@ function Step9({ draft, set }: StepProps) {
         rows.push(
           existing || {
             day: i + 1,
-            date: addDaysISO(draft.start_date, i),
+            date: routingDate(i),
             city_id: "",
             program: "",
             program_mode: "text",
@@ -2599,7 +2616,7 @@ function Step9({ draft, set }: StepProps) {
           },
         );
         rows[i].day = i + 1;
-        rows[i].date = addDaysISO(draft.start_date, i);
+        rows[i].date = routingDate(i);
         rows[i].overnight = i < need - 1;
       }
       if (rows[0] && !rows[0].from_city) {
@@ -2626,7 +2643,7 @@ function Step9({ draft, set }: StepProps) {
                 ...dayZero,
                 day: 0,
                 is_day_zero: true,
-                date: addDaysISO(draft.start_date, -1),
+                date: routingDate(-1),
                 overnight: false,
               },
               ...normalized,
@@ -2699,7 +2716,7 @@ function Step9({ draft, set }: StepProps) {
     const next = [...tourRows];
     next.splice(tourIndex, 0, {
       day: 0,
-      date: addDaysISO(draft.start_date, tourIndex),
+      date: routingDate(tourIndex),
       city_id: "",
       from_city: before ? cityName(before.city_id) || before.to_city || "" : "",
       to_city: "",
@@ -2716,7 +2733,7 @@ function Step9({ draft, set }: StepProps) {
               ...dayZero,
               day: 0,
               is_day_zero: true,
-              date: addDaysISO(draft.start_date, -1),
+              date: routingDate(-1),
               overnight: false,
             },
             ...normalized,
@@ -2733,7 +2750,7 @@ function Step9({ draft, set }: StepProps) {
         {
           day: 0,
           is_day_zero: true,
-          date: addDaysISO(draft.start_date, -1),
+          date: routingDate(-1),
           city_id: "",
           to_city_ids: [],
           program: "",
@@ -2776,7 +2793,7 @@ function Step9({ draft, set }: StepProps) {
               ...dayZero,
               day: 0,
               is_day_zero: true,
-              date: addDaysISO(draft.start_date, -1),
+              date: routingDate(-1),
               overnight: false,
             },
             ...normalized,

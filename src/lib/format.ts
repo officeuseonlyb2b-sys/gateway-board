@@ -1,5 +1,5 @@
 // Indian numbering & date formatting helpers.
-import type { QuoteDraft, TravelDetail } from "@/lib/wizard/types";
+import type { QuoteDraft, RoutingDay, TravelDetail } from "@/lib/wizard/types";
 
 export function inr(n: number): string {
   if (!isFinite(n)) return "₹0";
@@ -141,6 +141,28 @@ export function reconcileTripDateEdit(
     return { patch: {}, valid: true, boundaryConflict: true };
   }
   return { patch: { start_date: arrival, nights }, valid: true, boundaryConflict: false };
+}
+
+/**
+ * Keep calendar dates derived from Trip Basics. Routing day number (including
+ * optional Day 0) is the stable itinerary identity; its previous calendar date
+ * must never be used as an input after the trip dates are edited.
+ */
+export function synchronizeRoutingDates(draft: QuoteDraft): QuoteDraft {
+  const hasDates = draft.has_dates !== false;
+  let tourIndex = 0;
+  let changed = false;
+  const routing = draft.routing.map((day): RoutingDay => {
+    const dayZero = day.is_day_zero || day.day === 0;
+    const nextDate = hasDates
+      ? addDaysISO(draft.start_date, dayZero ? -1 : tourIndex)
+      : "";
+    if (!dayZero) tourIndex++;
+    if (day.date === nextDate) return day;
+    changed = true;
+    return { ...day, date: nextDate };
+  });
+  return changed ? { ...draft, routing } : draft;
 }
 
 export function hasReversedTravelBoundaryDates(draft: QuoteDraft): boolean {

@@ -750,6 +750,7 @@ function AccommodationSelectionTable({
 
   // Build the rows
   const rows = overnightRouting.map((day) => {
+    const hasStayDate = Boolean(day.date);
     const resolvedCity = resolveAccommodationCity(day, d.cities, d.destination_cities);
     const cityName = resolvedCity?.name || day.to_city?.trim() || "";
     const cityId = resolvedCity?.id || day.city_id;
@@ -800,24 +801,26 @@ function AccommodationSelectionTable({
     let hotelPool = cityHotels;
 
     const needsQuad = showQuad || (isDynamicGlobal && (dayMixFor(day.day).quad ?? 0) > 0);
-    const quadPool = hotelPool.filter((h) => hotelHasQuad(h.id, day.date));
+    const quadPool = hasStayDate ? hotelPool.filter((h) => hotelHasQuad(h.id, day.date)) : hotelPool;
     const noQuadHotel = needsQuad && quadPool.length === 0;
     if (needsQuad && quadPool.length > 0) hotelPool = quadPool;
 
     const rooms = sel ? d.room_categories.filter((r) => r.hotel_id === sel.hotel_id) : [];
-    const meals = sel?.room_id
+    const meals = hasStayDate && sel?.room_id
       ? availableMealPlans(d.rate_plans, sel.room_id, day.date, activeCategory)
       : [];
     const selHotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id) : null;
     const selectedAvailability = availability.details.find((hotel) => hotel.id === selHotel?.id);
     const baseRate =
-      sel && sel.room_id
+      hasStayDate && sel && sel.room_id
         ? findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, day.date, activeCategory)
         : null;
     const dayOverride = overrides[day.day];
     const rate = selectedAvailability?.blackout ? null : applyRateOverride(baseRate, dayOverride);
     const isFallback = sel?.is_fallback || false;
-    const pricingMessage = selectedAvailability
+    const pricingMessage = !hasStayDate
+      ? "Stay date is not set. Hotel rates require review when dates are selected."
+      : selectedAvailability
       ? selectedAvailability.roomCount === 0
         ? "Hotel available, but no room categories are linked."
         : selectedAvailability.blackout
