@@ -133,13 +133,12 @@ import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { getSavedQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
 import {
-  getCrmQuery,
   getQueryQuotationDraft,
   upsertQueryQuotationDraft,
-  useCrmQueries,
 } from "@/lib/crm/store";
 import { finalizeQuotationVersion } from "@/lib/crm/crm-remote";
-import { useAccessProfile } from "@/lib/crm/access";
+import { useAccessProfile, useAccessibleQueries } from "@/lib/crm/access";
+import type { CrmQuery } from "@/lib/crm/types";
 
 import { setActiveWizard } from "@/lib/wizard/active-wizard";
 import { QuoteViewerDialog } from "@/components/QuoteViewerDialog";
@@ -461,7 +460,7 @@ const INTERNATIONAL_CITIES = [
 // ============================================================
 // Root
 // ============================================================
-function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
+function syncLinkedQueryPaxRange(draft: QuoteDraft, linkedQuery?: CrmQuery): QuoteDraft {
   if (!draft.linked_query_id) return draft;
   // A persisted explicit mode is authoritative; do not overwrite a user's
   // deliberate Exact selection from the linked Query during reload.
@@ -475,7 +474,6 @@ function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
   const existingRange = draft.pax_range && draft.pax_range !== "auto" ? draft.pax_range.trim() : "";
   const defaultBoundsPlaceholder = draft.pax_min === 1 && draft.pax_max === 40 && !existingRange;
   if (validRangeBounds && !defaultBoundsPlaceholder) return draft;
-  const linkedQuery = getCrmQuery(draft.linked_query_id);
   if (!linkedQuery) return draft;
   const range = getQueryPricingPaxRange(linkedQuery);
   if (!range) return draft;
@@ -496,11 +494,31 @@ function syncLinkedQueryPaxRange(draft: QuoteDraft): QuoteDraft {
   };
 }
 
+function quotationOperationDiagnostic(operation: string, error: unknown) {
+  const detail = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const status = typeof detail.status === "number" ? detail.status : undefined;
+  const code = typeof detail.code === "string" ? detail.code : undefined;
+  const rawMessage = error instanceof Error ? error.message : "The request could not be completed.";
+  const kind =
+    status === 401 || status === 403 || code === "42501"
+      ? "permission"
+      : status === 400 || status === 409 || code === "23505"
+        ? "validation"
+        : status || code
+          ? "service"
+          : "frontend/runtime";
+  const reference = [status ? `HTTP ${status}` : "", code ? `code ${code}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  return `Quotation Builder · ${operation} failed (${kind}${reference ? `, ${reference}` : ""}). ${rawMessage}`;
+}
+
 function WizardPage() {
   const draft = useDraft();
   const dbData = useDB();
   const user = useAuth();
   const access = useAccessProfile();
+  const accessibleQueries = useAccessibleQueries();
   const search = Route.useSearch();
   const navigate = useNavigate();
 
@@ -556,7 +574,11 @@ function WizardPage() {
     () => (draft ? validateQuoteForFinalization(draft, dbData) : null),
     [draft, dbData],
   );
-  const linkedQuery = draft?.linked_query_id ? getCrmQuery(draft.linked_query_id) : undefined;
+  const linkedQuery = draft?.linked_query_id
+    ? accessibleQueries.find(
+        (query) => query.query_id === draft.linked_query_id || query.id === draft.linked_query_id,
+      )
+    : undefined;
   const programmes = usePrograms();
   const duplicateProgramme =
     draft?.program_mode === "new" && draft.new_program_name?.trim()
@@ -635,7 +657,9 @@ function WizardPage() {
     if (initialized) return;
     migrateLegacyDraft();
     if (search.queryId) {
-      const query = getCrmQuery(search.queryId);
+      const query = accessibleQueries.find(
+        (candidate) => candidate.query_id === search.queryId || candidate.id === search.queryId,
+      );
       if (query) {
         const next = emptyDraft();
         const start = query.travel_start ? new Date(query.travel_start) : null;
@@ -703,7 +727,14 @@ function WizardPage() {
     if (search.id) {
       const rec = getDraft(search.id);
       if (rec) {
-        const synced = syncLinkedQueryPaxRange(rec.wizard_state);
+        const synced = syncLinkedQueryPaxRange(
+          rec.wizard_state,
+          accessibleQueries.find(
+            (query) =>
+              query.query_id === rec.wizard_state.linked_query_id ||
+              query.id === rec.wizard_state.linked_query_id,
+          ),
+        );
         writeDraft(synced);
         setCurrentDraftId(rec.id);
         setInitialized(true);
@@ -711,7 +742,14 @@ function WizardPage() {
       }
       const cloudDraft = getQueryQuotationDraft(search.id);
       if (cloudDraft) {
-        const synced = syncLinkedQueryPaxRange(cloudDraft.draft_data);
+        const synced = syncLinkedQueryPaxRange(
+          cloudDraft.draft_data,
+          accessibleQueries.find(
+            (query) =>
+              query.query_id === cloudDraft.draft_data.linked_query_id ||
+              query.id === cloudDraft.draft_data.linked_query_id,
+          ),
+        );
         writeDraft(synced);
         upsertDraft(synced, cloudDraft.id, cloudDraft.draft_name);
         setCurrentDraftId(cloudDraft.id);
@@ -721,14 +759,19 @@ function WizardPage() {
     }
     const existing = draft || loadDraft();
     if (existing) {
-      const hydrated = syncLinkedQueryPaxRange(existing);
+      const hydrated = syncLinkedQueryPaxRange(
+        existing,
+        accessibleQueries.find(
+          (query) => query.query_id === existing.linked_query_id || query.id === existing.linked_query_id,
+        ),
+      );
       if (hydrated !== existing) writeDraft(hydrated);
       setShowBanner(true);
     } else {
       initDraft();
     }
     setInitialized(true);
-  }, [initialized, search.id, search.queryId, draft]);
+  }, [initialized, search.id, search.queryId, draft, accessibleQueries]);
 
   useEffect(() => {
     if (!draft) return;
@@ -860,8 +903,8 @@ function WizardPage() {
       const employee = access.employee;
       if (!employee)
         throw new Error("An active linked CRM employee is required to save a costing version.");
-      if (!latest.linked_query_id || !getCrmQuery(latest.linked_query_id))
-        throw new Error("The canonical linked CRM Query could not be resolved before saving.");
+      if (!latest.linked_query_id || !linkedQuery)
+        throw new Error("The linked Query is unavailable or you no longer have access to it.");
       const warnings = [
         ...review.blockers.map((item) => `${item.section}: ${item.message}`),
         ...(duplicateProgramme
@@ -913,8 +956,9 @@ function WizardPage() {
       });
       toast.success(`Costing V${quote.version} saved and confirmed by Supabase.`);
     } catch (error) {
-      console.error("Costing version save failed", error);
-      toast.error(error instanceof Error ? error.message : "Could not save the costing version.");
+      const diagnostic = quotationOperationDiagnostic("Step 10 · save costing version", error);
+      console.error(diagnostic);
+      toast.error(diagnostic);
     } finally {
       saveInFlightRef.current = false;
       setIsFinalizing(false);
@@ -1057,7 +1101,9 @@ function WizardPage() {
                   persistToDrafts(latest, { name });
                   toast.success("Draft saved and available in Drafts.");
                 } catch (error) {
-                  toast.error(`Draft save failed: ${(error as Error).message}`);
+                  const diagnostic = quotationOperationDiagnostic("save draft", error);
+                  console.error(diagnostic);
+                  toast.error(diagnostic);
                 } finally {
                   setIsDraftSaving(false);
                 }
@@ -1668,7 +1714,10 @@ type StepProps = { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void };
 // STEP 1 — Query Type
 // ============================================================
 function Step1({ draft, set }: StepProps) {
-  const queries = useCrmQueries();
+  // Linkable Queries must obey the active employee's existing CRM scope.
+  // The quotation workflow stays shared; only unauthorized Query records are
+  // excluded from this selector.
+  const queries = useAccessibleQueries();
   const opts: { key: QueryType; title: string; desc: string; icon: typeof Building2 }[] = [
     { key: "B2B", title: "B2B", desc: "Travel Agent Quotation", icon: Building2 },
     { key: "B2C", title: "B2C", desc: "Direct Guest Quotation", icon: User },

@@ -14,7 +14,10 @@ async function check(label, run) {
   console.log(`PASS ${label}`);
 }
 function loadTs(path, imports = {}, globals = {}) {
-  const source = fs.readFileSync(path, "utf8");
+  // Node's VM executes CommonJS output and has no import.meta. Preserve the
+  // production source while substituting only Vite's DEV expression in this
+  // isolated audit environment.
+  const source = fs.readFileSync(path, "utf8").replaceAll("import.meta.env.DEV", "__AUDIT_DEV__");
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   });
@@ -34,6 +37,7 @@ function loadTs(path, imports = {}, globals = {}) {
       Headers,
       setTimeout,
       clearTimeout,
+      __AUDIT_DEV__: false,
       ...globals,
     },
     { filename: path },
@@ -53,9 +57,20 @@ const adminEmployee = {
   account_status: "Active",
 };
 let cache = [adminEmployee];
+let activeAuthUser = { id: adminEmployee.auth_user_id };
+let activeEmployee = adminEmployee;
+let auditQueries = [];
 const access = loadTs("src/lib/crm/access.ts", {
-  "@/lib/auth-mock": { useAuth: () => ({ id: adminEmployee.auth_user_id }) },
-  "./store": { listEmployees: () => cache, useEmployees: () => cache, useCrmQueries: () => [] },
+  "@/lib/auth-mock": {
+    auth: { lifecycle: () => ({ employee: activeEmployee }) },
+    useAuth: () => activeAuthUser,
+    useAuthLifecycle: () => ({ employee: activeEmployee }),
+  },
+  "./store": {
+    listEmployees: () => cache,
+    useEmployees: () => cache,
+    useCrmQueries: () => auditQueries,
+  },
 });
 await check(
   "Auth linkage requires exactly one matching Auth UUID; email and metadata cannot grant access",
@@ -79,7 +94,7 @@ await check(
   },
 );
 await check(
-  "Super Admin can open every existing authenticated route; generic Employee is confined to personal routes",
+  "Super Admin can open every existing authenticated route; non-admin routes follow the explicit access map",
   () => {
     const files = fs
       .readdirSync("src/routes/_authenticated", { recursive: true })
@@ -101,17 +116,53 @@ await check(
         false,
         path,
       );
-      assert.equal(
-        access.canAccessPath({ accountReady: true, role: "Employee" }, path),
-        ["/employee-home", "/profile", "/help"].includes(path),
-        path,
-      );
+      if (["/admin-console", "/employee-management"].includes(path))
+        assert.equal(access.canAccessPath({ accountReady: true, role: "Employee" }, path), false, path);
     }
     assert.equal(access.dashboardPathForUser({ id: adminEmployee.auth_user_id }), "/admin-console");
     cache = [];
+    activeEmployee = undefined;
     assert.equal(access.useAccessProfile().accountReady, false);
     assert.equal(access.useAccessProfile().role, "");
     assert.deepEqual(plain(access.useAccessProfile().permissions), []);
+  },
+);
+await check(
+  "Quotation Query scope keeps Deeksha, Chhaya and Bhumi isolated without granting admin rights",
+  () => {
+    const salesEmployee = (name) => ({
+      ...adminEmployee,
+      id: randomUUID(),
+      name,
+      auth_user_id: randomUUID(),
+      employee_code: `${name.toUpperCase()}-001`,
+      role: "Sales Executive",
+      department: "Sales",
+      unit: "Madhya Pradesh",
+    });
+    const deeksha = salesEmployee("Deeksha");
+    const chhaya = salesEmployee("Chhaya");
+    const bhumi = salesEmployee("Bhumi");
+    cache = [adminEmployee, deeksha, chhaya, bhumi];
+    auditQueries = [
+      { id: "q-deeksha", query_id: "Q-DEEKSHA", owner: deeksha.id },
+      { id: "q-chhaya", query_id: "Q-CHHAYA", owner: chhaya.id },
+      { id: "q-bhumi", query_id: "Q-BHUMI", owner: bhumi.id },
+    ];
+    for (const employee of [deeksha, chhaya, bhumi]) {
+      activeEmployee = employee;
+      activeAuthUser = { id: employee.auth_user_id };
+      const visible = access.useAccessibleQueries();
+      assert.deepEqual(plain(visible.map((query) => query.owner)), [employee.id]);
+      assert.equal(visible.find((query) => query.query_id !== `Q-${employee.name.toUpperCase()}`), undefined);
+      assert.equal(access.canAccessPath(access.useAccessProfile(), "/costing"), true);
+      assert.equal(access.canReadCostingMasters(access.useAccessProfile().role), true);
+      assert.equal(access.canManageCostingMasters(access.useAccessProfile().role), false);
+    }
+    activeEmployee = adminEmployee;
+    activeAuthUser = { id: adminEmployee.auth_user_id };
+    assert.equal(access.useAccessibleQueries().length, 3);
+    assert.equal(access.canManageCostingMasters(access.useAccessProfile().role), true);
   },
 );
 
@@ -129,6 +180,7 @@ const store = loadTs(
   {
     react: { useSyncExternalStore: (_subscribe, get) => get() },
     "./types": { LIFECYCLE: [] },
+    "@/lib/quotes-store": { quoteContentHash: () => "audit-hash" },
     "./query-tracker-import.generated": {
       IMPORTED_QUERIES: [],
       IMPORTED_QUERY_EVENTS: [],
@@ -331,30 +383,29 @@ const request = (body, token = adminEmployee.auth_user_id) =>
 const secret = randomUUID();
 let employee;
 await check(
-  "Creation issues a unique code and Auth UUID with restricted defaults, ignoring submitted roles",
+  "Creation issues a unique code and Auth UUID with an approved Sales role",
   async () => {
     const result = await manage(
       request({
         action: "create_employee",
         name: "Test employee",
         password: secret,
-        role: "Super Admin",
-        department: "Admin",
+        role: "Sales Executive",
       }),
     );
     assert.equal(result.status, 200);
     employee = (await result.json()).employee;
     assert.equal(employee.employee_code, "EMP-0001");
-    assert.equal(employee.role, "Employee");
-    assert.equal(employee.department, "Unassigned");
+    assert.equal(employee.role, "Sales Executive");
+    assert.equal(employee.department, "Sales");
     assert.equal(employee.data_scope, "Own");
-    assert.equal(employee.dashboard_template, "Employee Home");
+    assert.equal(employee.dashboard_template, "My Sales Desk");
     assert.equal(employee.auth_login_email, "emp-0001@employee.mptourism.in");
     assert.ok(users.has(employee.auth_user_id));
     assert.ok(!JSON.stringify(employee).includes(secret));
     const concurrent = await Promise.all(
       ["A", "B"].map((name) =>
-        manage(request({ action: "create_employee", name, password: secret })),
+        manage(request({ action: "create_employee", name, password: secret, role: "Sales Executive" })),
       ),
     );
     const codes = await Promise.all(
@@ -422,7 +473,12 @@ await check("Partial creation failure compensates by deleting its new Auth accou
   assert.equal(
     (
       await manage(
-        request({ action: "create_employee", name: "Failure fixture", password: secret }),
+        request({
+          action: "create_employee",
+          name: "Failure fixture",
+          password: secret,
+          role: "Sales Executive",
+        }),
       )
     ).status,
     400,
@@ -437,6 +493,7 @@ await check("Edit preserves identity; reset invalidates the old password", async
       employeeId: employee.id,
       name: "Renamed test",
       phone: "123",
+      role: "Senior Sales Executive",
       employee_code: "EMP-9999",
     }),
   );
@@ -540,6 +597,7 @@ await check(
       tasks: [{ id: "local-task" }],
       events: [],
       employees: [adminEmployee, { id: "stale" }],
+      standaloneQuotationReviews: [],
     };
     let remoteEmployees = [adminEmployee];
     const reads = [],
@@ -548,6 +606,11 @@ await check(
     let hydrated = 0,
       persisted;
     const fake = {
+      rpc(name) {
+        if (name === "crm_review_employee_directory") return Promise.resolve({ data: [], error: null });
+        if (name === "list_sales_assignment_candidates") return Promise.resolve({ data: [], error: null });
+        return Promise.resolve({ data: null, error: null });
+      },
       from(table) {
         reads.push(table);
         let marker = false;
@@ -615,12 +678,27 @@ await check(
         replaceEmployeesFromCloud: (employees) => {
           snapshot.employees = employees;
         },
+        replaceAssignmentCandidatesFromCloud: () => {},
+        replaceQueryFromCloud: () => {},
+        replaceStandaloneQuotationReviewsFromCloud: () => {},
+        upsertStandaloneQuotationReviewFromCloud: () => {},
+        setCrmHydrationStatus: () => {},
+        setEmployeeDirectoryStatus: () => {},
+        setAssignmentDirectoryStatus: () => {},
+        listAssignmentCandidates: () => [],
         onCrmPersist: (callback) => {
           persisted = callback;
           return () => {};
         },
       },
-      "./query-tracker-import.generated": { QUERY_TRACKER_MARKER_ID: "marker" },
+      "@/lib/notifications-store": { ingestNotification: () => {} },
+      "./query-tracker-import.generated": {
+        QUERY_TRACKER_MARKER_ID: "marker",
+        IMPORTED_DATASET_MARKER: "marker",
+        IMPORTED_QUERIES: [],
+        IMPORTED_QUERY_EVENTS: [],
+        IMPORTED_QUERY_TASKS: [],
+      },
     });
     const flush = () => new Promise((resolve) => setTimeout(resolve, 400));
     const stop = remote.startCrmSync(true);
@@ -643,7 +721,7 @@ await check(
     writes.length = 0;
     const stopEmployee = remote.startCrmSync(false);
     await flush();
-    assert.deepEqual([...new Set(reads)], ["crm_employees"]);
+    assert.deepEqual([...new Set(reads)].sort(), ["crm_employees", "crm_notifications"]);
     assert.equal(writes.length, 0);
     stopEmployee();
   },

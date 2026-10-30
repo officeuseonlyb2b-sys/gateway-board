@@ -34,7 +34,7 @@ import { NumericStepper, uid, type StepProps } from "../shared";
 
 export function Step10({ draft, set }: StepProps) {
   const d = useDB();
-  const [showAllVehicles, setShowAllVehicles] = useState(false);
+  const [vehicleFilter, setVehicleFilter] = useState<"suitable" | "all">("suitable");
   const requestedPax = Math.max(1, effectivePaxForPricing(draft));
   const requestedRange = parsePaxRange(draft);
   const commercial = (amount: number) => {
@@ -80,7 +80,7 @@ export function Step10({ draft, set }: StepProps) {
       : fitsPax(vehicle, requestedPax);
   };
   const eligibleOpts = allOpts.filter(overlapsRequest);
-  const opts = showAllVehicles ? allOpts : eligibleOpts;
+  const opts = vehicleFilter === "all" ? allOpts : eligibleOpts;
 
   // ============================================================
   // TOTAL TRANSPORT COST
@@ -91,7 +91,12 @@ export function Step10({ draft, set }: StepProps) {
   // ============================================================
 
   const addVehicle = (travelId?: string) => {
-    const first = (travelId && eligibleOpts.find((o) => o.id === travelId)) || eligibleOpts[0];
+    // A manually chosen vehicle follows the active view filter. Suitable mode
+    // only exposes eligible vehicles; Show All intentionally permits every
+    // active master vehicle, including an outside-range vehicle combination.
+    const selectableOpts = vehicleFilter === "all" ? allOpts : eligibleOpts;
+    const first =
+      (travelId && selectableOpts.find((option) => option.id === travelId)) || eligibleOpts[0];
 
     if (!first) return;
 
@@ -186,14 +191,34 @@ export function Step10({ draft, set }: StepProps) {
           <h2 className="text-lg font-semibold">Transport — Per Route</h2>
 
           <p className="text-xs text-muted-foreground mt-0.5">
-            Showing vehicles suitable for{" "}
-            {requestedRange ? `${requestedRange.min}–${requestedRange.max}` : requestedPax} pax.
+            {vehicleFilter === "suitable"
+              ? `Showing vehicles suitable for ${
+                  requestedRange ? `${requestedRange.min}–${requestedRange.max}` : requestedPax
+                } pax.`
+              : "Showing all available vehicles."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setShowAllVehicles((value) => !value)}>
-            {showAllVehicles ? "Show suitable only" : "View all vehicles"}
-          </Button>
+          <div className="inline-flex" role="group" aria-label="Vehicle suitability filter">
+            <Button
+              size="sm"
+              variant={vehicleFilter === "suitable" ? "default" : "outline"}
+              className="rounded-r-none"
+              aria-pressed={vehicleFilter === "suitable"}
+              onClick={() => setVehicleFilter("suitable")}
+            >
+              Suitable Vehicles
+            </Button>
+            <Button
+              size="sm"
+              variant={vehicleFilter === "all" ? "default" : "outline"}
+              className="rounded-l-none"
+              aria-pressed={vehicleFilter === "all"}
+              onClick={() => setVehicleFilter("all")}
+            >
+              Show All Vehicles
+            </Button>
+          </div>
           <Button size="sm" onClick={() => addVehicle()} disabled={eligibleOpts.length === 0}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Add Transport
           </Button>
@@ -227,7 +252,7 @@ export function Step10({ draft, set }: StepProps) {
                       <SelectItem
                         key={option.id}
                         value={option.id}
-                        disabled={!overlapsRequest(option)}
+                        disabled={vehicleFilter === "suitable" && !overlapsRequest(option)}
                       >
                         {option.vehicle_type}
 
