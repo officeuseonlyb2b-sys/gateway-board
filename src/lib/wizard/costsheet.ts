@@ -170,9 +170,10 @@ function targetDays(days: number[] | undefined, all: number[]): number[] {
 }
 
 export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): LandPartSheet {
-  const all = draft.routing.map((r) => r.day);
+  const allRows = draft.routing.map((r) => r.day);
+  const all = draft.routing.filter((r) => !(r.is_day_zero || r.day === 0)).map((r) => r.day);
   const cityName = (id?: string) => d.cities.find((c) => c.id === id)?.name || "";
-  const dayIndex = new Map(draft.routing.map((r, i) => [r.day, i]));
+  const dayIndex = new Map(all.map((day, index) => [day, index]));
 
   const opts: Record<
     number,
@@ -184,7 +185,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
       misc: SheetOption[];
     }
   > = {};
-  all.forEach((day) => {
+  allRows.forEach((day) => {
     opts[day] = { transport: [], guide: [], entrances: [], activities: [], misc: [] };
   });
   const configuredEscortIds = new Set<string>();
@@ -584,7 +585,11 @@ export function buildHotelMealSheet(draft: QuoteDraft, d: DB, opt: HotelOption):
     const hotel = sel ? d.hotels.find((h) => h.id === sel.hotel_id)?.name || "—" : "—";
     const room = sel ? d.room_categories.find((r) => r.id === sel.room_id)?.name || "—" : "—";
     const plan = sel
-      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category))
+      ? planForDay(
+          opt,
+          day.day,
+          findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
+        )
       : null;
     const dbl = plan?.double_rate || 0;
     const eb = plan?.extra_bed_rate || 0;
@@ -737,7 +742,9 @@ const gross = (net: number, mk: number, gst: number) => {
 
 /** Resolve checked Activity & Experience lines to a per-person amount for one Rate Sheet row. */
 function selectedActivityPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): number {
-  const routingDays = draft.routing.map((day) => day.day);
+  const routingDays = draft.routing
+    .filter((day) => !(day.is_day_zero || day.day === 0))
+    .map((day) => day.day);
   return draft.activities.reduce((sum, line) => {
     if (line.inclusion_status === "optional") return sum;
     const days = targetDays(line.from_routing_days, routingDays);
@@ -762,7 +769,9 @@ function selectedActivityPerPersonForPax(draft: QuoteDraft, d: DB, pax: number):
 
 /** Resolve checked Miscellaneous lines to a per-person amount for one Rate Sheet row. */
 function selectedMiscPerPersonForPax(draft: QuoteDraft, d: DB, pax: number): number {
-  const routingDays = draft.routing.map((day) => day.day);
+  const routingDays = draft.routing
+    .filter((day) => !(day.is_day_zero || day.day === 0))
+    .map((day) => day.day);
   return draft.misc.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);
     if (!days.length) return sum;
@@ -786,7 +795,9 @@ function selectedGuideTotalForPax(
   d: DB,
   pax: number,
 ): { guide: number; escort: number } {
-  const routingDays = draft.routing.map((day) => day.day);
+  const routingDays = draft.routing
+    .filter((day) => !(day.is_day_zero || day.day === 0))
+    .map((day) => day.day);
   const pricingPax = Math.max(1, effectivePaxForPricing(draft));
   let guide = 0;
   let escort = 0;
@@ -826,7 +837,9 @@ function selectedGuideTotalForPax(
 }
 
 function selectedEntranceTotalForPax(draft: QuoteDraft, d: DB, pax: number): number {
-  const routingDays = draft.routing.map((day) => day.day);
+  const routingDays = draft.routing
+    .filter((day) => !(day.is_day_zero || day.day === 0))
+    .map((day) => day.day);
   const activeCategory = draft.entrance_traveller_category ?? draft.traveler_type ?? "indian";
   return draft.entrances.reduce((sum, line) => {
     const days = targetDays(line.from_routing_days, routingDays);

@@ -50,8 +50,11 @@ function CommercialPackageMatrixImpl({
     [options, draft, db, scope.landPart],
   );
   const dynamicOptionValidity = useMemo(
-    () =>
-      new Map(
+    () => {
+      // Historical Dynamic allocations are retained for mode switching but
+      // must not be resolved or validated while Standard is selected.
+      if (!dynamicMode) return new Map(options.map((option) => [option.key, true] as const));
+      return new Map(
         options.map((option) => {
           const resolution = dynamicAccommodationRoomLines(draft, option, db);
           const requiredPax = effectiveAccommodationPax(draft, option);
@@ -70,8 +73,9 @@ function CommercialPackageMatrixImpl({
           });
           return [option.key, !incomplete] as const;
         }),
-      ),
-    [options, draft, db],
+      );
+    },
+    [options, draft, db, dynamicMode],
   );
   const primary = sheets[0];
   const rows = useMemo<MatrixRow[]>(
@@ -156,12 +160,12 @@ function CommercialPackageMatrixImpl({
         <div>
           <h2 className="text-lg font-semibold">
             {landMeals
-              ? "4. Commercial Matrix"
+              ? "2. Commercial Matrix"
               : landOnly
-                ? "3. Land Commercial Matrix"
+                ? "2. Land Commercial Matrix"
                 : accommodationOnly
-                  ? "3. Accommodation Commercial Matrix"
-                  : "4. Commercial Package Matrix"}
+                  ? "2. Accommodation Commercial Matrix"
+                  : "2. Commercial Package Matrix"}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {landMeals

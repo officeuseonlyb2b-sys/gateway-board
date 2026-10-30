@@ -84,7 +84,12 @@ function writeAll(list: DraftRecord[]) {
 }
 
 function uid() {
-  return "d_" + Math.random().toString(36).slice(2, 10);
+  const random = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 14);
+  return "d_" + random;
+}
+
+function cloneDraft(state: QuoteDraft): QuoteDraft {
+  return normalizeDraft(JSON.parse(JSON.stringify(state)) as QuoteDraft);
 }
 
 function deriveName(state: QuoteDraft): string {
@@ -106,7 +111,7 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
         draft_name: name || list[idx].draft_name || deriveName(state),
         updated_at: now,
         last_step: completedStepForScope(list[idx], state),
-        wizard_state: normalizeDraft(state),
+        wizard_state: cloneDraft(state),
       };
       writeAll(list);
       return id;
@@ -119,7 +124,7 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
     created_at: now,
     updated_at: now,
     last_step: state.step,
-    wizard_state: state,
+    wizard_state: cloneDraft(state),
   });
   writeAll(list);
   return newId;
@@ -127,7 +132,25 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
 
 export function getDraft(id: string): DraftRecord | null {
   const record = read().find((d) => d.id === id);
-  return record ? { ...record, wizard_state: normalizeDraft(record.wizard_state) } : null;
+  return record ? { ...record, wizard_state: cloneDraft(record.wizard_state) } : null;
+}
+
+/** Create a fully independent editable draft. Finalized-version lineage is not duplicated. */
+export function duplicateDraft(source: DraftRecord, name?: string): DraftRecord {
+  const copiedState = cloneDraft(source.wizard_state);
+  // Preserve completed workflow progress even when the source was last open
+  // on an earlier editable step.
+  copiedState.step = Math.max(copiedState.step, source.last_step);
+  copiedState.revision_of_quote_id = undefined;
+  copiedState.revision_of_quote_number = undefined;
+  copiedState.revision_reason = undefined;
+  copiedState.intended_version = undefined;
+  copiedState.updated_at = new Date().toISOString();
+  const copyName = name?.trim() || `${source.draft_name} — Copy`;
+  const id = upsertDraft(copiedState, undefined, copyName);
+  const created = getDraft(id);
+  if (!created) throw new Error("The duplicate draft could not be read back after saving.");
+  return created;
 }
 export function deleteDraft(id: string): void {
   writeAll(read().filter((d) => d.id !== id));

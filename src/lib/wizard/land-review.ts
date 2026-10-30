@@ -8,7 +8,15 @@ import {
 import { landDayContext } from "./land-eligibility";
 import type { QuoteDraft, RoutingDay } from "./types";
 
-export type GuideReviewRate = { label: string; rate: number };
+export type GuideReviewRate = { label: string; rate: number; minPax: number; maxPax?: number };
+
+export function guideSlabOverlaps(
+  slab: Pick<GuideReviewRate, "minPax" | "maxPax">,
+  quotationMinPax: number,
+  quotationMaxPax: number,
+): boolean {
+  return slab.minPax <= quotationMaxPax && (slab.maxPax == null || slab.maxPax >= quotationMinPax);
+}
 
 /** Persisted quotation rate wins over mutable master data. */
 export function savedQuoteRawRate(
@@ -160,9 +168,17 @@ export function guideReviewSlabs(guide: Guide, language: GuideLanguage): GuideRe
   return Object.entries(configuredGuideRates(guide, language))
     .flatMap(([key, rate]) => {
       const bounded = key.match(/^rate_(\d+)_to_(\d+)$/);
-      if (bounded) return [{ label: `${bounded[1]}–${bounded[2]}`, rate }];
+      if (bounded)
+        return [
+          {
+            label: `${bounded[1]}–${bounded[2]}`,
+            rate,
+            minPax: Number(bounded[1]),
+            maxPax: Number(bounded[2]),
+          },
+        ];
       const openEnded = key.match(/^rate_(\d+)_plus$/);
-      if (openEnded) return [{ label: `${openEnded[1]}+`, rate }];
+      if (openEnded) return [{ label: `${openEnded[1]}+`, rate, minPax: Number(openEnded[1]) }];
       return [];
     })
     .sort((left, right) => {
@@ -178,12 +194,16 @@ export function guideReviewRates(
   language: GuideLanguage,
   mode: "ranges" | "exact",
   exactPax: number,
+  quotationMinPax = 1,
+  quotationMaxPax = Number.POSITIVE_INFINITY,
 ): GuideReviewRate[] {
   if (mode === "exact") {
     const pax = Math.max(1, exactPax);
     const rate = guideRateForPax(guide, pax, language);
-    return rate > 0 ? [{ label: `${pax} Pax`, rate }] : [];
+    return rate > 0 ? [{ label: `${pax} Pax`, rate, minPax: pax, maxPax: pax }] : [];
   }
 
-  return guideReviewSlabs(guide, language).filter((item) => item.rate > 0);
+  return guideReviewSlabs(guide, language).filter(
+    (item) => item.rate > 0 && guideSlabOverlaps(item, quotationMinPax, quotationMaxPax),
+  );
 }

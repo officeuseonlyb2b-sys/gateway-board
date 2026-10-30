@@ -35,10 +35,11 @@ export interface QuoteValidationResult {
 }
 
 export function isRoutingReady(draft: Pick<QuoteDraft, "routing" | "nights">): boolean {
-  const overnight = draft.routing.filter((day) => day.overnight);
+  const tourDays = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  const overnight = tourDays.filter((day) => day.overnight);
   return (
     draft.nights > 0 &&
-    draft.routing.length === draft.nights + 1 &&
+    tourDays.length === draft.nights + 1 &&
     overnight.length === draft.nights &&
     overnight.every((day) => Boolean(day.city_id))
   );
@@ -60,7 +61,8 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   const issues: QuoteValidationIssue[] = [];
   const pax = effectivePaxForPricing(draft);
   const range = parsePaxRange(draft);
-  const overnight = draft.routing.filter((day) => day.overnight);
+  const tourDays = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  const overnight = tourDays.filter((day) => day.overnight);
   const queryFor = normalizeQueryFor(draft.query_for) || "Package";
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
   const requiresAccommodation = scope.accommodationPart;
@@ -256,13 +258,13 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       ),
     );
   }
-  if (scope.routing && draft.routing.length !== draft.nights + 1) {
+  if (scope.routing && tourDays.length !== draft.nights + 1) {
     issues.push(
       issue(
         "ROUTING_DURATION_MISMATCH",
         "blocker",
         "Routing",
-        `The itinerary has ${draft.routing.length} day(s), but the trip is ${draft.nights + 1} day(s).`,
+        `The itinerary has ${tourDays.length} touring day(s), but the trip is ${draft.nights + 1} day(s).`,
       ),
     );
   }

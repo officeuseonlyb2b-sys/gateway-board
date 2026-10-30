@@ -808,6 +808,46 @@ try {
     ["activity-master"],
     "Selected Tour destination resolves Activity eligibility",
   );
+  const manduDb = structuredClone(landDb);
+  manduDb.cities.push({ id: "city-mandu", name: "Mandu" });
+  manduDb.destination_cities.push({ id: "destination-city-mandu", name: "Mandu", created_at: now });
+  manduDb.activity_destinations.push({ id: "activity-destination-mandu", name: "Mandu" });
+  manduDb.activities.push({
+    ...manduDb.activities[0],
+    id: "activity-mandu",
+    destination_id: "activity-destination-mandu",
+    activity_name: "Mandu Activity",
+  });
+  const manduRoute = {
+    ...selectedRoute,
+    to_city_ids: ["city-mandu", "city-1"],
+  };
+  const manduDraft = {
+    ...types.emptyDraft(),
+    routing: [manduRoute],
+    activities: [
+      {
+        id: "activity-line-mandu",
+        activity_id: "activity-mandu",
+        qty: 1,
+        rate: 500,
+        pricing_mode: "slab",
+        inclusion_status: "included",
+        from_routing_days: [1],
+      },
+    ],
+  };
+  assert.equal(
+    landEligibility.isSelectedLandServiceValid(
+      "activity",
+      "activity-mandu",
+      1,
+      manduDraft,
+      manduDb,
+    ),
+    true,
+    "Selected Mandu activity remains eligible when Mandu is an intermediate city",
+  );
   assert.equal(
     landEligibility.isSelectedLandServiceValid("guide", "guide-master", 1, noProgramDraft, landDb),
     true,
@@ -1093,6 +1133,41 @@ try {
   incompleteRoutingDraft.routing[0].city_id = "";
   assert.equal(validation.isRoutingReady(incompleteRoutingDraft), false);
 
+  const dayZeroDraft = structuredClone(baseDraft());
+  dayZeroDraft.routing.unshift({
+    day: 0,
+    is_day_zero: true,
+    date: "2026-09-21",
+    city_id: "city-1",
+    from_city: "Indore",
+    to_city: "Indore",
+    program: "Arrival only",
+    program_mode: "text",
+    overnight: false,
+  });
+  assert.equal(
+    validation.isRoutingReady(dayZeroDraft),
+    true,
+    "Optional Day 0 does not invalidate a complete Day 1 onward routing",
+  );
+  const ordinaryLand = costsheet.buildLandPart(baseDraft(), db);
+  const dayZeroLand = costsheet.buildLandPart(dayZeroDraft, db);
+  assert.equal(
+    dayZeroLand.transport_total,
+    ordinaryLand.transport_total,
+    "Optional Day 0 does not add an automatic transport charge",
+  );
+  assert.equal(dayZeroLand.rows.find((row) => row.day === 0)?.total, 0);
+  assert.equal(
+    calc.quotationPaxLabel({ ...baseDraft(), pax_mode: "range", pax_min: 4, pax_max: 14 }),
+    "4–14 Pax",
+  );
+  assert.equal(
+    calc.quotationPaxLabel({ ...baseDraft(), pax_mode: "range", pax_min: 2, pax_max: 9 }),
+    "2–9 Pax",
+  );
+  assert.equal(calc.quotationPaxLabel({ ...baseDraft(), pax_mode: "exact", adults: 4 }), "4 Pax");
+
   const overnightSourceDraft = baseDraft();
   overnightSourceDraft.routing[0].to_city = "Bhopal";
   const overnightSourceSheet = costsheet.buildHotelMealSheet(
@@ -1177,13 +1252,30 @@ try {
   const reviewGuide = db.guides[0];
   const reviewGuideBefore = structuredClone(reviewGuide);
   assert.deepEqual(landReview.guideReviewRates(reviewGuide, "English", "ranges", 6), [
-    { label: "1–5", rate: 1000 },
-    { label: "6–14", rate: 1500 },
-    { label: "15+", rate: 2000 },
+    { label: "1–5", rate: 1000, minPax: 1, maxPax: 5 },
+    { label: "6–14", rate: 1500, minPax: 6, maxPax: 14 },
+    { label: "15+", rate: 2000, minPax: 15 },
   ]);
   assert.deepEqual(landReview.guideReviewRates(reviewGuide, "English", "exact", 6), [
-    { label: "6 Pax", rate: 1500 },
+    { label: "6 Pax", rate: 1500, minPax: 6, maxPax: 6 },
   ]);
+  assert.deepEqual(
+    landReview.guideReviewRates(reviewGuide, "English", "ranges", 9, 2, 9).map((row) => row.label),
+    ["1–5", "6–14"],
+    "Guide review shows only slabs overlapping quotation range 2–9",
+  );
+  assert.deepEqual(
+    landReview
+      .guideReviewRates(reviewGuide, "English", "ranges", 14, 4, 14)
+      .map((row) => row.label),
+    ["1–5", "6–14"],
+    "Guide review shows only slabs overlapping quotation range 4–14",
+  );
+  assert.deepEqual(
+    landReview.guideReviewRates(reviewGuide, "English", "exact", 4).map((row) => row.label),
+    ["4 Pax"],
+    "Exact 4 Pax review resolves only its containing Guide slab",
+  );
   const missingGuideRate = { ...reviewGuide, rate_1_to_5: 0, rate_6_to_14: 0, rate_15_plus: 0 };
   assert.deepEqual(
     landReview.guideReviewRates(missingGuideRate, "English", "ranges", 6),
@@ -3363,6 +3455,29 @@ try {
     "Save and reload retain the explicitly selected Standard mode",
   );
   assert.equal(
+    draftStore.normalizeDraft(structuredClone(standardWithStaleDynamicData)).allocation_mode,
+    "standard",
+    "Draft hydration preserves explicitly selected Standard mode with historical Dynamic data",
+  );
+  assert.equal(
+    hotelsStep.isDynamicHotelMode(standardWithStaleDynamicData),
+    false,
+    "Step 8 does not mask Standard mode with retained Dynamic state",
+  );
+  assert.equal(
+    hotelsStep.isDynamicHotelMode(fourNightDynamic),
+    true,
+    "Step 8 keeps explicitly selected Dynamic mode active",
+  );
+  assert.equal(
+    hotelsStep.isDynamicHotelMode({
+      ...standardWithStaleDynamicData,
+      allocation_mode: "dynamic",
+    }),
+    true,
+    "Standard → Dynamic → Standard mode switching remains explicit and reversible",
+  );
+  assert.equal(
     types.hotelSelectionForDay(fourNightDynamic.hotel_options[0], fourNightDynamic.routing[3], true)
       ?.hotel_id,
     "hotel-4",
@@ -3566,6 +3681,22 @@ try {
   );
   const priorMasterDb = masterPricing.db.get();
   masterPricing.db.hydrateAll(fourNightDb);
+  const standardWithHistoricalDynamicMarkup = renderToStaticMarkup(
+    createElement(packageStandardReview.PackageStandardCostingReview, {
+      draft: standardWithStaleDynamicData,
+      set: () => undefined,
+      readOnly: true,
+    }),
+  );
+  assert.ok(
+    standardWithHistoricalDynamicMarkup.includes("Standard Hotel Mode"),
+    "Final review follows explicitly selected Standard mode",
+  );
+  assert.ok(
+    !standardWithHistoricalDynamicMarkup.includes("Dynamic Room-wise Rate Verification") &&
+      !standardWithHistoricalDynamicMarkup.includes("Allocation or rate validation pending"),
+    "Final review and commercial matrix ignore inactive Dynamic allocations",
+  );
   const fourNightMarkup = renderToStaticMarkup(
     createElement(dynamicReview.AccommodationDynamicCostingReview, {
       draft: fourNightDynamic,

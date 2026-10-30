@@ -96,6 +96,10 @@ export const hotelBookingConfirmationPatch = () => ({
   accommodation_status: undefined,
 });
 
+/** The saved explicit allocation mode is the single accommodation-mode source. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const isDynamicHotelMode = (draft: QuoteDraft) => isDynamicAccommodationMode(draft);
+
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
@@ -106,7 +110,10 @@ export function Step15({ draft, set }: StepProps) {
   const canUseDynamic = canUseDynamicAccommodation(draft);
 
   // Global Mode Toggle (Standard vs Dynamic)
-  const isDynamicGlobal = canUseDynamic && isDynamicAccommodationMode(draft);
+  // The persisted explicit mode is authoritative. Do not visually coerce a
+  // legacy Dynamic draft into Standard merely because its current Pax setup
+  // cannot create a new Dynamic allocation (for example, a Pax range).
+  const isDynamicGlobal = isDynamicHotelMode(draft);
   const isSplitGroup = isDynamicGlobal && isSplitAccommodation(draft);
   const splitAllocation = splitAccommodationAllocation(draft);
   const setGlobalMode = (isDynamic: boolean) => {
@@ -310,10 +317,7 @@ export function Step15({ draft, set }: StepProps) {
             overnightRouting.length > 0 &&
             activeOption.selections.some((s) => s.room_id) && (
               <>
-                {!isDynamicGlobal && (draft.dynamic_days ?? []).length > 0 && (
-                  <OptionDynamicPreview draft={draft} option={activeOption} />
-                )}
-                {optionUsesCustomAllocation(activeOption) && (
+                {isDynamicGlobal && optionUsesCustomAllocation(activeOption) && (
                   <OptionPerPersonPreview draft={draft} option={activeOption} />
                 )}
               </>

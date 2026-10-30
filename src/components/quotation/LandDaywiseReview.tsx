@@ -33,6 +33,7 @@ import {
 } from "@/lib/wizard/guide-pricing";
 import {
   guideReviewSlabs,
+  guideSlabOverlaps,
   landReviewRouteLabel,
   landReviewToursForDay,
   savedQuoteRawRate,
@@ -161,6 +162,7 @@ function LandDaywiseReviewImpl({
   const db = useDB();
   const sheet = useMemo(() => buildLandPart(draft, db), [draft, db]);
   const pricingPax = Math.max(1, effectivePaxForPricing(draft));
+  const serviceDays = draft.routing.filter((route) => !(route.is_day_zero || route.day === 0));
   const languageEnabled = (language: GuideLanguage) =>
     language === "Hindi"
       ? filters.hindi
@@ -263,10 +265,22 @@ function LandDaywiseReviewImpl({
           : Array.from(
               new Set(
                 entries.flatMap(({ line, master }) => {
-                  const masterSlabs = guideReviewSlabs(master, language).map((item) => item.label);
-                  const savedSlabs = (line?.pax_ranges ?? []).map(
-                    (item) => `${item.from_pax}–${item.to_pax}`,
-                  );
+                  const quotationMin = draft.pax_min ?? filters.exactPax;
+                  const quotationMax = draft.pax_max ?? filters.exactPax;
+                  const masterSlabs = guideReviewSlabs(master, language)
+                    .filter((item) => guideSlabOverlaps(item, quotationMin, quotationMax))
+                    .map((item) => item.label);
+                  const savedSlabs = (line?.pax_ranges ?? [])
+                    .filter(
+                      (item) =>
+                        Number.isFinite(item.from_pax) &&
+                        Number.isFinite(item.to_pax) &&
+                        item.from_pax >= 1 &&
+                        item.to_pax >= item.from_pax &&
+                        item.from_pax <= quotationMax &&
+                        item.to_pax >= quotationMin,
+                    )
+                    .map((item) => `${item.from_pax}–${item.to_pax}`);
                   return [...masterSlabs, ...savedSlabs];
                 }),
               ),
@@ -301,7 +315,8 @@ function LandDaywiseReviewImpl({
   const escortMode = getEscortPricingMode(draft);
   const escortRanges = (draft.escort_ranges ?? []).filter((range) =>
     filters.paxDisplay === "ranges"
-      ? true
+      ? range.min_pax <= (draft.pax_max ?? filters.exactPax) &&
+        range.max_pax >= (draft.pax_min ?? filters.exactPax)
       : filters.exactPax >= range.min_pax && filters.exactPax <= range.max_pax,
   );
   const escortColumns: EscortColumn[] =
@@ -371,9 +386,12 @@ function LandDaywiseReviewImpl({
         if (filters.paxDisplay === "exact") {
           pax = filters.exactPax;
         } else {
-          const [fromPax, toPax] = column.slab.split(/[–-]/).map(Number);
+          const match = column.slab.match(/^(\d+)(?:[–-](\d+)|\+)$/);
+          if (!match) return sum;
+          const fromPax = Number(match[1]);
+          const toPax = match[2] ? Number(match[2]) : Number.POSITIVE_INFINITY;
           pax =
-            pricingPax >= fromPax && pricingPax <= (toPax || Number.POSITIVE_INFINITY)
+            pricingPax >= fromPax && pricingPax <= toPax
               ? pricingPax
               : fromPax;
         }
@@ -392,8 +410,10 @@ function LandDaywiseReviewImpl({
         );
         if ((included ? "included" : "optional") !== column.inclusion) return sum;
         const targets = line?.from_routing_days?.length
-          ? line.from_routing_days.filter((day) => draft.routing.some((route) => route.day === day))
-          : draft.routing.map((route) => route.day);
+          ? line.from_routing_days.filter((day) =>
+              serviceDays.some((route) => route.day === day),
+            )
+          : serviceDays.map((route) => route.day);
         const multiplier = line ? (line.guides * line.days) / Math.max(1, targets.length) : 1;
         return sum + rate * multiplier;
       }, 0) || undefined
@@ -402,6 +422,7 @@ function LandDaywiseReviewImpl({
 
   const escortCellValue = (group: DayGroup, column: EscortColumn): number | undefined => {
     if (!filters.escort || !isEscortEnabled(draft)) return undefined;
+    if (group.route.is_day_zero || group.route.day === 0) return undefined;
     if (escortMode === "pax_range" && column.rangeId) {
       const range = (draft.escort_ranges ?? []).find((item) => item.id === column.rangeId);
       if (!range) return undefined;
@@ -409,7 +430,7 @@ function LandDaywiseReviewImpl({
         getEscortBaseForPax(
           { ...draft, escort_ranges: [range] },
           filters.paxDisplay === "exact" ? filters.exactPax : range.min_pax,
-        ) / Math.max(1, draft.routing.length);
+        ) / Math.max(1, serviceDays.length);
       return value > 0 ? value : undefined;
     }
     if (escortMode === "day_wise") {

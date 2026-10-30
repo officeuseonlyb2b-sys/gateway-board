@@ -185,15 +185,16 @@ export function eligibleGuidesForDay(draft: QuoteDraft, routingDay: RoutingDay, 
 
 export function eligibleActivitiesForDay(draft: QuoteDraft, routingDay: RoutingDay, db: DB) {
   const context = landDayContext(draft, routingDay, db);
-  if (context.hasExplicitTourSelection && context.selectedTours.length === 0) return [];
-  const eligibleDestinationCityIds =
-    context.selectedTours.length > 0
-      ? unique(context.selectedTours.map((tour) => tour.city_id))
-      : context.destinationCityIds;
+  // Activities are city-based, not Tour-based. A routing day can contain an
+  // intermediate city even when its selected Tour belongs to another city.
+  const eligibleDestinationCityIds = unique([
+    ...context.destinationCityIds,
+    ...context.selectedTours.map((tour) => tour.city_id),
+  ]);
   const eligibleCityNames = db.destination_cities
     .filter((city) => eligibleDestinationCityIds.includes(city.id))
     .map((city) => city.name);
-  if (context.selectedTours.length === 0) eligibleCityNames.push(...context.cityNames);
+  eligibleCityNames.push(...context.cityNames);
   const destinationIds = db.activity_destinations
     .filter((destination) =>
       eligibleCityNames.some((city) => normalized(city) === normalized(destination.name)),

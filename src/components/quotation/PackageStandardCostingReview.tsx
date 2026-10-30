@@ -17,6 +17,7 @@ import {
   computeMealDays,
   effectivePaxForPricing,
   getCostingPaxValues,
+  quotationPaxLabel,
   gstRateFor,
   hotelsGst,
   hotelsMarkup,
@@ -386,7 +387,6 @@ function Masthead({ draft }: { draft: QuoteDraft }) {
 
 function TripInformation({ draft }: { draft: QuoteDraft }) {
   const db = useDB();
-  const pax = useMemo(() => getCostingPaxValues(draft), [draft]);
   const route = draft.routing
     .map((day) => db.cities.find((city) => city.id === day.city_id)?.name || day.to_city)
     .filter(Boolean)
@@ -400,7 +400,7 @@ function TripInformation({ draft }: { draft: QuoteDraft }) {
       `${draft.start_date || "—"} — ${draft.start_date ? addDaysISO(draft.start_date, draft.nights || 0) : "—"}`,
     ],
     ["Duration", `${draft.nights || 0} Nights / ${(draft.nights || 0) + 1} Days`],
-    ["Travellers", pax.join(", ") || "—"],
+    ["Travellers", `${quotationPaxLabel(draft)} · ${draft.tour_type || "—"}`],
   ];
   return (
     <Section number={1} title="Trip Information">
@@ -473,7 +473,14 @@ function DaywiseLand({ draft, filters }: { draft: QuoteDraft; filters: LandRevie
         return rate > 0 ? [{ label: `${filters.exactPax} Pax`, rate }] : [];
       }
       const language = (line.language || (kind === "other" ? "Language" : kind)) as GuideLanguage;
-      return guideReviewRates(master, language, filters.paxDisplay, filters.exactPax);
+      return guideReviewRates(
+        master,
+        language,
+        filters.paxDisplay,
+        filters.exactPax,
+        draft.pax_min ?? filters.exactPax,
+        draft.pax_max ?? filters.exactPax,
+      );
     });
     return values.length ? (
       <div className="space-y-0.5">
@@ -873,7 +880,9 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
                           </>
                         )}
                         <td>
-                          {row.min_pax && row.max_pax ? `${row.min_pax}–${row.max_pax}` : pax}
+                          {"min_pax" in row && row.min_pax && row.max_pax
+                            ? `${row.min_pax}–${row.max_pax}`
+                            : pax}
                         </td>
                         <td className="text-right tabular-nums">{money(row.base_rate)}</td>
                         <td className="text-right tabular-nums">{money(row.markup)}</td>
@@ -1305,9 +1314,11 @@ function AccommodationReview({
 function SeparateMealsReview({
   draft,
   optionKey = "A",
+  sectionNumber = 5,
 }: {
   draft: QuoteDraft;
   optionKey?: OptionKey;
+  sectionNumber?: number;
 }) {
   const db = useDB();
   const rows = useMemo(
@@ -1324,7 +1335,7 @@ function SeparateMealsReview({
   const optionalRows = rows.filter((row) => row.status === "optional");
 
   return (
-    <Section number={3} title={`Meals — Option ${optionKey} Included & Optional Review`}>
+    <Section number={sectionNumber} title={`Meals — Option ${optionKey} Included & Optional Review`}>
       <div className="space-y-3 p-2">
         <div className="grid gap-2 lg:grid-cols-2">
           {(
@@ -1503,6 +1514,14 @@ function PackageStandardCostingReviewImpl({
       <div className="print-trip-land-page space-y-3">
         <Masthead draft={costingDraft} />
         <TripInformation draft={costingDraft} />
+        <div className="print-commercial-matrix-page [&_h2]:text-[#103353]">
+          <CommercialPackageMatrix
+            draft={costingDraft}
+            set={set}
+            readOnly={readOnly}
+            displaySelection={draft.land_review_display_selection}
+          />
+        </div>
         {scope.landPart && (
           <LandReview draft={draft} costingDraft={costingDraft} set={set} readOnly={readOnly} />
         )}
@@ -1512,10 +1531,10 @@ function PackageStandardCostingReviewImpl({
               draft={costingDraft}
               options={costingDraft.hotel_options.slice(0, 4)}
               embedded
-              embeddedSectionNumber={2}
+              embeddedSectionNumber={4}
             />
           ) : (
-            <AccommodationReview draft={costingDraft} sectionNumber={2} />
+            <AccommodationReview draft={costingDraft} sectionNumber={4} />
           ))}
       </div>
       {!landOnly &&
@@ -1531,27 +1550,25 @@ function PackageStandardCostingReviewImpl({
                 draft={costingDraft}
                 options={costingDraft.hotel_options.slice(0, 4)}
                 embedded
+                embeddedSectionNumber={4}
               />
             ) : (
-              <AccommodationReview draft={costingDraft} />
+              <AccommodationReview draft={costingDraft} sectionNumber={4} />
             )}
           </div>
         ))}
       {scope.accommodationPart && (
         <div className="space-y-3 print-meals-section">
           {costingDraft.hotel_options.slice(0, 4).map((option) => (
-            <SeparateMealsReview key={option.key} draft={costingDraft} optionKey={option.key} />
+            <SeparateMealsReview
+              key={option.key}
+              draft={costingDraft}
+              optionKey={option.key}
+              sectionNumber={5}
+            />
           ))}
         </div>
       )}
-      <div className="print-commercial-matrix-page [&_h2]:text-[#103353]">
-        <CommercialPackageMatrix
-          draft={costingDraft}
-          set={set}
-          readOnly={readOnly}
-          displaySelection={draft.land_review_display_selection}
-        />
-      </div>
     </div>
   );
 }

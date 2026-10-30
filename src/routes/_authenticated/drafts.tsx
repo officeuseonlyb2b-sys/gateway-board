@@ -1,16 +1,27 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { FileText, Play, Trash2, Search, Pencil, Check, X, Send } from "lucide-react";
+import { FileText, Play, Trash2, Search, Pencil, Check, X, Send, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useDrafts, deleteDraft, renameDraft, type DraftRecord } from "@/lib/drafts-store";
+import {
+  useDrafts,
+  deleteDraft,
+  duplicateDraft,
+  renameDraft,
+  type DraftRecord,
+} from "@/lib/drafts-store";
 import { fmtDateShort } from "@/lib/format";
-import { useAccessibleQueries } from "@/lib/crm/access";
-import { removeQueryQuotationDraft, useStandaloneQuotationReviews } from "@/lib/crm/store";
+import { useAccessProfile, useAccessibleQueries } from "@/lib/crm/access";
+import {
+  removeQueryQuotationDraft,
+  upsertQueryQuotationDraft,
+  useStandaloneQuotationReviews,
+} from "@/lib/crm/store";
 import { QuotationReviewRequestDialog } from "@/components/quotation/QuotationReviewRequestDialog";
+import { accommodationMode } from "@/lib/wizard/types";
 
 export const Route = createFileRoute("/_authenticated/drafts")({
   head: () => ({ meta: [{ title: "Drafts — MP Tourism Hub" }] }),
@@ -31,6 +42,7 @@ const STEP_LABELS = [
 
 function DraftsPage() {
   const localDrafts = useDrafts();
+  const access = useAccessProfile();
   const queries = useAccessibleQueries();
   const standaloneReviews = useStandaloneQuotationReviews();
   const cloudDraftMetadata = useMemo(
@@ -93,6 +105,31 @@ function DraftsPage() {
     setEditingId(null);
   }
 
+  function duplicate(draft: DraftRecord) {
+    let copy: DraftRecord | null = null;
+    try {
+      copy = duplicateDraft(draft);
+      const employee = access.employee;
+      if (copy.wizard_state.linked_query_id && employee) {
+        upsertQueryQuotationDraft(copy.wizard_state.linked_query_id, {
+          id: copy.id,
+          draft_name: copy.draft_name,
+          draft_data: copy.wizard_state,
+          created_by_employee_id: employee.id,
+          created_by_name: employee.name,
+          created_by_role: employee.role,
+          last_edited_by_employee_id: employee.id,
+          last_edited_by_name: employee.name,
+          last_edited_by_role: employee.role,
+        });
+      }
+      toast.success(`Created independent draft “${copy.draft_name}”.`);
+    } catch (error) {
+      if (copy) deleteDraft(copy.id);
+      toast.error(`Could not duplicate costing: ${(error as Error).message}`);
+    }
+  }
+
   return (
     <div className="p-6 lg:p-8 max-w-[1500px] mx-auto">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -136,6 +173,7 @@ function DraftsPage() {
               <tr>
                 <th className="text-left py-2.5 px-4">Draft Name</th>
                 <th className="text-left py-2.5 px-2">Type</th>
+                <th className="text-left py-2.5 px-2">Hotel Mode</th>
                 <th className="text-left py-2.5 px-2">Program</th>
                 <th className="text-left py-2.5 px-2">Query</th>
                 <th className="text-left py-2.5 px-2">Last Step</th>
@@ -228,6 +266,11 @@ function DraftsPage() {
                         <Badge variant="secondary">{d.wizard_state.query_type}</Badge>
                       )}
                     </td>
+                    <td className="py-2.5 px-2">
+                      <Badge variant="outline">
+                        {accommodationMode(d.wizard_state) === "dynamic" ? "Dynamic" : "Standard"}
+                      </Badge>
+                    </td>
                     <td className="py-2.5 px-2 text-muted-foreground">
                       {d.wizard_state.program_name || "—"}
                     </td>
@@ -279,6 +322,9 @@ function DraftsPage() {
                         <Button size="sm" variant="outline" onClick={() => resume(d)}>
                           <Play className="h-3.5 w-3.5 mr-1" /> Resume
                         </Button>
+                        <Button size="sm" variant="outline" onClick={() => duplicate(d)}>
+                          <Copy className="h-3.5 w-3.5 mr-1" /> Duplicate Costing
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -310,7 +356,11 @@ function DraftsPage() {
                           variant="ghost"
                           title="Delete"
                           onClick={() => {
-                            if (confirm(`Delete draft "${d.draft_name}"?`)) {
+                            if (
+                              confirm(
+                                `Delete saved draft "${d.draft_name}" permanently? This action cannot be undone.`,
+                              )
+                            ) {
                               deleteDraft(d.id);
                               const cloud = cloudDraftMetadata.get(d.id);
                               if (cloud) removeQueryQuotationDraft(cloud.query_id, d.id);

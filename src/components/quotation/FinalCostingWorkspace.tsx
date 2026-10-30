@@ -9,6 +9,7 @@ import {
   dynamicAccommodationBreakdown,
   effectiveAccommodationPax,
   getCostingPaxValues,
+  quotationPaxLabel,
   gstRateFor,
   hotelsGst,
   hotelsMarkup,
@@ -95,7 +96,7 @@ function Context({ draft }: { draft: QuoteDraft }) {
       `${draft.start_date || "—"} — ${draft.start_date ? addDaysISO(draft.start_date, draft.nights || 0) : "—"}`,
     ],
     ["Duration", `${draft.nights || 0} Nights / ${(draft.nights || 0) + 1} Days`],
-    ["Travellers", `${pax.join(", ") || "—"} · ${draft.tour_type || "—"}`],
+    ["Travellers", `${quotationPaxLabel(draft)} · ${draft.tour_type || "—"}`],
   ];
   return (
     <Section title="Trip Information" number={1}>
@@ -361,9 +362,7 @@ function DynamicAccommodationReview({
                       const room = db.room_categories.find(
                         (item) => item.id === allocation.room_id,
                       );
-                      const selection = day
-                        ? hotelSelectionForDay(option, day, true)
-                        : undefined;
+                      const selection = day ? hotelSelectionForDay(option, day, true) : undefined;
                       const hotel = selection
                         ? db.hotels.find((item) => item.id === selection.hotel_id)
                         : undefined;

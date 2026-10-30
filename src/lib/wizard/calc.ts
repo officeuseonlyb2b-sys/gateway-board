@@ -205,7 +205,13 @@ function resolveDynamicAccommodationRoomLines(
         missing++;
         return;
       }
-      const plan = findRatePlan(d.rate_plans, allocation.room_id, selection.meal_plan, date, option.category);
+      const plan = findRatePlan(
+        d.rate_plans,
+        allocation.room_id,
+        selection.meal_plan,
+        date,
+        option.category,
+      );
       const masterNet = plan
         ? allocation.occupancy === "single"
           ? plan.single_rate_missing
@@ -472,7 +478,9 @@ export function calculateMealCostingRows(
           const hs =
             opt?.selections.find((item) => item.hotel_id === choice.hotel_id) ??
             hotelSelectionForDay(opt, day);
-          const plan = hs ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date, opt?.category) : null;
+          const plan = hs
+            ? findRatePlan(d.rate_plans, hs.room_id, hs.meal_plan, date, opt?.category)
+            : null;
           perPerson =
             choice.per_person_rate ??
             (mealKey === "lunch" ? plan?.lunch_rate : plan?.dinner_rate) ??
@@ -803,6 +811,13 @@ export function getCostingPaxValues(draft: QuoteDraft): number[] {
   return [1];
 }
 
+/** Compact authoritative traveller label for quotation headers and reviews. */
+export function quotationPaxLabel(draft: QuoteDraft): string {
+  const range = parsePaxRange(draft);
+  if (draft.pax_mode === "range" && range) return `${range.min}–${range.max} Pax`;
+  return `${Math.max(1, totalPax(draft))} Pax`;
+}
+
 export function deriveTourTypeFromPricingPax(pax: number | null | undefined): "FIT" | "GIT" {
   const pricingPax =
     typeof pax === "number" && Number.isFinite(pax) ? Math.max(1, Math.floor(pax)) : 1;
@@ -985,7 +1000,11 @@ export function computePersonTotals(
     if (sel?.no_hotel) return null;
     if (!sel) return null;
     const date = addDaysISO(draft.start_date, i);
-    return planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category));
+    return planForDay(
+      opt,
+      day.day,
+      findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
+    );
   });
 
   return allocs.map((p) => {
@@ -1348,7 +1367,11 @@ export function computeDynamicOption(
     if (sel?.no_hotel) return;
     const date = addDaysISO(draft.start_date, i);
     const plan = sel
-      ? planForDay(opt, day.day, findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category))
+      ? planForDay(
+          opt,
+          day.day,
+          findRatePlan(d.rate_plans, sel.room_id, sel.meal_plan, date, opt.category),
+        )
       : null;
     if (!plan) {
       days.push({ day: day.day, city_id: day.city_id, mix, net: 0, gst: 0, missing: true });

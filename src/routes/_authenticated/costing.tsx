@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
@@ -494,12 +494,14 @@ function WizardPage() {
   const user = useAuth();
   const access = useAccessProfile();
   const search = Route.useSearch();
+  const navigate = useNavigate();
 
   const [showBanner, setShowBanner] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isDraftSaving, setIsDraftSaving] = useState(false);
   const saveInFlightRef = useRef(false);
   const [lastSavedDraftFingerprint, setLastSavedDraftFingerprint] = useState<string | null>(null);
   const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
@@ -559,13 +561,19 @@ function WizardPage() {
   const draftFingerprint = (value: QuoteDraft) =>
     JSON.stringify({ ...value, updated_at: undefined });
   const currentDraftFingerprint = draft ? draftFingerprint(draft) : "";
+  const lastPersistedDraftFingerprint = activeDraftRecord
+    ? draftFingerprint(activeDraftRecord.wizard_state)
+    : null;
+  const hasUnsavedDraftChanges = Boolean(
+    draft && (!activeDraftRecord || lastPersistedDraftFingerprint !== currentDraftFingerprint),
+  );
   const latestSavedDraft = linkedQuery?.costing_versions
     ?.slice()
     .sort((left, right) => right.version - left.version)[0]?.quote.draft_snapshot;
   const unchangedFromSavedVersion = Boolean(
     draft &&
-      (lastSavedDraftFingerprint === currentDraftFingerprint ||
-        (latestSavedDraft && draftFingerprint(latestSavedDraft) === currentDraftFingerprint)),
+    (lastSavedDraftFingerprint === currentDraftFingerprint ||
+      (latestSavedDraft && draftFingerprint(latestSavedDraft) === currentDraftFingerprint)),
   );
   const costingWarnings = [
     ...(finalizationReview?.blockers.map((item) => `${item.section}: ${item.message}`) ?? []),
@@ -590,7 +598,9 @@ function WizardPage() {
         ]
       : []),
     ...(unchangedFromSavedVersion
-      ? ["Snapshot: This exact costing is already saved. Change the draft before creating the next version."]
+      ? [
+          "Snapshot: This exact costing is already saved. Change the draft before creating the next version.",
+        ]
       : []),
   ];
   const canFinalize = step === 10 && finalizationBlockers.length === 0;
@@ -780,6 +790,7 @@ function WizardPage() {
   };
 
   const canProceed = validate(draft, step);
+  const continueBlocker = step === 5 && !canProceed ? routingStepError(draft) : undefined;
   const canNavigateTo = (targetStep: number) => {
     const targetPosition = workflowSteps.findIndex((workflowStep) => workflowStep === targetStep);
     if (targetPosition < 0) return false;
@@ -794,6 +805,7 @@ function WizardPage() {
   const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
     flushDraftPersistence();
     const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
+    if (!getDraft(id)) throw new Error("Draft could not be verified after saving.");
     if (!currentDraftId) setCurrentDraftId(id);
     const employee = access.employee;
     if (nextState.linked_query_id && employee) {
@@ -845,9 +857,7 @@ function WizardPage() {
       const warnings = [
         ...review.blockers.map((item) => `${item.section}: ${item.message}`),
         ...(duplicateProgramme
-          ? [
-              `Programme: “${duplicateProgramme.name}” already exists (${duplicateProgramme.code}).`,
-            ]
+          ? [`Programme: “${duplicateProgramme.name}” already exists (${duplicateProgramme.code}).`]
           : []),
       ];
       let quote = buildCostingVersionSnapshot(
@@ -863,11 +873,7 @@ function WizardPage() {
         warnings,
       );
       const requestDraftId = persistToDrafts(latest, { silent: true });
-      const version = await finalizeQuotationVersion(
-        latest.linked_query_id,
-        quote,
-        requestDraftId,
-      );
+      const version = await finalizeQuotationVersion(latest.linked_query_id, quote, requestDraftId);
       quote = version.quote;
       if (!getSavedQuote(quote.id)) persistQuote(quote);
       setLastSavedDraftFingerprint(draftFingerprint(latest));
@@ -1019,21 +1025,34 @@ function WizardPage() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="mr-1 hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-              Autosaved{" "}
-              {new Date(draft.updated_at).toLocaleTimeString("en-IN", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {hasUnsavedDraftChanges
+                ? "Unsaved changes"
+                : `Saved ${new Date(
+                    activeDraftRecord?.updated_at ?? draft.updated_at,
+                  ).toLocaleTimeString("en-IN", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`}
             </div>
             <Button
               variant="outline"
               size="sm"
+              disabled={isDraftSaving}
               onClick={() => {
-                const name =
-                  window.prompt("Name this draft (optional):", draft.program_name || "") ||
-                  undefined;
-                persistToDrafts(draft, { name });
-                toast.success("Draft saved.");
+                if (isDraftSaving) return;
+                setIsDraftSaving(true);
+                try {
+                  const latest = loadDraft() ?? draft;
+                  const name =
+                    window.prompt("Name this draft (optional):", draft.program_name || "") ||
+                    undefined;
+                  persistToDrafts(latest, { name });
+                  toast.success("Draft saved and available in Drafts.");
+                } catch (error) {
+                  toast.error(`Draft save failed: ${(error as Error).message}`);
+                } finally {
+                  setIsDraftSaving(false);
+                }
               }}
             >
               <Save className="h-3.5 w-3.5 mr-1.5" /> Save Draft
@@ -1042,13 +1061,15 @@ function WizardPage() {
               variant="ghost"
               size="sm"
               onClick={() => {
-                if (confirm("Discard all progress and start over?")) {
-                  if (currentDraftId) deleteDraft(currentDraftId);
-                  setCurrentDraftId(null);
-                  clearDraft();
-                  setActiveWizard(null);
-                  writeDraft(emptyDraft());
-                }
+                const message = currentDraftId
+                  ? hasUnsavedDraftChanges
+                    ? "Discard unsaved changes and exit? Your last saved draft will remain available in Drafts."
+                    : null
+                  : "Exit this unsaved quotation? It has not yet been saved in Drafts.";
+                if (message && !confirm(message)) return;
+                clearDraft();
+                setActiveWizard(null);
+                navigate({ to: "/drafts" });
               }}
             >
               <X className="h-3.5 w-3.5 mr-1.5" /> Discard
@@ -1065,8 +1086,10 @@ function WizardPage() {
             label="Travellers"
             value={
               draft.query_type === "Brochure"
-                ? `${draft.pax_min || 0}–${draft.pax_max || 0} pax`
-                : `${totalPax(draft)} pax · ${draft.tour_type}`
+                ? `${draft.pax_min || 0}–${draft.pax_max || 0} Pax · ${draft.tour_type || "—"}`
+                : draft.pax_mode === "range"
+                  ? `${draft.pax_min || 0}–${draft.pax_max || 0} Pax · ${draft.tour_type || "—"}`
+                  : `${totalPax(draft)} Pax · ${draft.tour_type || "—"}`
             }
           />
           <QuoteContextItem label="Programme" value={draft.program_name || "Not selected yet"} />
@@ -1160,10 +1183,16 @@ function WizardPage() {
               <Button variant="ghost" onClick={goBack} disabled={stepPosition === 1 && sub === 0}>
                 <ChevronLeft className="h-4 w-4 mr-1" /> Back
               </Button>
-              <div className="hidden text-center text-xs text-muted-foreground sm:block">
-                {subCount > 0
-                  ? `${STEPS[step - 1].subs?.[sub] || STEPS[step - 1].label} · ${sub + 1} of ${subCount}`
-                  : STEPS[step - 1].label}
+              <div
+                className={cn(
+                  "hidden max-w-xl text-center text-xs sm:block",
+                  continueBlocker ? "font-medium text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {continueBlocker ||
+                  (subCount > 0
+                    ? `${STEPS[step - 1].subs?.[sub] || STEPS[step - 1].label} · ${sub + 1} of ${subCount}`
+                    : STEPS[step - 1].label)}
               </div>
               {stepPosition < workflowSteps.length || sub < subCount - 1 ? (
                 <Button onClick={goNext} disabled={!canProceed}>
@@ -1451,6 +1480,18 @@ function validate(d: QuoteDraft, step: number): boolean {
     default:
       return true;
   }
+}
+
+function routingStepError(draft: QuoteDraft): string {
+  const tourDays = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  if (tourDays.length !== draft.nights + 1)
+    return `Routing needs ${draft.nights + 1} touring days; ${tourDays.length} are defined.`;
+  const overnight = tourDays.filter((day) => day.overnight);
+  if (overnight.length !== draft.nights)
+    return `Routing needs ${draft.nights} overnight rows; ${overnight.length} are defined.`;
+  const missingCity = overnight.find((day) => !day.city_id);
+  if (missingCity) return `Day ${missingCity.day}: select the required overnight city.`;
+  return "Complete the required routing fields before continuing.";
 }
 
 // ============================================================
@@ -2532,7 +2573,7 @@ function Step9({ draft, set }: StepProps) {
                 day: 0,
                 is_day_zero: true,
                 date: addDaysISO(draft.start_date, -1),
-                overnight: true,
+                overnight: false,
               },
               ...normalized,
             ]
@@ -2584,7 +2625,10 @@ function Step9({ draft, set }: StepProps) {
     if (patch.city_id !== undefined) {
       // The last itinerary row is a departure day. Its destination is still
       // needed by land services, but it must never become an accommodation night.
-      next[i].overnight = i < next.length - 1 && Boolean(patch.city_id);
+      next[i].overnight =
+        !(next[i].is_day_zero || next[i].day === 0) &&
+        i < next.length - 1 &&
+        Boolean(patch.city_id);
       if (i + 1 < next.length && patch.city_id) {
         next[i + 1] = { ...next[i + 1], from_city: cityName(patch.city_id) };
       }
@@ -2617,7 +2661,7 @@ function Step9({ draft, set }: StepProps) {
               day: 0,
               is_day_zero: true,
               date: addDaysISO(draft.start_date, -1),
-              overnight: true,
+              overnight: false,
             },
             ...normalized,
           ]
@@ -2638,7 +2682,7 @@ function Step9({ draft, set }: StepProps) {
           to_city_ids: [],
           program: "",
           program_mode: "text",
-          overnight: true,
+          overnight: false,
         },
         ...draft.routing,
       ],
@@ -2668,7 +2712,7 @@ function Step9({ draft, set }: StepProps) {
               day: 0,
               is_day_zero: true,
               date: addDaysISO(draft.start_date, -1),
-              overnight: true,
+              overnight: false,
             },
             ...normalized,
           ]
@@ -3976,8 +4020,10 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
             label="Travellers"
             value={
               draft.query_type === "Brochure"
-                ? `${draft.pax_min || 0}–${draft.pax_max || 0} pax`
-                : `${totalPax(draft)} pax`
+                ? `${draft.pax_min || 0}–${draft.pax_max || 0} Pax`
+                : draft.pax_mode === "range"
+                  ? `${draft.pax_min || 0}–${draft.pax_max || 0} Pax`
+                  : `${totalPax(draft)} Pax`
             }
             detail={
               draft.query_type === "Brochure"
@@ -4110,10 +4156,12 @@ function StepPaxType({ draft, set }: StepProps) {
   const autoTourType: "FIT" | "GIT" | "Brochure" = isBrochure
     ? "Brochure"
     : deriveTourTypeFromPricingPax(pricingPax);
+  const selectedTourType =
+    draft.tour_type === "FIT" || draft.tour_type === "GIT" ? draft.tour_type : autoTourType;
 
   useEffect(() => {
-    if (draft.tour_type !== autoTourType) set({ tour_type: autoTourType });
-  }, [autoTourType]);
+    if (!draft.tour_type) set({ tour_type: autoTourType });
+  }, [autoTourType, draft.tour_type, set]);
 
   if (isBrochure) {
     return (
@@ -4215,17 +4263,20 @@ function StepPaxType({ draft, set }: StepProps) {
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold">Pax & Tour Type</h2>
-      <div className="flex items-center gap-3">
-        <Badge
-          className={cn(
-            "text-sm px-3 py-1",
-            autoTourType === "FIT" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white",
-          )}
-        >
-          {autoTourType}
-        </Badge>
+      <div className="flex flex-wrap items-center gap-2">
+        {(["FIT", "GIT"] as const).map((tourType) => (
+          <Button
+            key={tourType}
+            type="button"
+            size="sm"
+            variant={selectedTourType === tourType ? "default" : "outline"}
+            onClick={() => set({ tour_type: tourType })}
+          >
+            {tourType}
+          </Button>
+        ))}
         <span className="text-sm text-muted-foreground">
-          Auto-detected from pricing pax — 1-5 pax = FIT, 6+ = GIT.
+          Quotation type is retained independently from the Pax count.
         </span>
       </div>
       <Card className="p-4 space-y-3 max-w-lg">

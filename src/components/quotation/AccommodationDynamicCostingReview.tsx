@@ -8,6 +8,7 @@ import {
   dynamicAccommodationRoomLines,
   effectiveAccommodationPax,
   getCostingPaxValues,
+  quotationPaxLabel,
   hotelsGst,
   hotelsMarkup,
   mealPlanCoverage,
@@ -100,7 +101,7 @@ function TripInformation({ draft }: { draft: QuoteDraft }) {
     ["Programme", draft.program_name || "—"],
     ["Travel Dates", travelDates],
     ["Duration", `${draft.nights} Nights / ${draft.nights + 1} Days`],
-    ["Travellers", `${pax.join(", ") || "—"} · ${draft.tour_type || "—"}`],
+    ["Travellers", `${quotationPaxLabel(draft)} · ${draft.tour_type || "—"}`],
   ];
 
   return (

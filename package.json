@@ -12,6 +12,7 @@
     "audit": "npm run audit:quotation",
     "audit:quotation": "node scripts/audit-quotation-engine.mjs",
     "test:hotel-import": "node scripts/test-hotel-import.mjs",
+    "test:drafts": "node scripts/test-drafts.mjs",
     "audit:access": "node scripts/audit-account-linkage.mjs",
     "employees:reset": "node scripts/reset-employee-master.mjs",
     "employees:bootstrap": "node scripts/bootstrap-super-admin.mjs",

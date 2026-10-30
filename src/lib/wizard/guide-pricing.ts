@@ -128,14 +128,15 @@ export function getEscortRangeBase(
   range: NonNullable<QuoteDraft["escort_ranges"]>[number],
 ): number {
   if (!isEscortEnabled(draft) || getEscortPricingMode(draft) !== "pax_range") return 0;
-  const dayRates = draft.routing.map(
+  const serviceDays = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
+  const dayRates = serviceDays.map(
     (day) => draft.escort_day_rates_by_slab?.[day.day]?.[range.id] ?? 0,
   );
   const hasDayRates = dayRates.some((rate) => rate > 0);
   // Old quotations stored one flat charge on the slab. Preserve that value
   // until the user enters the new day/slab matrix; never invent a distribution.
   const base = hasDayRates
-    ? draft.routing.reduce(
+    ? serviceDays.reduce(
         (sum, day) =>
           isEscortDayRequired(draft, day.day)
             ? sum + (draft.escort_day_rates_by_slab?.[day.day]?.[range.id] ?? 0)
