@@ -33,6 +33,7 @@ import {
   Database,
   BriefcaseBusiness,
   RadioTower,
+  BookOpenCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -295,6 +296,11 @@ const SECTIONS: Section[] = [
       },
     ],
   },
+  {
+    label: "Brochures",
+    roles: SALES_ROLES,
+    items: [{ label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck }],
+  },
 
   // =========================================================
   // EXISTING ANALYTICS
@@ -371,6 +377,11 @@ const quotationSection: Section = {
   ],
 };
 
+const brochureSection: Section = {
+  label: "Brochures",
+  items: [{ label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck }],
+};
+
 const resourcesSection: Section = {
   label: "Sales Resources",
   items: [
@@ -442,6 +453,7 @@ function salesSections(role: AppRole): Section[] | null {
       ...(reviewSupportRole ? [reviewSupportSection] : []),
       relationshipSection,
       quotationSection,
+      brochureSection,
       resourcesSection,
       {
         label: "Analytics & Performance",
@@ -479,6 +491,7 @@ function salesSections(role: AppRole): Section[] | null {
     ...(reviewSupportRole ? [reviewSupportSection] : []),
     relationshipSection,
     quotationSection,
+    brochureSection,
     resourcesSection,
     {
       label: "My Performance",

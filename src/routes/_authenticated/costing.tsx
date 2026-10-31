@@ -132,6 +132,7 @@ import { isRoutingReady, validateQuoteForFinalization } from "@/lib/wizard/valid
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { getSavedQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { createBrochureFromQuote } from "@/lib/brochures-store";
 import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
 import {
   getQueryQuotationDraft,
@@ -614,7 +615,11 @@ function WizardPage() {
         ]
       : []),
   ];
-  const finalizationBlockers = [
+  const isBrochure = draft?.query_type === "Brochure";
+  const finalizationBlockers = isBrochure ? [
+    ...(!draft?.program_id ? ["Programme: Select a canonical Programme before saving a Brochure pricing snapshot."] : []),
+    ...(unchangedFromSavedVersion ? ["Snapshot: This exact Brochure draft is already saved. Change the draft before saving another snapshot."] : []),
+  ] : [
     ...(!access.employee
       ? [
           "Permission: An active linked CRM employee is required to save an official costing version.",
@@ -916,6 +921,31 @@ function WizardPage() {
     setIsFinalizing(true);
     try {
       const employee = access.employee;
+      if (latest.query_type === "Brochure") {
+        if (!latest.program_id) throw new Error("Select a canonical Programme before saving a Brochure pricing snapshot.");
+        const reviewWarnings = [
+          ...review.blockers.map((item) => `${item.section}: ${item.message}`),
+          ...review.warnings.map((item) => `${item.section}: ${item.message}`),
+        ];
+        const actor = employee?.name || user?.name || "Brochure author";
+        const quote = buildCostingVersionSnapshot(
+          latest,
+          dbData,
+          actor,
+          employee
+            ? { employeeId: employee.id, authUserId: employee.auth_user_id, name: employee.name, role: employee.role }
+            : { employeeId: "local-brochure", name: actor, role: "Brochure author" },
+          reviewWarnings,
+        );
+        persistQuote(quote);
+        const brochure = createBrochureFromQuote(quote, actor, latest.program_name || undefined);
+        persistToDrafts(latest, { silent: true, name: latest.program_name || "Brochure draft" });
+        setLastSavedDraftFingerprint(draftFingerprint(latest));
+        toast.success(reviewWarnings.length
+          ? "Brochure library draft saved with unresolved pricing issues. It cannot be published until they are resolved."
+          : `Brochure pricing library draft V${brochure.version} saved under ${brochure.programme_name}.`);
+        return;
+      }
       if (!employee)
         throw new Error("An active linked CRM employee is required to save a costing version.");
       if (!latest.linked_query_id || !linkedQuery)
@@ -1027,9 +1057,9 @@ function WizardPage() {
   const endDate = addDaysISO(draft.start_date, draft.nights);
   const dateLabel =
     draft.query_type === "Brochure"
-      ? draft.brochure_validity_from && draft.brochure_validity_till
-        ? `${fmtDateShort(draft.brochure_validity_from)} – ${fmtDateShort(draft.brochure_validity_till)}`
-        : "Validity not set"
+      ? draft.has_dates === false
+        ? `${draft.nights}N / ${draft.nights + 1}D · departure to be selected`
+        : `${fmtDateShort(draft.start_date)} – ${fmtDateShort(endDate)}`
       : draft.has_dates === false
         ? `${draft.nights}N / ${draft.nights + 1}D · dates flexible`
         : `${fmtDateShort(draft.start_date)} – ${fmtDateShort(endDate)}`;
@@ -1150,7 +1180,7 @@ function WizardPage() {
             label="Current step"
             value={`${stepPosition}. ${STEPS[step - 1].label}`}
           />
-          <QuoteContextItem label="Travel" value={dateLabel} />
+          <QuoteContextItem label={draft.query_type === "Brochure" ? "Specific departure" : "Travel"} value={dateLabel} />
           <QuoteContextItem
             label="Travellers"
             value={
@@ -1162,6 +1192,16 @@ function WizardPage() {
             }
           />
           <QuoteContextItem label="Programme" value={draft.program_name || "Not selected yet"} />
+          {draft.query_type === "Brochure" && (
+            <QuoteContextItem
+              label="Brochure validity"
+              value={
+                draft.brochure_validity_from && draft.brochure_validity_till
+                  ? `${fmtDateShort(draft.brochure_validity_from)} - ${fmtDateShort(draft.brochure_validity_till)}`
+                  : "Not set"
+              }
+            />
+          )}
         </div>
 
         <div className="mt-4 rounded-xl border bg-background px-3 py-2 xl:hidden">
@@ -1514,7 +1554,7 @@ function validate(d: QuoteDraft, step: number): boolean {
       return false;
     case 3: {
       const paxOk =
-        d.pax_mode === "range"
+        d.query_type === "Brochure" || d.pax_mode === "range"
           ? (d.pax_min ?? 0) >= 1 && (d.pax_max ?? 0) >= (d.pax_min ?? 0)
           : d.adults + d.ss + d.children.length >= 1 &&
             d.children.every(
@@ -4121,7 +4161,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
             <SummaryField label="Programme" value={draft.program_name || "Not selected"} />
           )}
           <SummaryField
-            label="Travel"
+            label={draft.query_type === "Brochure" ? "Brochure validity" : "Travel"}
             value={
               draft.query_type === "Brochure"
                 ? draft.brochure_validity_from && draft.brochure_validity_till
@@ -4133,6 +4173,16 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
             }
             detail={`${draft.nights}N / ${draft.nights + 1}D`}
           />
+          {draft.query_type === "Brochure" && (
+            <SummaryField
+              label="Specific departure"
+              value={
+                draft.has_dates === false
+                  ? "Not selected - Day-number itinerary"
+                  : `${fmtDateShort(draft.start_date)} → ${fmtDateShort(endDate)}`
+              }
+            />
+          )}
           <SummaryField
             label="Travellers"
             value={
@@ -4335,7 +4385,12 @@ function StepPaxType({ draft, set }: StepProps) {
               min={1}
               value={draft.pax_min ?? 1}
               onChange={(pax_min) =>
-                set({ pax_min, pax_max: Math.max(pax_min, draft.pax_max ?? pax_min) })
+                set({
+                  pax_mode: "range",
+                  pax_min,
+                  pax_max: Math.max(pax_min, draft.pax_max ?? pax_min),
+                  pax_range: `${pax_min}-${Math.max(pax_min, draft.pax_max ?? pax_min)}`,
+                })
               }
             />
           </div>
@@ -4345,7 +4400,11 @@ function StepPaxType({ draft, set }: StepProps) {
               ariaLabel="Maximum Pax"
               min={draft.pax_min ?? 1}
               value={draft.pax_max ?? 1}
-              onChange={(pax_max) => set({ pax_max })}
+              onChange={(pax_max) => {
+                const pax_min = Math.max(1, draft.pax_min ?? 1);
+                const max = Math.max(pax_min, pax_max);
+                set({ pax_mode: "range", pax_min, pax_max: max, pax_range: `${pax_min}-${max}` });
+              }}
             />
           </div>
         </div>
@@ -4582,8 +4641,8 @@ function StepPaxType({ draft, set }: StepProps) {
 function StepDeparture({ draft, set }: StepProps) {
   if (draft.query_type === "Brochure") {
     return (
-      <div className="space-y-4 max-w-md">
-        <h2 className="text-lg font-semibold">Ex (Departure Point)</h2>
+      <div className="space-y-4 max-w-2xl">
+        <h2 className="text-lg font-semibold">Brochure Circuit</h2>
         <Select
           value={draft.tour_start_city || draft.departure_city}
           onValueChange={(v) => set({ departure_city: v, tour_start_city: v })}
@@ -4599,6 +4658,16 @@ function StepDeparture({ draft, set }: StepProps) {
             ))}
           </SelectContent>
         </Select>
+        <div className="space-y-2">
+          <Label>Tour Ending Point / Circuit End City *</Label>
+          <CityCombobox
+            value={draft.tour_end_city || ""}
+            onChange={(v) => set({ tour_end_city: v })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Used for the final departure-day routing destination.
+          </p>
+        </div>
         <p className="text-xs text-muted-foreground">
           Brochure ex-points are limited to standard MP gateways.
         </p>
@@ -5154,6 +5223,34 @@ function StepDuration({ draft, set }: StepProps) {
           <p className="text-xs text-muted-foreground">
             Programs use Day 1, Day 2… labels instead of calendar dates.
           </p>
+          <RadioGroup
+            value={hasDates ? "yes" : "no"}
+            onValueChange={(v) => set({ has_dates: v === "yes" })}
+            className="pt-2"
+          >
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="no" id="brochure-dates-no" />
+              <label htmlFor="brochure-dates-no" className="text-sm font-medium cursor-pointer">
+                No specific departure dates
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="yes" id="brochure-dates-yes" />
+              <label htmlFor="brochure-dates-yes" className="text-sm font-medium cursor-pointer">
+                Cost a specific departure date
+              </label>
+            </div>
+          </RadioGroup>
+          {hasDates && (
+            <div className="max-w-xs pt-1">
+              <Label>Departure Date</Label>
+              <Input
+                type="date"
+                value={draft.start_date}
+                onChange={(e) => applyDateEdit("start", e.target.value)}
+              />
+            </div>
+          )}
         </Card>
       ) : (
         <Card className="p-4 space-y-3">

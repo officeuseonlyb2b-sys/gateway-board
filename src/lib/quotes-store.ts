@@ -137,6 +137,8 @@ export interface SavedRateSheetRow {
   option_key: string;
   option_label: string;
   vehicle: string;
+  /** Stable transport selection identifier when the source draft has one. */
+  transport_variation_id?: string;
   pax: number;
   single: number;
   double: number;
@@ -214,6 +216,16 @@ export interface SavedQuote {
   group_rows?: SavedGroupRow[];
   scenarios?: SavedScenario[];
   rate_sheet_rows?: SavedRateSheetRow[];
+  /** Present only for a Brochure costing and retained in its immutable snapshot. */
+  brochure_source?: {
+    programme_id: string;
+    programme_code?: string;
+    programme_name: string;
+    validity_from?: string;
+    validity_till?: string;
+    pax_min: number;
+    pax_max: number;
+  };
   /** Query-facing values captured from the quotation at save time. */
   query_snapshot?: SavedQuerySnapshot;
 }

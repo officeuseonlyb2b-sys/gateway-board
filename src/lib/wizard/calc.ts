@@ -64,6 +64,9 @@ export function accommodationNightDate(
   day: QuoteDraft["routing"][number],
   routingIndex: number,
 ): string {
+  // A brochure without a selected departure is day-number based. Do not use a
+  // retained start date from another context for Hotel Master lookups.
+  if (draft.has_dates === false) return "";
   if (day.is_day_zero || day.day === 0)
     return day.date || addDaysISO(draft.start_date, -1);
   return addDaysISO(draft.start_date, routingIndex);
@@ -303,7 +306,7 @@ export function dynamicAccommodationTotal(draft: QuoteDraft, option: HotelOption
 export function isSplitAccommodation(draft: QuoteDraft): boolean {
   return (
     draft.accommodation_planning_mode === "split_group" &&
-    draft.pax_mode !== "range" &&
+    !paxRangeActive(draft) &&
     isDynamicAccommodationMode(draft)
   );
 }
@@ -688,11 +691,14 @@ export function totalPax(draft: QuoteDraft): number {
 
 /** Dynamic accommodation requires the explicit Exact mode and a positive actual traveller total. */
 export function canUseDynamicAccommodation(draft: QuoteDraft): boolean {
-  return draft.pax_mode === "exact" && totalPax(draft) > 0;
+  return !paxRangeActive(draft) && draft.pax_mode === "exact" && totalPax(draft) > 0;
 }
 
 /** True when the admin is costing for a pax RANGE instead of an exact headcount. */
 export function paxRangeActive(draft: QuoteDraft): boolean {
+  // Brochure bounds remain authoritative for legacy snapshots with stale
+  // exact/default traveller fields.
+  if (draft.query_type === "Brochure" && parsePaxRange(draft)) return true;
   if (draft.pax_mode) return draft.pax_mode === "range";
   if (
     Number.isInteger(draft.pax_min) &&
@@ -777,6 +783,18 @@ function parsePaxRangeText(value: string): { min: number; max: number } | null {
 
 /** Parsed { min, max } of an active pax range, else null. */
 export function parsePaxRange(draft: QuoteDraft): { min: number; max: number } | null {
+  // Brochure bounds are authored in Trip Basics and are always the pricing
+  // range, including older drafts which were saved before pax_mode was set.
+  // Keep B2B/B2C's explicit Exact mode semantics unchanged.
+  if (
+    draft.query_type === "Brochure" &&
+    Number.isInteger(draft.pax_min) &&
+    Number.isInteger(draft.pax_max) &&
+    (draft.pax_min ?? 0) >= 1 &&
+    (draft.pax_max ?? 0) >= (draft.pax_min ?? 0)
+  ) {
+    return { min: draft.pax_min!, max: draft.pax_max! };
+  }
   if (draft.pax_mode === "exact") return null;
   if (
     (!draft.pax_mode || draft.pax_mode === "range") &&
@@ -812,6 +830,14 @@ export function getCostingPaxValues(draft: QuoteDraft): number[] {
     return values;
   };
 
+  // A brochure is always costed at each whole Pax value in its configured
+  // Trip Basics range. This is deliberately before the shared exact/range
+  // branches so legacy brochure drafts cannot fall back to their default 2A.
+  if (draft.query_type === "Brochure") {
+    const range = validRange(draft.pax_min, draft.pax_max) ?? parsePaxRange(draft);
+    if (range) return expand(range);
+  }
+
   if (draft.pax_mode === "range") {
     const range = validRange(draft.pax_min, draft.pax_max) ?? parsePaxRange(draft);
     if (range) return expand(range);
@@ -833,6 +859,7 @@ export function getCostingPaxValues(draft: QuoteDraft): number[] {
 /** Compact authoritative traveller label for quotation headers and reviews. */
 export function quotationPaxLabel(draft: QuoteDraft): string {
   const range = parsePaxRange(draft);
+  if (paxRangeActive(draft) && range) return `${range.min}${String.fromCharCode(8211)}${range.max} Pax`;
   if (draft.pax_mode === "range" && range) return `${range.min}–${range.max} Pax`;
   return `${Math.max(1, totalPax(draft))} Pax`;
 }

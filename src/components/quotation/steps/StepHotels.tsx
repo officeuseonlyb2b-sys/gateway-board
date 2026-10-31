@@ -44,6 +44,7 @@ import {
   effectiveAccommodationPax,
   isSplitAccommodation,
   splitAccommodationAllocation,
+  paxRangeActive,
 } from "@/lib/wizard/calc";
 import type {
   QuoteDraft,
@@ -207,10 +208,11 @@ export function Step15({ draft, set }: StepProps) {
   const activeOption =
     draft.hotel_options.find((o) => o.key === activeOpt) || draft.hotel_options[0];
   const activeCategory = activeOption?.category || "";
-  const overnightRouting = activeOption
-    ? accommodationNightsForOption(draft.routing, activeOption).map((day) =>
-        accommodationCityForDay(day, d.cities),
-      )
+  // The selection table is the single day schedule. Regular overnight rows
+  // retain their existing costing behaviour; Day 0 and the departure row are
+  // displayed so their explicit exemption/hotel choices stay option-specific.
+  const hotelTableRouting = activeOption
+    ? draft.routing.map((day) => accommodationCityForDay(day, d.cities))
     : [];
 
   const applyCategory = (v: string) => {
@@ -250,9 +252,7 @@ export function Step15({ draft, set }: StepProps) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Accommodation Options (up to 4)</h2>
-
-      <Card className="overflow-hidden">
+      <Card className="hidden" aria-hidden="true">
         <div className="border-b bg-muted/30 px-3 py-2">
           <div className="text-sm font-semibold">Complete Itinerary Day Schedule</div>
           <p className="text-xs text-muted-foreground">
@@ -460,23 +460,23 @@ export function Step15({ draft, set }: StepProps) {
             )}
           </div>
 
-          {overnightRouting.length === 0 && (
+          {hotelTableRouting.length === 0 && (
             <p className="text-sm text-muted-foreground">Complete routing in Step 5 first.</p>
           )}
 
-          {!activeCategory && overnightRouting.length > 0 && (
+          {!activeCategory && hotelTableRouting.length > 0 && (
             <p className="text-sm text-amber-600">
               Select a hotel category above to load hotels for each city.
             </p>
           )}
 
-          {activeCategory && overnightRouting.length > 0 && (
+          {activeCategory && hotelTableRouting.length > 0 && (
             <AccommodationSelectionTable
               draft={draft}
               set={set}
               option={activeOption}
               activeCategory={activeCategory}
-              overnightRouting={overnightRouting}
+              overnightRouting={hotelTableRouting}
               onUpdate={(patch) => updateOption(activeOption.key, patch)}
               onQuickAdd={(cityId, cityName) => setQuickAdd({ cityId, cityName })}
               isDynamicGlobal={isDynamicGlobal}
@@ -490,7 +490,7 @@ export function Step15({ draft, set }: StepProps) {
           )}
 
           {activeCategory &&
-            overnightRouting.length > 0 &&
+            hotelTableRouting.length > 0 &&
             activeOption.selections.some((s) => s.room_id) && (
               <>
                 {isDynamicGlobal && optionUsesCustomAllocation(activeOption) && (
@@ -885,7 +885,16 @@ function AccommodationSelectionTable({
         room_id: "",
         meal_plan: "CP" as MealPlan,
       };
-      const merged = { ...cur, ...patch, city_id: cityId, routing_day: day.day };
+      const merged = {
+        ...cur,
+        ...patch,
+        city_id: cityId,
+        routing_day: day.day,
+        // Day 0 only becomes a priced stay after a hotel is explicitly chosen.
+        ...(day.is_day_zero || day.day === 0
+          ? { pre_tour_night: patch.no_hotel ? false : Boolean(patch.hotel_id || cur.hotel_id) }
+          : {}),
+      };
       if ("hotel_id" in patch) {
         const h = d.hotels.find((x) => x.id === merged.hotel_id);
         merged.is_fallback =
@@ -938,7 +947,7 @@ function AccommodationSelectionTable({
           ? "__own_arrangement__"
           : sel?.no_hotel
             ? "__no_hotel__"
-            : sel?.hotel_id || "",
+            : sel?.hotel_id || ((day.is_day_zero || day.day === 0 || !day.overnight) ? "__no_hotel__" : ""),
       selectedRoomId: sel?.room_id || "",
       selectedMeal: sel?.meal_plan || "CP",
       hasHotelExemptionConflict: hasHotelExemptionConflict(sel),
@@ -1158,12 +1167,12 @@ function AccommodationSelectionTable({
               : `Accommodation split complete: ${splitAllocation.allocated} of ${splitAllocation.total} travellers allocated across hotel options.`}
         </div>
       )}
-      {!canUseDynamic && draft.pax_mode === "range" && (
+      {!canUseDynamic && paxRangeActive(draft) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Dynamic Mode requires exact travelling pax.
         </div>
       )}
-      {!canUseDynamic && draft.pax_mode === "exact" && exactTravellingPax <= 0 && (
+      {!canUseDynamic && !paxRangeActive(draft) && draft.pax_mode === "exact" && exactTravellingPax <= 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Add exact travellers in Trip Basics to use Dynamic Mode.
         </div>

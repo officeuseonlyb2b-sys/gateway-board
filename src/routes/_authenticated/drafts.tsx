@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   useDrafts,
   deleteDraft,
   duplicateDraft,
@@ -40,6 +47,32 @@ const STEP_LABELS = [
   "Preview & Save",
 ];
 
+type DraftTypeFilter = "all" | "B2B" | "B2C" | "Brochure";
+type DraftDateFilter = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
+
+function localDateKey(value: string | undefined): number | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+}
+
+function inputDateKey(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? year * 10000 + month * 100 + day
+    : null;
+}
+
+function dayKeyOffset(days: number): number {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+}
+
 function DraftsPage() {
   const localDrafts = useDrafts();
   const access = useAccessProfile();
@@ -67,16 +100,64 @@ function DraftsPage() {
     return [...merged.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   }, [cloudDraftMetadata, localDrafts]);
   const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<DraftTypeFilter>("all");
+  const [dateFilter, setDateFilter] = useState<DraftDateFilter>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [programmeFilter, setProgrammeFilter] = useState("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const navigate = useNavigate();
 
+  const programmes = useMemo(() => {
+    const values = new Map<string, string>();
+    drafts.forEach((draft) => {
+      const name = draft.wizard_state.program_name?.trim();
+      if (!name) return;
+      const id = draft.wizard_state.program_id?.trim();
+      const key = id ? `id:${id}` : `name:${name.toLocaleLowerCase()}`;
+      if (!values.has(key)) values.set(key, name);
+    });
+    return [...values.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [drafts]);
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return drafts;
-    return drafts.filter((d) =>
-      (
+    const today = dayKeyOffset(0);
+    const from = inputDateKey(fromDate);
+    const to = inputDateKey(toDate);
+    return drafts.filter((d) => {
+      const type = d.wizard_state.query_type;
+      const programmeName = d.wizard_state.program_name?.trim() || "";
+      const programmeId = d.wizard_state.program_id?.trim();
+      const programmeKey = programmeName
+        ? programmeId
+          ? `id:${programmeId}`
+          : `name:${programmeName.toLocaleLowerCase()}`
+        : "none";
+      const modified = localDateKey(d.updated_at);
+      const typeMatches = typeFilter === "all" || type === typeFilter;
+      const programmeMatches = programmeFilter === "all" || programmeKey === programmeFilter;
+      const dateMatches =
+        dateFilter === "all" ||
+        (modified !== null &&
+          (dateFilter === "today"
+            ? modified === today
+            : dateFilter === "yesterday"
+              ? modified === dayKeyOffset(-1)
+              : dateFilter === "last7"
+                ? modified >= dayKeyOffset(-6) && modified <= today
+                : dateFilter === "last30"
+                  ? modified >= dayKeyOffset(-29) && modified <= today
+                  : dateFilter === "custom"
+                    ? (!from || modified >= from) && (!to || modified <= to)
+                    : true));
+      const searchMatches =
+        !needle ||
+        (
         d.draft_name +
         " " +
         (d.wizard_state.query_type || "") +
@@ -86,9 +167,19 @@ function DraftsPage() {
         (d.wizard_state.linked_query_id || "")
       )
         .toLowerCase()
-        .includes(needle),
-    );
-  }, [drafts, q]);
+        .includes(needle);
+      return typeMatches && programmeMatches && dateMatches && searchMatches;
+    });
+  }, [dateFilter, drafts, fromDate, programmeFilter, q, toDate, typeFilter]);
+
+  const clearFilters = () => {
+    setQ("");
+    setTypeFilter("all");
+    setDateFilter("all");
+    setFromDate("");
+    setToDate("");
+    setProgrammeFilter("all");
+  };
 
   function resume(d: DraftRecord) {
     navigate({ to: "/costing", search: { id: d.id } as never });
@@ -159,13 +250,73 @@ function DraftsPage() {
             className="pl-8"
           />
         </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <div className="w-full sm:w-40">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Quotation Type</label>
+            <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as DraftTypeFilter)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="B2B">B2B</SelectItem>
+                <SelectItem value="B2C">B2C</SelectItem>
+                <SelectItem value="Brochure">Brochure</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-44">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Modified Date</label>
+            <Select value={dateFilter} onValueChange={(value) => setDateFilter(value as DraftDateFilter)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Dates</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="yesterday">Yesterday</SelectItem>
+                <SelectItem value="last7">Last 7 Days</SelectItem>
+                <SelectItem value="last30">Last 30 Days</SelectItem>
+                <SelectItem value="custom">Custom Date Range</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-56">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Programme</label>
+            <Select value={programmeFilter} onValueChange={setProgrammeFilter}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Programmes</SelectItem>
+                <SelectItem value="none">No Programme Selected</SelectItem>
+                {programmes.map((programme) => (
+                  <SelectItem key={programme.value} value={programme.value}>{programme.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {dateFilter === "custom" && (
+            <>
+              <div className="w-full sm:w-36">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">From Date</label>
+                <Input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+              </div>
+              <div className="w-full sm:w-36">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">To Date</label>
+                <Input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+              </div>
+            </>
+          )}
+          <Button size="sm" variant="outline" onClick={clearFilters}>Clear Filters</Button>
+          <span className="pb-2 text-xs text-muted-foreground">Showing {filtered.length} of {drafts.length} drafts</span>
+        </div>
       </Card>
 
       <Card className="p-0 overflow-hidden">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             <FileText className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-            No drafts yet. A linked quotation is saved here automatically as you work.
+            {drafts.length
+              ? "No drafts match your current filters."
+              : "No drafts yet. A linked quotation is saved here automatically as you work."}
+            {drafts.length > 0 && (
+              <div className="mt-3"><Button size="sm" variant="outline" onClick={clearFilters}>Clear Filters</Button></div>
+            )}
           </div>
         ) : (
           <table className="w-full text-sm">

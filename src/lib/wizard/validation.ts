@@ -4,6 +4,7 @@ import {
   accommodationNightDate,
   effectivePaxForPricing,
   effectiveAccommodationPax,
+  paxRangeActive,
   isSplitAccommodation,
   parsePaxRange,
   planForDay,
@@ -78,7 +79,7 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   if (!draft.query_type) {
     issues.push(issue("TYPE_REQUIRED", "blocker", "Type", "Quotation type is missing."));
   }
-  if (draft.pax_mode === "range") {
+  if (paxRangeActive(draft)) {
     if (
       !Number.isInteger(draft.pax_min) ||
       !Number.isInteger(draft.pax_max) ||
@@ -225,6 +226,23 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
     );
   }
   if (
+    draft.query_type === "Brochure" &&
+    draft.has_dates !== false &&
+    draft.start_date &&
+    draft.brochure_validity_from &&
+    draft.brochure_validity_till &&
+    (draft.start_date < draft.brochure_validity_from || draft.start_date > draft.brochure_validity_till)
+  ) {
+    issues.push(
+      issue(
+        "BROCHURE_DEPARTURE_OUTSIDE_VALIDITY",
+        "blocker",
+        "Travel Requirements",
+        "The selected Brochure departure date must fall within the Brochure validity window.",
+      ),
+    );
+  }
+  if (
     scope.program &&
     !draft.program_name.trim() &&
     !(draft.program_mode === "new" && draft.save_program_as_new && draft.new_program_name?.trim())
@@ -344,6 +362,17 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
 
   if (requiresAccommodation)
     selectedOptions.forEach((option) => {
+      if (draft.query_type === "Brochure" && draft.has_dates === false) {
+        issues.push(
+          issue(
+            `BROCHURE_DEPARTURE_DATE_PENDING_${option.key}`,
+            "warning",
+            "Accommodation",
+            `Option ${option.key}: Hotel Master rates are not validated until a specific Brochure departure date is selected.`,
+          ),
+        );
+        return;
+      }
       accommodationNightsForOption(draft.routing, option).forEach((day) => {
         const dynamic = isDynamicAccommodationMode(draft);
         const selection = hotelSelectionForDay(option, day, true);

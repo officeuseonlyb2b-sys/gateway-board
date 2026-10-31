@@ -144,7 +144,9 @@ export function Step12({ draft, set }: StepProps) {
   const includedRows = activePricedRows.filter(
     (row) => isTourSelected(row) && isPriceSelected(row),
   );
-  const optionalRows = activePricedRows.filter(
+  // A selected tour without an active-category master rate remains visible as
+  // unpriced optional work; it must never disappear or be costed as zero.
+  const optionalRows = eligibleRows.filter(
     (row) => isTourSelected(row) && !isPriceSelected(row),
   );
   const selectablePricedRows = activePricedRows.filter(isTourSelected);
@@ -408,11 +410,11 @@ export function Step12({ draft, set }: StepProps) {
                     </td>
                     <td className="p-2">{row.city}</td>
                     <td className="p-2 capitalize">{traveller === "foreign" ? "Foreigner" : traveller}</td>
-                    <td className="p-2 text-right">{base > 0 ? inr(base) : "—"}</td>
+                    <td className="p-2 text-right">{base > 0 ? inr(base) : "Rate Not Configured"}</td>
                     <td className="p-2 text-right">{base > 0 ? inr(commercial.markup) : "—"}</td>
                     <td className="p-2 text-right">{base > 0 ? inr(commercial.gst) : "—"}</td>
                     <td className="p-2 text-right font-semibold">
-                      {base > 0 ? inr(commercial.final) : "—"}
+                      {base > 0 ? inr(commercial.final) : "Rate Not Configured"}
                     </td>
                   </tr>
                 );

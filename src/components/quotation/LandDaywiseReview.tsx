@@ -28,7 +28,10 @@ import {
   getEscortDayCharge,
   getEscortPricingMode,
   getEscortRangeDayCharge,
+  escortDayInclusion,
+  escortReportingInclusion,
   isEscortEnabled,
+  isEscortDayRequired,
   guideRawRateForPax,
 } from "@/lib/wizard/guide-pricing";
 import {
@@ -114,7 +117,7 @@ type ActivityColumn = {
   inclusion: "included" | "optional";
   label: string;
 };
-type EscortColumn = { key: string; label: string; rangeId?: string };
+type EscortColumn = { key: string; label: string; rangeId?: string; inclusion: "included" | "optional" };
 type TourDisplayRow = {
   tour: LandReviewTourRow;
   rowType?: "tour" | "activity" | "misc";
@@ -320,27 +323,29 @@ function LandDaywiseReviewImpl({
       : filters.exactPax >= range.min_pax && filters.exactPax <= range.max_pax,
   );
   const escortColumns: EscortColumn[] =
-    !filters.escort || !filters.guideIncluded || !isEscortEnabled(draft)
+    !filters.escort || !isEscortEnabled(draft)
       ? []
       : escortMode === "pax_range" && escortRanges.length
-        ? escortRanges.map((range) => ({
-            key: range.id,
+        ? escortRanges.flatMap((range) => (["included", "optional"] as const).map((inclusion) => ({
+            key: `${range.id}-${inclusion}`,
             rangeId: range.id,
+            inclusion,
             label:
               filters.paxDisplay === "exact"
                 ? `${filters.exactPax} Pax`
                 : `${range.min_pax}–${range.max_pax}`,
-          }))
+          })))
         : [
-            {
-              key: escortMode || "configured",
+            ...(["included", "optional"] as const).map((inclusion) => ({
+              key: `${escortMode || "configured"}-${inclusion}`,
+              inclusion,
               label:
                 escortMode === "day_wise"
                   ? "Day-wise"
                   : escortMode === "per_person"
                     ? "Per Person"
                     : "Configured",
-            },
+            })),
           ];
 
   const entranceInclusions: EntranceColumn["inclusion"][] = [
@@ -426,22 +431,20 @@ function LandDaywiseReviewImpl({
     if (escortMode === "pax_range" && column.rangeId) {
       const range = (draft.escort_ranges ?? []).find((item) => item.id === column.rangeId);
       if (!range) return undefined;
-      const value =
-        getEscortBaseForPax(
-          { ...draft, escort_ranges: [range] },
-          filters.paxDisplay === "exact" ? filters.exactPax : range.min_pax,
-        ) / Math.max(1, serviceDays.length);
+      if (escortDayInclusion(draft, group.route.day) !== column.inclusion || !isEscortDayRequired(draft, group.route.day)) return undefined;
+      const value = getEscortRangeDayCharge(draft, group.route.day, range.id);
       return value > 0 ? value : undefined;
     }
     if (escortMode === "day_wise") {
       if (!escortDayAppliesToPax(draft, pricingPax)) return undefined;
+      if (escortDayInclusion(draft, group.route.day) !== column.inclusion) return undefined;
       const value = getEscortDayCharge(draft, group.route.day);
       return value > 0 ? value : undefined;
     }
     const selected = group.sheetRow.guide_opts
       .filter((item) => item.checked && item.label.toLowerCase().includes("escort"))
       .reduce((sum, item) => sum + item.amount, 0);
-    return selected > 0 ? selected : undefined;
+    return column.inclusion === "included" && selected > 0 ? selected : undefined;
   };
 
   const entranceCellValue = (
@@ -634,9 +637,18 @@ function LandDaywiseReviewImpl({
         0,
       ),
     ),
-    ...escortColumns.map((column) =>
-      groups.reduce((total, group) => total + (escortCellValue(group, column) ?? 0), 0),
-    ),
+    ...escortColumns.map((column) => {
+      const dayTotal = groups.reduce(
+        (total, group) => total + (escortCellValue(group, column) ?? 0),
+        0,
+      );
+      // Reporting is a quotation-level amount, not a hidden per-day rate.
+      // Assign it once to the matching inclusion column so the review total
+      // agrees with the matrix without changing any displayed day rate.
+      return dayTotal > 0 && escortReportingInclusion(draft) === column.inclusion
+        ? dayTotal + (draft.guide_escort_reporting ?? 0)
+        : dayTotal;
+    }),
     ...entranceColumns.map((column) =>
       groups.reduce(
         (total, group) =>
@@ -750,11 +762,11 @@ function LandDaywiseReviewImpl({
                   </th>
                 )),
               )}
-              {escortColumns.length > 0 && (
-                <th colSpan={escortColumns.length} className="text-center">
-                  {escortMode === "pax_range" ? "Pax Range" : "Configured"}
+              {escortColumns.map((column) => (
+                <th key={`escort-range-${column.key}`} className="text-center">
+                  {column.label}
                 </th>
-              )}
+              ))}
               {entranceGroups.map((group) => (
                 <th
                   key={group.category}
@@ -778,7 +790,7 @@ function LandDaywiseReviewImpl({
               ))}
               {escortColumns.map((column) => (
                 <th key={column.key} className="text-center">
-                  {column.label}
+                  {column.inclusion === "included" ? "Included" : "Optional"}
                 </th>
               ))}
               {entranceColumns.map((column) => (

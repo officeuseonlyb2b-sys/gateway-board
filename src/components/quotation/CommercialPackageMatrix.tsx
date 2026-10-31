@@ -148,7 +148,7 @@ function CommercialPackageMatrixImpl({
   const showLunch = landMeals && rows.some(({ row }) => row.lunch > 0);
   const showDinner = landMeals && rows.some(({ row }) => row.dinner > 0);
   const showTransport = scope.landPart;
-  const showEscort = landScoped && rows.some(({ row }) => row.escort > 0);
+  const showEscort = scope.landPart && rows.some(({ row }) => row.escort > 0);
   const showGuide = scope.landPart;
   const showEntrances = scope.landPart;
   const showActivities = scope.landPart;
@@ -253,7 +253,7 @@ function CommercialPackageMatrixImpl({
                   </th>
                   {!accommodationOnly && (
                     <th
-                      colSpan={landScoped && showEscort ? 7 : 6}
+                      colSpan={showEscort ? 7 : 6}
                       className="bg-blue-50 p-2 text-center text-blue-900"
                     >
                       Land Part · Per Person
@@ -292,7 +292,7 @@ function CommercialPackageMatrixImpl({
                       "Transport",
                       "Entrance",
                       "Guide",
-                      ...(landScoped && showEscort ? ["Escort"] : []),
+                      ...(showEscort ? ["Tour Escort"] : []),
                       "Activities",
                       "Misc",
                       "Land Total",
@@ -336,10 +336,24 @@ function CommercialPackageMatrixImpl({
                     .filter((option) => scope.accommodationPart)
                     .flatMap((option) =>
                       (dynamicMode
-                        ? ["Lunch", "Dinner", "Allocated Rooms", "Package"]
-                        : ["Lunch", "Dinner", "SGL", "DBL", "TRP", "SGL", "DBL", "TRP"]
-                      ).map((label) => (
-                        <th key={`${option.key}-${label}`} className="p-2 text-right">
+                        ? [
+                            { role: "meal-lunch", label: "Lunch" },
+                            { role: "meal-dinner", label: "Dinner" },
+                            { role: "accommodation", label: "Allocated Rooms" },
+                            { role: "package", label: "Package" },
+                          ]
+                        : [
+                            { role: "meal-lunch", label: "Lunch" },
+                            { role: "meal-dinner", label: "Dinner" },
+                            { role: "accommodation-sgl", label: "SGL" },
+                            { role: "accommodation-dbl", label: "DBL" },
+                            { role: "accommodation-trp", label: "TRP" },
+                            { role: "package-sgl", label: "SGL" },
+                            { role: "package-dbl", label: "DBL" },
+                            { role: "package-trp", label: "TRP" },
+                          ]
+                      ).map(({ role, label }) => (
+                        <th key={`${option.key}-${role}`} className="p-2 text-right">
                           {label}
                         </th>
                       )),
@@ -380,12 +394,8 @@ function CommercialPackageMatrixImpl({
                         [
                           showTransport ? land.transport : undefined,
                           showEntrances ? land.entrances : undefined,
-                          showGuide
-                            ? landScoped
-                              ? land.guide
-                              : land.guide + land.escort
-                            : undefined,
-                          ...(landScoped && showEscort ? [land.escort] : []),
+                          showGuide ? land.guide : undefined,
+                          ...(showEscort ? [land.escort] : []),
                           showActivities ? land.activities : undefined,
                           showMisc ? land.misc : undefined,
                           landTotal,

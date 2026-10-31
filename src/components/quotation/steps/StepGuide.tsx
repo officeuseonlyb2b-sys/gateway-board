@@ -59,6 +59,8 @@ import {
   getEscortPricingMode,
   getEscortRangeBase,
   getEscortRangeDayCharge,
+  escortDayInclusion,
+  escortReportingInclusion,
   isEscortDayRequired,
   isEscortEnabled,
   guideRawRateForPax,
@@ -1072,6 +1074,8 @@ export function Step13({ draft, set }: StepProps) {
         [day]: required,
       },
     });
+  const setEscortDayInclusion = (day: number, inclusion: "included" | "optional") =>
+    set({ escort_day_inclusion: { ...(draft.escort_day_inclusion ?? {}), [day]: inclusion } });
 
   const breakdownData = costingPaxValues.map((paxCount) => ({
     pax: paxCount,
@@ -2431,6 +2435,7 @@ export function Step13({ draft, set }: StepProps) {
                     <th className="p-2 text-left">Date</th>
                     <th className="p-2 text-left">Route</th>
                     <th className="p-2 text-center">Escort Required</th>
+                    <th className="p-2 text-left">Cost Type</th>
                     {escortColumns.map((column) => (
                       <th key={column.id} className="min-w-[130px] p-2 text-right">
                         {column.label}
@@ -2459,6 +2464,12 @@ export function Step13({ draft, set }: StepProps) {
                             aria-label={`Day ${day.route.day} Escort required`}
                             className="h-4 w-4 accent-primary"
                           />
+                        </td>
+                        <td className="p-2">
+                          <Select value={escortDayInclusion(draft, day.route.day)} onValueChange={(value) => setEscortDayInclusion(day.route.day, value as "included" | "optional")} disabled={!required}>
+                            <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value="included">Included</SelectItem><SelectItem value="optional">Optional</SelectItem></SelectContent>
+                          </Select>
                         </td>
                         {escortColumns.map((column) => (
                           <td key={column.id} className="p-2">
@@ -2489,7 +2500,7 @@ export function Step13({ draft, set }: StepProps) {
                   })}
                   <tr className="border-t bg-muted/10">
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="p-2 text-right text-[10px] uppercase text-muted-foreground"
                     >
                       Escort Reporting Cost
@@ -2504,6 +2515,10 @@ export function Step13({ draft, set }: StepProps) {
                         }
                         className="ml-auto h-8 w-28 text-right"
                       />
+                      <Select value={escortReportingInclusion(draft)} onValueChange={(value) => set({ escort_reporting_inclusion: value as "included" | "optional" })}>
+                        <SelectTrigger className="ml-2 inline-flex h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="included">Included</SelectItem><SelectItem value="optional">Optional</SelectItem></SelectContent>
+                      </Select>
                     </td>
                   </tr>
                 </tbody>
@@ -2532,7 +2547,7 @@ export function Step13({ draft, set }: StepProps) {
       {serviceView === "escort" && escortEnabled && (
         <Card className="overflow-hidden">
           <div className="border-b bg-slate-900 p-3 text-sm font-semibold text-white">
-            Tour Escort — Day-wise Costing
+            Included Tour Escort — Day-wise Costing
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-xs">
@@ -2549,7 +2564,7 @@ export function Step13({ draft, set }: StepProps) {
                 </tr>
               </thead>
               <tbody>
-                {dayData.map((day) => {
+                {dayData.filter((day) => escortDayInclusion(draft, day.route.day) === "included").map((day) => {
                   const slab = escortRanges.find(
                     (item) => pricingPax >= item.min_pax && pricingPax <= item.max_pax,
                   );
@@ -2606,7 +2621,7 @@ export function Step13({ draft, set }: StepProps) {
       {serviceView === "escort" && (
         <Card className="overflow-hidden">
           <div className="border-b bg-slate-900 p-3 text-sm font-semibold text-white">
-            Tour Escort — Per Person Costing
+            Included Tour Escort — Per Person Costing
           </div>
           {escortEnabled ? (
             <div className="overflow-x-auto">
@@ -2654,6 +2669,23 @@ export function Step13({ draft, set }: StepProps) {
               Configure Tour Escort to view per-person costing.
             </div>
           )}
+        </Card>
+      )}
+
+      {serviceView === "escort" && escortEnabled && (
+        <Card className="overflow-hidden">
+          <div className="border-b bg-amber-700 p-3 text-sm font-semibold text-white">Optional Tour Escort — Additional Sale</div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead className="bg-amber-50 text-[10px] uppercase text-slate-600"><tr><th className="p-2 text-left">Day</th><th className="p-2 text-left">Date</th><th className="p-2 text-left">Route</th><th className="p-2 text-right">Applicable Rate</th><th className="p-2 text-right">Base Total</th><th className="p-2 text-right">Markup</th><th className="p-2 text-right">GST</th><th className="p-2 text-right">Final Selling Total</th></tr></thead><tbody>
+            {dayData.filter((day) => escortDayInclusion(draft, day.route.day) === "optional" && isEscortDayRequired(draft, day.route.day)).map((day) => {
+              const slab = escortRanges.find((item) => pricingPax >= item.min_pax && pricingPax <= item.max_pax);
+              const base = slab ? getEscortRangeDayCharge(draft, day.route.day, slab.id) : 0;
+              const commercial = applyLandCommercials(draft, base, 0.05);
+              return <tr key={day.route.day} className="border-t"><td className="p-2 font-semibold">Day {day.route.day}</td><td className="p-2">{day.route.date || "—"}</td><td className="p-2">{day.routeLabel}</td><td className="p-2 text-right">{base ? inr(base) : "—"}</td><td className="p-2 text-right">{inr(commercial.base)}</td><td className="p-2 text-right">{inr(commercial.markup)}</td><td className="p-2 text-right">{inr(commercial.gst)}</td><td className="p-2 text-right font-semibold">{inr(commercial.final)}</td></tr>;
+            })}
+            {(() => { const commercial = applyLandCommercials(draft, getEscortBaseForPax(draft, pricingPax, "optional"), 0.05); return <tr className="border-t bg-amber-50 font-semibold"><td colSpan={4} className="p-2">Optional Final Selling Total</td><td className="p-2 text-right">{inr(commercial.base)}</td><td className="p-2 text-right">{inr(commercial.markup)}</td><td className="p-2 text-right">{inr(commercial.gst)}</td><td className="p-2 text-right">{inr(commercial.final)}</td></tr>; })()}
+          </tbody></table></div>
+          <div className="border-t bg-amber-50/50 p-3 text-sm font-semibold">Optional Tour Escort — Per Person Cost Breakdown</div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead className="bg-amber-50 text-[10px] uppercase text-slate-600"><tr><th className="p-2 text-left">Pax</th><th className="p-2 text-left">Applicable Escort Slab</th><th className="p-2 text-right">Optional Base Total</th><th className="p-2 text-right">Optional Final Total</th><th className="p-2 text-right">Optional Per Person</th></tr></thead><tbody>{costingPaxValues.map((pax) => { const base = getEscortBaseForPax(draft, pax, "optional"); const commercial = applyLandCommercials(draft, base, 0.05); const slab = escortRanges.find((item) => pax >= item.min_pax && pax <= item.max_pax); return <tr key={pax} className="border-t"><td className="p-2">{pax} Pax</td><td className="p-2">{slab ? `${slab.min_pax}–${slab.max_pax} Pax` : "—"}</td><td className="p-2 text-right">{inr(commercial.base)}</td><td className="p-2 text-right">{inr(commercial.final)}</td><td className="p-2 text-right">{inr(commercial.final / Math.max(1, pax))}</td></tr>; })}</tbody></table></div>
         </Card>
       )}
 

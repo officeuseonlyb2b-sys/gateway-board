@@ -625,6 +625,10 @@ export interface QuoteDraft {
   guide_slab_selection_by_day?: Record<number, Record<string, "included" | "optional" | "removed">>;
   guide_day_escort?: Record<number, number>;
   guide_day_escort_enabled?: Record<number, boolean>;
+  /** Included is the backward-compatible default for existing Escort days. */
+  escort_day_inclusion?: Record<number, "included" | "optional">;
+  /** Reporting cost is charged once, in this selected Escort bucket. */
+  escort_reporting_inclusion?: "included" | "optional";
   /** Routing day → Escort slab ID → base rate. Blank/zero means no Escort that day. */
   escort_day_rates_by_slab?: Record<number, Record<string, number>>;
   guide_remarks?: string;

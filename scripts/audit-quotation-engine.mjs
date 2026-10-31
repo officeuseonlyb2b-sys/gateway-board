@@ -16,6 +16,12 @@ try {
   const draftStore = await vite.ssrLoadModule("/src/lib/wizard/store.ts");
   const namedDraftStore = await vite.ssrLoadModule("/src/lib/drafts-store.ts");
   const quoteStore = await vite.ssrLoadModule("/src/lib/quotes-store.ts");
+  const brochureStore = await vite.ssrLoadModule("/src/lib/brochures-store.ts");
+  assert.equal(
+    brochureStore.listBrochures(),
+    brochureStore.listBrochures(),
+    "Brochure external-store snapshot remains referentially stable without a write",
+  );
   const validation = await vite.ssrLoadModule("/src/lib/wizard/validation.ts");
   const queryFor = await vite.ssrLoadModule("/src/lib/query-for.ts");
   const masterPricing = await vite.ssrLoadModule("/src/lib/mock-store.ts");
@@ -2203,10 +2209,10 @@ try {
       activities: group.activities.map((activity) => activity.rows.length),
     })),
     [
-      { day: 1, rowSpan: 7, activities: [6, 1] },
+      { day: 1, rowSpan: 5, activities: [4, 1] },
       { day: 2, rowSpan: 2, activities: [2] },
     ],
-    "Range review preserves independently configured activity slabs",
+    "Range review retains only independently configured slabs overlapping the quotation range",
   );
   const duplicateRikshawSlabs = {
     ...renderedReviewDb.activities[0],
@@ -2263,6 +2269,48 @@ try {
       [9, 12, 600],
     ],
     "Range E Rikshaw review retains distinct configured slabs",
+  );
+  const brochureRikshawRows = packageStandardReview.includedActivitySellingRows(
+    {
+      ...groupedActivityDraft,
+      query_type: "Brochure",
+      pax_mode: "exact",
+      pax_min: 1,
+      pax_max: 10,
+      adults: 10,
+    },
+    {
+      id: "e-rikshaw-brochure-line",
+      activity_id: duplicateRikshawSlabs.id,
+      qty: 1,
+      rate: 600,
+      pricing_mode: "slab",
+      inclusion_status: "included",
+      from_routing_days: [1],
+    },
+    duplicateRikshawSlabs,
+    10,
+  );
+  assert.deepEqual(
+    brochureRikshawRows.map((row) => [row.min_pax, row.max_pax]),
+    [[1, 4], [5, 8], [9, 12]],
+    "Brochure activity review keeps only overlapping native slabs, not Pax rows or unrelated slabs",
+  );
+  const brochureOptionalRows = landPricing
+    .optionalActivitySellingRows(
+      { ...groupedActivityDraft, query_type: "Brochure", pax_mode: "exact", pax_min: 1, pax_max: 10 },
+      duplicateRikshawSlabs,
+      "indian",
+      10,
+    )
+    .filter((row) => {
+      if (row.rate_basis !== "custom_slab") return true;
+      return row.min_pax <= 10 && row.max_pax >= 1;
+    });
+  assert.deepEqual(
+    brochureOptionalRows.map((row) => [row.min_pax, row.max_pax]),
+    [[1, 4], [1, 4], [5, 8], [5, 8], [9, 12], [9, 12]],
+    "Optional Brochure activity review can retain original overlapping slab alternatives without Pax expansion",
   );
   masterPricing.db.hydrateAll(originalMasterDb);
   assert.deepEqual(
@@ -3571,6 +3619,81 @@ try {
     [2],
   );
   close(rateSheet[0].rows[0].pkg_double, scenario.per_person_avg, "Rate sheet vs scenario");
+
+  // Brochures price every whole Pax value from their Trip Basics bounds, even
+  // when an older saved draft still carries the shared exact-mode default.
+  const brochureRange = baseDraft();
+  brochureRange.query_type = "Brochure";
+  brochureRange.pax_mode = "exact";
+  brochureRange.pax_min = 1;
+  brochureRange.pax_max = 10;
+  brochureRange.pax_range = "auto";
+  assert.deepEqual(
+    calc.getCostingPaxValues(brochureRange),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "Brochure 1-10 range expands inclusively",
+  );
+  assert.equal(calc.paxRangeActive(brochureRange), true, "Legacy Brochure resolves as range mode");
+  assert.equal(
+    calc.quotationPaxLabel(brochureRange),
+    "1–10 Pax",
+    "Legacy Brochure label never falls back to stale exact traveller count",
+  );
+  brochureRange.adults = 10;
+  assert.equal(
+    calc.quotationPaxLabel(brochureRange),
+    "1–10 Pax",
+    "Legacy Brochure label never falls back to stale maximum traveller count",
+  );
+  assert.deepEqual(
+    costsheet
+      .buildRateSheet(brochureRange, db, brochureRange.hotel_options[0], [])
+      .flatMap((group) => group.rows.map((row) => row.pax)),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "Brochure commercial matrix receives every configured Pax row",
+  );
+  brochureRange.pax_min = 4;
+  brochureRange.pax_max = 14;
+  assert.equal(calc.quotationPaxLabel(brochureRange), "4–14 Pax", "Fresh Brochure range label");
+  assert.deepEqual(
+    calc.getCostingPaxValues(brochureRange),
+    [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    "Brochure 4-14 range expands inclusively",
+  );
+  const publishedBrochure = {
+    id: "brochure-v1", brochure_id: "brochure", version: 1, status: "Published",
+    name: "Audit Brochure", programme_id: "programme-echoes", programme_name: "Echoes",
+    days_nights: "3D / 2N", pax_min: 1, pax_max: 10, validity_from: "2026-01-01", validity_till: "2026-12-31",
+    source_quote_id: "quote-1", scenarios: [
+      { id: "six-3star-urbania-twin", pax: 6, hotel_category: "3 Star", accommodation_option_id: "A", transport: "Urbania", transport_variation_id: "urbania", occupancy: "Twin Sharing", price_per_person: 12500, group_total: 75000, currency: "INR" },
+    ], validation_errors: [], created_at: "2026-01-01T00:00:00.000Z", created_by: "Audit", updated_at: "2026-01-01T00:00:00.000Z",
+  };
+  const exactBrochurePrice = brochureStore.lookupPublishedPackagePriceInRecords([publishedBrochure], {
+    programme_id: "programme-echoes", pax: 6, hotel_category: "3 Star", transport_variation_id: "urbania", occupancy: "Twin Sharing", departure_date: "2026-06-01",
+  });
+  assert.deepEqual(
+    exactBrochurePrice,
+    { available: true, brochure_id: "brochure", brochure_version_id: "brochure-v1", version: 1, scenario_id: "six-3star-urbania-twin", price_per_person: 12500, group_total: 75000, currency: "INR", hotel_category: "3 Star", transport: "Urbania", validity_from: "2026-01-01", validity_till: "2026-12-31" },
+    "Published Brochure lookup returns only its exact saved Pax/hotel/transport/occupancy scenario",
+  );
+  assert.deepEqual(
+    brochureStore.lookupPublishedPackagePriceInRecords([publishedBrochure], {
+      programme_id: "programme-echoes", pax: 6, hotel_category: "4 Star", transport_variation_id: "urbania", occupancy: "Twin Sharing", departure_date: "2026-06-01",
+    }),
+    { available: false, reason: "PRICE_ON_REQUEST" },
+    "Brochure lookup has no hotel-category fallback",
+  );
+  assert.equal(brochureStore.brochurePricingCoverage(publishedBrochure).valid_scenarios, 1, "Brochure coverage counts saved valid scenarios");
+
+  // The brochure normalization is audience-specific: B2B/B2C exact drafts
+  // keep their established traveller-count pricing even if legacy bounds exist.
+  const b2bExactWithBounds = baseDraft();
+  b2bExactWithBounds.pax_min = 1;
+  b2bExactWithBounds.pax_max = 10;
+  b2bExactWithBounds.pax_mode = "exact";
+  assert.deepEqual(calc.getCostingPaxValues(b2bExactWithBounds), [2], "B2B exact pricing unchanged");
+  const b2cExactWithBounds = { ...b2bExactWithBounds, query_type: "B2C" };
+  assert.deepEqual(calc.getCostingPaxValues(b2cExactWithBounds), [2], "B2C exact pricing unchanged");
 
   // Range rows are bounded by both the requested range and each vehicle's
   // actual capacity; an ineligible vehicle must never fall back to all rows.

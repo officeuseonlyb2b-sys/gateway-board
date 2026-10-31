@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedActivitiesRouteImport } from './routes/_authenticated/activities'
 import { Route as AuthenticatedAdminConsoleRouteImport } from './routes/_authenticated/admin-console'
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
+import { Route as AuthenticatedBrochuresRouteImport } from './routes/_authenticated/brochures'
 import { Route as AuthenticatedClientsRouteImport } from './routes/_authenticated/clients'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
@@ -96,6 +97,11 @@ const AuthenticatedAdminConsoleRoute =
 const AuthenticatedAgentsRoute = AuthenticatedAgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedBrochuresRoute = AuthenticatedBrochuresRouteImport.update({
+  id: '/brochures',
+  path: '/brochures',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedClientsRoute = AuthenticatedClientsRouteImport.update({
@@ -393,6 +399,7 @@ export interface FileRoutesByFullPath {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
+  '/brochures': typeof AuthenticatedBrochuresRoute
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -452,6 +459,7 @@ export interface FileRoutesByTo {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
+  '/brochures': typeof AuthenticatedBrochuresRoute
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -513,6 +521,7 @@ export interface FileRoutesById {
   '/_authenticated/activities': typeof AuthenticatedActivitiesRoute
   '/_authenticated/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRouteWithChildren
+  '/_authenticated/brochures': typeof AuthenticatedBrochuresRoute
   '/_authenticated/clients': typeof AuthenticatedClientsRouteWithChildren
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
@@ -574,6 +583,7 @@ export interface FileRouteTypes {
     | '/activities'
     | '/admin-console'
     | '/agents'
+    | '/brochures'
     | '/clients'
     | '/costing'
     | '/dashboard'
@@ -633,6 +643,7 @@ export interface FileRouteTypes {
     | '/activities'
     | '/admin-console'
     | '/agents'
+    | '/brochures'
     | '/clients'
     | '/costing'
     | '/dashboard'
@@ -693,6 +704,7 @@ export interface FileRouteTypes {
     | '/_authenticated/activities'
     | '/_authenticated/admin-console'
     | '/_authenticated/agents'
+    | '/_authenticated/brochures'
     | '/_authenticated/clients'
     | '/_authenticated/costing'
     | '/_authenticated/dashboard'
@@ -795,6 +807,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AuthenticatedAgentsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/brochures': {
+      id: '/_authenticated/brochures'
+      path: '/brochures'
+      fullPath: '/brochures'
+      preLoaderRoute: typeof AuthenticatedBrochuresRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/clients': {
@@ -1204,6 +1223,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivitiesRoute: typeof AuthenticatedActivitiesRoute
   AuthenticatedAdminConsoleRoute: typeof AuthenticatedAdminConsoleRoute
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRouteWithChildren
+  AuthenticatedBrochuresRoute: typeof AuthenticatedBrochuresRoute
   AuthenticatedClientsRoute: typeof AuthenticatedClientsRouteWithChildren
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
@@ -1259,6 +1279,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivitiesRoute: AuthenticatedActivitiesRoute,
   AuthenticatedAdminConsoleRoute: AuthenticatedAdminConsoleRoute,
   AuthenticatedAgentsRoute: AuthenticatedAgentsRouteWithChildren,
+  AuthenticatedBrochuresRoute: AuthenticatedBrochuresRoute,
   AuthenticatedClientsRoute: AuthenticatedClientsRouteWithChildren,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,

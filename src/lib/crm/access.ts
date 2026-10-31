@@ -134,6 +134,7 @@ export function canAccessPath(profile: AccessProfile, pathname: string) {
     "/costing",
     "/drafts",
     "/quotes",
+    "/brochures",
     "/routing-programs",
     "/destinations",
     "/new-lead",

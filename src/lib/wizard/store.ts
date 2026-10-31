@@ -65,7 +65,12 @@ export function normalizeDraft(raw: QuoteDraft): QuoteDraft {
     ...raw,
     hotel_options: hotelOptions,
     query_for: normalizeQueryFor(raw.query_for),
-    pax_mode: raw.pax_mode || (legacyRange || legacyBounds ? "range" : "exact"),
+    // Brochure Trip Basics always prices an inclusive range. This repairs
+    // legacy snapshots with valid bounds but stale exact/default mode.
+    pax_mode:
+      raw.query_type === "Brochure" && legacyBounds
+        ? "range"
+        : raw.pax_mode || (legacyRange || legacyBounds ? "range" : "exact"),
     escort_pricing_mode: raw.escort_pricing_mode ?? legacyEscortMode,
     escort_enabled: raw.escort_enabled ?? Boolean(raw.escort_pricing_mode || legacyEscortMode),
     children: Array.isArray(raw.children) ? raw.children : [],

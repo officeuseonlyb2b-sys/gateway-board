@@ -123,9 +123,18 @@ export function isEscortDayRequired(draft: QuoteDraft, day: number): boolean {
   return Object.values(draft.escort_day_rates_by_slab?.[day] ?? {}).some((rate) => rate > 0);
 }
 
+export type EscortInclusion = "included" | "optional";
+export function escortDayInclusion(draft: QuoteDraft, day: number): EscortInclusion {
+  return draft.escort_day_inclusion?.[day] ?? "included";
+}
+export function escortReportingInclusion(draft: QuoteDraft): EscortInclusion {
+  return draft.escort_reporting_inclusion ?? "included";
+}
+
 export function getEscortRangeBase(
   draft: QuoteDraft,
   range: NonNullable<QuoteDraft["escort_ranges"]>[number],
+  inclusion: EscortInclusion = "included",
 ): number {
   if (!isEscortEnabled(draft) || getEscortPricingMode(draft) !== "pax_range") return 0;
   const serviceDays = draft.routing.filter((day) => !(day.is_day_zero || day.day === 0));
@@ -138,13 +147,13 @@ export function getEscortRangeBase(
   const base = hasDayRates
     ? serviceDays.reduce(
         (sum, day) =>
-          isEscortDayRequired(draft, day.day)
+          isEscortDayRequired(draft, day.day) && escortDayInclusion(draft, day.day) === inclusion
             ? sum + (draft.escort_day_rates_by_slab?.[day.day]?.[range.id] ?? 0)
             : sum,
         0,
       )
-    : (range.charge ?? 0);
-  return base > 0 ? base + (draft.guide_escort_reporting ?? 0) : 0;
+    : inclusion === "included" ? (range.charge ?? 0) : 0;
+  return base > 0 ? base + (escortReportingInclusion(draft) === inclusion ? (draft.guide_escort_reporting ?? 0) : 0) : 0;
 }
 
 export function getEscortRangeDayCharge(draft: QuoteDraft, day: number, rangeId: string) {
@@ -156,23 +165,27 @@ export function getEscortPerPersonRate(draft: QuoteDraft): number {
 }
 
 /** Base Escort amount before Land Part markup/GST for one costing pax. */
-export function getEscortBaseForPax(draft: QuoteDraft, pax: number): number {
+export function getEscortBaseForPax(draft: QuoteDraft, pax: number, inclusion: EscortInclusion = "included"): number {
   if (!isEscortEnabled(draft)) return 0;
   const mode = getEscortPricingMode(draft);
   if (mode === "per_person") {
-    return getEscortPerPersonRate(draft) * pax + (draft.guide_escort_reporting ?? 0);
+    const hasExplicitDays = Object.keys(draft.guide_day_escort_enabled ?? {}).length > 0 || Object.keys(draft.escort_day_inclusion ?? {}).length > 0;
+    const activeDays = draft.routing.filter((day) => isEscortDayRequired(draft, day.day) && escortDayInclusion(draft, day.day) === inclusion);
+    const hasSelectedDays = hasExplicitDays ? activeDays.length > 0 : inclusion === "included";
+    return hasSelectedDays ? getEscortPerPersonRate(draft) * pax + (escortReportingInclusion(draft) === inclusion ? (draft.guide_escort_reporting ?? 0) : 0) : 0;
   }
   if (mode === "pax_range") {
     const range = (draft.escort_ranges ?? []).find(
       (item) => pax >= item.min_pax && pax <= item.max_pax,
     );
-    return range ? getEscortRangeBase(draft, range) : 0;
+    return range ? getEscortRangeBase(draft, range, inclusion) : 0;
   }
   if (mode !== "day_wise" || !escortDayAppliesToPax(draft, pax)) return 0;
 
   const charges = draft.routing
+    .filter((day) => escortDayInclusion(draft, day.day) === inclusion)
     .map((day) => getEscortDayCharge(draft, day.day))
     .filter((charge) => charge > 0);
   if (!charges.length) return 0;
-  return charges.reduce((sum, charge) => sum + charge, 0) + (draft.guide_escort_reporting ?? 0);
+  return charges.reduce((sum, charge) => sum + charge, 0) + (escortReportingInclusion(draft) === inclusion ? (draft.guide_escort_reporting ?? 0) : 0);
 }

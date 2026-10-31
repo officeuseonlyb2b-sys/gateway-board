@@ -84,6 +84,11 @@ export function CustomerQuotationPreview({
           <p className="mt-1 text-sm text-muted-foreground">
             Read-only Final Quotation Review using the exact selections from Step 9.
           </p>
+          {draft.query_type === "Brochure" && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Save Brochure Draft stores a standalone immutable pricing snapshot; no CRM Query is required.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={printPreview}>
@@ -102,7 +107,17 @@ export function CustomerQuotationPreview({
           <Button variant="outline" onClick={onSaveDraft}>
             <Save className="mr-2 h-4 w-4" /> Save Draft
           </Button>
-          <Button
+          {draft.query_type === "Brochure" && (
+            <Button
+              disabled={!canFinalize || isFinalizing}
+              onClick={onFinalize}
+              title={finalizeBlockers.join(" ") || "Save this immutable Brochure pricing snapshot."}
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              {isFinalizing ? "Saving..." : "Save Brochure Draft"}
+            </Button>
+          )}
+          {draft.query_type !== "Brochure" && <Button
             disabled={!canFinalize || isFinalizing}
             onClick={onFinalize}
             title={
@@ -113,7 +128,7 @@ export function CustomerQuotationPreview({
           >
             <ShieldCheck className="mr-2 h-4 w-4" />
             {isFinalizing ? "Saving…" : `Save Costing · V${version}`}
-          </Button>
+          </Button>}
         </div>
       </div>
 

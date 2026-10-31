@@ -1067,10 +1067,9 @@ export function buildRateSheet(
           ? selectedGuideTotalForPax(draft, d, pax)
           : { guide: 0, escort: 0 };
         const guide = includeLand ? gross(guideAtPax.guide / pax, mk.land, 0.05) : 0;
-        const escortBasePerPerson =
-          isEscortEnabled(draft) && getEscortPricingMode(draft) === "per_person"
-            ? (draft.escort_per_person_rate ?? 0) + (draft.guide_escort_reporting ?? 0) / pax
-            : guideAtPax.escort / pax;
+        // selectedGuideTotalForPax is the single source for Included Escort.
+        // It already excludes Optional days and assigns reporting cost once.
+        const escortBasePerPerson = guideAtPax.escort / pax;
         const escort = includeLand ? gross(escortBasePerPerson, mk.land, 0.05) : 0;
         const entrances = includeLand
           ? gross(selectedEntranceTotalForPax(draft, d, pax) / pax, mk.land, 0.05)

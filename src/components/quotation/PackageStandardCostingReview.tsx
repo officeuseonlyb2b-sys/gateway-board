@@ -17,6 +17,8 @@ import {
   computeMealDays,
   effectivePaxForPricing,
   getCostingPaxValues,
+  paxRangeActive,
+  parsePaxRange,
   quotationPaxLabel,
   gstRateFor,
   hotelsGst,
@@ -85,6 +87,20 @@ const grid =
 const money = (value?: number) => (value == null || !Number.isFinite(value) ? "—" : inr(value));
 const gross = (base: number, markup: number, gst: number) => base * (1 + markup) * (1 + gst);
 
+/** Presentation-only filter: Brochure pricing may be pax-wise in the matrix,
+ * while activity reviews retain the source slab schedule that overlaps it. */
+function activityRateAppliesToReview(
+  draft: QuoteDraft,
+  pax: number,
+  row: { rate_basis: string; min_pax?: number; max_pax?: number },
+) {
+  if (row.rate_basis !== "custom_slab" || row.min_pax == null || row.max_pax == null) return true;
+  const range = paxRangeActive(draft) ? parsePaxRange(draft) : null;
+  return range
+    ? row.min_pax <= range.max && row.max_pax >= range.min
+    : pax >= row.min_pax && pax <= row.max_pax;
+}
+
 /**
  * Step 7 persists the selected activity's active rate on the draft line. The
  * included review may show the activity's slab schedule, but it must not turn
@@ -130,8 +146,12 @@ export function includedActivitySellingRows(
       if (!byRange.has(key) || savedRateMatch) byRange.set(key, slab);
     });
 
-    const displayedSlabs = [...byRange.values()].filter(
-      (slab) => draft.pax_mode === "range" || (pax >= slab.from_pax && pax <= slab.to_pax),
+    const displayedSlabs = [...byRange.values()].filter((slab) =>
+      activityRateAppliesToReview(draft, pax, {
+        rate_basis: "custom_slab",
+        min_pax: slab.from_pax,
+        max_pax: slab.to_pax,
+      }),
     );
     return displayedSlabs.map((slab) => {
       const isActiveRange = pax >= slab.from_pax && pax <= slab.to_pax;
@@ -905,15 +925,7 @@ function ActivitiesReview({ draft, optional = false }: { draft: QuoteDraft; opti
                   master,
                   draft.traveler_type || "indian",
                   pax,
-                ).filter(
-                  (row) =>
-                    draft.pax_mode === "range" ||
-                    row.rate_basis !== "custom_slab" ||
-                    (row.min_pax != null &&
-                      row.max_pax != null &&
-                      pax >= row.min_pax &&
-                      pax <= row.max_pax),
-                );
+                ).filter((row) => activityRateAppliesToReview(draft, pax, row));
                 return rows.map((row, index) => {
                   const day = line.from_routing_days?.[0];
                   const route = draft.routing.find((item) => item.day === day);
@@ -997,7 +1009,7 @@ function LandReview({
   };
   const filters: LandReviewFilters = {
     ...selection,
-    paxDisplay: draft.pax_mode === "range" ? "ranges" : "exact",
+    paxDisplay: paxRangeActive(draft) ? "ranges" : "exact",
     exactPax: effectivePaxForPricing(draft),
   };
   const daywiseFilters: LandReviewFilters = {
@@ -1016,7 +1028,7 @@ function LandReview({
     <Section number={2} title="Land Services — Pricing & Selection Review">
       <div className="space-y-2 p-2">
         <div className="inline-flex rounded-sm border border-[#b8cee1] bg-[#eef5fb] px-2 py-1 text-[9px] font-semibold text-[#103353]">
-          {draft.pax_mode === "range"
+          {paxRangeActive(draft)
             ? `Costing Mode: Pax Range · ${draft.pax_min ?? 1}–${draft.pax_max ?? draft.pax_min ?? 1} Pax`
             : `Costing Mode: Exact Travellers · ${effectivePaxForPricing(draft)} Pax`}
         </div>
@@ -1097,7 +1109,7 @@ function AccommodationReview({
                     <th>Nights</th>
                     {options.map((option) => (
                       <th key={option.key} className="text-left">
-                        Option {option.key}
+                        Option {option.key} · {option.category || option.label || "Accommodation"}
                       </th>
                     ))}
                   </tr>
@@ -1508,6 +1520,481 @@ function SeparateMealsReview({
   );
 }
 
+function GroupedMealsReview({
+  draft,
+  sectionNumber = 5,
+}: {
+  draft: QuoteDraft;
+  sectionNumber?: number;
+}) {
+  const db = useDB();
+  const options = useMemo(() => {
+    const configured = draft.hotel_options
+      .filter((option) => option.selections.length > 0)
+      .slice(0, 4);
+    return configured.length
+      ? configured
+      : ([{ key: "A", label: "Option A", selections: [] }] as HotelOption[]);
+  }, [draft.hotel_options]);
+  const rowsByOption = useMemo(
+    () =>
+      new Map(
+        options.map((option) => [option.key, calculateMealCostingRows(draft, db, option.key)]),
+      ),
+    [draft, db, options],
+  );
+  const dayRows = useMemo(() => {
+    const result = new Map<string, { day: number; date: string; city: string; cityId: string }>();
+    draft.routing.forEach((route) => {
+      const cityId = route.city_id || route.to_city_id || route.from_city || `route-${route.day}`;
+      const city =
+        db.cities.find((item) => item.id === cityId)?.name ||
+        route.to_city ||
+        route.from_city ||
+        "—";
+      result.set(`${route.day}:${cityId}`, { day: route.day, date: route.date, city, cityId });
+    });
+    rowsByOption.forEach((rows) =>
+      rows.forEach((row) =>
+        result.set(`${row.day}:${row.city_id}`, {
+          day: row.day,
+          date: row.date,
+          city: row.city,
+          cityId: row.city_id,
+        }),
+      ),
+    );
+    return [...result.values()].sort((a, b) => a.day - b.day || a.city.localeCompare(b.city));
+  }, [draft.routing, db.cities, rowsByOption]);
+  const matching = (
+    optionKey: OptionKey,
+    row: (typeof dayRows)[number],
+    meal: "Lunch" | "Dinner",
+    status: "included" | "optional",
+  ) =>
+    (rowsByOption.get(optionKey) ?? []).filter(
+      (item) =>
+        item.day === row.day &&
+        item.city_id === row.cityId &&
+        item.meal_type === meal &&
+        item.status === status,
+    );
+  const summary = (
+    optionKey: OptionKey,
+    meal: "Lunch" | "Dinner",
+    status: "included" | "optional",
+  ) => mealCostingTotal(draft, rowsByOption.get(optionKey) ?? [], meal, status);
+  const price = (items: ReturnType<typeof matching>) => {
+    if (!items.length) return "—";
+    const base = items.reduce((sum, item) => sum + item.total, 0) / (items[0]?.pax || 1);
+    const markup = base * hotelsMarkup(draft);
+    const gst = (base + markup) * hotelsGst(draft);
+    return (
+      <>
+        <div className="font-semibold">{money(base + markup + gst)}</div>
+        <div className="text-[8px] text-[#73849b]">
+          Net {money(base)}
+          <br />
+          GST {money(gst)}
+        </div>
+      </>
+    );
+  };
+  const stay = (optionKey: OptionKey, row: (typeof dayRows)[number]) => {
+    const rows = (rowsByOption.get(optionKey) ?? []).filter(
+      (item) => item.day === row.day && item.city_id === row.cityId,
+    );
+    const route = draft.routing.find((item) => item.day === row.day);
+    const option = options.find((item) => item.key === optionKey);
+    const hotelSelection = route ? hotelSelectionForDay(option, route) : undefined;
+    const hotelName = db.hotels.find((hotel) => hotel.id === hotelSelection?.hotel_id)?.name;
+    const meal = (type: "Lunch" | "Dinner") => {
+      const item = rows.find((value) => value.meal_type === type);
+      const status = !item
+        ? "No Meal"
+        : item.status === "hotel_plan"
+          ? "Included in Hotel Plan"
+          : item.status === "included"
+            ? "Included"
+            : "Optional";
+      return `${type}: ${status}${item?.label && item.status !== "hotel_plan" ? ` — ${item.label}` : ""}`;
+    };
+    return (
+      <>
+        <div className="font-semibold">
+          {rows.find((item) => item.label)?.label || hotelName || "No meal venue selected"}
+        </div>
+        <div className="text-[8px] text-[#73849b]">{meal("Lunch")}</div>
+        <div className="text-[8px] text-[#73849b]">{meal("Dinner")}</div>
+        {hotelSelection?.meal_plan && (
+          <div className="text-[8px] text-[#73849b]">
+            Hotel Meal Plan: {hotelSelection.meal_plan}
+          </div>
+        )}
+      </>
+    );
+  };
+  return (
+    <Section number={sectionNumber} title="Meals — Included & Optional Review">
+      <div className="space-y-2 p-2">
+        <Panel title="A. Day-wise Included & Optional Meals / Stay Plan">
+          <div className="overflow-x-auto">
+            <table className={`${grid} min-w-[900px]`}>
+              <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]">
+                <tr>
+                  <th>Day</th>
+                  <th>Date</th>
+                  <th className="text-left">City</th>
+                  {options.map((option) => (
+                    <th key={option.key} className="text-left">
+                      Option {option.key} · {option.category || option.label || "Accommodation"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dayRows.map((row) => (
+                  <tr key={`${row.day}:${row.cityId}`}>
+                    <td>Day {row.day}</td>
+                    <td>{row.date}</td>
+                    <td>{row.city}</td>
+                    {options.map((option) => (
+                      <td key={option.key}>{stay(option.key, row)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+        <Panel
+          title="B. Meals — Rate Verification (Per Person)"
+          helper="Hotel-plan meals are excluded from meal charges."
+        >
+          <div className="overflow-x-auto">
+            <table className={`${grid} min-w-[1200px]`}>
+              <thead>
+                <tr className="bg-[#e6f0fb] text-[9px] uppercase text-[#103353]">
+                  <th rowSpan={3}>Day</th>
+                  <th rowSpan={3}>Date</th>
+                  <th rowSpan={3} className="text-left">
+                    City
+                  </th>
+                  {options.map((option) => (
+                    <th key={option.key} colSpan={4}>
+                      Option {option.key} · {option.category || option.label || "Accommodation"}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="bg-[#f0f4f8] text-[8px] uppercase text-[#204e76]">
+                  {options.flatMap((option) => [
+                    <th key={`${option.key}-l`} colSpan={2}>
+                      Lunch (PP)
+                    </th>,
+                    <th key={`${option.key}-d`} colSpan={2}>
+                      Dinner (PP)
+                    </th>,
+                  ])}
+                </tr>
+                <tr className="bg-[#f0f4f8] text-[8px] uppercase text-[#204e76]">
+                  {options.flatMap((option) =>
+                    ["Included", "Optional", "Included", "Optional"].map((label, index) => (
+                      <th key={`${option.key}-${index}`} className="text-right">
+                        {label}
+                      </th>
+                    )),
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {dayRows.map((row) => (
+                  <tr key={`${row.day}:${row.cityId}`}>
+                    <td>Day {row.day}</td>
+                    <td>{row.date}</td>
+                    <td>{row.city}</td>
+                    {options.flatMap((option) =>
+                      [
+                        price(matching(option.key, row, "Lunch", "included")),
+                        price(matching(option.key, row, "Lunch", "optional")),
+                        price(matching(option.key, row, "Dinner", "included")),
+                        price(matching(option.key, row, "Dinner", "optional")),
+                      ].map((value, index) => (
+                        <td
+                          key={`${option.key}-${index}`}
+                          className="text-right align-top tabular-nums"
+                        >
+                          {value}
+                        </td>
+                      )),
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                {[
+                  "Total (Supplier incl. GST)",
+                  "Markup",
+                  "GST on markup",
+                  "Final selling total",
+                  "FINAL MEALS PRICE PP",
+                ].map((label, index) => (
+                  <tr
+                    key={label}
+                    className={
+                      index === 4
+                        ? "bg-[#eaf8ef] font-bold text-[#103353]"
+                        : index === 3
+                          ? "bg-[#e6f0fb] font-semibold"
+                          : "bg-[#f5f8fb]"
+                    }
+                  >
+                    <td colSpan={3}>{label}</td>
+                    {options.flatMap((option) =>
+                      [
+                        summary(option.key, "Lunch", "included"),
+                        summary(option.key, "Lunch", "optional"),
+                        summary(option.key, "Dinner", "included"),
+                        summary(option.key, "Dinner", "optional"),
+                      ].map((total, totalIndex) => (
+                        <td key={`${option.key}-${totalIndex}`} className="text-right tabular-nums">
+                          {money(
+                            index === 0
+                              ? total.base_total
+                              : index === 1
+                                ? total.markup
+                                : index === 2
+                                  ? total.gst
+                                  : index === 3
+                                    ? total.final_total
+                                    : total.per_person,
+                          )}
+                        </td>
+                      )),
+                    )}
+                  </tr>
+                ))}
+              </tfoot>
+            </table>
+          </div>
+        </Panel>
+      </div>
+    </Section>
+  );
+}
+
+function ApprovedMealsReview({
+  draft,
+  sectionNumber = 5,
+}: {
+  draft: QuoteDraft;
+  sectionNumber?: number;
+}) {
+  const db = useDB();
+  const options = useMemo(() => {
+    const configured = draft.hotel_options
+      .filter((option) => option.selections.length > 0)
+      .slice(0, 4);
+    return configured.length
+      ? configured
+      : ([{ key: "A", label: "Option A", selections: [] }] as HotelOption[]);
+  }, [draft.hotel_options]);
+  const rowsByOption = useMemo(
+    () =>
+      new Map(
+        options.map((option) => [option.key, calculateMealCostingRows(draft, db, option.key)]),
+      ),
+    [draft, db, options],
+  );
+  const cityName = (cityId?: string) => db.cities.find((city) => city.id === cityId)?.name;
+  const routeCities = (route: RoutingDay) => {
+    const cities = [
+      route.from_city,
+      cityName(route.city_id),
+      route.to_city,
+      cityName(route.to_city_id),
+      ...(route.to_city_ids ?? []).map(cityName),
+    ].filter(Boolean);
+    return [...new Set(cities)].join(" → ") || "—";
+  };
+  const mealRows = (optionKey: OptionKey, day: number, type: "Lunch" | "Dinner") =>
+    (rowsByOption.get(optionKey) ?? []).filter((row) => row.day === day && row.meal_type === type);
+  const summary = (
+    optionKey: OptionKey,
+    meal: "Lunch" | "Dinner",
+    status: "included" | "optional",
+  ) => mealCostingTotal(draft, rowsByOption.get(optionKey) ?? [], meal, status);
+  const venue = (rows: ReturnType<typeof mealRows>) =>
+    rows
+      .map((row) => row.label)
+      .filter(Boolean)
+      .join(" / ") || "—";
+  const cities = (rows: ReturnType<typeof mealRows>) =>
+    rows
+      .map((row) => row.city)
+      .filter(Boolean)
+      .join(" / ") || "—";
+  const price = (rows: ReturnType<typeof mealRows>, status: "included" | "optional") => {
+    if (status === "included" && rows.some((row) => row.status === "hotel_plan"))
+      return <span className="font-semibold text-emerald-800">Included in Hotel Plan</span>;
+    const selected = rows.filter((row) => row.status === status);
+    if (!selected.length) return "—";
+    const base = selected.reduce((sum, row) => sum + row.total, 0) / (selected[0]?.pax || 1);
+    const markup = base * hotelsMarkup(draft);
+    const gst = (base + markup) * hotelsGst(draft);
+    return (
+      <>
+        <div className="font-semibold">{money(base + markup + gst)}</div>
+        <div className="text-[8px] text-[#73849b]">
+          Net {money(base)}
+          <br />
+          GST {money(gst)}
+        </div>
+      </>
+    );
+  };
+  const hotelPlan = (option: HotelOption, route: RoutingDay) => {
+    const selection = hotelSelectionForDay(option, route);
+    return selection?.meal_plan || "No Overnight Plan";
+  };
+  return (
+    <Section number={sectionNumber} title="Meals — Option A Included & Optional Review">
+      <div className="p-2">
+        <div className="overflow-x-auto">
+          <table className={`${grid} min-w-[1800px]`}>
+            <thead>
+              <tr className="bg-[#e6f0fb] text-[9px] uppercase text-[#103353]">
+                <th rowSpan={3}>Day / Date / Cities Covered</th>
+                {options.map((option) => (
+                  <th key={option.key} colSpan={9}>
+                    Option {option.key} · {option.category || option.label || "Accommodation"}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-[#f0f4f8] text-[8px] uppercase text-[#204e76]">
+                {options.flatMap((option) => [
+                  <th key={`${option.key}-plan`} rowSpan={2}>
+                    Hotel Plan
+                  </th>,
+                  <th key={`${option.key}-lunch`} colSpan={4}>
+                    Lunch Arrangement
+                  </th>,
+                  <th key={`${option.key}-dinner`} colSpan={4}>
+                    Dinner Arrangement
+                  </th>,
+                ])}
+              </tr>
+              <tr className="bg-[#f0f4f8] text-[8px] uppercase text-[#204e76]">
+                {options.flatMap((option) =>
+                  [
+                    "City",
+                    "Venue Name",
+                    "Inclusion (₹)",
+                    "Optional (₹)",
+                    "City",
+                    "Venue Name",
+                    "Inclusion (₹)",
+                    "Optional (₹)",
+                  ].map((label, index) => (
+                    <th
+                      key={`${option.key}-${index}`}
+                      className={
+                        index === 2 || index === 3 || index === 6 || index === 7
+                          ? "text-right"
+                          : "text-left"
+                      }
+                    >
+                      {label}
+                    </th>
+                  )),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {draft.routing.map((route, index) => (
+                <tr key={route.day}>
+                  <td>
+                    <b>Day {route.day}</b>
+                    <div>{route.date || `Day ${index + 1}`}</div>
+                    <div className="text-[8px] text-[#73849b]">{routeCities(route)}</div>
+                  </td>
+                  {options.flatMap((option) => {
+                    const lunch = mealRows(option.key, route.day, "Lunch");
+                    const dinner = mealRows(option.key, route.day, "Dinner");
+                    return [
+                      <td key={`${option.key}-plan`}>{hotelPlan(option, route)}</td>,
+                      <td key={`${option.key}-lc`}>{cities(lunch)}</td>,
+                      <td key={`${option.key}-lv`}>{venue(lunch)}</td>,
+                      <td key={`${option.key}-li`} className="text-right align-top tabular-nums">
+                        {price(lunch, "included")}
+                      </td>,
+                      <td key={`${option.key}-lo`} className="text-right align-top tabular-nums">
+                        {price(lunch, "optional")}
+                      </td>,
+                      <td key={`${option.key}-dc`}>{cities(dinner)}</td>,
+                      <td key={`${option.key}-dv`}>{venue(dinner)}</td>,
+                      <td key={`${option.key}-di`} className="text-right align-top tabular-nums">
+                        {price(dinner, "included")}
+                      </td>,
+                      <td key={`${option.key}-do`} className="text-right align-top tabular-nums">
+                        {price(dinner, "optional")}
+                      </td>,
+                    ];
+                  })}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              {[
+                "Total (Supplier incl. GST)",
+                "Markup",
+                "GST on markup",
+                "Final selling total",
+                "FINAL MEALS PRICE PP",
+              ].map((label, index) => (
+                <tr
+                  key={label}
+                  className={
+                    index === 4
+                      ? "bg-[#eaf8ef] font-bold text-[#103353]"
+                      : index === 3
+                        ? "bg-[#e6f0fb] font-semibold"
+                        : "bg-[#f5f8fb]"
+                  }
+                >
+                  <td>{label}</td>
+                  {options.flatMap((option) => [
+                    <td key={`${option.key}-summary`} colSpan={5} />,
+                    ...[
+                      summary(option.key, "Lunch", "included"),
+                      summary(option.key, "Lunch", "optional"),
+                      summary(option.key, "Dinner", "included"),
+                      summary(option.key, "Dinner", "optional"),
+                    ].map((total, totalIndex) => (
+                      <td key={`${option.key}-${totalIndex}`} className="text-right tabular-nums">
+                        {money(
+                          index === 0
+                            ? total.base_total
+                            : index === 1
+                              ? total.markup
+                              : index === 2
+                                ? total.gst
+                                : index === 3
+                                  ? total.final_total
+                                  : total.per_person,
+                        )}
+                      </td>
+                    )),
+                  ])}
+                </tr>
+              ))}
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 function PackageStandardCostingReviewImpl({
   draft,
   set,
@@ -1559,7 +2046,7 @@ function PackageStandardCostingReviewImpl({
         !accommodationOnly &&
         (landMeals ? (
           <div className="print-meals-section">
-            <SeparateMealsReview draft={costingDraft} />
+            <ApprovedMealsReview draft={costingDraft} />
           </div>
         ) : (
           <div className="print-accommodation-section">
@@ -1577,14 +2064,7 @@ function PackageStandardCostingReviewImpl({
         ))}
       {scope.accommodationPart && (
         <div className="space-y-3 print-meals-section">
-          {costingDraft.hotel_options.slice(0, 4).map((option) => (
-            <SeparateMealsReview
-              key={option.key}
-              draft={costingDraft}
-              optionKey={option.key}
-              sectionNumber={5}
-            />
-          ))}
+          <ApprovedMealsReview draft={costingDraft} sectionNumber={5} />
         </div>
       )}
     </div>

@@ -274,6 +274,7 @@ export function buildSavedQuote(
           option_key: option.key,
           option_label: option.category || option.label || `Option ${option.key}`,
           vehicle: group.vehicle,
+          transport_variation_id: group.line_id,
           pax: row.pax,
           single: row.pkg_single,
           double: row.pkg_double,
@@ -408,6 +409,19 @@ export function buildSavedQuote(
       });
     })(),
     rate_sheet_rows: savedRateSheetRows,
+    ...(draft.query_type === "Brochure" && draft.program_id
+      ? {
+          brochure_source: {
+            programme_id: draft.program_id,
+            programme_code: draft.program_code,
+            programme_name: draft.program_name,
+            validity_from: draft.brochure_validity_from,
+            validity_till: draft.brochure_validity_till,
+            pax_min: queryPaxMin,
+            pax_max: queryPaxMax,
+          },
+        }
+      : {}),
     query_snapshot: {
       program_id: draft.program_id,
       program_name: draft.program_name || undefined,
@@ -558,6 +572,9 @@ export function buildCostingVersionSnapshot(
       include_sgl: false,
       include_dbl: false,
       include_trp: false,
+      ...(draft.query_type === "Brochure" && draft.program_id
+        ? { brochure_source: { programme_id: draft.program_id, programme_code: draft.program_code, programme_name: draft.program_name, validity_from: draft.brochure_validity_from, validity_till: draft.brochure_validity_till, pax_min: Math.max(1, draft.pax_min ?? 1), pax_max: Math.max(draft.pax_min ?? 1, draft.pax_max ?? draft.pax_min ?? 1) } }
+        : {}),
       audit_log: [
         {
           at: now,

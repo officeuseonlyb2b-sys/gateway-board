@@ -197,7 +197,7 @@ function StayPlan({
               <th>Nights</th>
               {options.map((option) => (
                 <th key={option.key} className="text-left">
-                  Option {option.key}
+                  Option {option.key} · {option.category || option.label || "Accommodation"}
                 </th>
               ))}
             </tr>

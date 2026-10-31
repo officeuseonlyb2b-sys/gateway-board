@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, Utensils } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { addDaysISO, inr } from "@/lib/format";
 import { restaurantsForCityNames, useDB, type Restaurant } from "@/lib/mock-store";
 import {
@@ -116,8 +117,13 @@ export function StepMeals({ draft, set }: StepProps) {
     ? [{ key: "A" as const, label: "Land + Meals", selections: [] }]
     : draft.hotel_options.filter((option) => option.selections.length > 0);
   const [activeKey, setActiveKey] = useState<OptionKey>(options[0]?.key ?? "A");
+  const [copySourceKey, setCopySourceKey] = useState<OptionKey>("A");
   const option = options.find((item) => item.key === activeKey) ?? options[0];
   const optionKey = option?.key ?? "A";
+  useEffect(() => {
+    if (copySourceKey === optionKey)
+      setCopySourceKey(options.find((item) => item.key !== optionKey)?.key ?? optionKey);
+  }, [copySourceKey, optionKey, options]);
   const selections =
     draft.meal_selections_by_option?.[optionKey] ??
     (optionKey === "A" ? (draft.meal_selections ?? {}) : {});
@@ -161,6 +167,30 @@ export function StepMeals({ draft, set }: StepProps) {
   ) => {
     const current = selections[`${day}:${cityId}`]?.[meal];
     if (current) setMeal(day, cityId, meal, { ...current, inclusion_status });
+  };
+  const copyMealsFromOption = () => {
+    if (!option || copySourceKey === optionKey) return;
+    const source = draft.meal_selections_by_option?.[copySourceKey] ??
+      (copySourceKey === "A" ? draft.meal_selections ?? {} : {});
+    if (Object.keys(selections).length && !window.confirm(`Replace Option ${optionKey}'s existing meal selections?`)) return;
+    const next = Object.fromEntries(Object.entries(source).map(([key, value]) => {
+      const day = Number(key.split(":")[0]);
+      const destinationHotel = option.selections.find((selection) => selection.routing_day === day && !selection.no_hotel);
+      const copyChoice = (choice?: MealChoice): MealChoice | undefined => {
+        if (!choice) return undefined;
+        if (choice.source !== "hotel") return { ...choice };
+        const hotel = db.hotels.find((item) => item.id === destinationHotel?.hotel_id);
+        // Hotel meal rates are always re-resolved against the destination
+        // option's selected hotel and meal plan; no source rate is retained.
+        return { ...choice, hotel_id: destinationHotel?.hotel_id, label: hotel?.name || "Hotel", per_person_rate: undefined };
+      };
+      return [key, { lunch: copyChoice(value.lunch), dinner: copyChoice(value.dinner) }];
+    })) as Record<string, MealDaySelection>;
+    set({
+      meal_selections_by_option: { ...(draft.meal_selections_by_option ?? {}), [optionKey]: next },
+      ...(optionKey === "A" ? { meal_selections: next } : {}),
+    });
+    toast.success(`Meal selections copied from Option ${copySourceKey} to Option ${optionKey}.`);
   };
 
   if (!option)
@@ -474,6 +504,20 @@ export function StepMeals({ draft, set }: StepProps) {
           ))}
         </TabsList>
       </Tabs>
+      {options.length > 1 && (
+        <Card className="flex flex-wrap items-end gap-2 p-3">
+          <div className="min-w-44">
+            <div className="mb-1 text-xs font-medium">Copy meal selections from</div>
+            <Select value={copySourceKey} onValueChange={(value) => setCopySourceKey(value as OptionKey)}>
+              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>{options.filter((item) => item.key !== optionKey).map((item) => <SelectItem key={item.key} value={item.key}>Option {item.key} · {item.category || item.label || "Hotel"}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <Button size="sm" onClick={copyMealsFromOption} disabled={copySourceKey === optionKey}>
+            Copy to Option {optionKey}
+          </Button>
+        </Card>
+      )}
       <div>
         <div className="text-[10px] font-semibold uppercase text-muted-foreground">Part 1</div>
         <h3 className="text-sm font-semibold">Meal Selection &amp; Costing</h3>
