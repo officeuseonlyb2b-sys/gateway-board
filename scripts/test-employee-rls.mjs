@@ -817,8 +817,54 @@ await check(
             .amount,
           444,
         );
+        const inReview = {
+          ...visible.rows[0].data.review_support.query_reviews[0],
+          status: "In Review",
+          started_at: new Date().toISOString(),
+        };
+        const returned = {
+          ...inReview,
+          status: "Returned",
+          completed_at: new Date().toISOString(),
+          decided_at: new Date().toISOString(),
+          decision_note: "Please correct hotel rates and verify room validity.",
+          review_notes: "Please correct hotel rates and verify room validity.",
+        };
+        const reviewData = {
+          ...visible.rows[0].data,
+          review_support: {
+            ...visible.rows[0].data.review_support,
+            query_reviews: [inReview],
+          },
+        };
+        await db.query(
+          "UPDATE public.crm_queries SET data=$1::jsonb WHERE query_id='Q-VERSION-TEST'",
+          [JSON.stringify(reviewData)],
+        );
+        reviewData.review_support.query_reviews = [returned];
+        await db.query(
+          "UPDATE public.crm_queries SET data=$1::jsonb WHERE query_id='Q-VERSION-TEST'",
+          [JSON.stringify(reviewData)],
+        );
       },
       "EMP-0102@example.invalid",
+    );
+    await asUser(
+      ownerId,
+      async () => {
+        const visible = await db.query(
+          "SELECT data FROM public.crm_queries WHERE query_id='Q-VERSION-TEST'",
+        );
+        const review = visible.rows[0].data.review_support.query_reviews[0];
+        assert.equal(review.status, "Returned");
+        assert.equal(review.decision_note, "Please correct hotel rates and verify room validity.");
+        assert.equal(
+          review.quotation_snapshot.quote.totals.amount,
+          444,
+          "return feedback must not mutate the submitted immutable snapshot",
+        );
+      },
+      "EMP-0103@example.invalid",
     );
   },
 );

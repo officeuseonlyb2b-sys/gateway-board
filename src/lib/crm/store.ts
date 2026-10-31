@@ -724,6 +724,14 @@ export function requestQueryReview(
   if (!inited) load();
   const query = getCrmQuery(queryId);
   if (!query) throw new Error("Query not found.");
+  const duplicate = (query.review_support?.query_reviews || []).some(
+    (review) =>
+      review.source_type !== "draft" &&
+      review.requested_by_employee_id === input.requestedByEmployeeId &&
+      review.reviewer_employee_id === input.reviewerEmployeeId &&
+      !["Approved", "Returned", "Cancelled"].includes(review.status),
+  );
+  if (duplicate) throw new Error("A Query review is already active for this reviewer.");
   const requestedAt = iso(new Date());
   const assignment: QueryReviewAssignment = {
     id: crypto.randomUUID(),
@@ -790,6 +798,13 @@ export function assignQueryAssistance(
   if (!inited) load();
   const query = getCrmQuery(queryId);
   if (!query) throw new Error("Query not found.");
+  const duplicate = (query.review_support?.assistance || []).some(
+    (assignment) =>
+      assignment.assigned_by_employee_id === input.assignedByEmployeeId &&
+      assignment.assistant_employee_id === input.assistantEmployeeId &&
+      !["Completed", "Cancelled"].includes(assignment.status),
+  );
+  if (duplicate) throw new Error("An assistance request is already active for this helper.");
   const assignedAt = iso(new Date());
   const assignment = {
     id: crypto.randomUUID(),

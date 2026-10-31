@@ -151,7 +151,12 @@ export default function SalesReview({ mode }: { mode: ReviewMode }) {
           summary || undefined,
         );
       } else {
-        const note = action === "return" ? window.prompt("Correction instructions:") : undefined;
+        const note =
+          action === "return"
+            ? window.prompt("Correction instructions:")
+            : action === "approve"
+              ? window.prompt("Manager feedback for the requester (optional):")
+              : undefined;
         if (action === "return" && !note?.trim()) return;
         if (
           "source_type" in item.assignment &&
