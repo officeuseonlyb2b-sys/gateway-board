@@ -98,6 +98,7 @@ import {
   usePrograms,
   type Agent,
 } from "@/lib/wizard/agents-store";
+import { listSavedItineraryRoutingProgrammes } from "@/lib/saved-itinerary-routings";
 import {
   computeAddonsTotal,
   totalPax,
@@ -2240,10 +2241,18 @@ function Step2({ draft, set }: StepProps) {
 // STEP 4 — Program (updated with Program Name & Category and Beautiful Preview)
 // ============================================================
 function Step4({ draft, set }: StepProps) {
-  const programs = usePrograms();
+  const [programs, setPrograms] = useState<Awaited<ReturnType<typeof listSavedItineraryRoutingProgrammes>>>([]);
   const db = useDB();
   const [programSearch, setProgramSearch] = useState("");
   const [durationFilter, setDurationFilter] = useState(String(draft.nights));
+
+  useEffect(() => {
+    let active = true;
+    listSavedItineraryRoutingProgrammes()
+      .then((items) => active && setPrograms(items))
+      .catch(() => active && setPrograms([]));
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!draft.program_id) setDurationFilter(String(draft.nights));
@@ -2284,15 +2293,7 @@ function Step4({ draft, set }: StepProps) {
       if (!name) return "";
       return db.cities.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id || "";
     };
-    const sourceRouting = p.routing.length
-      ? p.routing
-      : Array.from({ length: Math.max(1, p.days) }, (_, index) => ({
-          day: index + 1,
-          overnight_city: null,
-          program_text: index === 0 ? p.routing_summary : "",
-          from_city: undefined,
-          destination_city: undefined,
-        }));
+    const sourceRouting = p.routing;
     const routing: RoutingDay[] = sourceRouting.map((r, i) => ({
       day: r.day,
       date: addDaysISO(draft.start_date, i),
@@ -2403,8 +2404,9 @@ function Step4({ draft, set }: StepProps) {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {visiblePrograms.length} matching programs. Search accepts route abbreviations and
-                  full city names.
+                  {visiblePrograms.length
+                    ? `${visiblePrograms.length} matching saved routing${visiblePrograms.length === 1 ? "" : "s"}. Search accepts route abbreviations and full city names.`
+                    : "No saved Itinerary Master routing available."}
                 </p>
 
                 {/* 🔥 ATTRACTIVE & BEAUTIFUL PROGRAM PREVIEW */}
