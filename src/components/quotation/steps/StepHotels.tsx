@@ -25,7 +25,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { inr, fmtDateShort } from "@/lib/format";
-import { useDB, MEAL_PLANS, type MealPlan } from "@/lib/mock-store";
+import {
+  useDB,
+  MEAL_PLANS,
+  type BrochureHotelRatePricingBasis,
+  type MealPlan,
+} from "@/lib/mock-store";
 import {
   applyRateOverride,
   gstRateFor,
@@ -65,12 +70,23 @@ import {
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import {
   diagnoseHotelAvailability,
+  hotelCategoryCoverageMessage,
   hotelsForAccommodation,
   normalizeHotelLookupValue,
   resolveAccommodationCity,
 } from "@/lib/wizard/hotel-availability";
 import { getMasterSyncState, subscribeMasterSync } from "@/lib/masters-remote";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
+import {
+  brochureDepartureRateScenarios,
+  brochureRateForNight,
+  brochureAccommodationForOption,
+  brochureAccommodationSummaryRows,
+  brochureAccommodationRoomSummaryRows,
+  brochureOccupancyCommercialTotals,
+} from "@/lib/wizard/brochure-accommodation";
+import { brochurePriceBasisLabel } from "@/lib/brochure-hotel-rates";
+import { brochureRateResolutionMessage, brochureReferenceRatesForHotel } from "@/lib/wizard/brochure-rate-resolution";
 import { QuickAddHotelDialog } from "@/components/QuickAddHotelDialog";
 import { useAuth } from "@/lib/auth-mock";
 import { NumericStepper, WIZARD_HOTEL_CATEGORIES } from "../shared";
@@ -140,6 +156,7 @@ export function accommodationCityForDay(
 export function Step15({ draft, set }: StepProps) {
   const d = useDB();
   const [activeOpt, setActiveOpt] = useState<OptionKey>(draft.hotel_options[0]?.key || "A");
+  const [previewedBrochureBands, setPreviewedBrochureBands] = useState<Partial<Record<OptionKey, string>>>({});
   const [quickAdd, setQuickAdd] = useState<{ cityId: string; cityName: string } | null>(null);
   const paxForMix = Math.max(1, effectivePaxForPricing(draft));
   const exactTravellingPax = totalPax(draft);
@@ -249,6 +266,438 @@ export function Step15({ draft, set }: StepProps) {
       inclusions: [...(source.inclusions ?? [])],
     });
   };
+
+  if (draft.query_type === "Brochure") {
+    const brochureSchedules = activeOption
+      ? accommodationScheduleRows(hotelTableRouting, activeOption)
+      : [];
+    const brochureCosting = activeOption
+      ? brochureAccommodationForOption(draft, activeOption, d)
+      : undefined;
+    const brochureDateScenarios = draft.has_dates === false
+      ? brochureDepartureRateScenarios(draft, d)
+      : [];
+    const bandKey = (from: string, to: string) => `${from}|${to}`;
+    const storedPreviewBand = activeOption ? previewedBrochureBands[activeOption.key] || "" : "";
+    const previewedBrochureScenario = brochureDateScenarios.find(
+      (scenario) => bandKey(scenario.validity_from, scenario.validity_to) === storedPreviewBand,
+    );
+    const previewedBandCosting = activeOption
+      ? previewedBrochureScenario?.options[activeOption.key]
+      : undefined;
+    const brochureHotelCategories = d.hotels.map((hotel) => ({
+      ...hotel,
+      hotel_categories: [hotel.hotel_category],
+    }));
+    const setBrochureSelection = (
+      day: QuoteDraft["routing"][number],
+      cityId: string,
+      hotelValue: string,
+    ) => {
+      if (!activeOption) return;
+      const current = hotelSelectionForDay(activeOption, day, true);
+      const others = activeOption.selections.filter((selection) => selection.routing_day !== day.day);
+      if (hotelValue === "__no_stay__") {
+        updateOption(activeOption.key, { selections: others });
+        return;
+      }
+      const dayZero = Boolean(day.is_day_zero || day.day === 0);
+      const selection = hotelValue === "__no_hotel__" || hotelValue === "__own_arrangement__"
+        ? {
+            city_id: cityId,
+            routing_day: day.day,
+            hotel_id: "",
+            room_id: "",
+            meal_plan: "CP" as MealPlan,
+            no_hotel: true,
+            pre_tour_night: false,
+            accommodation_status: hotelValue === "__own_arrangement__"
+              ? "own_arrangement" as const
+              : "no_hotel_required" as const,
+          }
+        : {
+            ...current,
+            city_id: cityId,
+            routing_day: day.day,
+            hotel_id: hotelValue,
+            room_id: "",
+            meal_plan: current?.meal_plan || "CP" as MealPlan,
+            no_hotel: false,
+            pre_tour_night: dayZero ? true : current?.pre_tour_night,
+            accommodation_status: undefined,
+          };
+      updateOption(activeOption.key, { selections: [...others, selection] });
+    };
+    const paxRows = Array.from({ length: 40 }, (_, index) => index + 1);
+    const summaryPax = activeOption
+      ? Math.max(1, effectiveAccommodationPax(draft, activeOption))
+      : 1;
+    const brochureSummaryRows = brochureCosting
+      ? brochureAccommodationRoomSummaryRows(draft, brochureCosting)
+      : [];
+    const paxAccommodationForCosting = (
+      costing: NonNullable<typeof brochureCosting>,
+      pax: number,
+      occupancy: "single" | "double" | "triple" | "quad",
+    ) => {
+      return brochureOccupancyCommercialTotals(draft, costing, pax, occupancy)?.final_per_person;
+    };
+    const paxAccommodation = (pax: number, occupancy: "single" | "double" | "triple" | "quad") =>
+      brochureCosting ? paxAccommodationForCosting(brochureCosting, pax, occupancy) : undefined;
+    return (
+      <div className="space-y-4">
+        <Card className="border-primary/20 bg-primary/[0.03] p-4">
+          <div className="font-semibold">Brochure Hotel Accommodation · Day-wise</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Routing determines each stay night. Every row uses that night's selected Hotel ID and its own Brochure Rate; regular supplier rates are never used.
+          </p>
+        </Card>
+        <div className="flex gap-2 border-b">
+          {draft.hotel_options.map((option) => (
+            <button key={option.key} type="button" onClick={() => setActiveOpt(option.key)} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px", activeOpt === option.key ? "border-primary text-primary" : "border-transparent text-muted-foreground")}>
+              Option {option.key} · {option.category || "Select Category"}
+            </button>
+          ))}
+          {draft.hotel_options.length < 4 && <button type="button" onClick={addOption} className="px-3 py-2 text-sm text-primary">+ Add Option</button>}
+        </div>
+        {activeOption && (
+          <div className="space-y-4">
+            <Card className="flex flex-wrap items-end gap-3 p-4">
+              <div className="w-full max-w-xs">
+                <Label>Hotel Category for Option {activeOption.key}</Label>
+                <Select value={activeOption.category} onValueChange={applyCategory}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select category..." /></SelectTrigger>
+                  <SelectContent>{WIZARD_HOTEL_CATEGORIES.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {draft.hotel_options.length > 1 && (
+                <div className="w-48">
+                  <Label>Copy from Option</Label>
+                  <Select onValueChange={(value) => copyFromOption(value as OptionKey)}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Choose option" /></SelectTrigger>
+                    <SelectContent>{draft.hotel_options.filter((option) => option.key !== activeOption.key).map((option) => <SelectItem key={option.key} value={option.key}>Option {option.key}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              )}
+              {draft.hotel_options.length > 1 && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => {
+                  const remaining = draft.hotel_options.filter((option) => option.key !== activeOpt);
+                  set({ hotel_options: remaining });
+                  setActiveOpt(remaining[0].key);
+                }}>
+                  <Trash2 className="mr-1 h-4 w-4 text-destructive" /> Remove Option
+                </Button>
+              )}
+            </Card>
+            {!activeCategory && <p className="text-sm text-amber-700">Choose this option's Hotel Category to load matching hotels for each routing city.</p>}
+            {hotelTableRouting.length === 0 && <p className="text-sm text-muted-foreground">Complete Programme routing first. No cities or nights are inferred from the Programme name.</p>}
+            {activeCategory && hotelTableRouting.length > 0 && (
+              <Card className="overflow-hidden">
+                {draft.has_dates === false && (
+                  <div className="space-y-2 border-b p-3">
+                    <div className="max-w-xl">
+                      <Label htmlFor={`brochure-band-${activeOption.key}`} className="text-xs">Preview an existing departure-rate band</Label>
+                      {brochureDateScenarios.length > 0 ? (
+                        <Select
+                          value={previewedBrochureScenario ? storedPreviewBand : ""}
+                          onValueChange={(value) => setPreviewedBrochureBands((current) => ({
+                            ...current,
+                            [activeOption.key]: value,
+                          }))}
+                        >
+                          <SelectTrigger id={`brochure-band-${activeOption.key}`} className="mt-1 h-9 text-xs">
+                            <SelectValue placeholder="Choose a date band to preview nightly rates" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {brochureDateScenarios.map((scenario) => {
+                              const costing = scenario.options[activeOption.key];
+                              const coveredNights = costing?.nights.filter((night) => night.resolution.status === "covered").length ?? 0;
+                              const status = !costing || !costing.nights.length
+                                ? "Unavailable"
+                                : costing.missing === 0
+                                  ? "Fully covered"
+                                  : coveredNights > 0
+                                    ? `Partial validity coverage · ${costing.missing} night(s) unavailable`
+                                    : "Unavailable";
+                              return (
+                                <SelectItem key={bandKey(scenario.validity_from, scenario.validity_to)} value={bandKey(scenario.validity_from, scenario.validity_to)}>
+                                  {scenario.validity_from} – {scenario.validity_to} · {status}
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="mt-1 text-xs text-amber-800">No dated Brochure Rate scenarios cover the current selling validity.</p>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Preview only. Choosing a band does not select or save a specific departure date.
+                    </p>
+                    {previewedBandCosting && previewedBandCosting.missing > 0 && (
+                      <p className="text-xs text-amber-800">
+                        Partial validity coverage: {previewedBandCosting.missing} selected night(s) are unavailable in this band.
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1100px] text-sm">
+                    <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                      <tr>
+                        <th className="p-3">Day / Night</th>
+                        <th className="p-3">Date</th>
+                        <th className="p-3">Overnight City</th>
+                        <th className="p-3">Hotel</th>
+                        <th className="p-3">Room / Rate Source</th>
+                        <th className="p-3 text-right">SGL</th>
+                        <th className="p-3 text-right">DBL</th>
+                        <th className="p-3 text-right">TRP</th>
+                        <th className="p-3 text-right">Extra Bed</th>
+                        <th className="p-3 text-right">Child</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {brochureSchedules.map(({ day, is_departure: isDeparture }, index) => {
+                        const dayZero = Boolean(day.is_day_zero || day.day === 0);
+                        const stayDay = accommodationCityForDay(day, d.cities);
+                        const resolved = resolveAccommodationCity(stayDay, d.cities, d.destination_cities);
+                        const cityId = resolved?.id || stayDay.city_id || "";
+                        const cityName = resolved?.name || stayDay.to_city?.trim() || (isDeparture ? draft.tour_end_city || "" : "");
+                        const selection = hotelSelectionForDay(activeOption, stayDay, true);
+                        const isNight = isAccommodationNightForOption(activeOption, day);
+                        const canSelectStay = dayZero || Boolean(day.overnight) || isNight;
+                        const { inCategory: hotelPool } = hotelsForAccommodation(
+                          brochureHotelCategories,
+                          cityName,
+                          activeCategory,
+                          d.cities,
+                          d.destination_cities,
+                          cityId,
+                        );
+                        const hotelValue = selection?.hotel_id ||
+                          (selection?.accommodation_status === "own_arrangement" ? "__own_arrangement__" :
+                            selection?.no_hotel ? "__no_hotel__" : dayZero ? "__no_stay__" : "");
+                        const bandNight = previewedBandCosting?.nights.find((night) => night.day.day === day.day);
+                        const sellingValidityResolution = selection?.hotel_id && isNight && draft.has_dates === false
+                          ? brochureRateForNight(draft, selection.hotel_id, day, draft.routing.indexOf(day), d.brochure_hotel_rates)
+                          : undefined;
+                        const resolution = selection?.hotel_id && isNight
+                          ? draft.has_dates === false
+                            ? previewedBrochureScenario ? bandNight?.resolution : sellingValidityResolution
+                            : brochureRateForNight(draft, selection.hotel_id, day, draft.routing.indexOf(day), d.brochure_hotel_rates)
+                          : undefined;
+                        const hasRateInAnyBand = Boolean(selection?.hotel_id && brochureDateScenarios.some((scenario) =>
+                          scenario.options[activeOption.key]?.nights.some((night) =>
+                            night.hotelId === selection.hotel_id && night.resolution.status === "covered",
+                          ),
+                        ));
+                        const rate = resolution?.status === "covered" ? resolution.rate : undefined;
+                        const referenceRates = selection?.hotel_id && draft.has_dates === false && !draft.brochure_validity_from && !draft.brochure_validity_till
+                          ? brochureReferenceRatesForHotel(selection.hotel_id, d.brochure_hotel_rates)
+                          : [];
+                        const referenceRate = referenceRates.length === 1 ? referenceRates[0] : undefined;
+                        const displayedRate = rate || referenceRate;
+                        const rateMessage = resolution
+                          ? brochureRateResolutionMessage(resolution)
+                          : sellingValidityResolution
+                            ? brochureRateResolutionMessage(sellingValidityResolution)
+                            : "";
+                        return (
+                          <tr key={`${activeOption.key}-${day.day}-${index}`} className="border-t align-top">
+                            <td className="p-3 font-medium">
+                              {dayZero ? "Day 0 · Pre-tour" : `Day ${day.day}${isDeparture ? " · Departure" : ""}`}
+                              {isNight && <div className="text-[10px] font-normal text-muted-foreground">Accommodation night</div>}
+                            </td>
+                            <td className="p-3 whitespace-nowrap">{draft.has_dates === false ? "No specific date" : day.date ? fmtDateShort(day.date) : "Date missing"}</td>
+                            <td className="p-3">{cityName || "Routing city required"}</td>
+                            <td className="min-w-[220px] p-3">
+                              {!canSelectStay ? (
+                                <span className="text-xs text-muted-foreground">No hotel charge · routing is not overnight</span>
+                              ) : !cityId ? (
+                                <span className="text-xs text-amber-700">Set the overnight/arrival city in Routing first.</span>
+                              ) : (
+                                <>
+                                  <Select value={hotelValue} onValueChange={(value) => setBrochureSelection(day, cityId, value)}>
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder={dayZero ? "No pre-tour stay" : "Select hotel..."} /></SelectTrigger>
+                                    <SelectContent>
+                                      {dayZero && <SelectItem value="__no_stay__">No pre-tour stay</SelectItem>}
+                                      {!dayZero && <SelectItem value="__no_hotel__">No Hotel Required</SelectItem>}
+                                      {!dayZero && <SelectItem value="__own_arrangement__">Own Arrangement</SelectItem>}
+                                      {selection?.hotel_id && !hotelPool.some((hotel) => hotel.id === selection.hotel_id) && (
+                                        <SelectItem value={selection.hotel_id} disabled>{d.hotels.find((hotel) => hotel.id === selection.hotel_id)?.name || "Selected hotel"} · reselect for this city/category</SelectItem>
+                                      )}
+                                      {hotelPool.map((hotel) => <SelectItem key={hotel.id} value={hotel.id}>{hotel.name}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                  <div className="mt-1 text-[10px] text-muted-foreground">{selection?.hotel_id ? `${selection.hotel_id} · Source: Brochure Rate` : isNight ? "Select a hotel for this overnight" : "Optional pre-tour hotel stay"}</div>
+                                  {referenceRate && <div className="mt-1 text-[10px] text-amber-800">Saved Brochure Rate — Valid {fmtDateShort(referenceRate.validity_from)} to {fmtDateShort(referenceRate.validity_to)}. Set Brochure selling validity to confirm pricing coverage.</div>}
+                                  {referenceRates.length > 1 && <div className="mt-1 text-[10px] text-amber-800">{referenceRates.length} saved Brochure Rate periods found. Set Brochure selling validity to select the applicable period.</div>}
+                                  {resolution && !rate && !referenceRate && <div className="mt-1 text-[10px] text-amber-800">{rateMessage}</div>}
+                                  {canSelectStay && !hotelPool.length && (
+                                    <div className="mt-1 space-y-1 text-[10px] text-amber-700">
+                                      <p>{hotelCategoryCoverageMessage(cityName, activeCategory)}</p>
+                                      <a href="/hotels" target="_blank" rel="noopener noreferrer" className="font-medium underline">
+                                        Open Hotels Master in a new tab
+                                      </a>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </td>
+                            <td className="p-3 text-xs">
+                              {selection?.hotel_id && displayedRate
+                                ? draft.has_dates === false && previewedBrochureScenario
+                                  ? `Brochure Rate · Per Night · ${previewedBrochureScenario.validity_from} – ${previewedBrochureScenario.validity_to}`
+                                  : referenceRate
+                                    ? `Saved Brochure Rate · Valid ${fmtDateShort(referenceRate.validity_from)} – ${fmtDateShort(referenceRate.validity_to)} · pricing coverage pending`
+                                    : "Hotel-level estimate · Brochure Rate · Per Night"
+                                : draft.has_dates === false && isNight && selection?.hotel_id && !previewedBrochureScenario && hasRateInAnyBand
+                                  ? "Rates vary by departure period — see dated scenarios"
+                                : isNight && !selection?.no_hotel
+                                  ? rateMessage || "Brochure Rate Not Configured"
+                                  : "No room charge"}
+                            </td>
+                            {(["single", "double", "triple", "extra_bed", "child"] as const).map((field) => (
+                              <td key={field} className="p-3 text-right tabular-nums">
+                                {isNight && selection?.no_hotel
+                                  ? "—"
+                                  : displayedRate
+                                    ? <><div>{inr(displayedRate[field])}</div><div className="text-[9px] text-muted-foreground">{brochurePriceBasisLabel(displayedRate.pricing_basis[field])}</div></>
+                                    : draft.has_dates === false && isNight && selection?.hotel_id && !previewedBrochureScenario && hasRateInAnyBand
+                                      ? "Select a date band"
+                                    : isNight && selection?.hotel_id
+                                      ? "Unavailable"
+                                      : "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+            {draft.has_dates !== false && brochureCosting && brochureCosting.missing > 0 && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                {brochureCosting.missing} accommodation night(s) need a selected hotel with a valid Per Night Brochure Rate. Uncovered and legacy periods cannot be priced.
+              </div>
+            )}
+            {draft.has_dates !== false && brochureCosting && brochureCosting.nights.length > 0 && (
+              <>
+                <Card className="overflow-hidden">
+                  <div className="border-b px-4 py-3 text-sm font-semibold">Option {activeOption.key} · Total Night-wise Accommodation</div>
+                  <p className="px-4 py-2 text-[10px] text-muted-foreground">
+                    Occupancy rows are alternatives, not additive. Extra Bed is charged only as the configured fourth-bed add-on; Child is charged per configured child and does not add another room rate.
+                  </p>
+                  <p className="px-4 pb-2 text-[10px] text-muted-foreground">GST on markup is shown as a subset of Total GST and is not added a second time.</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[850px] text-xs">
+                      <thead className="bg-muted/30"><tr><th className="p-2 text-left">Rate / saved unit</th><th className="p-2 text-right">Total Base Rate</th><th className="p-2 text-right">Total GST (Base + Markup)</th><th className="p-2 text-right">Markup</th><th className="p-2 text-right">GST on markup (included above)</th><th className="p-2 text-right">Final Accommodation Selling Total</th><th className="p-2 text-right">Final PP / unit</th></tr></thead>
+                      <tbody>{brochureSummaryRows.map((row) => <tr key={row.key} className="border-t"><td className="p-2 font-medium">{row.label}<div className="text-[9px] font-normal text-muted-foreground">{row.rate_basis_label}</div></td><td className="p-2 text-right">{row.incomplete ? "Incomplete · Rate Not Configured" : inr(row.base_total)}</td><td className="p-2 text-right">{row.incomplete ? "—" : inr(row.gst)}</td><td className="p-2 text-right">{row.incomplete ? "—" : inr(row.markup)}</td><td className="p-2 text-right">{row.incomplete ? "—" : inr(row.gst_on_markup)}</td><td className="p-2 text-right font-semibold">{row.incomplete ? "—" : inr(row.final_total)}</td><td className="p-2 text-right font-semibold">{row.incomplete ? "—" : inr(row.final_per_person ?? row.final_per_unit ?? 0)}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                </Card>
+                <Card className="overflow-hidden">
+                  <div className="border-b px-4 py-3 text-sm font-semibold">Pax-wise Accommodation Costing · Option {activeOption.key}</div>
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full min-w-[700px] text-xs">
+                      <thead className="sticky top-0 bg-muted/90"><tr><th className="p-2 text-left">Pax</th><th className="p-2 text-right">Single PP</th><th className="p-2 text-right">Double PP</th><th className="p-2 text-right">Triple PP</th><th className="p-2 text-right">Quad / Extra Bed PP</th></tr></thead>
+                      <tbody>{paxRows.map((pax) => <tr key={pax} className="border-t"><td className="p-2 font-medium">{pax}</td>{(["single", "double", "triple", "quad"] as const).map((occupancy) => <td key={occupancy} className="p-2 text-right">{paxAccommodation(pax, occupancy) === undefined ? "Brochure Rate Not Configured" : inr(paxAccommodation(pax, occupancy)!)}</td>)}</tr>)}</tbody>
+                    </table>
+                  </div>
+                </Card>
+              </>
+            )}
+            {draft.has_dates === false && brochureDateScenarios.length > 0 && (
+              <Card className="overflow-hidden">
+                <div className="border-b px-4 py-3">
+                  <div className="text-sm font-semibold">Date-free Brochure · Separate Dated Rate Scenarios</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    These are departure-date coverage bands within the selling validity. No departure date is written into the draft.
+                  </p>
+                </div>
+                <div className="space-y-4 p-3">
+                  {brochureDateScenarios.map((scenario) => {
+                    const costing = scenario.options[activeOption.key];
+                    if (!costing || costing.missing > 0) {
+                      const missingNights = costing?.nights.filter((night) => !night.noHotel && night.resolution.status !== "covered") ?? [];
+                      return (
+                        <div key={`${scenario.validity_from}-${scenario.validity_to}`} className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                          <div className="font-semibold">{scenario.validity_from} – {scenario.validity_to} · Not publishable for Option {activeOption.key}</div>
+                          <div className="mt-1">Uncovered hotel night(s): {missingNights.map((night) => `Day ${night.day.day} ${night.day.to_city || night.hotelName}: ${night.message}`).join("; ") || "No complete rate coverage for this option."}</div>
+                        </div>
+                      );
+                    }
+                    const bandSummaryRows = brochureAccommodationSummaryRows(
+                      draft,
+                      costing,
+                      summaryPax,
+                    );
+                    const bandSummaryByKey = new Map(bandSummaryRows.map((row) => [row.key, row]));
+                    const bandQuadTotals = brochureOccupancyCommercialTotals(
+                      draft,
+                      costing,
+                      summaryPax,
+                      "quad",
+                    );
+                    const bandPricingRows = [
+                      { key: "single", label: "Single (SGL)", totals: bandSummaryByKey.get("single") },
+                      { key: "double", label: "Double (DBL)", totals: bandSummaryByKey.get("double") },
+                      { key: "triple", label: "Triple (TRP)", totals: bandSummaryByKey.get("triple") },
+                      { key: "quad", label: "Quad occupancy", totals: bandQuadTotals },
+                      { key: "extra_bed", label: "Extra Bed add-on", totals: bandSummaryByKey.get("extra_bed") },
+                      { key: "child", label: "Child add-on", totals: bandSummaryByKey.get("child") },
+                    ];
+                    return (
+                      <div key={`${scenario.validity_from}-${scenario.validity_to}`} className="space-y-3 rounded border p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-semibold text-sm">Departures {scenario.validity_from} – {scenario.validity_to}</div>
+                          <div className="text-xs text-muted-foreground">Option {activeOption.key} · {activeOption.category} · Source: Brochure Rate</div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[900px] text-xs">
+                            <thead className="bg-muted/30"><tr><th className="p-2 text-left">Night</th><th className="p-2 text-left">City / Hotel</th><th className="p-2 text-right">SGL</th><th className="p-2 text-right">DBL</th><th className="p-2 text-right">TRP</th><th className="p-2 text-right">Extra Bed</th><th className="p-2 text-right">Child</th></tr></thead>
+                            <tbody>{costing.nights.map((night) => {
+                              if (night.resolution.status !== "covered") return null;
+                              const rate = night.resolution.rate;
+                              return <tr key={night.day.day} className="border-t"><td className="p-2">{night.day.day === 0 ? "Day 0" : `Day ${night.day.day}`}</td><td className="p-2">{night.day.to_city || night.hotelName} · {night.hotelName}</td>{(["single", "double", "triple", "extra_bed", "child"] as const).map((field) => <td key={field} className="p-2 text-right">{inr(rate[field])}</td>)}</tr>;
+                            })}</tbody>
+                          </table>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[850px] text-xs">
+                            <thead className="bg-muted/30"><tr><th className="p-2 text-left">Rate / saved unit</th><th className="p-2 text-right">Total Base Rate</th><th className="p-2 text-right">Total GST (Base + Markup)</th><th className="p-2 text-right">Markup</th><th className="p-2 text-right">GST on markup (included above)</th><th className="p-2 text-right">Final Selling Total</th></tr></thead>
+                            <tbody>{bandPricingRows.map(({ key, label, totals }) => <tr key={key} className="border-t"><td className="p-2 font-medium">{label}{"rate_basis_label" in (totals || {}) && <div className="text-[9px] text-muted-foreground">{totals.rate_basis_label}</div>}</td><td className="p-2 text-right">{totals ? inr(totals.base_total) : "Unavailable"}</td><td className="p-2 text-right">{totals ? inr(totals.gst) : "—"}</td><td className="p-2 text-right">{totals ? inr(totals.markup) : "—"}</td><td className="p-2 text-right">{totals ? inr(totals.gst_on_markup) : "—"}</td><td className="p-2 text-right font-semibold">{totals ? inr(totals.final_total) : "—"}</td></tr>)}</tbody>
+                          </table>
+                        </div>
+                        <div className="rounded border bg-slate-50 p-2 text-xs">
+                          <div className="font-medium">Independent add-on totals</div>
+                          {bandSummaryRows.filter((row) => row.key === "extra_bed" || row.key === "child").map((row) => (
+                            <div key={row.key} className="mt-1 flex flex-wrap justify-between gap-2">
+                              <span>{row.label} · {row.rate_basis_label}</span>
+                              <span>{row.incomplete ? "Incomplete · Rate Not Configured" : `Base ${inr(row.base_total)} · Final ${inr(row.final_total)} · Per unit ${inr(row.final_per_unit ?? row.final_per_person ?? 0)}`}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="max-h-[320px] overflow-auto">
+                          <table className="w-full min-w-[700px] text-xs">
+                            <thead className="sticky top-0 bg-muted/90"><tr><th className="p-2 text-left">Pax</th><th className="p-2 text-right">Single PP</th><th className="p-2 text-right">Double PP</th><th className="p-2 text-right">Triple PP</th><th className="p-2 text-right">Quad PP</th></tr></thead>
+                            <tbody>{paxRows.map((pax) => <tr key={pax} className="border-t"><td className="p-2">{pax}</td>{(["single", "double", "triple", "quad"] as const).map((occupancy) => <td key={occupancy} className="p-2 text-right">{paxAccommodationForCosting(costing, pax, occupancy) === undefined ? "Not covered" : inr(paxAccommodationForCosting(costing, pax, occupancy)!)}</td>)}</tr>)}</tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

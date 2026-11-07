@@ -1,6 +1,11 @@
 // Full-fidelity saved quotes persisted to localStorage.
 import { useSyncExternalStore } from "react";
 import type { QuoteDraft } from "./wizard/types";
+import {
+  addAndVerifyLargeRecord,
+  largeRecordStore,
+  putAndVerifyLargeRecord,
+} from "./large-record-store";
 
 const QUOTES_KEY = "mp_tourism_quotes";
 const SEQ_KEY = "mp_tourism_quote_seq";
@@ -139,6 +144,8 @@ export interface SavedRateSheetRow {
   vehicle: string;
   /** Stable transport selection identifier when the source draft has one. */
   transport_variation_id?: string;
+  brochure_validity_from?: string;
+  brochure_validity_till?: string;
   pax: number;
   single: number;
   double: number;
@@ -225,14 +232,23 @@ export interface SavedQuote {
     validity_till?: string;
     pax_min: number;
     pax_max: number;
+    rate_coverage_gaps?: string[];
   };
+  /** Large Brochure payloads are stored in browser-local IndexedDB, not cloud storage. */
+  snapshot_storage?: "browser-indexeddb";
   /** Query-facing values captured from the quotation at save time. */
   query_snapshot?: SavedQuerySnapshot;
 }
 
+const brochureQuoteSnapshotStore = largeRecordStore<SavedQuote>("brochure-quotes");
+
 const listeners = new Set<() => void>();
 let cachedSnapshot: SavedQuote[] = [];
 let cacheInitialized = false;
+let brochureSnapshotCache = new Map<string, SavedQuote>();
+let brochureSnapshotHydration: Promise<void> | null = null;
+let brochureSnapshotStorageError: string | null = null;
+const isBrowser = () => typeof window !== "undefined";
 
 function readFromStorage(): SavedQuote[] {
   if (!isBrowser()) return [];
@@ -243,14 +259,60 @@ function readFromStorage(): SavedQuote[] {
   }
 }
 function refreshCache() {
-  cachedSnapshot = readFromStorage();
+  const merged = new Map(readFromStorage().map((quote) => [quote.id, quote]));
+  brochureSnapshotCache.forEach((quote, id) => merged.set(id, quote));
+  cachedSnapshot = [...merged.values()].sort((left, right) => right.saved_at.localeCompare(left.saved_at));
   cacheInitialized = true;
 }
 function emit() {
   refreshCache();
   listeners.forEach((l) => l());
 }
-const isBrowser = () => typeof window !== "undefined";
+
+function hydrateBrochureSnapshots(): Promise<void> {
+  if (!isBrowser()) return Promise.resolve();
+  if (brochureSnapshotHydration) return brochureSnapshotHydration;
+  brochureSnapshotHydration = brochureQuoteSnapshotStore.getAll()
+    .then((quotes) => {
+      brochureSnapshotCache = new Map(
+        quotes.map((quote) => [quote.id, quote.snapshot_storage === "browser-indexeddb"
+          ? quote
+          : { ...quote, snapshot_storage: "browser-indexeddb" as const }]),
+      );
+      brochureSnapshotStorageError = null;
+      refreshCache();
+      listeners.forEach((listener) => listener());
+    })
+    .catch((error: unknown) => {
+      brochureSnapshotStorageError = error instanceof Error ? error.message : String(error);
+      // Keep localStorage-backed quotes visible even if IndexedDB is unavailable.
+      refreshCache();
+      listeners.forEach((listener) => listener());
+    });
+  return brochureSnapshotHydration;
+}
+
+export function getBrochureSnapshotStorageError(): string | null {
+  return brochureSnapshotStorageError;
+}
+
+export async function listBrochureQuoteSnapshots(): Promise<SavedQuote[]> {
+  await hydrateBrochureSnapshots();
+  return [...brochureSnapshotCache.values()].sort((left, right) => right.saved_at.localeCompare(left.saved_at));
+}
+
+export async function getSavedQuoteSnapshot(id: string): Promise<SavedQuote | undefined> {
+  const cached = brochureSnapshotCache.get(id);
+  if (cached) return cached;
+  const quote = await brochureQuoteSnapshotStore.get(id);
+  if (quote) {
+    brochureSnapshotCache.set(id, quote.snapshot_storage === "browser-indexeddb"
+      ? quote
+      : { ...quote, snapshot_storage: "browser-indexeddb" });
+    emit();
+  }
+  return quote;
+}
 
 export function loadQuotes(): SavedQuote[] {
   return readFromStorage();
@@ -258,6 +320,7 @@ export function loadQuotes(): SavedQuote[] {
 
 function getSnapshot(): SavedQuote[] {
   if (!cacheInitialized) refreshCache();
+  void hydrateBrochureSnapshots();
   return cachedSnapshot;
 }
 
@@ -275,6 +338,9 @@ export function nextQuoteNumber(): string {
 }
 
 export function saveQuote(q: SavedQuote): void {
+  if (q.draft_snapshot?.query_type === "Brochure" || q.brochure_source) {
+    throw new Error("Large Brochure snapshots must be saved with saveBrochureQuote() to browser-local IndexedDB.");
+  }
   const list = loadQuotes();
   if (list.some((x) => x.id === q.id)) {
     throw new Error("Generated quotations are immutable. Create a revised version instead.");
@@ -328,11 +394,64 @@ export function saveQuote(q: SavedQuote): void {
   saveAll(list);
 }
 
+/** Save a complete Brochure snapshot to browser-local IndexedDB and verify its full payload by readback. */
+export async function saveBrochureQuote(q: SavedQuote): Promise<SavedQuote> {
+  if (q.query_id) throw new Error("Brochure snapshots must not be linked to a CRM Query.");
+  if (q.draft_snapshot?.query_type !== "Brochure" || !q.brochure_source?.programme_id) {
+    throw new Error("A Brochure snapshot requires its complete Brochure draft and canonical Programme metadata.");
+  }
+  if (readFromStorage().some((quote) => quote.id === q.id)) {
+    throw new Error("This snapshot ID is already used by a local quote. No existing quote was replaced.");
+  }
+  const existing = await getSavedQuoteSnapshot(q.id);
+  const now = q.generated_at || q.saved_at || new Date().toISOString();
+  const normalized: SavedQuote = {
+    ...q,
+    version: q.version || 1,
+    family_id: q.family_id || q.id,
+    status: q.status || "Saved",
+    generated_at: q.generated_at || now,
+    generated_by: q.generated_by || q.saved_by,
+    display_number: q.display_number || `${q.quote_number}-V${q.version || 1}`,
+    snapshot_storage: "browser-indexeddb",
+    audit_log: q.audit_log?.length ? q.audit_log : [
+      { at: now, by: q.saved_by, action: "generated", detail: "Immutable Brochure costing snapshot saved" },
+    ],
+  };
+  normalized.content_hash = normalized.content_hash || quoteContentHash(normalized);
+  if (existing) {
+    if (existing.content_hash === normalized.content_hash && JSON.stringify(existing) === JSON.stringify(normalized)) return existing;
+    throw new Error("This immutable Brochure snapshot ID already exists with different content. No existing snapshot was replaced.");
+  }
+  const persisted = await addAndVerifyLargeRecord(normalized, brochureQuoteSnapshotStore);
+  brochureSnapshotCache.set(persisted.id, persisted);
+  brochureSnapshotStorageError = null;
+  emit();
+  return persisted;
+}
+
+async function saveAllQuotes(list: SavedQuote[]): Promise<void> {
+  const external = list.filter((quote) => quote.snapshot_storage === "browser-indexeddb");
+  const local = list.filter((quote) => quote.snapshot_storage !== "browser-indexeddb");
+  // Persist the immutable Brochure record updates to IndexedDB first. The
+  // legacy mp_tourism_quotes key never receives these large payloads.
+  for (const quote of external) {
+    const persisted = await putAndVerifyLargeRecord(quote, brochureQuoteSnapshotStore);
+    brochureSnapshotCache.set(persisted.id, persisted);
+  }
+  if (isBrowser() && JSON.stringify(readFromStorage()) !== JSON.stringify(local)) {
+    localStorage.setItem(QUOTES_KEY, JSON.stringify(local));
+  }
+  brochureSnapshotCache = new Map(external.map((quote) => [quote.id, quote]));
+  emit();
+}
+
 /** Generated records are never deleted; an authorised user may only void one. */
-export function voidQuote(id: string, reason: string, by: string): void {
+export async function voidQuote(id: string, reason: string, by: string): Promise<void> {
   if (!reason.trim()) throw new Error("A reason is required to void a quotation.");
   const at = new Date().toISOString();
-  const list = loadQuotes().map((quote) =>
+  const list = await listSavedQuotes();
+  const updated = list.map((quote) =>
     quote.id === id
       ? {
           ...quote,
@@ -344,7 +463,7 @@ export function voidQuote(id: string, reason: string, by: string): void {
         }
       : quote,
   );
-  saveAll(list);
+  await saveAllQuotes(updated);
 }
 
 export function updateQuoteStatus(
@@ -352,11 +471,11 @@ export function updateQuoteStatus(
   status: Exclude<SavedQuoteStatus, "Generated" | "Void">,
   by: string,
   detail?: string,
-): void {
+): Promise<void> {
   const at = new Date().toISOString();
   const action = status === "Sent" ? "sent" : status === "Accepted" ? "accepted" : "superseded";
-  saveAll(
-    loadQuotes().map((quote) =>
+  return listSavedQuotes().then((list) => saveAllQuotes(
+    list.map((quote) =>
       quote.id === id
         ? {
             ...quote,
@@ -364,8 +483,8 @@ export function updateQuoteStatus(
             audit_log: [...(quote.audit_log ?? []), { at, by, action, detail }],
           }
         : quote,
-    ),
-  );
+      ),
+    ));
 }
 
 /** Backward-compatible symbol: deliberately refuses destructive deletion. */
@@ -374,7 +493,14 @@ export function deleteQuote(_id: string): never {
 }
 
 export function getSavedQuote(id: string): SavedQuote | undefined {
-  return loadQuotes().find((quote) => quote.id === id);
+  return cachedSnapshot.find((quote) => quote.id === id) ?? loadQuotes().find((quote) => quote.id === id);
+}
+
+export async function listSavedQuotes(): Promise<SavedQuote[]> {
+  await hydrateBrochureSnapshots();
+  const merged = new Map(readFromStorage().map((quote) => [quote.id, quote]));
+  brochureSnapshotCache.forEach((quote, id) => merged.set(id, quote));
+  return [...merged.values()].sort((left, right) => right.saved_at.localeCompare(left.saved_at));
 }
 
 export function latestQuoteForQuery(queryId: string): SavedQuote | undefined {
@@ -389,6 +515,8 @@ export function quoteVersionContext(draft: QuoteDraft): {
   quote_number?: string;
   revision_of_quote_id?: string;
 } {
+  // Brochure versions are programme-based snapshots, never Query revisions.
+  if (draft.query_type === "Brochure") return { version: 1 };
   if (!draft.linked_query_id) return { version: 1 };
   const parent = draft.revision_of_quote_id
     ? getSavedQuote(draft.revision_of_quote_id)

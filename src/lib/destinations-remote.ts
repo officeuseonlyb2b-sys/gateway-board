@@ -60,26 +60,28 @@ async function seedRemoteFromLocal() {
   }
 }
 
+/** Explicit operator action only; startup never calls this function. */
+export async function initializeDestinationsFromLocal(): Promise<void> {
+  if (!allowSeed) throw new Error("Only an authorised Super Admin can initialize the shared destination catalogue.");
+  await seedRemoteFromLocal();
+  await pullDestinations();
+}
+
 /** Reconcile the local cache with the database (adds, renames, deletes). */
 export function pullDestinations(): Promise<void> {
   if (pulling) return pulling;
-  const maySeed = allowSeed;
   pulling = (async () => {
     const remote = await fetchAll();
     if (!remote) return;
 
     if (remote.cities.length === 0 && db.get().destination_cities.length > 0) {
-      if (!maySeed) {
-        console.warn(
-          "[destinations] remote catalogue is empty or not visible; read-only session will not seed or delete the hydrated master list",
-        );
-        return;
-      }
-      await seedRemoteFromLocal();
-      const again = await fetchAll();
-      if (!again) return;
-      remote.cities = again.cities;
-      remote.tours = again.tours;
+      console.warn("[destinations] remote catalogue is empty; startup will not seed browser-local destinations");
+      reportMasterSyncIssue(
+        "uninitialized",
+        new Error("Staging destination catalogue not initialized. No browser-local destination data was uploaded."),
+        "destinations",
+      );
+      return;
     }
 
     const local = db.get();

@@ -14,6 +14,19 @@ import {
   type BlackoutRange,
   type SupplementType,
 } from "@/lib/mock-store";
+import {
+  brochureRateExcelColumns,
+  brochureRateValuesForHotel,
+  mergeBrochureExcelPeriod,
+  parseBrochureRateExcelRows,
+  type ParsedBrochureExcelPeriod,
+} from "@/lib/hotel-brochure-rates-excel";
+import { validateBrochureHotelRatePeriods } from "@/lib/brochure-hotel-rates";
+import {
+  mapPeriodsToCurrentHotelIds,
+  reconcileBrochureHotelIdentities,
+  type BrochureHotelIdentityMatch,
+} from "@/lib/hotel-identity-reconciliation";
 
 export interface ImportRowError {
   row: number;
@@ -31,6 +44,10 @@ export interface ImportSummary {
   identicalDuplicates: number;
   conflictingRows: number;
   rateCellsImported: number;
+  brochureRatesAdded: number;
+  brochureRatesUpdated: number;
+  brochureRateConflicts: number;
+  brochureRatesSkipped: number;
   skippedRows: number;
   errors: ImportRowError[];
 }
@@ -42,7 +59,11 @@ export type ImportDisposition =
   | "New Meal Plan / Rate Period"
   | "Identical Duplicate"
   | "Conflicting Duplicate"
-  | "Invalid / Needs Review";
+  | "Invalid / Needs Review"
+  | "Brochure Rate Period"
+  | "Brochure Rate Conflict"
+  | "Hotel ID Reconciled"
+  | "Hotel Match Needs Confirmation";
 
 export interface ImportPreviewRow {
   row: number;
@@ -66,6 +87,13 @@ export interface ImportPreview {
   identicalDuplicates: number;
   conflictingRows: number;
   rejectedRows: number;
+  brochureColumnsFound: boolean;
+  brochureHotelsMatched: number;
+  brochurePeriodsToImport: number;
+  brochureRateConflicts: number;
+  brochureRateErrors: number;
+  brochureIdentityMatches: BrochureHotelIdentityMatch[];
+  brochureUnresolvedHotelMatches: number;
   diagnostics: ImportPreviewRow[];
 }
 
@@ -79,6 +107,7 @@ export interface ImportProgress {
 /* -------------------------------------------------------------------------- */
 
 const COL = {
+  hotelId: ["hotel id", "canonical hotel id", "hotel master id"],
   city: ["city", "city name", "destination", "destination city", "column1", "col1"],
 
   category: [
@@ -1007,8 +1036,136 @@ function sameImportedPrices(
   );
 }
 
+interface PreparedBrochureRateImport {
+  hasBrochureColumns: boolean;
+  updates: Map<string, Array<Omit<import("@/lib/mock-store").BrochureHotelRate, "updated_at">>>;
+  conflicts: Array<{ row: number; hotelId: string; reason: string }>;
+  errors: Array<{ row: number; reason: string }>;
+  matchedHotelIds: Set<string>;
+  countsByHotel: Map<string, { added: number; updated: number }>;
+  addedCount: number;
+  updatedCount: number;
+  identicalCount: number;
+  identityMatches: BrochureHotelIdentityMatch[];
+  skippedCount: number;
+}
+
+function prepareBrochureRateImport(
+  rows: readonly Record<string, unknown>[],
+  data: ReturnType<typeof db.get>,
+  manualMappings: Readonly<Record<string, string>> = {},
+): PreparedBrochureRateImport {
+  const parsed = parseBrochureRateExcelRows(rows, (value) => parseSingleDate(value) ?? undefined);
+  const updates = new Map<string, Array<Omit<import("@/lib/mock-store").BrochureHotelRate, "updated_at">>>();
+  const conflicts = parsed.conflicts.map((item) => ({
+    row: item.rows[0] ?? 0,
+    hotelId: item.hotelId,
+    reason: `Repeated Brochure values conflict for Hotel ID ${item.hotelId}, ${item.validityFrom}–${item.validityTo} (rows ${item.rows.join(", ")}; fields: ${item.fields.join(", ")}). Existing rate was not changed.`,
+  }));
+  const errors = [...parsed.errors];
+  const matchedHotelIds = new Set<string>();
+  const countsByHotel = new Map<string, { added: number; updated: number }>();
+  const identityMatches = reconcileBrochureHotelIdentities(parsed.periods, data.hotels, data.cities, manualMappings);
+  const resolvedPeriods = mapPeriodsToCurrentHotelIds(parsed.periods, identityMatches);
+  let skippedCount = resolvedPeriods.skipped.length + parsed.conflicts.reduce((sum, item) => sum + item.rows.length, 0);
+  for (const match of identityMatches) {
+    if (match.unresolved) {
+      errors.push({ row: match.rows[0] ?? 0, reason: `${match.status === "ambiguous" ? "Ambiguous" : "Missing"} canonical Hotel match for “${match.sourceCity} / ${match.sourceHotelName}” (stale ID ${match.sourceHotelId}); choose a current Hotel ID or explicitly skip this identity.` });
+    }
+  }
+
+  // Multiple stale IDs may reconcile to one current Hotel. Merge identical
+  // repeats and block that Hotel/period if any repeated fields conflict.
+  const remappedGroups = new Map<string, ParsedBrochureExcelPeriod[]>();
+  for (const period of resolvedPeriods.mapped) {
+    const key = `${period.hotelId}|${period.validityFrom}|${period.validityTo}`;
+    const list = remappedGroups.get(key) || [];
+    list.push(period);
+    remappedGroups.set(key, list);
+  }
+  const remappedPeriods: ParsedBrochureExcelPeriod[] = [];
+  for (const group of remappedGroups.values()) {
+    const mergedPeriod: ParsedBrochureExcelPeriod = { ...group[0], values: { ...group[0].values } };
+    const conflictingFields = new Set<string>();
+    for (const duplicate of group.slice(1)) {
+      for (const [field, value] of Object.entries(duplicate.values)) {
+        const previous = mergedPeriod.values[field as keyof typeof mergedPeriod.values];
+        if (previous !== undefined && String(previous).toLowerCase() !== String(value).toLowerCase()) conflictingFields.add(field);
+        else if (previous === undefined) mergedPeriod.values[field as keyof typeof mergedPeriod.values] = value as string | number;
+      }
+    }
+    if (conflictingFields.size) {
+      conflicts.push({ row: group[0].row, hotelId: group[0].hotelId, reason: `Rows ${group.map((item) => item.row).join(", ")} refer to the same current Hotel ID and validity period but contain conflicting Brochure values (${[...conflictingFields].join(", ")}); the period was not imported.` });
+      skippedCount += group.length;
+    } else remappedPeriods.push(mergedPeriod);
+  }
+  let addedCount = 0;
+  let updatedCount = 0;
+  let identicalCount = 0;
+  for (const period of remappedPeriods) {
+    const hotel = data.hotels.find((item) => item.id === period.hotelId);
+    if (!hotel) {
+      errors.push({ row: period.row, reason: `Canonical Hotel ID ${period.hotelId} does not exist in the current Hotel Master; Brochure rates were skipped.` });
+      skippedCount += 1;
+      continue;
+    }
+    matchedHotelIds.add(hotel.id);
+    const currentRates = updates.get(hotel.id) || (data.brochure_hotel_rates || []).filter((rate) => rate.hotel_id === hotel.id);
+    const existing = currentRates.find((rate) => rate.validity_from === period.validityFrom && rate.validity_to === period.validityTo);
+    const amountKeys = ["single", "double", "triple", "extra_bed", "child"] as const;
+    const suppliedAmounts = amountKeys.filter((key) => typeof period.values[key] === "number");
+    if (!existing && suppliedAmounts.length !== amountKeys.length) {
+      errors.push({ row: period.row, reason: `New Brochure period ${period.validityFrom}–${period.validityTo} must include all five amounts; blank cells were not converted to zero.` });
+      continue;
+    }
+    if (!existing && !suppliedAmounts.length) continue;
+    const merged = mergeBrochureExcelPeriod(existing, period, globalThis.crypto?.randomUUID?.() || `brochure-rate-${Date.now()}-${period.row}`);
+    const samePricingBasis = existing &&
+      (["single", "double", "triple", "extra_bed", "child"] as const)
+        .every((field) => existing.pricing_basis?.[field] === merged.pricing_basis[field]);
+    if (existing && existing.rate_basis === merged.rate_basis &&
+      existing.single === merged.single && existing.double === merged.double && existing.triple === merged.triple &&
+      existing.extra_bed === merged.extra_bed && existing.child === merged.child &&
+      samePricingBasis) {
+      identicalCount += 1;
+      continue;
+    }
+    const nextRates = existing
+      ? currentRates.map((rate) => rate.id === existing.id ? merged : rate)
+      : [...currentRates, merged];
+    const overlap = validateBrochureHotelRatePeriods(nextRates);
+    if (overlap) {
+      conflicts.push({ row: period.row, hotelId: hotel.id, reason: `${overlap} Conflicting import was skipped; existing Brochure periods were preserved.` });
+      continue;
+    }
+    updates.set(hotel.id, nextRates);
+    const hotelCounts = countsByHotel.get(hotel.id) || { added: 0, updated: 0 };
+    if (existing) {
+      updatedCount += 1;
+      hotelCounts.updated += 1;
+    } else {
+      addedCount += 1;
+      hotelCounts.added += 1;
+    }
+    countsByHotel.set(hotel.id, hotelCounts);
+  }
+  return { hasBrochureColumns: parsed.hasBrochureColumns, updates, conflicts, errors, matchedHotelIds, countsByHotel, addedCount, updatedCount, identicalCount, identityMatches, skippedCount };
+}
+
+function brochurePayloadOnlyRow(raw: Record<string, unknown>): boolean {
+  const hasBrochureData = Object.keys(raw).some((key) => normalizeHeader(key).startsWith("brochureperiod")) &&
+    Object.entries(raw).some(([key, value]) => normalizeHeader(key).startsWith("brochureperiod") && normalizeText(value) !== "");
+  if (!hasBrochureData) return false;
+  const supplierFields = [COL.validity, COL.validityFrom, COL.validityTo, COL.meal, COL.single, COL.double]
+    .some((keys) => pick(raw, keys) !== "");
+  return !supplierFields;
+}
+
 /** Read-only audit. No master-store or Supabase mutation occurs here. */
-export async function previewExcel(file: File): Promise<ImportPreview> {
+export async function previewExcel(
+  file: File,
+  options: { brochureHotelMappings?: Record<string, string> } = {},
+): Promise<ImportPreview> {
   const empty: ImportPreview = {
     sheetName: "",
     totalRows: 0,
@@ -1019,6 +1176,13 @@ export async function previewExcel(file: File): Promise<ImportPreview> {
     identicalDuplicates: 0,
     conflictingRows: 0,
     rejectedRows: 0,
+    brochureColumnsFound: false,
+    brochureHotelsMatched: 0,
+    brochurePeriodsToImport: 0,
+    brochureRateConflicts: 0,
+    brochureRateErrors: 0,
+    brochureIdentityMatches: [],
+    brochureUnresolvedHotelMatches: 0,
     diagnostics: [],
   };
   const wb = XLSX.read(await file.arrayBuffer(), {
@@ -1038,6 +1202,14 @@ export async function previewExcel(file: File): Promise<ImportPreview> {
   });
   empty.totalRows = rows.length;
   const data = db.get();
+  const brochureImport = prepareBrochureRateImport(rows, data, options.brochureHotelMappings);
+  empty.brochureColumnsFound = brochureImport.hasBrochureColumns;
+  empty.brochureHotelsMatched = brochureImport.matchedHotelIds.size;
+  empty.brochurePeriodsToImport = brochureImport.addedCount + brochureImport.updatedCount;
+  empty.brochureRateConflicts = brochureImport.conflicts.length;
+  empty.brochureRateErrors = brochureImport.errors.length;
+  empty.brochureIdentityMatches = brochureImport.identityMatches;
+  empty.brochureUnresolvedHotelMatches = brochureImport.identityMatches.filter((item) => item.unresolved).length;
   const seenHotels = new Set<string>();
   const seenRooms = new Set<string>();
   const seenRates = new Map<string, { single: number | null; double: number | null }>();
@@ -1045,6 +1217,7 @@ export async function previewExcel(file: File): Promise<ImportPreview> {
 
   rows.forEach((raw, index) => {
     const row = index + 2;
+    if (brochurePayloadOnlyRow(raw)) return;
     const rawCity = pick(raw, COL.city);
     const cityResult = canonicalCityName(rawCity);
     const city = cityResult.name;
@@ -1165,6 +1338,35 @@ export async function previewExcel(file: File): Promise<ImportPreview> {
     seenRooms.add(roomKey);
     seenRates.set(rateKey, { single, double });
   });
+  for (const [index, item] of brochureImport.conflicts.entries()) {
+    empty.diagnostics.push({ row: item.row, hotel: item.hotelId, city: "", category: "", room: "", plan: "", validity: "", disposition: "Brochure Rate Conflict", reason: item.reason });
+  }
+  for (const match of brochureImport.identityMatches) {
+    const hotel = data.hotels.find((item) => item.id === match.matchedHotelId);
+    const city = hotel ? data.cities.find((item) => item.id === hotel.city_id)?.name : "";
+    empty.diagnostics.push({
+      row: match.rows[0] ?? 0,
+      hotel: match.sourceHotelName,
+      city: match.sourceCity,
+      category: "",
+      room: "",
+      plan: "",
+      validity: "",
+      disposition: match.unresolved ? "Hotel Match Needs Confirmation" : "Hotel ID Reconciled",
+      reason: match.matchedHotelId
+        ? `${match.status === "canonical_id" ? "Canonical ID matched" : "Stale ID reconciled"}: ${city || ""} / ${hotel?.name || ""} (current Hotel ID ${match.matchedHotelId}; source ID ${match.sourceHotelId || "blank"}).`
+        : match.status === "skip"
+          ? `Explicitly skipped. Source Hotel ID ${match.sourceHotelId || "blank"}; no Brochure periods will be applied.`
+          : `${match.status === "ambiguous" ? "Ambiguous" : "No unique"} City + Hotel Name match. Select a current Hotel ID or explicitly skip.`,
+    });
+  }
+  for (const item of brochureImport.errors) {
+    const rowData = rows[item.row - 2] || {};
+    empty.diagnostics.push({ row: item.row, hotel: pick(rowData, COL.hotelId) || pick(rowData, COL.hotel), city: pick(rowData, COL.city), category: "", room: "", plan: "", validity: "", disposition: "Invalid / Needs Review", reason: item.reason });
+  }
+  for (const [hotelId, rates] of brochureImport.updates) {
+    empty.diagnostics.push({ row: 0, hotel: hotelId, city: "", category: "", room: "", plan: "", validity: `${rates.length} total saved period(s)`, disposition: "Brochure Rate Period", reason: "Brochure rate changes will be applied by canonical Hotel ID only after import confirmation." });
+  }
   empty.hotelsMatched = matchedHotels.size;
   return empty;
 }
@@ -1191,6 +1393,7 @@ const DEFAULT_ROOM_NAME = "As Per Portal";
 export async function importExcel(
   file: File,
   onProgress?: (p: ImportProgress) => void,
+  options: { brochureHotelMappings?: Record<string, string>; importSupplierRates?: boolean } = {},
 ): Promise<ImportSummary> {
   const summary: ImportSummary = {
     totalRows: 0,
@@ -1202,6 +1405,10 @@ export async function importExcel(
     identicalDuplicates: 0,
     conflictingRows: 0,
     rateCellsImported: 0,
+    brochureRatesAdded: 0,
+    brochureRatesUpdated: 0,
+    brochureRateConflicts: 0,
+    brochureRatesSkipped: 0,
     skippedRows: 0,
     errors: [],
   };
@@ -1272,10 +1479,18 @@ export async function importExcel(
     const roomCache = new Map<string, Awaited<ReturnType<typeof roomService.findOrCreate>>>();
     const updatedHotelIds = new Set<string>();
 
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = 0; options.importSupplierRates !== false && i < rows.length; i++) {
       const raw = rows[i];
 
       const rowNum = i + 2;
+
+        // A Hotel Rates row carrying only the appended Brochure columns is not
+        // a malformed supplier row. Its Brochure data is handled separately
+        // after the supplier import pass.
+        if (brochurePayloadOnlyRow(raw)) {
+          onProgress?.({ done: i + 1, total: rows.length });
+          continue;
+        }
 
       try {
         const rawCityName = pick(raw, COL.city);
@@ -1746,6 +1961,33 @@ export async function importExcel(
       }
     }
 
+    if (options.importSupplierRates === false) onProgress?.({ done: rows.length, total: rows.length });
+
+    // Brochure data is deliberately processed after the unchanged supplier
+    // import pipeline. Old workbooks without these columns are a strict no-op.
+    const brochureImport = prepareBrochureRateImport(rows, db.get(), options.brochureHotelMappings);
+    summary.brochureRateConflicts = brochureImport.conflicts.length;
+    summary.brochureRatesSkipped = brochureImport.identicalCount + brochureImport.conflicts.length + brochureImport.errors.length;
+    for (const conflict of brochureImport.conflicts) summary.errors.push({ row: conflict.row, reason: conflict.reason, raw: {} });
+    for (const error of brochureImport.errors) summary.errors.push({ row: error.row, reason: error.reason, raw: rows[error.row - 2] || {} });
+    for (const [hotelId, rates] of brochureImport.updates) {
+      try {
+        db.saveBrochureHotelRatesForHotel(hotelId, rates);
+        const counts = brochureImport.countsByHotel.get(hotelId);
+        summary.brochureRatesAdded += counts?.added ?? 0;
+        summary.brochureRatesUpdated += counts?.updated ?? 0;
+      } catch (error) {
+        summary.brochureRateConflicts += 1;
+        summary.brochureRatesSkipped += 1;
+        summary.errors.push({
+          row: 0,
+          reason: error instanceof Error ? `Hotel ID ${hotelId}: ${error.message}` : `Hotel ID ${hotelId}: could not save Brochure rates.`,
+          raw: {},
+        });
+        continue;
+      }
+    }
+
     summary.hotelsAdded = db.get().hotels.length - beforeHotels;
 
     summary.roomsAdded = db.get().room_categories.length - beforeRooms;
@@ -1775,93 +2017,95 @@ export async function importExcel(
 /*                              EXPORT                                        */
 /* -------------------------------------------------------------------------- */
 
-export function exportExcel(): void {
-  const data = db.get();
+const HOTEL_RATE_EXPORT_COLUMNS = [
+  "City", "Hotel Category", "Hotel Type", "Hotel Name", "Address", "Room Category",
+  "Validity", "Season", "Rates Standard Meal Plan", "Double", "Single", "Quad",
+  "Extra Bed", "CWB", "CWB Rule", "Lunch", "Dinner", "Extra Breakfast",
+  "X'mas Sup", "X'mas Sup Type", "X'mas From", "X'mas To", "N'year Sup",
+  "N'year Sup Type", "N'year From", "N'year To", "Rates From", "Email ID", "Wifi",
+  "Pool", "Blackout Dates", "Include In Quote", "Remarks",
+] as const;
 
+/** Build the unchanged supplier columns first, then append stable IDs and dynamic Brochure periods. */
+export function buildHotelRatesWorksheet(data: ReturnType<typeof db.get> = db.get()): XLSX.WorkSheet {
+  const brochureRates = data.brochure_hotel_rates ?? [];
+  const ratesByHotel = new Map<string, typeof brochureRates>();
+  for (const rate of brochureRates) {
+    const list = ratesByHotel.get(rate.hotel_id) || [];
+    list.push(rate);
+    ratesByHotel.set(rate.hotel_id, list);
+  }
+  const maxBrochurePeriods = Math.max(0, ...[...ratesByHotel.values()].map((rates) => rates.length));
+  const headers = [
+    ...HOTEL_RATE_EXPORT_COLUMNS,
+    "Hotel ID",
+    "Room Category ID",
+    ...brochureRateExcelColumns(maxBrochurePeriods),
+  ];
   const rows: Record<string, unknown>[] = [];
-
-  data.rate_plans.forEach((p) => {
-    const room = data.room_categories.find((r) => r.id === p.room_category_id);
-
-    if (!room) return;
-
-    const hotel = data.hotels.find((h) => h.id === room.hotel_id);
-
-    if (!hotel) return;
-
-    const city = data.cities.find((c) => c.id === hotel.city_id);
-
-    rows.push({
+  const exportedHotelIds = new Set<string>();
+  const supplierRow = (hotel: (typeof data.hotels)[number], plan?: (typeof data.rate_plans)[number], room?: (typeof data.room_categories)[number]) => {
+    const city = data.cities.find((item) => item.id === hotel.city_id);
+    const row: Record<string, unknown> = {
       City: city?.name ?? "",
-
       "Hotel Category": hotel.hotel_category,
-
       "Hotel Type": hotel.hotel_type ?? "",
-
       "Hotel Name": hotel.name,
-
       Address: hotel.address ?? "",
-
-      "Room Category": room.name,
-
-      Validity: serializeValidity(p.validity_start, p.validity_end),
-
-      Season: p.season_label ?? "",
-
-      "Rates Standard Meal Plan": p.meal_plan,
-
-      Double: p.double_rate,
-
-      Single: p.single_rate,
-
-      Quad: p.quad_rate ?? "",
-
-      "Extra Bed": p.extra_bed_rate,
-
-      CWB: p.cwb_rate ?? "",
-
-      "CWB Rule": p.cwb_rule_text ?? "",
-
-      Lunch: p.lunch_rate ?? "",
-
-      Dinner: p.dinner_rate ?? "",
-
-      "Extra Breakfast": p.extra_breakfast_rate ?? "",
-
-      "X'mas Sup": p.xmas_supplement ?? "",
-
-      "X'mas Sup Type": p.xmas_supplement_type ?? "",
-
-      "X'mas From": p.xmas_date_from ?? "",
-
-      "X'mas To": p.xmas_date_to ?? "",
-
-      "N'year Sup": p.newyear_supplement ?? "",
-
-      "N'year Sup Type": p.newyear_supplement_type ?? "",
-
-      "N'year From": p.newyear_date_from ?? "",
-
-      "N'year To": p.newyear_date_to ?? "",
-
+      "Room Category": room?.name ?? "",
+      Validity: plan ? serializeValidity(plan.validity_start, plan.validity_end) : "",
+      Season: plan?.season_label ?? "",
+      "Rates Standard Meal Plan": plan?.meal_plan ?? "",
+      Double: plan?.double_rate ?? "",
+      Single: plan?.single_rate ?? "",
+      Quad: plan?.quad_rate ?? "",
+      "Extra Bed": plan?.extra_bed_rate ?? "",
+      CWB: plan?.cwb_rate ?? "",
+      "CWB Rule": plan?.cwb_rule_text ?? "",
+      Lunch: plan?.lunch_rate ?? "",
+      Dinner: plan?.dinner_rate ?? "",
+      "Extra Breakfast": plan?.extra_breakfast_rate ?? "",
+      "X'mas Sup": plan?.xmas_supplement ?? "",
+      "X'mas Sup Type": plan?.xmas_supplement_type ?? "",
+      "X'mas From": plan?.xmas_date_from ?? "",
+      "X'mas To": plan?.xmas_date_to ?? "",
+      "N'year Sup": plan?.newyear_supplement ?? "",
+      "N'year Sup Type": plan?.newyear_supplement_type ?? "",
+      "N'year From": plan?.newyear_date_from ?? "",
+      "N'year To": plan?.newyear_date_to ?? "",
       "Rates From": [hotel.contact_name, hotel.contact_phone].filter(Boolean).join(" - "),
-
       "Email ID": hotel.email,
-
       Wifi: hotel.has_wifi ? "Yes" : "No",
-
       Pool: hotel.has_pool ? "Yes" : "No",
-
       "Blackout Dates": serializeBlackouts(hotel.blackout_ranges),
+      "Include In Quote": plan?.include_in_quote === false ? "No" : "Yes",
+      Remarks: plan?.remarks ?? "",
+      "Hotel ID": hotel.id,
+      "Room Category ID": room?.id ?? "",
+      ...brochureRateValuesForHotel(ratesByHotel.get(hotel.id) || [], maxBrochurePeriods),
+    };
+    rows.push(row);
+    exportedHotelIds.add(hotel.id);
+  };
 
-      "Include In Quote": p.include_in_quote === false ? "No" : "Yes",
+  for (const plan of data.rate_plans) {
+    const room = data.room_categories.find((item) => item.id === plan.room_category_id);
+    if (!room) continue;
+    const hotel = data.hotels.find((item) => item.id === room.hotel_id);
+    if (!hotel) continue;
+    supplierRow(hotel, plan, room);
+  }
+  // Brochure-only hotels must also be exportable in the existing worksheet.
+  for (const hotel of data.hotels) {
+    if (exportedHotelIds.has(hotel.id) || !ratesByHotel.has(hotel.id)) continue;
+    supplierRow(hotel);
+  }
+  const matrix = [headers, ...rows.map((row) => headers.map((header) => row[header] ?? ""))];
+  return XLSX.utils.aoa_to_sheet(matrix);
+}
 
-      Remarks: p.remarks ?? "",
-    });
-  });
-
-  const ws = XLSX.utils.json_to_sheet(rows);
-
+export function exportExcel(): void {
+  const ws = buildHotelRatesWorksheet();
   const wb = XLSX.utils.book_new();
 
   XLSX.utils.book_append_sheet(wb, ws, "Hotel Rates");

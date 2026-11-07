@@ -6,7 +6,9 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  // Local, gitignored PGlite/browser-validation artifacts are not application
+  // source. Keep every tracked source directory in the normal lint scope.
+  { ignores: ["dist", ".output", ".vinxi", ".employee-validation/**"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

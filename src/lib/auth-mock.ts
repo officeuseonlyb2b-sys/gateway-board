@@ -33,6 +33,30 @@ export const hasSupabaseConfig = Boolean(
   supabasePublicConfig.url && supabasePublicConfig.publishableKey,
 );
 
+const STAGING_EMPLOYEE_PROFILE_HOST = "nxmfzwxzspjpguvpxnfb.supabase.co";
+export const usesStagingEmployeeProfileRpc = () =>
+  supabaseProjectHost === STAGING_EMPLOYEE_PROFILE_HOST;
+
+type EmployeeProfileRpcResult = {
+  data: Array<{ id: string; data: unknown }> | null;
+  error: { code?: string; message: string } | null;
+};
+type EmployeeProfileRpcBuilder = PromiseLike<EmployeeProfileRpcResult> & {
+  abortSignal(signal: AbortSignal): EmployeeProfileRpcBuilder;
+};
+
+/** The staging RPC returns only the authenticated user's allowlisted profile. */
+export function getMyEmployeeProfile(signal?: AbortSignal): EmployeeProfileRpcBuilder {
+  if (!usesStagingEmployeeProfileRpc()) {
+    throw new Error("The self-profile RPC is available only in the staging project.");
+  }
+  const client = supabase as unknown as {
+    rpc: (name: string, args?: Record<string, never>) => EmployeeProfileRpcBuilder;
+  };
+  const query = client.rpc("crm_my_employee_profile", {});
+  return signal ? query.abortSignal(signal) : query;
+}
+
 export type ProfileResolutionCode =
   | "profile_network_error"
   | "profile_not_linked"
@@ -200,17 +224,20 @@ async function runEmployeeProfileResolution(user: User, source: string): Promise
     `profile lookup started user=${requestUserId} source=${source} session=true host=${supabaseProjectHost} query_count=${profileQueries}`,
   );
   try {
-    const profileLookup = supabase
-      .from("crm_employees")
-      .select("id,data")
-      .eq("data->>auth_user_id", requestUserId)
-      .limit(2)
-      .abortSignal(controller.signal);
+    const usesStagingRpc = usesStagingEmployeeProfileRpc();
+    const profileLookup = usesStagingRpc
+      ? getMyEmployeeProfile(controller.signal)
+      : supabase
+          .from("crm_employees")
+          .select("id,data")
+          .eq("data->>auth_user_id", requestUserId)
+          .limit(2)
+          .abortSignal(controller.signal);
     const { data, error } = await profileLookup;
     const request = getLatestSupabaseRequestDiagnostic(
-      "/rest/v1/crm_employees",
+      usesStagingRpc ? "/rest/v1/rpc/crm_my_employee_profile" : "/rest/v1/crm_employees",
       lookupStartedAt,
-      "data->>auth_user_id",
+      usesStagingRpc ? undefined : "data->>auth_user_id",
     );
 
     if (requestGeneration !== generation || authUser?.id !== requestUserId) {

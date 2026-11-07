@@ -10,6 +10,12 @@ try {
   const costsheet = await vite.ssrLoadModule("/src/lib/wizard/costsheet.ts");
   const scenarioEngine = await vite.ssrLoadModule("/src/lib/wizard/scenario.ts");
   const types = await vite.ssrLoadModule("/src/lib/wizard/types.ts");
+  const brochureProgramme = await vite.ssrLoadModule("/src/lib/wizard/brochure-program.ts");
+  const brochureHotelRates = await vite.ssrLoadModule("/src/lib/brochure-hotel-rates.ts");
+  const brochureAccommodation = await vite.ssrLoadModule("/src/lib/wizard/brochure-accommodation.ts");
+  const brochureRateResolution = await vite.ssrLoadModule(
+    "/src/lib/wizard/brochure-rate-resolution.ts",
+  );
   const dateFormat = await vite.ssrLoadModule("/src/lib/format.ts");
   const dateReconciliation = dateFormat;
   const quoteBuilder = await vite.ssrLoadModule("/src/lib/wizard/build-saved-quote.ts");
@@ -42,9 +48,56 @@ try {
   const mealsStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepMeals.tsx");
   const guideStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepGuide.tsx");
   const hotelsStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepHotels.tsx");
+  const finalStep = await vite.ssrLoadModule("/src/components/quotation/steps/StepFinal.tsx");
   const hotelAvailability = await vite.ssrLoadModule("/src/lib/wizard/hotel-availability.ts");
   const hotelRateLookup = await vite.ssrLoadModule("/src/lib/wizard/rate-lookup.ts");
   const queryFilters = await vite.ssrLoadModule("/src/components/crm/query-filters.tsx");
+
+  const programmeMaster = {
+    id: "MASTER-CIRCUIT-1",
+    code: "MPC-01",
+    name: "Canonical Circuit",
+    nights: 2,
+    days: 3,
+    duration_label: "2 Nights & 3 Days",
+    routing_summary: "Bhopal - Sanchi - Bhopal",
+    routing: [
+      { day: 1, overnight_city: "Bhopal", destination_city: "Bhopal", program_text: "Arrival" },
+      { day: 2, overnight_city: "Sanchi", destination_city: "Sanchi", program_text: "Stupa" },
+      { day: 3, overnight_city: null, destination_city: "Bhopal", program_text: "Departure" },
+    ],
+    cities: ["Bhopal", "Sanchi"],
+    categories: ["Heritage"],
+    travel_modes: ["car"],
+    inclusions: ["Transfers"],
+    exclusions: ["Airfare"],
+    source: "Manual",
+    status: "Active",
+  };
+  const masterBrochure = brochureProgramme.brochureDraftFromProgramme(programmeMaster, (name) =>
+    name ? `city-${name.toLowerCase()}` : "",
+  );
+  assert.equal(
+    masterBrochure.program_id,
+    programmeMaster.id,
+    "Brochure keeps the canonical Programme Master ID",
+  );
+  assert.equal(masterBrochure.program_code, programmeMaster.code);
+  assert.equal(masterBrochure.query_type, "Brochure");
+  assert.equal(
+    masterBrochure.linked_query_id,
+    undefined,
+    "Master-launched Brochure has no CRM Query",
+  );
+  assert.equal(masterBrochure.nights, 2);
+  assert.equal(masterBrochure.routing.length, 3, "Master day-wise routing is pre-filled");
+  assert.equal(masterBrochure.routing[1].city_id, "city-sanchi");
+  masterBrochure.routing[1].program = "Brochure-only change";
+  assert.equal(
+    programmeMaster.routing[1].program_text,
+    "Stupa",
+    "Editing a Brochure routing never mutates the Programme Master",
+  );
 
   const historicalQuery = {
     id: "excel_EMP26-27EMP0044",
@@ -592,6 +645,13 @@ try {
   assert.equal(queryFor.resolveQuotationStep(7, accommodationScope.workflowSteps), 8);
 
   const now = "2026-09-22T00:00:00.000Z";
+  const perRoomBrochureBasis = {
+    single: "per_room",
+    double: "per_room",
+    triple: "per_room",
+    extra_bed: "per_add_on",
+    child: "per_child",
+  };
   const db = {
     cities: [{ id: "city-1", name: "Indore" }],
     hotels: [
@@ -610,6 +670,7 @@ try {
         updated_at: now,
       },
     ],
+    brochure_hotel_rates: [],
     room_categories: [{ id: "room-1", hotel_id: "hotel-1", name: "Deluxe", created_at: now }],
     rate_plans: [
       {
@@ -1221,9 +1282,9 @@ try {
     "Date synchronization retains routing cities and day-specific selections",
   );
   assert.deepEqual(
-    dateFormat.synchronizeRoutingDates({ ...synchronizedRouting, has_dates: false }).routing.map(
-      (day) => day.date,
-    ),
+    dateFormat
+      .synchronizeRoutingDates({ ...synchronizedRouting, has_dates: false })
+      .routing.map((day) => day.date),
     ["", "", "", "", "", ""],
     "Without Dates clears prior calendar dates rather than leaving stale hotel-rate dates",
   );
@@ -2293,12 +2354,22 @@ try {
   );
   assert.deepEqual(
     brochureRikshawRows.map((row) => [row.min_pax, row.max_pax]),
-    [[1, 4], [5, 8], [9, 12]],
+    [
+      [1, 4],
+      [5, 8],
+      [9, 12],
+    ],
     "Brochure activity review keeps only overlapping native slabs, not Pax rows or unrelated slabs",
   );
   const brochureOptionalRows = landPricing
     .optionalActivitySellingRows(
-      { ...groupedActivityDraft, query_type: "Brochure", pax_mode: "exact", pax_min: 1, pax_max: 10 },
+      {
+        ...groupedActivityDraft,
+        query_type: "Brochure",
+        pax_mode: "exact",
+        pax_min: 1,
+        pax_max: 10,
+      },
       duplicateRikshawSlabs,
       "indian",
       10,
@@ -2309,7 +2380,14 @@ try {
     });
   assert.deepEqual(
     brochureOptionalRows.map((row) => [row.min_pax, row.max_pax]),
-    [[1, 4], [1, 4], [5, 8], [5, 8], [9, 12], [9, 12]],
+    [
+      [1, 4],
+      [1, 4],
+      [5, 8],
+      [5, 8],
+      [9, 12],
+      [9, 12],
+    ],
     "Optional Brochure activity review can retain original overlapping slab alternatives without Pax expansion",
   );
   masterPricing.db.hydrateAll(originalMasterDb);
@@ -3622,6 +3700,22 @@ try {
 
   // Brochures price every whole Pax value from their Trip Basics bounds, even
   // when an older saved draft still carries the shared exact-mode default.
+  db.brochure_hotel_rates = [
+    {
+      id: "audit-brochure-rate",
+      hotel_id: "hotel-1",
+      rate_basis: "per_night",
+      pricing_basis: perRoomBrochureBasis,
+      validity_from: "2026-01-01",
+      validity_to: "2026-12-31",
+      single: 12000,
+      double: 24000,
+      triple: 36000,
+      extra_bed: 8000,
+      child: 5000,
+      updated_at: now,
+    },
+  ];
   const brochureRange = baseDraft();
   brochureRange.query_type = "Brochure";
   brochureRange.pax_mode = "exact";
@@ -3652,6 +3746,31 @@ try {
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     "Brochure commercial matrix receives every configured Pax row",
   );
+  const brochureSnapshot = quoteBuilder.buildSavedQuote(brochureRange, db, "Audit User");
+  assert.deepEqual(
+    [...new Set(brochureSnapshot.rate_sheet_rows.map((row) => row.pax))],
+    costsheet
+      .buildRateSheet(brochureRange, db, brochureRange.hotel_options[0], brochureRange.transport)
+      .flatMap((group) => group.rows)
+      .filter((row) => [row.single, row.double, row.triple, row.quad].some((price) => price > 0))
+      .map((row) => row.pax),
+    "Brochure final snapshots capture every applicable priced matrix row without final-row checkboxes",
+  );
+  const legacyLinkedBrochure = {
+    ...brochureRange,
+    linked_query_id: "EMP-AUDIT-001",
+    linked_query_name: "Legacy CRM link",
+  };
+  assert.equal(
+    quoteStore.quoteVersionContext(legacyLinkedBrochure).version,
+    1,
+    "Brochure versioning never follows a legacy CRM Query",
+  );
+  assert.equal(
+    quoteBuilder.buildSavedQuote(legacyLinkedBrochure, db, "Audit User").query_id,
+    undefined,
+    "Brochure snapshots never persist a CRM Query identity",
+  );
   brochureRange.pax_min = 4;
   brochureRange.pax_max = 14;
   assert.equal(calc.quotationPaxLabel(brochureRange), "4–14 Pax", "Fresh Brochure range label");
@@ -3660,30 +3779,1189 @@ try {
     [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     "Brochure 4-14 range expands inclusively",
   );
-  const publishedBrochure = {
-    id: "brochure-v1", brochure_id: "brochure", version: 1, status: "Published",
-    name: "Audit Brochure", programme_id: "programme-echoes", programme_name: "Echoes",
-    days_nights: "3D / 2N", pax_min: 1, pax_max: 10, validity_from: "2026-01-01", validity_till: "2026-12-31",
-    source_quote_id: "quote-1", scenarios: [
-      { id: "six-3star-urbania-twin", pax: 6, hotel_category: "3 Star", accommodation_option_id: "A", transport: "Urbania", transport_variation_id: "urbania", occupancy: "Twin Sharing", price_per_person: 12500, group_total: 75000, currency: "INR" },
-    ], validation_errors: [], created_at: "2026-01-01T00:00:00.000Z", created_by: "Audit", updated_at: "2026-01-01T00:00:00.000Z",
+
+  const varayHotelId = "hotel-varay-express-canonical";
+  const brochureHotelRateRows = [
+    {
+      id: "varay-2026-27",
+      hotel_id: "hotel-1",
+      rate_basis: "per_night",
+      pricing_basis: perRoomBrochureBasis,
+      validity_from: "2026-11-01",
+      validity_to: "2027-03-31",
+      single: 12000,
+      double: 24000,
+      triple: 36000,
+      extra_bed: 8000,
+      child: 5000,
+      updated_at: now,
+    },
+    {
+      id: "varay-2027-28",
+      hotel_id: "hotel-1",
+      rate_basis: "per_night",
+      pricing_basis: perRoomBrochureBasis,
+      validity_from: "2027-04-01",
+      validity_to: "2027-09-30",
+      single: 15000,
+      double: 30000,
+      triple: 45000,
+      extra_bed: 9000,
+      child: 6000,
+      updated_at: now,
+    },
+    {
+      id: "other-hotel-2026-27",
+      hotel_id: "hotel-2",
+      rate_basis: "per_night",
+      pricing_basis: perRoomBrochureBasis,
+      validity_from: "2026-11-01",
+      validity_to: "2027-09-30",
+      single: 22000,
+      double: 44000,
+      triple: 66000,
+      extra_bed: 10000,
+      child: 7000,
+      updated_at: now,
+    },
+  ];
+  const inclusivePeriod = brochureHotelRates.resolveBrochureHotelRate(
+    "hotel-1",
+    "2027-03-31",
+    "2027-03-31",
+    brochureHotelRateRows,
+  );
+  assert.equal(inclusivePeriod.status, "covered");
+  assert.equal(inclusivePeriod.rate.id, "varay-2026-27", "Validity To is inclusive");
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(inclusivePeriod.rate, "single"),
+    12000,
+    "Per-room SGL divides by one",
+  );
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(inclusivePeriod.rate, "double"),
+    12000,
+    "Per-room DBL divides once by two",
+  );
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(inclusivePeriod.rate, "triple"),
+    12000,
+    "Per-room TRP divides once by three",
+  );
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(inclusivePeriod.rate, "quad"),
+    11000,
+    "Quad uses the per-room TRP plus one Extra Bed add-on, divided by four",
+  );
+  const perPersonBrochureRate = {
+    ...inclusivePeriod.rate,
+    pricing_basis: {
+      ...perRoomBrochureBasis,
+      single: "per_person",
+      double: "per_person",
+      triple: "per_person",
+    },
   };
-  const exactBrochurePrice = brochureStore.lookupPublishedPackagePriceInRecords([publishedBrochure], {
-    programme_id: "programme-echoes", pax: 6, hotel_category: "3 Star", transport_variation_id: "urbania", occupancy: "Twin Sharing", departure_date: "2026-06-01",
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(perPersonBrochureRate, "double"),
+    24000,
+    "Explicit per-person DBL amount is not divided again",
+  );
+  close(
+    brochureHotelRates.brochureAdultRatePerPerson(perPersonBrochureRate, "triple"),
+    36000,
+    "Explicit per-person TRP amount is not divided again",
+  );
+  close(perPersonBrochureRate.extra_bed, 8000, "Extra Bed remains a single configured add-on amount");
+  close(perPersonBrochureRate.child, 5000, "Child remains a single per-child amount");
+  const nextPeriod = brochureHotelRates.resolveBrochureHotelRate(
+    "hotel-1",
+    "2027-04-01",
+    "2027-04-01",
+    brochureHotelRateRows,
+  );
+  assert.equal(nextPeriod.status, "covered");
+  assert.equal(nextPeriod.rate.id, "varay-2027-28", "Validity From is inclusive");
+  assert.equal(
+    brochureHotelRates.resolveBrochureHotelRate(
+      "hotel-1",
+      "2027-10-01",
+      "2027-10-01",
+      brochureHotelRateRows,
+    ).status,
+    "uncovered",
+    "Expired/out-of-validity dates never fall back to regular hotel rates",
+  );
+  const sellingValidityResolution = brochureHotelRates.resolveBrochureHotelRate(
+    "hotel-1",
+    "2026-11-01",
+    "2027-09-30",
+    brochureHotelRateRows,
+  );
+  assert.equal(sellingValidityResolution.status, "multiple_periods");
+  assert.deepEqual(
+    sellingValidityResolution.periods.map(({ rate }) => rate.id),
+    ["varay-2026-27", "varay-2027-28"],
+    "Date-free selling validity keeps each distinct hotel price period separate",
+  );
+
+  const nightCities = [
+    { id: "city-ujjain", name: "Ujjain" },
+    { id: "city-maheshwar", name: "Maheshwar" },
+    { id: "city-mandu", name: "Mandu" },
+    { id: "city-indore", name: "Indore" },
+  ];
+  const nightHotels = [
+    { id: "night-hotel-a1", city_id: "city-ujjain", name: "Ujjain A", hotel_category: "3 Star" },
+    { id: "night-hotel-a2", city_id: "city-maheshwar", name: "Maheshwar A", hotel_category: "3 Star" },
+    { id: "night-hotel-a3", city_id: "city-mandu", name: "Mandu A", hotel_category: "3 Star" },
+    { id: "night-hotel-b1", city_id: "city-ujjain", name: "Ujjain B", hotel_category: "4 Star" },
+    { id: "night-hotel-b2", city_id: "city-maheshwar", name: "Maheshwar B", hotel_category: "4 Star" },
+    { id: "night-hotel-b3", city_id: "city-mandu", name: "Mandu B", hotel_category: "4 Star" },
+    { id: "night-hotel-b2-alt", city_id: "city-maheshwar", name: "Maheshwar B Alt", hotel_category: "4 Star" },
+  ].map((hotel) => ({
+    ...hotel,
+    contact_name: "",
+    contact_phone: "",
+    email: "",
+    has_wifi: true,
+    has_pool: false,
+    address: "",
+    created_at: now,
+    updated_at: now,
+  }));
+  const nightlyRates = [
+    ["night-hotel-a1", 1000, 2000, 3000, 500, 200],
+    ["night-hotel-a2", 2000, 4000, 6000, 1000, 300],
+    ["night-hotel-a3", 3000, 6000, 9000, 1500, 400],
+    ["night-hotel-b1", 2000, 4000, 6000, 1000, 300],
+    ["night-hotel-b2", 4000, 8000, 12000, 2000, 500],
+    ["night-hotel-b3", 6000, 12000, 18000, 3000, 700],
+    ["night-hotel-b2-alt", 9000, 18000, 27000, 4500, 900],
+  ].map(([hotel_id, single, double, triple, extra_bed, child]) => ({
+    id: `per-night-${hotel_id}`,
+    hotel_id,
+    rate_basis: "per_night",
+    pricing_basis: perRoomBrochureBasis,
+    validity_from: "2026-10-31",
+    validity_to: "2026-11-30",
+    single,
+    double,
+    triple,
+    extra_bed,
+    child,
+    updated_at: now,
+  }));
+  const multiNightDb = {
+    ...db,
+    cities: [...db.cities, ...nightCities],
+    hotels: [...db.hotels, ...nightHotels],
+    brochure_hotel_rates: nightlyRates,
+  };
+  const threeNightRouting = [
+    { day: 1, date: "2026-11-01", city_id: "city-ujjain", to_city: "Ujjain", overnight: true },
+    { day: 2, date: "2026-11-02", city_id: "city-maheshwar", to_city: "Maheshwar", overnight: true },
+    { day: 3, date: "2026-11-03", city_id: "city-mandu", to_city: "Mandu", overnight: true },
+    { day: 4, date: "2026-11-04", city_id: "city-indore", to_city: "Indore", overnight: false },
+  ];
+  const makeNightSelections = (hotelIds) => hotelIds.map((hotel_id, index) => ({
+    city_id: nightCities[index].id,
+    routing_day: index + 1,
+    hotel_id,
+    room_id: "",
+    meal_plan: "CP",
+  }));
+  const threeNightBrochure = {
+    ...baseDraft(),
+    query_type: "Brochure",
+    has_dates: true,
+    start_date: "2026-11-01",
+    nights: 3,
+    pax_mode: "range",
+    pax_min: 1,
+    pax_max: 40,
+    pax_range: "1-40",
+    transport: [],
+    routing: threeNightRouting,
+    hotel_options: [
+      {
+        key: "A",
+        label: "3 Star",
+        category: "3 Star",
+        selections: makeNightSelections(["night-hotel-a1", "night-hotel-a2", "night-hotel-a3"]),
+      },
+      {
+        key: "B",
+        label: "4 Star",
+        category: "4 Star",
+        selections: makeNightSelections(["night-hotel-b1", "night-hotel-b2", "night-hotel-b3"]),
+      },
+    ],
+  };
+  const threeNightA = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    threeNightBrochure.hotel_options[0],
+    multiNightDb,
+  );
+  const threeNightB = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    threeNightBrochure.hotel_options[1],
+    multiNightDb,
+  );
+  // Regression: UjjainSpecial has two charged nights followed by a departure
+  // day.  With no selling validity, saved Brochure rates remain visible as a
+  // provisional preview, but they never become publishable matrix rows.
+  const ujjainDb = {
+    ...db,
+    cities: [
+      ...db.cities,
+      { id: "city-ujjain-special", name: "Ujjain" },
+      { id: "city-omkareshwar-special", name: "Omkareshwar" },
+    ],
+    hotels: [
+      ...db.hotels,
+      { id: "varay-special", name: "Varay Express", city_id: "city-ujjain-special", hotel_category: "3 Star", contact_name: "", contact_phone: "", email: "", has_wifi: true, has_pool: false, address: "", created_at: now, updated_at: now },
+      { id: "lalit-special", name: "Lalit Inn", city_id: "city-omkareshwar-special", hotel_category: "3 Star", contact_name: "", contact_phone: "", email: "", has_wifi: true, has_pool: false, address: "", created_at: now, updated_at: now },
+    ],
+    brochure_hotel_rates: [
+      { id: "varay-special-rate", hotel_id: "varay-special", rate_basis: "per_night", pricing_basis: perRoomBrochureBasis, validity_from: "2026-01-01", validity_to: "2026-12-31", single: 1800, double: 2000, triple: 2700, extra_bed: 800, child: 650, updated_at: now },
+      { id: "lalit-special-rate", hotel_id: "lalit-special", rate_basis: "per_night", pricing_basis: perRoomBrochureBasis, validity_from: "2026-01-01", validity_to: "2026-12-31", single: 1800, double: 1750, triple: 2650, extra_bed: 900, child: 700, updated_at: now },
+    ],
+  };
+  const ujjainSpecial = {
+    ...baseDraft(), query_type: "Brochure", has_dates: false, start_date: "", nights: 2,
+    pax_mode: "range", pax_min: 1, pax_max: 40, pax_range: "1-40", transport: [],
+    routing: [
+      { day: 1, date: "", city_id: "city-ujjain-special", to_city: "Ujjain", overnight: true },
+      { day: 2, date: "", city_id: "city-omkareshwar-special", to_city: "Omkareshwar", overnight: true },
+      { day: 3, date: "", to_city: "Departure", overnight: false },
+    ],
+    hotel_options: [{ key: "A", label: "3 Star", category: "3 Star", selections: [
+      { routing_day: 1, city_id: "city-ujjain-special", hotel_id: "varay-special", room_id: "", meal_plan: "CP" },
+      { routing_day: 2, city_id: "city-omkareshwar-special", hotel_id: "lalit-special", room_id: "", meal_plan: "CP" },
+    ] }],
+  };
+  const ujjainPreview = brochureAccommodation.brochureAccommodationForOption(ujjainSpecial, ujjainSpecial.hotel_options[0], ujjainDb);
+  assert.equal(ujjainPreview.provisional, true, "UjjainSpecial without selling validity is explicitly provisional");
+  assert.equal(ujjainPreview.previewMissing, 0, "UjjainSpecial has saved reference rates for both charged nights");
+  assert.deepEqual(
+    [ujjainPreview.singleRoomTotal, ujjainPreview.doubleRoomTotal, ujjainPreview.tripleRoomTotal, ujjainPreview.extraBed, ujjainPreview.child],
+    [3600, 3750, 5350, 1700, 1350],
+    "UjjainSpecial sums Varay Express + Lalit Inn only; departure has no hotel charge",
+  );
+  const ujjainPreviewRows = costsheet.buildRateSheet(ujjainSpecial, ujjainDb, ujjainSpecial.hotel_options[0], []).flatMap((group) => group.rows);
+  assert.deepEqual(ujjainPreviewRows.map((row) => row.pax), Array.from({ length: 40 }, (_, index) => index + 1), "UjjainSpecial preview retains independent 1–40 Pax rows");
+  assert.ok(ujjainPreviewRows.every((row) => row.brochure_provisional), "UjjainSpecial preview matrix is marked provisional");
+  assert.ok(validation.validateQuoteForFinalization(ujjainSpecial, ujjainDb).blockers.some((item) => item.code === "BROCHURE_SELLING_VALIDITY_PENDING"), "Provisional UjjainSpecial pricing cannot be published");
+  assert.throws(() => quoteBuilder.buildSavedQuote(ujjainSpecial, ujjainDb, "Audit User"), /provisional/i, "Final snapshot rejects provisional UjjainSpecial pricing");
+  const datedUjjain = { ...ujjainSpecial, has_dates: true, start_date: "2026-11-01", routing: ujjainSpecial.routing.map((day) => ({ ...day, date: day.day === 1 ? "2026-11-01" : day.day === 2 ? "2026-11-02" : "2026-11-03" })) };
+  const ujjainFinal = brochureAccommodation.brochureAccommodationForOption(datedUjjain, datedUjjain.hotel_options[0], ujjainDb);
+  assert.deepEqual([ujjainFinal.singleRoomTotal, ujjainFinal.doubleRoomTotal, ujjainFinal.tripleRoomTotal, ujjainFinal.extraBed, ujjainFinal.child], [3600, 3750, 5350, 1700, 1350], "Step 10 dated calculation matches Step 9 preview hotel amounts");
+  assert.equal(threeNightA.nights.length, 3, "A 3-night programme charges exactly its three routing overnights");
+  assert.equal(threeNightA.missing, 0);
+  close(threeNightA.single, 6000, "Option A three-night SGL total sums three different city hotels");
+  close(threeNightA.double, 6000, "Option A three-night DBL per-person total sums each selected hotel's own rate");
+  close(threeNightA.triple, 6000, "Option A three-night TRP per-person total sums each selected hotel's own rate");
+  close(threeNightA.quad, 5250, "Option A three-night Quad PP includes one verified Extra Bed add-on per night");
+  close(threeNightA.extraBed, 3000, "Option A extra-bed total sums three nightly prices");
+  close(threeNightA.child, 900, "Option A child total sums three nightly prices");
+  const missingNightOption = {
+    ...threeNightBrochure.hotel_options[0],
+    selections: threeNightBrochure.hotel_options[0].selections.filter(
+      (selection) => selection.routing_day !== 3,
+    ),
+  };
+  const missingNightCosting = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    missingNightOption,
+    multiNightDb,
+  );
+  assert.equal(missingNightCosting.missing, 1, "A missing selected hotel on a chargeable night marks totals incomplete");
+  assert.equal(
+    brochureAccommodation.brochureAccommodationSummaryRows(
+      threeNightBrochure,
+      missingNightCosting,
+      2,
+    ).find((row) => row.key === "double").incomplete,
+    true,
+    "A missing hotel rate is never displayed as a zero-priced accommodation total",
+  );
+  const waivedNightOption = {
+    ...threeNightBrochure.hotel_options[0],
+    selections: [
+      ...threeNightBrochure.hotel_options[0].selections.filter((selection) => selection.routing_day !== 3),
+      { city_id: "city-mandu", routing_day: 3, hotel_id: "", room_id: "", meal_plan: "CP", no_hotel: true, accommodation_status: "no_hotel_required" },
+    ],
+  };
+  const waivedNightCosting = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    waivedNightOption,
+    multiNightDb,
+  );
+  assert.equal(waivedNightCosting.missing, 0, "An intentional No Hotel Required night is not a missing-rate error");
+  close(waivedNightCosting.single, 3000, "An intentional No Hotel Required night contributes zero charge");
+  const threeNightSummaryRows = brochureAccommodation.brochureAccommodationSummaryRows(
+    threeNightBrochure,
+    threeNightA,
+    2,
+  );
+  const doubleSummary = threeNightSummaryRows.find((row) => row.key === "double");
+  close(doubleSummary.base_total, 12000, "Step 8 DBL supplier amount is two guests times the three-night DBL PP base");
+  close(doubleSummary.markup, 1200, "Step 8 DBL markup is applied once to total base");
+  close(doubleSummary.gst, 660, "Step 8 DBL GST applies once to base plus markup");
+  close(doubleSummary.final_total, 13860, "Step 8 DBL final group selling total");
+  close(doubleSummary.final_per_person, 6930, "Step 8 DBL final PP divides per-room DBL by two exactly once");
+  const extraBedSummary = threeNightSummaryRows.find((row) => row.key === "extra_bed");
+  close(extraBedSummary.base_total, 3000, "Step 8 Extra Bed remains a separate three-night add-on");
+  close(extraBedSummary.final_total, 3465, "Step 8 Extra Bed receives configured markup/GST once");
+  const childSummary = brochureAccommodation.brochureAccommodationSummaryRows(
+    { ...threeNightBrochure, children: [{ age: 8 }] },
+    threeNightA,
+    2,
+  ).find((row) => row.key === "child");
+  close(childSummary.base_total, 900, "Step 8 Child total follows configured child count only");
+  close(childSummary.final_per_unit, 1039.5, "Step 8 final Child price remains per child without another room charge");
+  const perPersonNightlyDb = {
+    ...multiNightDb,
+    brochure_hotel_rates: nightlyRates.map((rate) => ({
+      ...rate,
+      pricing_basis: {
+        single: "per_person",
+        double: "per_person",
+        triple: "per_person",
+        extra_bed: "per_add_on",
+        child: "per_child",
+      },
+    })),
+  };
+  const perPersonThreeNight = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    threeNightBrochure.hotel_options[0],
+    perPersonNightlyDb,
+  );
+  close(perPersonThreeNight.double, 12000, "Three-night per-person DBL amount is not divided by two again");
+  close(perPersonThreeNight.triple, 18000, "Three-night per-person TRP amount is not divided by three again");
+  close(perPersonThreeNight.quad, 14250, "Quad converts explicit per-person TRP plus one bed add-on per night");
+  const perPersonNightlyMatrix = costsheet.buildRateSheet(
+    threeNightBrochure,
+    perPersonNightlyDb,
+    threeNightBrochure.hotel_options[0],
+    [],
+  );
+  assert.deepEqual(
+    perPersonNightlyMatrix.flatMap((group) => group.rows.map((row) => row.pax)),
+    Array.from({ length: 40 }, (_, index) => index + 1),
+    "Explicit per-person rate units preserve the complete 1–40 Pax matrix",
+  );
+  close(
+    perPersonNightlyMatrix[0].rows[1].double,
+    12000 * 1.1 * 1.05,
+    "Per-person DBL matrix value receives markup/GST once without an occupancy divisor",
+  );
+  const perPersonNightlyScenario = scenarioEngine.computeScenario(
+    threeNightBrochure,
+    { id: "three-night-per-person", label: "Option A", option_key: "A" },
+    perPersonNightlyDb,
+  );
+  close(
+    perPersonNightlyScenario.persons[0].hotel_net,
+    12000,
+    "Per-person DBL scenario uses the saved basis without a second divide-by-two",
+  );
+  close(threeNightB.single, 12000, "Option B keeps its separate 4 Star hotel prices");
+  const threeNightMatrix = costsheet.buildRateSheet(
+    threeNightBrochure,
+    multiNightDb,
+    threeNightBrochure.hotel_options[0],
+    [],
+  );
+  assert.deepEqual(
+    threeNightMatrix.flatMap((group) => group.rows.map((row) => row.pax)),
+    Array.from({ length: 40 }, (_, index) => index + 1),
+    "Three-night Brochure matrix retains all 1–40 Pax rows",
+  );
+  close(
+    threeNightMatrix[0].rows[1].double,
+    6000 * 1.1 * 1.05,
+    "Three-night DBL matrix total uses all three nights once with existing markup/GST",
+  );
+  close(threeNightMatrix[0].rows[1].single, 6000 * 1.1 * 1.05, "Three-night SGL matrix price is basis-aware");
+  close(threeNightMatrix[0].rows[1].triple, 6000 * 1.1 * 1.05, "Three-night TRP matrix price is basis-aware");
+  close(
+    threeNightMatrix[0].rows[1].quad,
+    5250 * 1.1 * 1.05,
+    "Three-night Quad matrix price applies the extra-bed add-on once and GST once",
+  );
+  const threeNightScenario = scenarioEngine.computeScenario(
+    threeNightBrochure,
+    { id: "three-night-a", label: "Option A", option_key: "A" },
+    multiNightDb,
+  );
+  close(threeNightScenario.persons[0].hotel_net, 6000, "Scenario per-person accommodation is the sum of three nightly DBL shares");
+
+  const changedOptionB = {
+    ...threeNightBrochure.hotel_options[1],
+    selections: threeNightBrochure.hotel_options[1].selections.map((selection) =>
+      selection.routing_day === 2 ? { ...selection, hotel_id: "night-hotel-b2-alt" } : selection,
+    ),
+  };
+  const changedOptionBCosting = brochureAccommodation.brochureAccommodationForOption(
+    threeNightBrochure,
+    changedOptionB,
+    multiNightDb,
+  );
+  close(changedOptionBCosting.single, 17000, "Changing Option B changes only its selected night's price");
+  close(
+    brochureAccommodation.brochureAccommodationForOption(
+      threeNightBrochure,
+      threeNightBrochure.hotel_options[0],
+      multiNightDb,
+    ).single,
+    6000,
+    "Changing Option B leaves Option A hotel selections and total unchanged",
+  );
+
+  const explicitDayZero = {
+    ...threeNightBrochure,
+    routing: [
+      { day: 0, is_day_zero: true, date: "2026-11-01", city_id: "city-ujjain", to_city: "Ujjain", overnight: false },
+      ...threeNightRouting,
+    ],
+    hotel_options: [
+      {
+        ...threeNightBrochure.hotel_options[0],
+        selections: [
+          { city_id: "city-ujjain", routing_day: 0, hotel_id: "night-hotel-a1", room_id: "", meal_plan: "CP", pre_tour_night: true },
+          ...threeNightBrochure.hotel_options[0].selections,
+        ],
+      },
+    ],
+  };
+  const dayZeroCosting = brochureAccommodation.brochureAccommodationForOption(
+    explicitDayZero,
+    explicitDayZero.hotel_options[0],
+    multiNightDb,
+  );
+  assert.equal(dayZeroCosting.nights.length, 4, "Day 0 is charged only when its pre-tour night is explicitly configured");
+  close(dayZeroCosting.single, 7000, "Explicit Day 0 adds only its own hotel night rate");
+  const noDayZeroCosting = brochureAccommodation.brochureAccommodationForOption(
+    { ...explicitDayZero, hotel_options: [threeNightBrochure.hotel_options[0]] },
+    threeNightBrochure.hotel_options[0],
+    multiNightDb,
+  );
+  assert.equal(noDayZeroCosting.nights.length, 3, "Unselected Day 0 and the departure day add no hotel charges");
+
+  const dateFreeThreeNight = {
+    ...threeNightBrochure,
+    has_dates: false,
+    brochure_validity_from: "2026-11-01",
+    brochure_validity_till: "2026-11-30",
+    start_date: "2030-01-01",
+    routing: threeNightRouting.map((day) => ({ ...day, date: "" })),
+  };
+  const dateFreeCosting = brochureAccommodation.brochureAccommodationForOption(
+    dateFreeThreeNight,
+    dateFreeThreeNight.hotel_options[0],
+    multiNightDb,
+  );
+  assert.equal(dateFreeCosting.missing, 0, "Date-free Brochure resolves all hotels against selling validity without departure dates");
+  close(dateFreeCosting.single, 6000, "Date-free three-night pricing uses nightly rates covering the entire selling window");
+  const seasonalRateDb = {
+    ...multiNightDb,
+    brochure_hotel_rates: [
+      {
+        ...nightlyRates.find((rate) => rate.hotel_id === "night-hotel-a1"),
+        id: "night-hotel-a1-season-one",
+        validity_from: "2026-11-01",
+        validity_to: "2026-11-15",
+      },
+      {
+        ...nightlyRates.find((rate) => rate.hotel_id === "night-hotel-a1"),
+        id: "night-hotel-a1-season-two",
+        validity_from: "2026-11-16",
+        validity_to: "2026-12-01",
+        single: 2000,
+        double: 4000,
+        triple: 6000,
+      },
+      {
+        ...nightlyRates.find((rate) => rate.hotel_id === "night-hotel-a2"),
+        validity_from: "2026-11-02",
+        validity_to: "2026-12-01",
+      },
+      {
+        ...nightlyRates.find((rate) => rate.hotel_id === "night-hotel-a3"),
+        validity_from: "2026-11-03",
+        validity_to: "2026-12-02",
+      },
+    ],
+  };
+  const seasonalBrochureDraft = {
+    ...dateFreeThreeNight,
+    program_id: "programme-seasonal-audit",
+    program_code: "SEASONAL-AUDIT",
+    hotel_options: [dateFreeThreeNight.hotel_options[0]],
+  };
+  const seasonalDepartureBands = brochureAccommodation.brochureDepartureRateScenarios(
+    seasonalBrochureDraft,
+    seasonalRateDb,
+  );
+  assert.deepEqual(
+    seasonalDepartureBands.map((band) => [band.validity_from, band.validity_to]),
+    [["2026-11-01", "2026-11-15"], ["2026-11-16", "2026-11-30"]],
+    "Date-free selling validity splits into distinct departure-date bands where a selected night's season changes",
+  );
+  close(seasonalDepartureBands[0].options.A.single, 6000, "First seasonal band keeps first-night SGL price");
+  close(seasonalDepartureBands[1].options.A.single, 7000, "Second seasonal band keeps the changed first-night SGL price");
+  const seasonalMatrix = costsheet.buildRateSheet(
+    seasonalBrochureDraft,
+    seasonalRateDb,
+    seasonalBrochureDraft.hotel_options[0],
+    [],
+  );
+  assert.equal(seasonalMatrix.length, 2, "Commercial matrix retains separate seasonal date-band groups");
+  assert.deepEqual(
+    seasonalMatrix.map((group) => [group.rows[0].brochure_validity_from, group.rows[0].brochure_validity_till, group.rows.length]),
+    [["2026-11-01", "2026-11-15", 40], ["2026-11-16", "2026-11-30", 40]],
+    "Each seasonal scenario retains all configured 1–40 Pax rows",
+  );
+  const seasonalSavedQuote = quoteBuilder.buildSavedQuote(seasonalBrochureDraft, seasonalRateDb, "Audit User");
+  assert.deepEqual(
+    [...new Set(seasonalSavedQuote.rate_sheet_rows.map((row) => `${row.brochure_validity_from}..${row.brochure_validity_till}`))],
+    ["2026-11-01..2026-11-15", "2026-11-16..2026-11-30"],
+    "Immutable Brochure snapshots preserve each distinct seasonal pricing validity band",
+  );
+  const seasonalTransportLine = {
+    id: "seasonal-transport-line",
+    travel_id: "small",
+    vehicles: 1,
+    days: 1,
+    rate: 40000,
+    rate_format: "total",
+    total_override: 40000,
+  };
+  const seasonalTransportDraft = {
+    ...seasonalBrochureDraft,
+    transport: [seasonalTransportLine],
+    transport_options: [
+      {
+        id: "seasonal-coach-variation",
+        name: "Seasonal Coach",
+        min_pax: 1,
+        max_pax: 40,
+        vehicles: [{ transport_line_id: seasonalTransportLine.id, quantity: 1 }],
+      },
+    ],
+  };
+  const seasonalTransportSnapshot = quoteBuilder.buildSavedQuote(
+    seasonalTransportDraft,
+    seasonalRateDb,
+    "Audit User",
+  );
+  const savedSeasonalRow = seasonalTransportSnapshot.rate_sheet_rows.find(
+    (row) => row.pax === 6 && row.brochure_validity_from === "2026-11-16",
+  );
+  assert.ok(savedSeasonalRow);
+  assert.equal(seasonalTransportSnapshot.brochure_source.programme_id, "programme-seasonal-audit");
+  assert.equal(savedSeasonalRow.option_key, "A");
+  assert.equal(savedSeasonalRow.option_label, "3 Star");
+  assert.equal(savedSeasonalRow.transport_variation_id, "seasonal-coach-variation");
+  assert.equal(savedSeasonalRow.pax, 6);
+  const expectedTransportMatrixRow = costsheet
+    .buildRateSheet(
+      seasonalTransportDraft,
+      seasonalRateDb,
+      seasonalTransportDraft.hotel_options[0],
+      seasonalTransportDraft.transport,
+    )
+    .flatMap((group) => group.rows)
+    .find((row) => row.pax === 6 && row.brochure_validity_from === "2026-11-16");
+  assert.ok(expectedTransportMatrixRow);
+  close(
+    savedSeasonalRow.double,
+    expectedTransportMatrixRow.pkg_double,
+    "Saved matrix row retains the exact final price for its transport variation, Pax and seasonal band",
+  );
+  const savedSeasonalTransportRow = seasonalTransportSnapshot.rate_sheet_rows.find(
+    (row) => row.pax === 6 && row.brochure_validity_from === "2026-11-16",
+  );
+  const portalScenarios = brochureStore.scenariosFromQuote(seasonalTransportSnapshot);
+  const portalDoubleScenario = portalScenarios.find(
+    (scenario) =>
+      scenario.pax === 6 &&
+      scenario.accommodation_option_id === "A" &&
+      scenario.transport_variation_id === "seasonal-coach-variation" &&
+      scenario.occupancy === "Twin Sharing" &&
+      scenario.validity_from === "2026-11-16",
+  );
+  assert.ok(portalDoubleScenario);
+  assert.equal(portalDoubleScenario.hotel_category, "3 Star");
+  assert.equal(portalDoubleScenario.validity_till, "2026-11-30");
+  close(
+    portalDoubleScenario.price_per_person,
+    savedSeasonalTransportRow.double,
+    "Portal Twin Sharing price is the exact final DBL matrix amount for its Programme/category/transport/Pax/date band",
+  );
+  const partialCoverageDb = {
+    ...seasonalRateDb,
+    brochure_hotel_rates: seasonalRateDb.brochure_hotel_rates.map((rate) =>
+      rate.hotel_id === "night-hotel-a3" ? { ...rate, validity_to: "2026-11-27" } : rate,
+    ),
+  };
+  const partialCoverageBands = brochureAccommodation.brochureDepartureRateScenarios(
+    seasonalBrochureDraft,
+    partialCoverageDb,
+  );
+  assert.deepEqual(
+    partialCoverageBands.map((band) => [band.validity_from, band.validity_to]),
+    [["2026-11-01", "2026-11-15"], ["2026-11-16", "2026-11-25"], ["2026-11-26", "2026-11-30"]],
+    "A gap in the third-night validity creates only the affected departure-date band as uncovered",
+  );
+  assert.equal(partialCoverageBands[0].options.A.missing, 0);
+  assert.equal(partialCoverageBands[1].options.A.missing, 0);
+  assert.equal(partialCoverageBands[2].options.A.missing, 1);
+  const partialCoverageMatrix = costsheet.buildRateSheet(
+    seasonalBrochureDraft,
+    partialCoverageDb,
+    seasonalBrochureDraft.hotel_options[0],
+    [],
+  );
+  assert.deepEqual(
+    partialCoverageMatrix.map((group) => [group.rows[0].brochure_validity_from, group.rows[0].brochure_validity_till]),
+    [["2026-11-01", "2026-11-15"], ["2026-11-16", "2026-11-25"]],
+    "Only the uncovered date band is blocked; covered scenarios retain their complete matrices",
+  );
+  const partialCoverageSnapshot = quoteBuilder.buildSavedQuote(
+    seasonalBrochureDraft,
+    partialCoverageDb,
+    "Audit User",
+  );
+  assert.ok(
+    partialCoverageSnapshot.brochure_source.rate_coverage_gaps.some((gap) => gap.includes("2026-11-26–2026-11-30")),
+    "Immutable Brochure snapshot carries uncovered departure windows as distinct coverage warnings",
+  );
+  const outOfValidityNight = brochureAccommodation.brochureAccommodationForOption(
+    { ...threeNightBrochure, start_date: "2026-12-01" },
+    threeNightBrochure.hotel_options[0],
+    multiNightDb,
+  );
+  assert.equal(outOfValidityNight.missing, 3, "Out-of-validity night dates are all flagged without supplier fallback");
+  const resumedDraft = draftStore.normalizeDraft(structuredClone(threeNightBrochure));
+  assert.deepEqual(
+    resumedDraft.hotel_options.map((option) => option.selections.map((selection) => selection.hotel_id)),
+    threeNightBrochure.hotel_options.map((option) => option.selections.map((selection) => selection.hotel_id)),
+    "Save/refresh/resume draft normalization preserves each option's per-night hotel selections",
+  );
+  const masterDbBeforeReviewRender = structuredClone(masterPricing.db.get());
+  masterPricing.db.hydrateAll(multiNightDb);
+  const brochureStepEightMarkup = renderToStaticMarkup(
+    createElement(hotelsStep.Step15, {
+      draft: threeNightBrochure,
+      set: () => undefined,
+    }),
+  );
+  assert.ok(
+    ["Day 1", "Ujjain", "Day 2", "Maheshwar", "Day 3", "Mandu", "Day 4", "Indore", "Brochure Rate"].every((label) => brochureStepEightMarkup.includes(label)),
+    "Brochure Step 8 renders each routed night, the non-overnight departure, and each selected hotel's rate source",
+  );
+  const brochureFinalReviewMarkup = renderToStaticMarkup(
+    createElement(packageStandardReview.PackageStandardCostingReview, {
+      draft: threeNightBrochure,
+      set: () => undefined,
+      readOnly: true,
+    }),
+  );
+  assert.ok(
+    ["Accommodation &amp; Meals — Hotel Verification · Brochure Rates", "Ujjain A", "Maheshwar A", "Mandu A", "Option B", "Final Accommodation Selling Total"].every((label) => brochureFinalReviewMarkup.includes(label)),
+    "Final Review Section 4 displays the routed night-wise hotels, Brochure source, options and totals",
+  );
+  masterPricing.db.hydrateAll(seasonalRateDb);
+  const seasonalStepEightMarkup = renderToStaticMarkup(
+    createElement(hotelsStep.Step15, {
+      draft: seasonalBrochureDraft,
+      set: () => undefined,
+    }),
+  );
+  const firstBandRows = brochureAccommodation.brochureAccommodationSummaryRows(
+    seasonalBrochureDraft,
+    seasonalDepartureBands[0].options.A,
+    40,
+  );
+  const firstBandDouble = firstBandRows.find((row) => row.key === "double");
+  close(firstBandDouble.base_total, 240000, "Fully priced date-band DBL base uses that band's three nightly rates for all 40 Pax");
+  close(firstBandDouble.markup, 24000, "Date-band DBL markup is applied once to the band total");
+  close(firstBandDouble.gst, 13200, "Date-band GST applies once to base plus markup");
+  close(firstBandDouble.final_total, 277200, "Date-band DBL final selling total is not taken from the uncovered full selling window");
+  assert.ok(
+    seasonalStepEightMarkup.includes(dateFormat.inr(firstBandDouble.base_total)) &&
+      seasonalStepEightMarkup.includes(dateFormat.inr(firstBandDouble.final_total)),
+    "Step 8 renders nonzero summary values from the same valid date-band costing as its night rows",
+  );
+  assert.ok(
+    seasonalStepEightMarkup.includes("Preview an existing departure-rate band") &&
+      seasonalStepEightMarkup.includes("Preview only. Choosing a band does not select or save a specific departure date."),
+    "The date-free upper table offers an explicit band preview without mutating departure-date state",
+  );
+  const seasonalStepEightLabels = [
+    "Separate Dated Rate Scenarios",
+    "2026-11-01",
+    "2026-11-15",
+    "2026-11-16",
+    "2026-11-30",
+  ].map((label) => [label, seasonalStepEightMarkup.includes(label)]);
+  assert.ok(
+    seasonalStepEightLabels.every(([, visible]) => visible),
+    `Date-free Step 8 displays separate seasonal departure-date price bands: ${JSON.stringify(seasonalStepEightLabels)}`,
+  );
+  const seasonalFinalReviewMarkup = renderToStaticMarkup(
+    createElement(packageStandardReview.PackageStandardCostingReview, {
+      draft: seasonalBrochureDraft,
+      set: () => undefined,
+      readOnly: true,
+    }),
+  );
+  assert.ok(
+    seasonalFinalReviewMarkup.includes("2026-11-01 – 2026-11-15") &&
+      seasonalFinalReviewMarkup.includes("2026-11-16 – 2026-11-30") &&
+      seasonalFinalReviewMarkup.includes("Final Accommodation Selling Total") &&
+      seasonalFinalReviewMarkup.includes(dateFormat.inr(firstBandDouble.final_total)),
+    "Date-free Final Review preserves both seasonal bands and matches Step 8's final total for the same band",
+  );
+  masterPricing.db.hydrateAll(masterDbBeforeReviewRender);
+
+  const legacyFullProgrammeRate = {
+    id: "legacy-full-programme-rate",
+    hotel_id: "legacy-hotel",
+    validity_from: "2026-11-01",
+    validity_to: "2027-03-31",
+    single: 12000,
+    double: 24000,
+    triple: 36000,
+    extra_bed: 8000,
+    child: 5000,
+    updated_at: now,
+  };
+  assert.equal(
+    brochureHotelRates.resolveBrochureHotelRate(
+      "legacy-hotel",
+      "2026-11-01",
+      "2026-11-01",
+      [legacyFullProgrammeRate],
+    ).status,
+    "legacy_basis",
+    "Basis-less legacy records are never silently reinterpreted as per-night amounts",
+  );
+  assert.equal(
+    brochureHotelRates.resolveBrochureHotelRate(
+      "legacy-hotel",
+      "2026-11-01",
+      "2026-11-01",
+      [{ ...legacyFullProgrammeRate, rate_basis: "per_night" }],
+    ).status,
+    "unverified_pricing_basis",
+    "Per-night records without per-field room/person/add-on units are blocked instead of guessed",
+  );
+  assert.equal(
+    brochureHotelRates.resolveBrochureHotelRate(
+      "hotel-2",
+      "2027-03-31",
+      "2027-03-31",
+      brochureHotelRateRows,
+    ).rate.single,
+    22000,
+    "Rates are isolated by canonical Hotel ID, not category",
+  );
+  assert.ok(
+    brochureHotelRates.validateBrochureHotelRatePeriods([
+      { validity_from: "2026-11-01", validity_to: "2027-03-31" },
+      { validity_from: "2027-03-31", validity_to: "2027-09-30" },
+    ]),
+    "Inclusive overlapping periods are rejected",
+  );
+  assert.equal(
+    brochureHotelRates.validateBrochureHotelRatePeriods([
+      { validity_from: "2026-11-01", validity_to: "2027-03-31" },
+      { validity_from: "2027-04-01", validity_to: "2027-09-30" },
+    ]),
+    undefined,
+    "Adjacent non-overlapping validity periods are accepted",
+  );
+
+  const masterDbBeforeBrochureRateSave = structuredClone(masterPricing.db.get());
+  const originalRoomsAndRates = structuredClone({
+    room_categories: masterDbBeforeBrochureRateSave.room_categories,
+    rate_plans: masterDbBeforeBrochureRateSave.rate_plans,
   });
+  const varayHotel = {
+    id: varayHotelId,
+    city_id: "city-ujjain",
+    name: "Varay Express",
+    hotel_category: "Excellent Budget",
+    contact_name: "",
+    contact_phone: "",
+    email: "",
+    has_wifi: true,
+    has_pool: false,
+    address: "",
+    created_at: now,
+    updated_at: now,
+  };
+  const otherCanonicalHotel = { ...varayHotel, id: "hotel-other-canonical", name: "Other Hotel" };
+  masterPricing.db.hydrateAll({
+    ...masterDbBeforeBrochureRateSave,
+    hotels: [...masterDbBeforeBrochureRateSave.hotels, varayHotel, otherCanonicalHotel],
+    brochure_hotel_rates: [],
+  });
+  const varayFirstPeriod = {
+    id: "varay-first-period",
+    rate_basis: "per_night",
+    pricing_basis: perRoomBrochureBasis,
+    validity_from: "2026-11-01",
+    validity_to: "2027-03-31",
+    single: 12000,
+    double: 24000,
+    triple: 36000,
+    extra_bed: 8000,
+    child: 5000,
+  };
+  const varaySecondPeriod = {
+    id: "varay-second-period",
+    rate_basis: "per_night",
+    pricing_basis: perRoomBrochureBasis,
+    validity_from: "2027-04-01",
+    validity_to: "2027-09-30",
+    single: 15000,
+    double: 30000,
+    triple: 45000,
+    extra_bed: 9000,
+    child: 6000,
+  };
+  masterPricing.db.saveBrochureHotelRatesForHotel(varayHotelId, [varayFirstPeriod]);
+  masterPricing.db.saveBrochureHotelRatesForHotel(varayHotelId, [varayFirstPeriod, varaySecondPeriod]);
+  assert.deepEqual(
+    masterPricing.db.get().brochure_hotel_rates
+      .filter((rate) => rate.hotel_id === varayHotelId)
+      .map((rate) => rate.id),
+    ["varay-first-period", "varay-second-period"],
+    "Saving another validity retains the existing saved period under the same canonical Hotel ID",
+  );
+  assert.deepEqual(
+    masterPricing.db.get().brochure_hotel_rates.find((rate) => rate.id === "varay-first-period").pricing_basis,
+    perRoomBrochureBasis,
+    "The verified SGL/DBL/TRP/add-on/child unit basis persists with Hotel Master rates",
+  );
+  masterPricing.db.saveBrochureHotelRatesForHotel("hotel-other-canonical", [
+    { ...varayFirstPeriod, id: "other-hotel-period", single: 22000 },
+  ]);
+  masterPricing.db.hydrateAll(structuredClone(masterPricing.db.get()));
+  assert.equal(
+    masterPricing.db.get().brochure_hotel_rates.find((rate) => rate.id === "other-hotel-period").single,
+    22000,
+    "A refresh/re-hydration restores a different hotel's own saved price",
+  );
+  assert.deepEqual(
+    {
+      room_categories: masterPricing.db.get().room_categories,
+      rate_plans: masterPricing.db.get().rate_plans,
+    },
+    originalRoomsAndRates,
+    "Brochure rate saves do not mutate regular room categories or supplier rates",
+  );
+  masterPricing.db.hydrateAll(masterDbBeforeBrochureRateSave);
+
+  const regularRateSheetBeforeBrochure = costsheet.buildRateSheet(
+    baseDraft(),
+    db,
+    baseDraft().hotel_options[0],
+    baseDraft().transport,
+  );
+  db.brochure_hotel_rates = brochureHotelRateRows;
+  const brochureMatrixDraft = {
+    ...baseDraft(),
+    query_type: "Brochure",
+    has_dates: true,
+    start_date: "2026-11-01",
+    pax_mode: "range",
+    pax_min: 1,
+    pax_max: 40,
+    transport: [],
+    hotel_options: [
+      {
+        ...baseDraft().hotel_options[0],
+        selections: [{ city_id: "", routing_day: 1, hotel_id: "hotel-1", room_id: "", meal_plan: "CP" }],
+      },
+    ],
+  };
+  const brochureMatrix = costsheet.buildRateSheet(
+    brochureMatrixDraft,
+    db,
+    brochureMatrixDraft.hotel_options[0],
+    brochureMatrixDraft.transport,
+  );
+  assert.deepEqual(
+    brochureMatrix.flatMap((group) => group.rows.map((row) => row.pax)),
+    Array.from({ length: 40 }, (_, index) => index + 1),
+    "The Brochure commercial matrix calculates every configured Pax row from 1 through 40",
+  );
+  close(brochureMatrix[0].rows[0].single, 12000 * 1.1 * 1.05, "Brochure SGL uses selected hotel approximate rate");
+  close(brochureMatrix[0].rows[1].double, (24000 / 2) * 1.1 * 1.05, "Brochure DBL uses existing per-person occupancy basis");
+  const brochureScenario = scenarioEngine.computeScenario(
+    brochureMatrixDraft,
+    { id: "brochure-scenario", label: "Brochure Option A", option_key: "A" },
+    db,
+  );
+  assert.equal(brochureScenario.rate_missing, 0);
+  close(
+    brochureScenario.persons[0].hotel_net,
+    24000 / 2,
+    "Brochure scenario summary uses the selected Brochure DBL rate once, not nightly supplier rates",
+  );
+  close(
+    brochureScenario.persons[0].hotel_gst,
+    0,
+    "Brochure approximate rates do not receive regular supplier GST before configured sales GST",
+  );
+  const brochureChildDraft = { ...brochureMatrixDraft, children: [{ age: 8 }] };
+  const brochureChildMatrix = costsheet.buildRateSheet(
+    brochureChildDraft,
+    db,
+    brochureChildDraft.hotel_options[0],
+    [],
+  );
+  close(
+    brochureChildMatrix[0].rows[1].single,
+    ((12000 + 5000) / 2) * 1.1 * 1.05,
+    "Brochure child amount is included in per-person occupancy costing",
+  );
+  const brochureChildScenario = scenarioEngine.computeScenario(
+    brochureChildDraft,
+    { id: "brochure-child-scenario", label: "Brochure Child", option_key: "A" },
+    db,
+  );
+  close(
+    brochureChildScenario.persons[0].hotel_net,
+    5000,
+    "Brochure scenario applies the Child amount instead of a regular supplier tariff",
+  );
+  const switchedHotelOption = {
+    ...brochureMatrixDraft.hotel_options[0],
+    selections: [{ city_id: "", routing_day: 1, hotel_id: "hotel-2", room_id: "", meal_plan: "CP" }],
+  };
+  assert.equal(
+    brochureRateResolution.brochureRateResolutionForOption(
+      brochureMatrixDraft,
+      switchedHotelOption,
+      db.brochure_hotel_rates,
+    ).rate.single,
+    22000,
+    "Changing selected hotel immediately resolves the new hotel and cannot retain stale rates",
+  );
+  const regularRateSheetAfterBrochure = costsheet.buildRateSheet(
+    baseDraft(),
+    db,
+    baseDraft().hotel_options[0],
+    baseDraft().transport,
+  );
+  assert.deepEqual(
+    regularRateSheetAfterBrochure,
+    regularRateSheetBeforeBrochure,
+    "B2B/B2C regular hotel costing is unchanged when Brochure rates exist",
+  );
+
+  const dateFreeBrochure = {
+    ...structuredClone(brochureRange),
+    has_dates: false,
+    brochure_validity_from: "2026-11-01",
+    brochure_validity_till: "2027-03-31",
+    start_date: "2030-11-27",
+    routing: structuredClone(brochureRange.routing).map((day) => ({ ...day, date: "2026-11-27" })),
+  };
+  assert.equal(
+    brochureRateResolution.brochureRateResolutionForOption(
+      dateFreeBrochure,
+      dateFreeBrochure.hotel_options[0],
+      db.brochure_hotel_rates,
+    ).rate.id,
+    "varay-2026-27",
+    "Date-free pricing uses Brochure selling validity, not a retained departure date",
+  );
+  const dateFreeAcrossPeriods = { ...dateFreeBrochure, brochure_validity_till: "2027-09-30" };
+  assert.equal(
+    brochureRateResolution.brochureRateResolutionForOption(
+      dateFreeAcrossPeriods,
+      dateFreeAcrossPeriods.hotel_options[0],
+      db.brochure_hotel_rates,
+    ).status,
+    "multiple_periods",
+    "Date-free validity spanning two hotel price periods is never flattened to one price",
+  );
+  const expiredBrochureDraft = { ...brochureMatrixDraft, start_date: "2027-10-01" };
+  assert.deepEqual(
+    costsheet.buildRateSheet(expiredBrochureDraft, db, expiredBrochureDraft.hotel_options[0], []),
+    [],
+    "Out-of-validity Brochure pricing yields no zero or supplier-rate matrix rows",
+  );
+  const undatedRouting = dateFormat.synchronizeRoutingDates(dateFreeBrochure);
+  assert.ok(
+    undatedRouting.routing.every((day) => day.date === ""),
+    "Date-free Brochure routing clears retained calendar dates instead of using a start-date fallback",
+  );
+  assert.equal(
+    calc.accommodationNightDate(undatedRouting, undatedRouting.routing[0], 0),
+    "",
+    "Date-free Brochure hotel pricing has no fabricated stay date",
+  );
+  const dateFreeSnapshot = quoteBuilder.buildSavedQuote(undatedRouting, db, "Audit User");
+  assert.equal(
+    dateFreeSnapshot.travel_start,
+    "",
+    "Date-free Brochure snapshots retain no departure date",
+  );
+  assert.equal(
+    dateFreeSnapshot.travel_end,
+    "",
+    "Date-free Brochure snapshots retain no derived end date",
+  );
+  assert.equal(dateFreeSnapshot.draft_snapshot.start_date, "", "Date-free Brochure snapshots omit retained departure dates from their input payload");
+  assert.ok(dateFreeSnapshot.draft_snapshot.routing.every((day) => day.date === ""), "Date-free saved routes retain day-number rows without calendar dates");
+  const dateFreeFinalReview = renderToStaticMarkup(
+    createElement(finalStep.Step17, { draft: undatedRouting, set: () => undefined }),
+  );
+  assert.ok(dateFreeFinalReview.includes("Departure date not selected · Day-number itinerary"));
+  assert.ok(dateFreeFinalReview.includes("Brochure selling validity:"));
+  assert.ok(!dateFreeFinalReview.includes("2030-11-27"), "Final Review does not display a retained placeholder departure date");
+  assert.equal(dateFreeSnapshot.draft_snapshot.start_date, "", "Date-free snapshots do not retain a misleading departure date in the saved draft payload");
+  assert.ok(dateFreeSnapshot.draft_snapshot.routing.every((day) => day.date === ""), "Date-free snapshot routing uses day numbers, not stale calendar dates");
+  const publishedBrochure = {
+    id: "brochure-v1",
+    brochure_id: "brochure",
+    version: 1,
+    status: "Published",
+    name: "Audit Brochure",
+    programme_id: "programme-echoes",
+    programme_name: "Echoes",
+    days_nights: "3D / 2N",
+    pax_min: 1,
+    pax_max: 10,
+    validity_from: "2026-01-01",
+    validity_till: "2026-12-31",
+    source_quote_id: "quote-1",
+    scenarios: [
+      {
+        id: "six-3star-urbania-twin",
+        pax: 6,
+        hotel_category: "3 Star",
+        accommodation_option_id: "A",
+        transport: "Urbania",
+        transport_variation_id: "urbania",
+        occupancy: "Twin Sharing",
+        price_per_person: 12500,
+        group_total: 75000,
+        currency: "INR",
+      },
+    ],
+    validation_errors: [],
+    created_at: "2026-01-01T00:00:00.000Z",
+    created_by: "Audit",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  };
+  const exactBrochurePrice = brochureStore.lookupPublishedPackagePriceInRecords(
+    [publishedBrochure],
+    {
+      programme_id: "programme-echoes",
+      pax: 6,
+      hotel_category: "3 Star",
+      transport_variation_id: "urbania",
+      occupancy: "Twin Sharing",
+      departure_date: "2026-06-01",
+    },
+  );
   assert.deepEqual(
     exactBrochurePrice,
-    { available: true, brochure_id: "brochure", brochure_version_id: "brochure-v1", version: 1, scenario_id: "six-3star-urbania-twin", price_per_person: 12500, group_total: 75000, currency: "INR", hotel_category: "3 Star", transport: "Urbania", validity_from: "2026-01-01", validity_till: "2026-12-31" },
+    {
+      available: true,
+      brochure_id: "brochure",
+      brochure_version_id: "brochure-v1",
+      version: 1,
+      scenario_id: "six-3star-urbania-twin",
+      price_per_person: 12500,
+      group_total: 75000,
+      currency: "INR",
+      hotel_category: "3 Star",
+      transport: "Urbania",
+      validity_from: "2026-01-01",
+      validity_till: "2026-12-31",
+    },
     "Published Brochure lookup returns only its exact saved Pax/hotel/transport/occupancy scenario",
   );
   assert.deepEqual(
     brochureStore.lookupPublishedPackagePriceInRecords([publishedBrochure], {
-      programme_id: "programme-echoes", pax: 6, hotel_category: "4 Star", transport_variation_id: "urbania", occupancy: "Twin Sharing", departure_date: "2026-06-01",
+      programme_id: "programme-echoes",
+      pax: 6,
+      hotel_category: "4 Star",
+      transport_variation_id: "urbania",
+      occupancy: "Twin Sharing",
+      departure_date: "2026-06-01",
     }),
     { available: false, reason: "PRICE_ON_REQUEST" },
     "Brochure lookup has no hotel-category fallback",
   );
-  assert.equal(brochureStore.brochurePricingCoverage(publishedBrochure).valid_scenarios, 1, "Brochure coverage counts saved valid scenarios");
+  const seasonalPublishedBrochure = {
+    ...publishedBrochure,
+    id: "brochure-seasonal-v1",
+    scenarios: [
+      {
+        ...publishedBrochure.scenarios[0],
+        id: "season-one",
+        price_per_person: 11000,
+        validity_from: "2026-11-01",
+        validity_till: "2026-11-15",
+      },
+      {
+        ...publishedBrochure.scenarios[0],
+        id: "season-two",
+        price_per_person: 14000,
+        validity_from: "2026-11-16",
+        validity_till: "2026-11-30",
+      },
+    ],
+  };
+  const seasonalLookupBase = {
+    programme_id: "programme-echoes",
+    pax: 6,
+    hotel_category: "3 Star",
+    transport_variation_id: "urbania",
+    occupancy: "Twin Sharing",
+  };
+  assert.equal(
+    brochureStore.lookupPublishedPackagePriceInRecords([seasonalPublishedBrochure], {
+      ...seasonalLookupBase,
+      departure_date: "2026-11-10",
+    }).price_per_person,
+    11000,
+    "Published lookup selects the first dated seasonal pricing scenario",
+  );
+  assert.equal(
+    brochureStore.lookupPublishedPackagePriceInRecords([seasonalPublishedBrochure], {
+      ...seasonalLookupBase,
+      departure_date: "2026-11-20",
+    }).price_per_person,
+    14000,
+    "Published lookup selects the second dated seasonal pricing scenario",
+  );
+  assert.deepEqual(
+    brochureStore.lookupPublishedPackagePriceInRecords([seasonalPublishedBrochure], {
+      ...seasonalLookupBase,
+      departure_date: "2026-12-01",
+    }),
+    { available: false, reason: "PRICE_ON_REQUEST" },
+    "Published lookup never uses an out-of-band seasonal price",
+  );
+  assert.equal(
+    brochureStore.brochurePricingCoverage(publishedBrochure).valid_scenarios,
+    1,
+    "Brochure coverage counts saved valid scenarios",
+  );
 
   // The brochure normalization is audience-specific: B2B/B2C exact drafts
   // keep their established traveller-count pricing even if legacy bounds exist.
@@ -3691,9 +4969,17 @@ try {
   b2bExactWithBounds.pax_min = 1;
   b2bExactWithBounds.pax_max = 10;
   b2bExactWithBounds.pax_mode = "exact";
-  assert.deepEqual(calc.getCostingPaxValues(b2bExactWithBounds), [2], "B2B exact pricing unchanged");
+  assert.deepEqual(
+    calc.getCostingPaxValues(b2bExactWithBounds),
+    [2],
+    "B2B exact pricing unchanged",
+  );
   const b2cExactWithBounds = { ...b2bExactWithBounds, query_type: "B2C" };
-  assert.deepEqual(calc.getCostingPaxValues(b2cExactWithBounds), [2], "B2C exact pricing unchanged");
+  assert.deepEqual(
+    calc.getCostingPaxValues(b2cExactWithBounds),
+    [2],
+    "B2C exact pricing unchanged",
+  );
 
   // Range rows are bounded by both the requested range and each vehicle's
   // actual capacity; an ineligible vehicle must never fall back to all rows.

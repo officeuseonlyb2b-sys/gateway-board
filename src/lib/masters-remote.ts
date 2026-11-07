@@ -12,7 +12,7 @@ import { db, onMastersPersist, type DB } from "@/lib/mock-store";
 
 const ROW_ID = "shared";
 
-export type MasterSyncStatus = "idle" | "loading" | "ready" | "empty" | "denied" | "error";
+export type MasterSyncStatus = "idle" | "loading" | "ready" | "empty" | "uninitialized" | "denied" | "error";
 
 export interface MasterSyncState {
   status: MasterSyncStatus;
@@ -60,7 +60,7 @@ function classifyRemoteError(error: { code?: string; message?: string; details?:
 
 /** Record a costing-master read failure without replacing the catalogue with []. */
 export function reportMasterSyncIssue(
-  status: "denied" | "error" | "empty",
+  status: "denied" | "error" | "empty" | "uninitialized",
   error: unknown,
   source: string,
 ) {
@@ -69,7 +69,9 @@ export function reportMasterSyncIssue(
       ? String((error as { message?: string }).message)
       : error
         ? String(error)
-        : status === "empty"
+        : status === "uninitialized"
+          ? "Staging master catalogue not initialized. No browser-local master data was uploaded."
+          : status === "empty"
           ? "No shared costing master record is visible."
           : "Costing master data could not be loaded.";
   console.error(`[${source}] ${status}`, error ?? message);
@@ -107,6 +109,44 @@ async function pushNow(next: DB) {
     { onConflict: "id" },
   );
   if (error) console.error("[masters] save failed", error);
+}
+
+/** Explicit operator action only; startup never calls this function. */
+export async function initializeSharedMastersFromLocal(): Promise<void> {
+  if (readOnlyMode) throw new Error("Only an authorised Super Admin can initialize shared costing masters.");
+  await pushNow(db.get());
+  ready = true;
+  setSyncState({ status: "ready", message: "Shared costing master catalogue initialized by an explicit operator action.", source: "masters-initialize" });
+}
+
+/** Persist a protected recovery merge immediately and wait for Supabase confirmation. */
+export async function persistMastersAndWait(next: DB): Promise<void> {
+  if (!ready || readOnlyMode) throw new Error("The authenticated shared Hotel Master is not writable by this account.");
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = null;
+  pending = null;
+  const rev = newRev();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) throw userError || new Error("No authenticated user is available to save the Hotel Master recovery.");
+  const { data, error } = await supabase
+    .from("app_master_state")
+    .upsert({
+      id: ROW_ID,
+      data: JSON.parse(JSON.stringify(next)),
+      rev,
+      updated_by: userData.user.id,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" })
+    .select("id,rev")
+    .single();
+  if (error) {
+    const status = classifyRemoteError(error);
+    setSyncState({ status, message: error.message || "Shared Hotel Master recovery save failed.", source: "masters-recovery" });
+    throw error;
+  }
+  if (data?.id !== ROW_ID || data.rev !== rev) throw new Error("Supabase did not confirm the Hotel Master recovery revision.");
+  myRev = rev;
+  setSyncState({ status: "ready", message: "Hotel Master recovery was saved to the shared record.", source: "masters-recovery" });
 }
 
 function schedulePush(next: DB) {
@@ -179,9 +219,11 @@ export async function pullMasters(): Promise<void> {
   }
 
   // No shared record yet — publish what this managing account currently has.
-  ready = true;
-  await pushNow(db.get());
-  setSyncState({ status: "ready", message: "", source: "masters" });
+  reportMasterSyncIssue(
+    "uninitialized",
+    new Error("Staging master catalogue not initialized. No browser-local master data was uploaded."),
+    "masters",
+  );
 }
 
 /** Initial pull + realtime subscription. Writers also push local master edits. */
@@ -192,6 +234,7 @@ export function startMastersSync(options?: { readOnly?: boolean }): () => void {
 
   const initial = pullMasters();
   void initial.then(() => {
+    if (!ready) return;
     onInitialPull.forEach((cb) => cb());
     onInitialPull.length = 0;
   });

@@ -46,6 +46,11 @@ import { Route as AuthenticatedTravelsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedUsersRolesRouteImport } from './routes/_authenticated/users-roles'
 import { Route as AuthenticatedAgentContactsIdRouteImport } from './routes/_authenticated/agent-contacts/$id'
 import { Route as AuthenticatedAgentsIdRouteImport } from './routes/_authenticated/agents/$id'
+import { Route as AuthenticatedBrochuresDraftsRouteImport } from './routes/_authenticated/brochures/drafts'
+import { Route as AuthenticatedBrochuresItinerariesRouteImport } from './routes/_authenticated/brochures/itineraries'
+import { Route as AuthenticatedBrochuresItineraryMasterRouteImport } from './routes/_authenticated/brochures/itinerary-master'
+import { Route as AuthenticatedBrochuresNewRouteImport } from './routes/_authenticated/brochures/new'
+import { Route as AuthenticatedBrochuresRoutingsRouteImport } from './routes/_authenticated/brochures/routings'
 import { Route as AuthenticatedClientsIdRouteImport } from './routes/_authenticated/clients/$id'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
@@ -264,6 +269,36 @@ const AuthenticatedAgentsIdRoute = AuthenticatedAgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AuthenticatedAgentsRoute,
 } as any)
+const AuthenticatedBrochuresDraftsRoute =
+  AuthenticatedBrochuresDraftsRouteImport.update({
+    id: '/drafts',
+    path: '/drafts',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
+const AuthenticatedBrochuresItinerariesRoute =
+  AuthenticatedBrochuresItinerariesRouteImport.update({
+    id: '/itineraries',
+    path: '/itineraries',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
+const AuthenticatedBrochuresItineraryMasterRoute =
+  AuthenticatedBrochuresItineraryMasterRouteImport.update({
+    id: '/itinerary-master',
+    path: '/itinerary-master',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
+const AuthenticatedBrochuresNewRoute =
+  AuthenticatedBrochuresNewRouteImport.update({
+    id: '/new',
+    path: '/new',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
+const AuthenticatedBrochuresRoutingsRoute =
+  AuthenticatedBrochuresRoutingsRouteImport.update({
+    id: '/routings',
+    path: '/routings',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
 const AuthenticatedClientsIdRoute = AuthenticatedClientsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -399,7 +434,7 @@ export interface FileRoutesByFullPath {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/brochures': typeof AuthenticatedBrochuresRoute
+  '/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -430,6 +465,11 @@ export interface FileRoutesByFullPath {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/brochures/drafts': typeof AuthenticatedBrochuresDraftsRoute
+  '/brochures/itineraries': typeof AuthenticatedBrochuresItinerariesRoute
+  '/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
+  '/brochures/new': typeof AuthenticatedBrochuresNewRoute
+  '/brochures/routings': typeof AuthenticatedBrochuresRoutingsRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -459,7 +499,7 @@ export interface FileRoutesByTo {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/brochures': typeof AuthenticatedBrochuresRoute
+  '/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -490,6 +530,11 @@ export interface FileRoutesByTo {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/brochures/drafts': typeof AuthenticatedBrochuresDraftsRoute
+  '/brochures/itineraries': typeof AuthenticatedBrochuresItinerariesRoute
+  '/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
+  '/brochures/new': typeof AuthenticatedBrochuresNewRoute
+  '/brochures/routings': typeof AuthenticatedBrochuresRoutingsRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -521,7 +566,7 @@ export interface FileRoutesById {
   '/_authenticated/activities': typeof AuthenticatedActivitiesRoute
   '/_authenticated/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/_authenticated/brochures': typeof AuthenticatedBrochuresRoute
+  '/_authenticated/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/_authenticated/clients': typeof AuthenticatedClientsRouteWithChildren
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
@@ -552,6 +597,11 @@ export interface FileRoutesById {
   '/_authenticated/users-roles': typeof AuthenticatedUsersRolesRoute
   '/_authenticated/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/_authenticated/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/_authenticated/brochures/drafts': typeof AuthenticatedBrochuresDraftsRoute
+  '/_authenticated/brochures/itineraries': typeof AuthenticatedBrochuresItinerariesRoute
+  '/_authenticated/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
+  '/_authenticated/brochures/new': typeof AuthenticatedBrochuresNewRoute
+  '/_authenticated/brochures/routings': typeof AuthenticatedBrochuresRoutingsRoute
   '/_authenticated/clients/$id': typeof AuthenticatedClientsIdRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -614,6 +664,11 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/agent-contacts/$id'
     | '/agents/$id'
+    | '/brochures/drafts'
+    | '/brochures/itineraries'
+    | '/brochures/itinerary-master'
+    | '/brochures/new'
+    | '/brochures/routings'
     | '/clients/$id'
     | '/hotels/$id'
     | '/queries/$id'
@@ -674,6 +729,11 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/agent-contacts/$id'
     | '/agents/$id'
+    | '/brochures/drafts'
+    | '/brochures/itineraries'
+    | '/brochures/itinerary-master'
+    | '/brochures/new'
+    | '/brochures/routings'
     | '/clients/$id'
     | '/hotels/$id'
     | '/queries/$id'
@@ -735,6 +795,11 @@ export interface FileRouteTypes {
     | '/_authenticated/users-roles'
     | '/_authenticated/agent-contacts/$id'
     | '/_authenticated/agents/$id'
+    | '/_authenticated/brochures/drafts'
+    | '/_authenticated/brochures/itineraries'
+    | '/_authenticated/brochures/itinerary-master'
+    | '/_authenticated/brochures/new'
+    | '/_authenticated/brochures/routings'
     | '/_authenticated/clients/$id'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/queries/$id'
@@ -1026,6 +1091,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAgentsIdRouteImport
       parentRoute: typeof AuthenticatedAgentsRoute
     }
+    '/_authenticated/brochures/drafts': {
+      id: '/_authenticated/brochures/drafts'
+      path: '/drafts'
+      fullPath: '/brochures/drafts'
+      preLoaderRoute: typeof AuthenticatedBrochuresDraftsRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
+    '/_authenticated/brochures/itineraries': {
+      id: '/_authenticated/brochures/itineraries'
+      path: '/itineraries'
+      fullPath: '/brochures/itineraries'
+      preLoaderRoute: typeof AuthenticatedBrochuresItinerariesRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
+    '/_authenticated/brochures/itinerary-master': {
+      id: '/_authenticated/brochures/itinerary-master'
+      path: '/itinerary-master'
+      fullPath: '/brochures/itinerary-master'
+      preLoaderRoute: typeof AuthenticatedBrochuresItineraryMasterRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
+    '/_authenticated/brochures/new': {
+      id: '/_authenticated/brochures/new'
+      path: '/new'
+      fullPath: '/brochures/new'
+      preLoaderRoute: typeof AuthenticatedBrochuresNewRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
+    '/_authenticated/brochures/routings': {
+      id: '/_authenticated/brochures/routings'
+      path: '/routings'
+      fullPath: '/brochures/routings'
+      preLoaderRoute: typeof AuthenticatedBrochuresRoutingsRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
     '/_authenticated/clients/$id': {
       id: '/_authenticated/clients/$id'
       path: '/$id'
@@ -1194,6 +1294,30 @@ const AuthenticatedAgentsRouteChildren: AuthenticatedAgentsRouteChildren = {
 const AuthenticatedAgentsRouteWithChildren =
   AuthenticatedAgentsRoute._addFileChildren(AuthenticatedAgentsRouteChildren)
 
+interface AuthenticatedBrochuresRouteChildren {
+  AuthenticatedBrochuresDraftsRoute: typeof AuthenticatedBrochuresDraftsRoute
+  AuthenticatedBrochuresItinerariesRoute: typeof AuthenticatedBrochuresItinerariesRoute
+  AuthenticatedBrochuresItineraryMasterRoute: typeof AuthenticatedBrochuresItineraryMasterRoute
+  AuthenticatedBrochuresNewRoute: typeof AuthenticatedBrochuresNewRoute
+  AuthenticatedBrochuresRoutingsRoute: typeof AuthenticatedBrochuresRoutingsRoute
+}
+
+const AuthenticatedBrochuresRouteChildren: AuthenticatedBrochuresRouteChildren =
+  {
+    AuthenticatedBrochuresDraftsRoute: AuthenticatedBrochuresDraftsRoute,
+    AuthenticatedBrochuresItinerariesRoute:
+      AuthenticatedBrochuresItinerariesRoute,
+    AuthenticatedBrochuresItineraryMasterRoute:
+      AuthenticatedBrochuresItineraryMasterRoute,
+    AuthenticatedBrochuresNewRoute: AuthenticatedBrochuresNewRoute,
+    AuthenticatedBrochuresRoutingsRoute: AuthenticatedBrochuresRoutingsRoute,
+  }
+
+const AuthenticatedBrochuresRouteWithChildren =
+  AuthenticatedBrochuresRoute._addFileChildren(
+    AuthenticatedBrochuresRouteChildren,
+  )
+
 interface AuthenticatedClientsRouteChildren {
   AuthenticatedClientsIdRoute: typeof AuthenticatedClientsIdRoute
 }
@@ -1223,7 +1347,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivitiesRoute: typeof AuthenticatedActivitiesRoute
   AuthenticatedAdminConsoleRoute: typeof AuthenticatedAdminConsoleRoute
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRouteWithChildren
-  AuthenticatedBrochuresRoute: typeof AuthenticatedBrochuresRoute
+  AuthenticatedBrochuresRoute: typeof AuthenticatedBrochuresRouteWithChildren
   AuthenticatedClientsRoute: typeof AuthenticatedClientsRouteWithChildren
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
@@ -1279,7 +1403,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivitiesRoute: AuthenticatedActivitiesRoute,
   AuthenticatedAdminConsoleRoute: AuthenticatedAdminConsoleRoute,
   AuthenticatedAgentsRoute: AuthenticatedAgentsRouteWithChildren,
-  AuthenticatedBrochuresRoute: AuthenticatedBrochuresRoute,
+  AuthenticatedBrochuresRoute: AuthenticatedBrochuresRouteWithChildren,
   AuthenticatedClientsRoute: AuthenticatedClientsRouteWithChildren,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,

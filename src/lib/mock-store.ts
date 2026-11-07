@@ -717,6 +717,7 @@ export const VEHICLE_ALLOCATION: Array<{
 export interface DB {
   cities: City[];
   hotels: Hotel[];
+  brochure_hotel_rates: BrochureHotelRate[];
   room_categories: RoomCategory[];
   rate_plans: RatePlan[];
   quotes: Quote[];
@@ -733,8 +734,43 @@ export interface DB {
   restaurants: Restaurant[];
 }
 
-const STORAGE_KEY =
-  "mp-tourism-db-v7-seed5.0";
+export type BrochureRoomRateBasis = "per_room" | "per_person" | "unverified";
+export type BrochureAddonRateBasis = "per_add_on" | "per_person" | "unverified";
+export type BrochureChildRateBasis = "per_child" | "per_person" | "unverified";
+
+export interface BrochureHotelRatePricingBasis {
+  single: BrochureRoomRateBasis;
+  double: BrochureRoomRateBasis;
+  triple: BrochureRoomRateBasis;
+  extra_bed: BrochureAddonRateBasis;
+  child: BrochureChildRateBasis;
+}
+
+export const UNVERIFIED_BROCHURE_RATE_PRICING_BASIS: BrochureHotelRatePricingBasis = {
+  single: "unverified",
+  double: "unverified",
+  triple: "unverified",
+  extra_bed: "unverified",
+  child: "unverified",
+};
+
+export interface BrochureHotelRate {
+  id: string;
+  hotel_id: string;
+  rate_basis: "per_night" | "full_programme";
+  pricing_basis: BrochureHotelRatePricingBasis;
+  validity_from: string;
+  validity_to: string;
+  single: number;
+  double: number;
+  triple: number;
+  extra_bed: number;
+  child: number;
+  updated_at: string;
+}
+
+export const LEGACY_DB_CACHE_KEY = "mp-tourism-db-v7-seed5.0";
+const STORAGE_KEY = LEGACY_DB_CACHE_KEY;
 
 const uid = () =>
   typeof crypto !== "undefined" &&
@@ -1558,6 +1594,7 @@ function seed(): DB {
   return {
     cities,
     hotels,
+    brochure_hotel_rates: [],
     room_categories: rooms,
     rate_plans: plans,
     quotes: [],
@@ -1614,6 +1651,12 @@ function load(): DB {
       if (!parsed.quotes) {
         parsed.quotes = [];
       }
+
+      parsed.brochure_hotel_rates = (parsed.brochure_hotel_rates ?? []).map((rate) => ({
+        ...rate,
+        rate_basis: rate.rate_basis ?? "full_programme",
+        pricing_basis: rate.pricing_basis ?? UNVERIFIED_BROCHURE_RATE_PRICING_BASIS,
+      }));
 
       if (
         !parsed.miscellaneous_items
@@ -2017,6 +2060,11 @@ export const db = {
     try {
       _db = {
         ...next,
+        brochure_hotel_rates: (next.brochure_hotel_rates ?? []).map((rate) => ({
+          ...rate,
+          rate_basis: rate.rate_basis ?? "full_programme",
+          pricing_basis: rate.pricing_basis ?? UNVERIFIED_BROCHURE_RATE_PRICING_BASIS,
+        })),
       };
     } finally {
       suppressPush = false;
@@ -2114,6 +2162,87 @@ export const db = {
     }
   },
 
+  saveBrochureHotelRatesForHotel(
+    hotelId: string,
+    rates: Array<Omit<BrochureHotelRate, "hotel_id" | "updated_at">>,
+  ) {
+    const d = load();
+    if (!d.hotels.some((hotel) => hotel.id === hotelId)) {
+      throw new Error("The selected Hotel Master record no longer exists.");
+    }
+    for (let index = 0; index < rates.length; index += 1) {
+      const current = rates[index];
+      if (!current.validity_from || !current.validity_to || current.validity_to < current.validity_from) {
+        throw new Error("Each Brochure rate needs a valid From/To date range.");
+      }
+      if (rates.some((other, otherIndex) =>
+        otherIndex !== index && current.validity_from <= other.validity_to && other.validity_from <= current.validity_to,
+      )) {
+        throw new Error("Brochure rate validity periods for one hotel cannot overlap.");
+      }
+    }
+
+    const updatedAt = now();
+    d.brochure_hotel_rates = [
+      ...d.brochure_hotel_rates.filter((rate) => rate.hotel_id !== hotelId),
+      ...rates.map((rate) => ({
+        ...rate,
+        hotel_id: hotelId,
+        updated_at: updatedAt,
+      })),
+    ];
+    persist();
+    emit();
+  },
+
+  /** Add recovery-snapshot Hotel data without replacing any current record. */
+  mergeHotelRecovery(additions: Pick<DB, "cities" | "hotels" | "room_categories" | "rate_plans" | "brochure_hotel_rates">) {
+    const d = load();
+    const cityIds = new Set(d.cities.map((item) => item.id));
+    for (const city of additions.cities) {
+      if (cityIds.has(city.id)) throw new Error(`Recovery City ID already exists: ${city.id}`);
+      cityIds.add(city.id);
+    }
+    const hotelIds = new Set(d.hotels.map((item) => item.id));
+    for (const hotel of additions.hotels) {
+      if (hotelIds.has(hotel.id)) throw new Error(`Recovery Hotel ID already exists: ${hotel.id}`);
+      if (!cityIds.has(hotel.city_id)) throw new Error(`Recovery Hotel ${hotel.id} references a City that is not present.`);
+      hotelIds.add(hotel.id);
+    }
+    const roomIds = new Set(d.room_categories.map((item) => item.id));
+    for (const room of additions.room_categories) {
+      if (roomIds.has(room.id)) throw new Error(`Recovery Room ID already exists: ${room.id}`);
+      if (!hotelIds.has(room.hotel_id)) throw new Error(`Recovery Room ${room.id} references a Hotel that is not present.`);
+      roomIds.add(room.id);
+    }
+    const rateIds = new Set(d.rate_plans.map((item) => item.id));
+    for (const rate of additions.rate_plans) {
+      if (rateIds.has(rate.id)) throw new Error(`Recovery supplier Rate ID already exists: ${rate.id}`);
+      if (!roomIds.has(rate.room_category_id)) throw new Error(`Recovery supplier Rate ${rate.id} references a Room that is not present.`);
+      rateIds.add(rate.id);
+    }
+    const brochureRateIds = new Set((d.brochure_hotel_rates || []).map((item) => item.id));
+    for (const rate of additions.brochure_hotel_rates || []) {
+      if (brochureRateIds.has(rate.id)) throw new Error(`Recovery Brochure Rate ID already exists: ${rate.id}`);
+      if (!hotelIds.has(rate.hotel_id)) throw new Error(`Recovery Brochure Rate ${rate.id} references a Hotel that is not present.`);
+      brochureRateIds.add(rate.id);
+    }
+    d.cities.push(...additions.cities);
+    d.hotels.push(...additions.hotels);
+    d.room_categories.push(...additions.room_categories);
+    d.rate_plans.push(...additions.rate_plans);
+    d.brochure_hotel_rates.push(...(additions.brochure_hotel_rates || []));
+    persist();
+    emit();
+    return {
+      citiesAdded: additions.cities.length,
+      hotelsAdded: additions.hotels.length,
+      roomsAdded: additions.room_categories.length,
+      supplierRatesAdded: additions.rate_plans.length,
+      brochureRatesAdded: additions.brochure_hotel_rates?.length || 0,
+    };
+  },
+
   deleteHotel(id: string) {
     const d = load();
 
@@ -2124,6 +2253,9 @@ export const db = {
       d.hotels.filter(
         (h) => h.id !== id,
       );
+    d.brochure_hotel_rates = d.brochure_hotel_rates.filter(
+      (rate) => rate.hotel_id !== id,
+    );
 
     /*
      * Remove all rooms belonging to the hotel.

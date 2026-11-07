@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Plus, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Plus, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -12,8 +12,25 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { db, useDB, HOTEL_CATEGORIES, HOTEL_TYPES, type Hotel, type HotelCategory, type HotelType, type BlackoutRange } from "@/lib/mock-store";
+import {
+  db,
+  useDB,
+  HOTEL_CATEGORIES,
+  HOTEL_TYPES,
+  UNVERIFIED_BROCHURE_RATE_PRICING_BASIS,
+  type BrochureHotelRatePricingBasis,
+  type Hotel,
+  type HotelCategory,
+  type HotelType,
+  type BlackoutRange,
+} from "@/lib/mock-store";
 import { notify } from "@/lib/notify";
+import {
+  getBrochureHotelRates,
+  saveBrochureHotelRates,
+  validateBrochureHotelRatePeriods,
+  type BrochureHotelRateDraft,
+} from "@/lib/brochure-hotel-rates";
 import {
   HotelRatesEditor,
   emptyRoom,
@@ -29,6 +46,68 @@ interface Props {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
 }
+
+export type BrochureRateForm = Omit<BrochureHotelRateDraft, "hotel_id" | "single" | "double" | "triple" | "extra_bed" | "child"> & {
+  single: string;
+  double: string;
+  triple: string;
+  extra_bed: string;
+  child: string;
+};
+
+const BROCHURE_PRICE_BASIS_CHOICES: Record<
+  keyof BrochureHotelRatePricingBasis,
+  Array<{ value: string; label: string }>
+> = {
+  single: [
+    { value: "per_room", label: "Per room" },
+    { value: "per_person", label: "Per person" },
+  ],
+  double: [
+    { value: "per_room", label: "Per room" },
+    { value: "per_person", label: "Per person" },
+  ],
+  triple: [
+    { value: "per_room", label: "Per room" },
+    { value: "per_person", label: "Per person" },
+  ],
+  extra_bed: [
+    { value: "per_add_on", label: "Per extra bed" },
+    { value: "per_person", label: "Per person" },
+  ],
+  child: [
+    { value: "per_child", label: "Per child" },
+    { value: "per_person", label: "Per person" },
+  ],
+};
+
+const emptyBrochureRate = (): BrochureRateForm => ({
+  id: crypto.randomUUID(),
+  rate_basis: "per_night",
+  pricing_basis: { ...UNVERIFIED_BROCHURE_RATE_PRICING_BASIS },
+  validity_from: "",
+  validity_to: "",
+  single: "",
+  double: "",
+  triple: "",
+  extra_bed: "",
+  child: "",
+});
+
+export const brochureRateFormFromHotel = (hotelId?: string): BrochureRateForm[] => {
+  if (!hotelId) return [emptyBrochureRate()];
+  const rates = getBrochureHotelRates(hotelId).map(({ updated_at: _updatedAt, hotel_id: _hotelId, ...rate }) => ({
+    ...rate,
+    rate_basis: rate.rate_basis ?? "full_programme",
+    pricing_basis: rate.pricing_basis ?? { ...UNVERIFIED_BROCHURE_RATE_PRICING_BASIS },
+    single: String(rate.single),
+    double: String(rate.double),
+    triple: String(rate.triple),
+    extra_bed: String(rate.extra_bed),
+    child: String(rate.child),
+  }));
+  return rates.length ? rates : [emptyBrochureRate()];
+};
 
 export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenChange }: Props) {
   const data = useDB();
@@ -53,17 +132,43 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
   const [newCity, setNewCity] = useState("");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const initialRooms = useMemo<RoomBlock[]>(() => {
+  const roomsEdited = useRef(false);
+  const brochureRatesEdited = useRef(false);
+  const [brochureRates, setBrochureRates] = useState<BrochureRateForm[]>(() => brochureRateFormFromHotel(hotel?.id));
+  const [rooms, setRooms] = useState<RoomBlock[]>(() => {
     if (!hotel) return [emptyRoom()];
-    const rooms = data.room_categories.filter((r) => r.hotel_id === hotel.id);
-    const plans = data.rate_plans.filter((p) => rooms.some((r) => r.id === p.room_category_id));
-    const hydrated = hydrateRoomsFromDb(rooms, plans);
+    const hotelRooms = data.room_categories.filter((r) => r.hotel_id === hotel.id);
+    const plans = data.rate_plans.filter((p) => hotelRooms.some((r) => r.id === p.room_category_id));
+    const hydrated = hydrateRoomsFromDb(hotelRooms, plans);
     return hydrated.length ? hydrated : [emptyRoom()];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hotel?.id]);
+  });
 
-  const [rooms, setRooms] = useState<RoomBlock[]>(initialRooms);
+  useEffect(() => {
+    if (!isOpen) {
+      roomsEdited.current = false;
+      brochureRatesEdited.current = false;
+      return;
+    }
+
+    const hotelId = hotel?.id;
+    if (!roomsEdited.current) {
+      const hotelRooms = data.room_categories.filter((room) => room.hotel_id === hotelId);
+      const plans = data.rate_plans.filter((plan) => hotelRooms.some((room) => room.id === plan.room_category_id));
+      const hydrated = hydrateRoomsFromDb(hotelRooms, plans);
+      setRooms(hydrated.length ? hydrated : [emptyRoom()]);
+    }
+    if (!brochureRatesEdited.current) setBrochureRates(brochureRateFormFromHotel(hotelId));
+  }, [isOpen, hotel?.id, data.room_categories, data.rate_plans, data.brochure_hotel_rates]);
+
+  function updateRooms(updater: (current: RoomBlock[]) => RoomBlock[]) {
+    roomsEdited.current = true;
+    setRooms(updater);
+  }
+
+  function updateBrochureRates(updater: (current: BrochureRateForm[]) => BrochureRateForm[]) {
+    brochureRatesEdited.current = true;
+    setBrochureRates(updater);
+  }
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -84,6 +189,20 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     }
     setErrors({});
 
+    const activeBrochureRates = brochureRates.filter((rate) =>
+      [rate.validity_from, rate.validity_to, rate.single, rate.double, rate.triple, rate.extra_bed, rate.child]
+        .some((value) => value.trim() !== ""),
+    );
+    if (activeBrochureRates.some((rate) =>
+      !rate.validity_from || !rate.validity_to ||
+      [rate.single, rate.double, rate.triple, rate.extra_bed, rate.child]
+        .some((value) => value.trim() === "" || !Number.isFinite(Number(value)) || Number(value) < 0),
+    )) {
+      return toast.error("Complete both validity dates and all five non-negative Brochure amounts for each period.");
+    }
+    const brochurePeriodError = validateBrochureHotelRatePeriods(activeBrochureRates);
+    if (brochurePeriodError) return toast.error(brochurePeriodError);
+
     setSaving(true);
     await new Promise((r) => setTimeout(r, 250));
     const cityName = data.cities.find((c) => c.id === form.city_id)?.name ?? "";
@@ -103,6 +222,27 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
     }
 
     persistRoomsForHotel(hotelId, rooms);
+    try {
+      saveBrochureHotelRates(
+        hotelId,
+        activeBrochureRates.map((rate) => ({
+          id: rate.id,
+          rate_basis: rate.rate_basis,
+          pricing_basis: rate.pricing_basis,
+          validity_from: rate.validity_from,
+          validity_to: rate.validity_to,
+          single: Number(rate.single),
+          double: Number(rate.double),
+          triple: Number(rate.triple),
+          extra_bed: Number(rate.extra_bed),
+          child: Number(rate.child),
+        })),
+      );
+    } catch (error) {
+      setSaving(false);
+      toast.error(error instanceof Error ? error.message : "Unable to save Brochure rates.");
+      return;
+    }
 
     if (hotel) {
       toast.success("Hotel updated.");
@@ -235,11 +375,139 @@ export function HotelFormDialog({ trigger, hotel, open: controlledOpen, onOpenCh
           <div className="border-t pt-4">
             <HotelRatesEditor
               rooms={rooms}
-              setRooms={setRooms}
+              setRooms={updateRooms}
               errors={errors}
               cityName={data.cities.find((c) => c.id === form.city_id)?.name}
             />
 
+          </div>
+
+          <div className="border-t pt-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold">Brochure Rates (Approximate)</h3>
+              <p className="text-xs text-muted-foreground">
+                Hotel-specific estimates used only for Brochure costing. Regular supplier rates remain unchanged.
+              </p>
+            </div>
+            {brochureRates.map((rate, index) => (
+              <div key={rate.id} className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium">Validity Period {index + 1}</h4>
+                  {brochureRates.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => updateBrochureRates((rates) => rates.filter((item) => item.id !== rate.id))}
+                      aria-label={`Remove validity period ${index + 1}`}
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" /> Remove
+                    </Button>
+                  )}
+                </div>
+                <div className="max-w-xs">
+                  <Label className="text-xs">Rate Basis</Label>
+                  <Select
+                    value={rate.rate_basis}
+                    onValueChange={(value: "per_night" | "full_programme") =>
+                      updateBrochureRates((rates) => rates.map((item) =>
+                        item.id === rate.id ? { ...item, rate_basis: value } : item,
+                      ))
+                    }
+                  >
+                    <SelectTrigger className="mt-1 h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="per_night">Per Night</SelectItem>
+                      <SelectItem value="full_programme">Full Programme (Legacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {rate.rate_basis === "full_programme" && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      This legacy amount is not used for day-wise costing. Convert only after confirming the nightly amount.
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {([[
+                    "validity_from",
+                    "Validity From",
+                  ], ["validity_to", "Validity To"]] as const).map(([field, label]) => (
+                    <div key={field}>
+                      <Label className="text-xs">{label}</Label>
+                      <Input
+                        className="mt-1"
+                        type="date"
+                        value={rate[field]}
+                        onChange={(event) => updateBrochureRates((rates) => rates.map((item) =>
+                          item.id === rate.id ? { ...item, [field]: event.target.value } : item,
+                        ))}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Select the basis actually stated by the Hotel Master source. Existing records default to Unverified and cannot be costed until confirmed.
+                </p>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                  {([[
+                    "single",
+                    "Single (SGL)",
+                  ], ["double", "Double (DBL)"], ["triple", "Triple (TRP)"], ["extra_bed", "Extra Bed"], ["child", "Child"]] as const).map(([field, label]) => (
+                    <div key={field}>
+                      <Label className="text-xs">{label}</Label>
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="INR"
+                        value={rate[field]}
+                        onChange={(event) => updateBrochureRates((rates) => rates.map((item) =>
+                          item.id === rate.id ? { ...item, [field]: event.target.value } : item,
+                        ))}
+                      />
+                      <Select
+                        value={rate.pricing_basis[field]}
+                        onValueChange={(value) => updateBrochureRates((rates) => rates.map((item) =>
+                          item.id === rate.id
+                            ? {
+                                ...item,
+                                pricing_basis: {
+                                  ...item.pricing_basis,
+                                  [field]: value,
+                                } as BrochureHotelRatePricingBasis,
+                              }
+                            : item,
+                        ))}
+                      >
+                        <SelectTrigger className="mt-1 h-8 text-[10px]">
+                          <SelectValue placeholder="Confirm basis" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unverified">Unverified</SelectItem>
+                          {BROCHURE_PRICE_BASIS_CHOICES[field].map((choice) => (
+                            <SelectItem key={choice.value} value={choice.value}>
+                              {choice.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => updateBrochureRates((rates) => [...rates, emptyBrochureRate()])}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add Another Validity
+            </Button>
           </div>
 
           <div className="border-t pt-4 space-y-3">

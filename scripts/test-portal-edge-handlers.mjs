@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+
+// Synthetic in-memory adapter mirroring the three Edge Function authorization/query boundaries.
+const authorizePublisher = (user, employee) => !user ? 401 : employee?.role === 'Super Admin' && employee.active && employee.account_status === 'Active' && employee.employee_status !== 'Exited' ? 200 : 403;
+const authorizeAgent = (user, agent) => !user ? 401 : agent?.active ? 200 : 403;
+const exactPrice = (prices, currentVersion, q) => prices.find((p) => p.brochure_version_id === currentVersion && p.pax === q.pax && p.accommodation_option_id === q.hotelOptionId && p.transport_variation_id === q.transportVariationId && p.occupancy === q.occupancy && p.validity_from <= q.departureDate && p.validity_till >= q.departureDate);
+const publish = (state, draft) => { if (!draft.complete || !draft.banner || !draft.scenarios?.length || draft.coverage !== 'Ready') return { status: 422 }; if (state.hash === draft.hash) return { status: 200, revision: state.revision, idempotent: true }; if (draft.uploadFails) return { status: 502 }; return { status: 200, revision: state.revision + 1, idempotent: false }; };
+const submit = (snapshots, snapshot) => { if (!['Published', 'Ready for Review'].includes(snapshot.status) || snapshot.coverage !== 'Ready') return { status: 422 }; const existing = snapshots.find((row) => row.hash === snapshot.hash); return existing ? { status: 200, id: existing.id, state: existing.state, duplicate: true } : { status: 201, id: 's-new', state: 'Pending', duplicate: false }; };
+const approve = (snapshot, reviewer, attestation) => !reviewer?.superAdmin ? 403 : reviewer.id === snapshot.submittedBy ? 403 : !attestation ? 422 : snapshot.tampered ? 422 : snapshot.state !== 'Pending' ? 409 : 200;
+const publishApproved = (snapshot, request) => snapshot.state !== 'Approved' ? 404 : !/^[a-f0-9]{64}$/i.test(snapshot.hash || '') || snapshot.hash !== snapshot.recomputedHash ? 422 : snapshot.brochureVersion !== request.brochureVersion || snapshot.programme !== request.programme || snapshot.route !== request.route ? 422 : 200;
+
+const superAdmin = { role: 'Super Admin', active: true, account_status: 'Active', employee_status: 'Active' };
+assert.equal(authorizePublisher(undefined, superAdmin), 401);
+assert.equal(authorizePublisher({ id: 'u1' }, { ...superAdmin, role: 'Sales' }), 403);
+assert.equal(authorizePublisher({ id: 'u1' }, superAdmin), 200);
+assert.equal(authorizeAgent(undefined, { active: true }), 401);
+assert.equal(authorizeAgent({ id: 'a1' }, undefined), 403);
+assert.equal(authorizeAgent({ id: 'a1' }, { active: false }), 403);
+assert.equal(authorizeAgent({ id: 'a1' }, { active: true }), 200);
+const state = { revision: 3, hash: 'same' };
+const valid = { complete: true, banner: true, scenarios: [{}], coverage: 'Ready', hash: 'same' };
+assert.deepEqual(publish(state, valid), { status: 200, revision: 3, idempotent: true });
+assert.equal(publish(state, { ...valid, hash: 'new', uploadFails: true }).status, 502);
+assert.deepEqual(publish(state, { ...valid, hash: 'new' }), { status: 200, revision: 4, idempotent: false });
+assert.equal(publish(state, { ...valid, coverage: 'Partial' }).status, 422);
+assert.equal(publish(state, { ...valid, banner: false }).status, 422);
+assert.deepEqual(submit([{ id: 's1', hash: 'same', state: 'Pending' }], { status: 'Ready for Review', coverage: 'Ready', hash: 'same' }), { status: 200, id: 's1', state: 'Pending', duplicate: true });
+assert.equal(submit([], { status: 'Draft', coverage: 'Ready', hash: 'new' }).status, 422);
+const pending = { state: 'Pending', submittedBy: 'author', tampered: false };
+assert.equal(approve(pending, { id: 'author', superAdmin: true }, 'ATT-1'), 403);
+assert.equal(approve(pending, { id: 'reviewer', superAdmin: true }, ''), 422);
+assert.equal(approve({ ...pending, tampered: true }, { id: 'reviewer', superAdmin: true }, 'ATT-1'), 422);
+assert.equal(approve(pending, { id: 'reviewer', superAdmin: true }, 'ATT-1'), 200);
+const approvedSnapshot = { state: 'Approved', hash: 'a'.repeat(64), recomputedHash: 'a'.repeat(64), brochureVersion: 'v1', programme: 'p1', route: 'r1' };
+assert.equal(publishApproved(approvedSnapshot, { brochureVersion: 'v1', programme: 'p1', route: 'r1' }), 200);
+assert.equal(publishApproved({ ...approvedSnapshot, recomputedHash: 'b'.repeat(64) }, { brochureVersion: 'v1', programme: 'p1', route: 'r1' }), 422, 'tampered snapshot is rejected before publication');
+assert.equal(publishApproved({ ...approvedSnapshot, hash: 'not-a-hash' }, { brochureVersion: 'v1', programme: 'p1', route: 'r1' }), 422, 'malformed stored hash is rejected');
+assert.equal(publishApproved({ ...approvedSnapshot, state: 'Pending' }, { brochureVersion: 'v1', programme: 'p1', route: 'r1' }), 404);
+assert.equal(publishApproved({ ...approvedSnapshot, state: 'Rejected' }, { brochureVersion: 'v1', programme: 'p1', route: 'r1' }), 404);
+assert.equal(publishApproved(approvedSnapshot, { brochureVersion: 'other', programme: 'p1', route: 'r1' }), 422);
+assert.equal(publishApproved(approvedSnapshot, { brochureVersion: 'v1', programme: 'other', route: 'r1' }), 422);
+const prices = [{ brochure_version_id: 'v-current', pax: 2, accommodation_option_id: 'hotel-a', transport_variation_id: 'car', occupancy: 'Twin Sharing', validity_from: '2026-01-01', validity_till: '2026-12-31', selling_price_per_person: 100 }, { brochure_version_id: 'v-old', pax: 2, accommodation_option_id: 'hotel-a', transport_variation_id: 'car', occupancy: 'Twin Sharing', validity_from: '2026-01-01', validity_till: '2026-12-31', selling_price_per_person: 1 }];
+const query = { pax: 2, hotelOptionId: 'hotel-a', transportVariationId: 'car', occupancy: 'Twin Sharing', departureDate: '2026-06-01' };
+assert.equal(exactPrice(prices, 'v-current', query).selling_price_per_person, 100);
+assert.equal(exactPrice(prices, 'v-current', { ...query, pax: 3 }), undefined);
+assert.equal(exactPrice(prices, 'v-current', { ...query, departureDate: '2027-01-01' }), undefined);
+console.log('portal edge handler mock contracts: passed');

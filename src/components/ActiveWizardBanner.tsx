@@ -23,15 +23,16 @@ export function ActiveWizardBanner() {
   const [hidden, setHidden] = useState(false);
 
   if (!active) return null;
-  if (pathname.startsWith("/costing")) return null;
+  if (pathname.startsWith("/costing") || pathname.startsWith("/brochures/new")) return null;
   if (hidden) return null;
 
   const name = active.programName || "Untitled quotation";
+  const isBrochure = active.workflowMode === "brochure";
   return (
     <div className="bg-primary text-primary-foreground px-4 py-2 flex items-center gap-3 text-sm print:hidden">
       <ClipboardList className="h-4 w-4 shrink-0 text-accent" />
       <div className="flex-1 min-w-0 truncate">
-        <span className="font-semibold">Quotation in progress:</span>{" "}
+        <span className="font-semibold">{isBrochure ? "Brochure costing in progress:" : "Quotation in progress:"}</span>{" "}
         <span className="truncate">"{name}"</span>
         <span className="mx-2 opacity-60">·</span>
         <span className="opacity-90">Step {active.step} of 16</span>
@@ -44,7 +45,7 @@ export function ActiveWizardBanner() {
         className="bg-accent text-accent-foreground hover:bg-accent/90"
       >
         <Link
-          to="/costing"
+          to={isBrochure ? "/brochures/new" : "/costing"}
           search={{ id: active.draftId || undefined }}
         >
           Continue Quotation →

@@ -32,7 +32,7 @@ import { accommodationMode } from "@/lib/wizard/types";
 
 export const Route = createFileRoute("/_authenticated/drafts")({
   head: () => ({ meta: [{ title: "Drafts — MP Tourism Hub" }] }),
-  component: DraftsPage,
+  component: () => <DraftsPage workspace="quotation" />,
 });
 
 const STEP_LABELS = [
@@ -47,7 +47,7 @@ const STEP_LABELS = [
   "Preview & Save",
 ];
 
-type DraftTypeFilter = "all" | "B2B" | "B2C" | "Brochure";
+type DraftTypeFilter = "all" | "B2B" | "B2C";
 type DraftDateFilter = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 
 function localDateKey(value: string | undefined): number | null {
@@ -73,7 +73,7 @@ function dayKeyOffset(days: number): number {
   return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
 }
 
-function DraftsPage() {
+export function DraftsPage({ workspace = "quotation" }: { workspace?: "quotation" | "brochure" }) {
   const localDrafts = useDrafts();
   const access = useAccessProfile();
   const queries = useAccessibleQueries();
@@ -97,8 +97,10 @@ function DraftsPage() {
         wizard_state: cloud.draft_data,
       });
     }
-    return [...merged.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [cloudDraftMetadata, localDrafts]);
+    return [...merged.values()]
+      .filter((draft) => (workspace === "brochure" ? draft.wizard_state.query_type === "Brochure" : draft.wizard_state.query_type !== "Brochure"))
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [cloudDraftMetadata, localDrafts, workspace]);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState<DraftTypeFilter>("all");
   const [dateFilter, setDateFilter] = useState<DraftDateFilter>("all");
@@ -139,7 +141,7 @@ function DraftsPage() {
           : `name:${programmeName.toLocaleLowerCase()}`
         : "none";
       const modified = localDateKey(d.updated_at);
-      const typeMatches = typeFilter === "all" || type === typeFilter;
+      const typeMatches = workspace === "brochure" || typeFilter === "all" || type === typeFilter;
       const programmeMatches = programmeFilter === "all" || programmeKey === programmeFilter;
       const dateMatches =
         dateFilter === "all" ||
@@ -170,7 +172,7 @@ function DraftsPage() {
         .includes(needle);
       return typeMatches && programmeMatches && dateMatches && searchMatches;
     });
-  }, [dateFilter, drafts, fromDate, programmeFilter, q, toDate, typeFilter]);
+  }, [dateFilter, drafts, fromDate, programmeFilter, q, toDate, typeFilter, workspace]);
 
   const clearFilters = () => {
     setQ("");
@@ -182,7 +184,7 @@ function DraftsPage() {
   };
 
   function resume(d: DraftRecord) {
-    navigate({ to: "/costing", search: { id: d.id } as never });
+    navigate({ to: workspace === "brochure" ? "/brochures/new" : "/costing", search: { id: d.id } as never });
   }
   function beginRename(d: DraftRecord) {
     setEditingId(d.id);
@@ -229,13 +231,13 @@ function DraftsPage() {
             <FileText className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Drafts</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{workspace === "brochure" ? "Draft Brochures" : "Draft Quotations"}</h1>
             <p className="text-sm text-muted-foreground">
-              In-progress quotations you can resume anytime.
+              {workspace === "brochure" ? "Editable Programme-based brochure costings you can resume anytime." : "In-progress B2B and B2C quotations you can resume anytime."}
             </p>
           </div>
         </div>
-        <Link to="/costing" search={{ id: undefined }}>
+        <Link to={workspace === "brochure" ? "/brochures/new" : "/costing"} search={{ id: undefined } as never}>
           <Button size="sm">Start new</Button>
         </Link>
       </div>
@@ -259,7 +261,6 @@ function DraftsPage() {
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="B2B">B2B</SelectItem>
                 <SelectItem value="B2C">B2C</SelectItem>
-                <SelectItem value="Brochure">Brochure</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -426,7 +427,7 @@ function DraftsPage() {
                       {d.wizard_state.program_name || "—"}
                     </td>
                     <td className="py-2.5 px-2 text-xs">
-                      {d.wizard_state.linked_query_id ? (
+                      {workspace !== "brochure" && d.wizard_state.linked_query_id ? (
                         <Link
                           to="/queries/$id"
                           params={{ id: d.wizard_state.linked_query_id }}

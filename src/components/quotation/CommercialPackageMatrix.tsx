@@ -17,6 +17,12 @@ import {
 
 type SetDraft = (patch: Partial<QuoteDraft>) => void;
 type MatrixRow = { key: string; groupKey: string; row: RateSheetRow };
+const matrixGroupKey = (lineId: string | undefined, vehicle: string, row: RateSheetRow) => {
+  const base = lineId ?? vehicle;
+  return row.brochure_validity_from || row.brochure_validity_till
+    ? `${base}|${row.brochure_validity_from ?? ""}|${row.brochure_validity_till ?? ""}`
+    : base;
+};
 
 function CommercialPackageMatrixImpl({
   draft,
@@ -31,17 +37,20 @@ function CommercialPackageMatrixImpl({
 }) {
   const db = useDB();
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const dynamicMode = isDynamicAccommodationMode(draft);
+  const brochureMode = draft.query_type === "Brochure";
+  const dynamicMode = !brochureMode && isDynamicAccommodationMode(draft);
   const options = useMemo<HotelOption[]>(() => {
     if (!scope.accommodationPart) return [{ key: "A", label: "Land Part", selections: [] }];
     return draft.hotel_options
       .filter((option) =>
-        dynamicMode
+        brochureMode
+          ? option.selections.some((selection) => Boolean(selection.hotel_id))
+          : dynamicMode
           ? option.selections.length > 0 || Object.keys(option.dynamic_allocations ?? {}).length > 0
           : option.selections.some((selection) => selection.room_id),
       )
       .slice(0, 4);
-  }, [draft.hotel_options, scope.accommodationPart, dynamicMode]);
+  }, [draft.hotel_options, scope.accommodationPart, dynamicMode, brochureMode]);
   const sheets = useMemo(
     () =>
       options.map((option) => ({
@@ -82,8 +91,8 @@ function CommercialPackageMatrixImpl({
     () =>
       (primary?.groups ?? []).flatMap((group) =>
         group.rows.map((row) => ({
-          key: `${group.line_id ?? group.vehicle}|${row.pax}`,
-          groupKey: group.line_id ?? group.vehicle,
+          key: `${matrixGroupKey(group.line_id, group.vehicle, row)}|${row.pax}`,
+          groupKey: matrixGroupKey(group.line_id, group.vehicle, row),
           row,
         })),
       ),
@@ -94,7 +103,10 @@ function CommercialPackageMatrixImpl({
     sheets.forEach(({ option, groups }) =>
       groups.forEach((group) =>
         group.rows.forEach((row) =>
-          lookup.set(`${option.key}|${group.line_id ?? group.vehicle}|${row.pax}`, row),
+          lookup.set(
+            `${option.key}|${matrixGroupKey(group.line_id, group.vehicle, row)}|${row.pax}`,
+            row,
+          ),
         ),
       ),
     );
@@ -176,6 +188,13 @@ function CommercialPackageMatrixImpl({
                   ? "Actual Pax → option-wise selected meals, accommodation and Final Accommodation + Meals Price PP"
                   : "Transport variation × actual Pax → common Land Cost PP → option-wise Lunch, Dinner, Accommodation and Package Price PP"}
           </p>
+              {brochureMode && (
+                <p className="mt-1 text-xs font-medium text-primary">
+                  {rows.some(({ row }) => row.brochure_provisional)
+                    ? "Provisional — Selling Validity Pending. Reference totals are visible for review only and cannot be published."
+                    : "Accommodation source: Brochure Rate · selected Hotel ID and applicable validity period"}
+                </p>
+              )}
         </div>
         <div className={readOnly ? "hidden" : "flex flex-wrap gap-2"}>
           <Button size="sm" className="pointer-events-none">
@@ -387,6 +406,11 @@ function CommercialPackageMatrixImpl({
                       {!accommodationOnly && (
                         <td className="whitespace-normal font-medium leading-snug">
                           {vehicleLabelByGroup.get(matrixRow.groupKey)}
+                          {matrixRow.row.brochure_validity_from && (
+                            <div className="mt-0.5 text-[9px] font-normal text-muted-foreground">
+                              Departures {matrixRow.row.brochure_validity_from} – {matrixRow.row.brochure_validity_till}
+                            </div>
+                          )}
                         </td>
                       )}
                       <td className="p-2 text-right font-medium">{land.pax}</td>

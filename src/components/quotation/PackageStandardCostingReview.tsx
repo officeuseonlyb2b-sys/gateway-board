@@ -1,3 +1,4 @@
+import { brochurePriceBasisLabel } from "@/lib/brochure-hotel-rates";
 import { memo, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { addDaysISO, inr } from "@/lib/format";
@@ -15,6 +16,7 @@ import {
 import {
   calculateMealCostingRows,
   computeMealDays,
+  effectiveAccommodationPax,
   effectivePaxForPricing,
   getCostingPaxValues,
   paxRangeActive,
@@ -46,6 +48,11 @@ import {
   transportOptionTotal,
 } from "@/lib/wizard/land-pricing";
 import { findRatePlan } from "@/lib/wizard/rate-lookup";
+import {
+  brochureAccommodationForOption,
+  brochureAccommodationSummaryRows,
+  brochureDepartureRateScenarios,
+} from "@/lib/wizard/brochure-accommodation";
 import {
   guideReviewRates,
   guideReviewSlabs,
@@ -1051,7 +1058,214 @@ function LandReview({
   );
 }
 
-function AccommodationReview({
+function AccommodationReview({ draft, sectionNumber = 3 }: { draft: QuoteDraft; sectionNumber?: number }) {
+  return draft.query_type === "Brochure" ? (
+    <BrochureAccommodationReview draft={draft} sectionNumber={sectionNumber} />
+  ) : (
+    <StandardAccommodationReview draft={draft} sectionNumber={sectionNumber} />
+  );
+}
+
+function BrochureAccommodationReview({
+  draft,
+  sectionNumber = 4,
+}: {
+  draft: QuoteDraft;
+  sectionNumber?: number;
+}) {
+  const db = useDB();
+  const options = draft.hotel_options.slice(0, 4);
+  const dateScenarios =
+    draft.has_dates === false ? brochureDepartureRateScenarios(draft, db) : [];
+  const costingByOption = new Map(
+    options.map((option) => [
+      option.key,
+      brochureAccommodationForOption(draft, option, db),
+    ] as const),
+  );
+  const schedule = draft.routing;
+  const hasNight = (option: HotelOption, day: RoutingDay) =>
+    isAccommodationNightForOption(option, day);
+  const hotelFor = (option: HotelOption, day: RoutingDay) => {
+    const selection = hotelSelectionForDay(option, day, true);
+    if (selection?.no_hotel)
+      return selection.accommodation_status === "own_arrangement"
+        ? "Own Arrangement"
+        : "No Hotel Required";
+    return db.hotels.find((hotel) => hotel.id === selection?.hotel_id)?.name || "Not selected";
+  };
+  const rateFor = (option: HotelOption, day: RoutingDay) =>
+    costingByOption.get(option.key)?.nights.find((night) => night.day.day === day.day);
+  const summariesByOption = new Map(
+    options.map((option) => {
+      const costing = costingByOption.get(option.key);
+      return [
+        option.key,
+        costing
+          ? brochureAccommodationSummaryRows(
+              draft,
+              costing,
+              effectiveAccommodationPax(draft, option),
+            )
+          : [],
+      ] as const;
+    }),
+  );
+
+  return (
+    <div aria-label={`${sectionNumber}. Accommodation & Meals — Hotel Verification`}>
+      <Section number={sectionNumber} title="Accommodation & Meals — Hotel Verification · Brochure Rates">
+        <div className="space-y-2 p-2">
+          <Panel title="A. Routing-based Hotel Stay Plan" helper="Each option keeps an independent hotel selection for each configured overnight.">
+            <div className="overflow-x-auto">
+              <table className={`${grid} min-w-[900px]`}>
+                <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]">
+                  <tr>
+                    <th>Day / Night</th>
+                    <th>Date</th>
+                    <th className="text-left">Routing City</th>
+                    {options.map((option) => <th key={option.key} className="text-left">Option {option.key} · {option.category || option.label || "Hotel Category"}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.map((day, index) => {
+                    const isNight = options.some((option) => hasNight(option, day));
+                    const city = db.cities.find((item) => item.id === day.city_id)?.name || day.to_city || "—";
+                    return (
+                      <tr key={`${day.day}-${index}`}>
+                        <td><b>{day.is_day_zero || day.day === 0 ? "Day 0 · Pre-tour" : `Day ${day.day}`}</b>{isNight && <div className="text-[8px]">Overnight</div>}</td>
+                        <td>{draft.has_dates === false ? "No specific date" : day.date || "Date missing"}</td>
+                        <td>{city}</td>
+                        {options.map((option) => (
+                          <td key={option.key}>
+                            {hasNight(option, day)
+                              ? hotelFor(option, day)
+                              : day.is_day_zero || day.day === 0
+                                ? "No pre-tour stay"
+                                : day.overnight
+                                  ? "—"
+                                  : "No hotel charge · departure/non-overnight"}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+          <Panel title="B. Night-wise Brochure Rate Verification" helper="Selected Hotel ID + applicable validity + Per Night rate; no supplier contract rates.">
+            <div className="overflow-x-auto">
+              <table className={`${grid} min-w-[1100px]`}>
+                <thead>
+                  <tr className="bg-[#e6f0fb] text-[9px] uppercase text-[#103353]">
+                    <th className="text-left">Day / Night · City · Hotel</th>
+                    {options.map((option) => <th key={option.key} colSpan={6}>Option {option.key} · {option.category || option.label}</th>)}
+                  </tr>
+                  <tr className="bg-[#f0f4f8] text-[8px] uppercase text-[#204e76]">
+                    <th>Rate Source</th>
+                    {options.flatMap((option) => ["Hotel", "SGL", "DBL", "TRP", "Extra Bed", "Child"].map((label) => <th key={`${option.key}-${label}`} className={label === "Hotel" ? "text-left" : "text-right"}>{label}</th>))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.filter((day) => options.some((option) => hasNight(option, day))).map((day) => (
+                    <tr key={`rate-${day.day}`}>
+                      <td><b>{day.is_day_zero || day.day === 0 ? "Day 0" : `Day ${day.day}`}</b><div>{draft.has_dates === false ? "No specific date" : day.date || "Date missing"}</div><div className="text-[8px] text-[#73849b]">{db.cities.find((city) => city.id === day.city_id)?.name || day.to_city || "—"}</div></td>
+                      {options.flatMap((option) => {
+                        const entry = rateFor(option, day);
+                        const rate = entry?.calculationRate;
+                        const selection = hotelSelectionForDay(option, day, true);
+                        const labels = rate
+                          ? [rate.single, rate.double, rate.triple, rate.extra_bed, rate.child]
+                          : [undefined, undefined, undefined, undefined, undefined];
+                        return [
+                          <td key={`${option.key}-${day.day}-source`} className="text-left">
+                            <b>{selection?.no_hotel ? "No Hotel Required" : entry?.pricingSource === "reference_preview" ? "Provisional — Selling Validity Pending" : "Brochure Rate"}</b>
+                            <div className="text-[8px]">{entry?.date || "Selling validity"}</div>
+                            {!rate && entry && !entry.noHotel && <div className="max-w-40 text-[8px] text-amber-800">{entry.message}</div>}
+                          </td>,
+                          ...labels.map((value, index) => {
+                            const field = (["single", "double", "triple", "extra_bed", "child"] as const)[index];
+                            return <td key={`${option.key}-${day.day}-price-${index}`} className="text-right">{value == null || !rate ? "—" : <>{money(value)}<div className="text-[8px] text-[#73849b]">{brochurePriceBasisLabel(rate.pricing_basis[field])}</div></>}</td>;
+                          }),
+                        ];
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+          {(draft.has_dates !== false || [...costingByOption.values()].some((costing) => costing.provisional)) && <Panel title="C. Total Accommodation and Per-person Selling Prices" helper="Night rates are summed once; occupancy rows are alternatives. Child is charged per child and Extra Bed only as its configured add-on. GST on markup is included in Total GST.">
+            {draft.has_dates === false && <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">Provisional — Selling Validity Pending. These mathematical reference totals use the selected hotels’ saved Brochure Rates and cannot be published or saved as a final pricing snapshot.</div>}
+            <div className="overflow-x-auto">
+              <table className={`${grid} min-w-[1050px]`}>
+                <thead className="bg-[#f0f4f8] text-[9px] uppercase text-[#103353]"><tr><th className="text-left">Option / Occupancy</th><th className="text-right">Total Base Rate</th><th className="text-right">Total GST (Base + Markup)</th><th className="text-right">Markup</th><th className="text-right">GST on markup (included above)</th><th className="text-right">Final Accommodation Selling Total</th><th className="text-right">Final per person</th></tr></thead>
+                <tbody>
+                  {options.flatMap((option) => {
+                    return (summariesByOption.get(option.key) ?? []).map((row) => {
+                      const missing = row.incomplete;
+                      return <tr key={`${option.key}-${row.key}`}><td><b>Option {option.key}</b> · {row.label}<div className="text-[8px] text-[#73849b]">{row.rate_basis_label}</div></td><td className="text-right">{missing ? "Rate Not Configured" : money(row.base_total)}</td><td className="text-right">{missing ? "—" : money(row.gst)}</td><td className="text-right">{missing ? "—" : money(row.markup)}</td><td className="text-right">{missing ? "—" : money(row.gst_on_markup)}</td><td className="text-right font-semibold">{missing ? "—" : money(row.final_total)}</td><td className="text-right font-semibold">{missing ? "—" : money(row.final_per_person ?? row.final_per_unit)}</td></tr>;
+                    });
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>}
+          {draft.has_dates === false && (
+            <Panel title="C. Date-free Selling Validity — Separate Dated Pricing Scenarios" helper="Each departure-date band has its own selected-hotel nightly prices; uncovered bands have no publishable price.">
+              <div className="space-y-3">
+                {dateScenarios.map((scenario) => (
+                  <div key={`${scenario.validity_from}-${scenario.validity_to}`} className="rounded border p-2">
+                    <div className="mb-2 text-[10px] font-semibold">Departures {scenario.validity_from} – {scenario.validity_to}</div>
+                    <div className="overflow-x-auto">
+                      <table className={`${grid} min-w-[1050px]`}>
+                        <thead><tr className="bg-[#f0f4f8] text-[8px] uppercase"><th>Option / Night</th><th>Selected hotel</th><th>Source</th><th className="text-right">SGL</th><th className="text-right">DBL</th><th className="text-right">TRP</th><th className="text-right">Extra Bed</th><th className="text-right">Child</th></tr></thead>
+                        <tbody>
+                          {options.flatMap((option) => {
+                            const costing = scenario.options[option.key];
+                            if (!costing) return [];
+                            const rows = costing.nights.map((night) => {
+                              const rate = night.calculationRate;
+                              return <tr key={`${option.key}-${night.day.day}`}><td>Option {option.key} · Day {night.day.day}</td><td>{night.hotelName || (night.noHotel ? "No Hotel Required" : "Not selected")}</td><td>{night.noHotel ? "No charge" : rate ? "Brochure Rate · Per Night" : night.message}</td>{(["single", "double", "triple", "extra_bed", "child"] as const).map((field) => <td key={field} className="text-right">{rate ? money(rate[field]) : "—"}</td>)}</tr>;
+                            });
+                            if (costing.missing > 0) rows.push(<tr key={`${option.key}-uncovered`} className="bg-amber-50"><td colSpan={8}>Option {option.key}: {costing.missing} night(s) uncovered for this departure band; only this price scenario is blocked.</td></tr>);
+                            return rows;
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className={`${grid} min-w-[1050px]`}>
+                        <thead><tr className="bg-[#eaf8ef] text-[8px] uppercase"><th>Option / Occupancy</th><th className="text-right">Total Base Rate</th><th className="text-right">Total GST (Base + Markup)</th><th className="text-right">Markup</th><th className="text-right">GST on markup (included above)</th><th className="text-right">Final Accommodation Selling Total</th><th className="text-right">Final per person</th></tr></thead>
+                        <tbody>
+                          {options.flatMap((option) => {
+                            const costing = scenario.options[option.key];
+                            if (!costing) return [];
+                            return brochureAccommodationSummaryRows(
+                              draft,
+                              costing,
+                              effectiveAccommodationPax(draft, option),
+                            ).map((row) => {
+                              const missing = row.incomplete;
+                              return <tr key={`${option.key}-${row.key}`}><td>Option {option.key} · {row.label}<div className="text-[8px] text-[#73849b]">{row.rate_basis_label}</div></td><td className="text-right">{missing ? "Rate Not Configured" : money(row.base_total)}</td><td className="text-right">{missing ? "—" : money(row.gst)}</td><td className="text-right">{missing ? "—" : money(row.markup)}</td><td className="text-right">{missing ? "—" : money(row.gst_on_markup)}</td><td className="text-right font-semibold">{missing ? "—" : money(row.final_total)}</td><td className="text-right font-semibold">{missing ? "—" : money(row.final_per_person ?? row.final_per_unit)}</td></tr>;
+                            });
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function StandardAccommodationReview({
   draft,
   sectionNumber = 3,
 }: {
@@ -2009,7 +2223,7 @@ function PackageStandardCostingReviewImpl({
   const landMeals = scope.queryFor === "Land Part + Meals";
   const landOnly = scope.queryFor === "Land Part";
   const accommodationOnly = !scope.landPart && scope.accommodationPart;
-  const dynamicAccommodation = isDynamicAccommodationMode(draft);
+  const dynamicAccommodation = draft.query_type !== "Brochure" && isDynamicAccommodationMode(draft);
   return (
     <div
       className={`print-quotation-pages space-y-3 rounded-sm bg-white p-1 ${

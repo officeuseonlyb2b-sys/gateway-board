@@ -10,7 +10,8 @@ interface Props {
   finalizeBlockers: string[];
   costingWarnings: string[];
   version: number;
-  onSaveDraft: () => void;
+  onSaveDraft: () => void | Promise<void>;
+  onExportDraft: () => void;
   onFinalize: () => void | Promise<void>;
   onRequestReview: () => void;
 }
@@ -73,6 +74,7 @@ export function CustomerQuotationPreview({
   costingWarnings,
   version,
   onSaveDraft,
+  onExportDraft,
   onFinalize,
   onRequestReview,
 }: Props) {
@@ -86,7 +88,9 @@ export function CustomerQuotationPreview({
           </p>
           {draft.query_type === "Brochure" && (
             <p className="mt-1 text-sm text-muted-foreground">
-              Save Brochure Draft stores a standalone immutable pricing snapshot; no CRM Query is required.
+              Save Brochure Draft keeps editable work locally and never needs a CRM Query. Final
+              pricing snapshots are separate and require a canonical Programme plus fully priced
+              rows.
             </p>
           )}
         </div>
@@ -105,8 +109,14 @@ export function CustomerQuotationPreview({
             <Send className="mr-2 h-4 w-4" /> Request Review
           </Button>
           <Button variant="outline" onClick={onSaveDraft}>
-            <Save className="mr-2 h-4 w-4" /> Save Draft
+            <Save className="mr-2 h-4 w-4" />
+            {draft.query_type === "Brochure" ? "Save Brochure Draft" : "Save Draft"}
           </Button>
+          {draft.query_type === "Brochure" && (
+            <Button variant="outline" onClick={onExportDraft}>
+              <FileDown className="mr-2 h-4 w-4" /> Download Draft Backup
+            </Button>
+          )}
           {draft.query_type === "Brochure" && (
             <Button
               disabled={!canFinalize || isFinalizing}
@@ -114,27 +124,33 @@ export function CustomerQuotationPreview({
               title={finalizeBlockers.join(" ") || "Save this immutable Brochure pricing snapshot."}
             >
               <ShieldCheck className="mr-2 h-4 w-4" />
-              {isFinalizing ? "Saving..." : "Save Brochure Draft"}
+              {isFinalizing ? "Saving..." : "Save Final Pricing Snapshot"}
             </Button>
           )}
-          {draft.query_type !== "Brochure" && <Button
-            disabled={!canFinalize || isFinalizing}
-            onClick={onFinalize}
-            title={
-              isFinalizing
-                ? "The official costing version is being saved."
-                : finalizeBlockers.join(" ") || "Save this immutable official costing version."
-            }
-          >
-            <ShieldCheck className="mr-2 h-4 w-4" />
-            {isFinalizing ? "Saving…" : `Save Costing · V${version}`}
-          </Button>}
+          {draft.query_type !== "Brochure" && (
+            <Button
+              disabled={!canFinalize || isFinalizing}
+              onClick={onFinalize}
+              title={
+                isFinalizing
+                  ? "The official costing version is being saved."
+                  : finalizeBlockers.join(" ") || "Save this immutable official costing version."
+              }
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              {isFinalizing ? "Saving…" : `Save Costing · V${version}`}
+            </Button>
+          )}
         </div>
       </div>
 
       {!isFinalizing && finalizeBlockers.length > 0 && (
         <div className="no-print rounded-lg border border-red-200 bg-red-50/70 p-4 text-sm text-red-800">
-          <div className="font-semibold">Costing V{version} cannot be saved:</div>
+          <div className="font-semibold">
+            {draft.query_type === "Brochure"
+              ? "Final pricing snapshot cannot be saved:"
+              : `Costing V${version} cannot be saved:`}
+          </div>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {finalizeBlockers.map((reason) => (
               <li key={reason}>{reason}</li>

@@ -80,6 +80,11 @@ export interface ProgramRoutingRow {
   program_text: string;
   from_city?: string;
   destination_city?: string;
+  to_cities?: string[];
+  intermediate_cities?: string[];
+  travel_mode?: string;
+  tour_titles?: string[];
+  tour_titles_by_city?: Record<string, string[]>;
 }
 export type ProgramSource = "Excel Import" | "Query History" | "Quotation Builder" | "Manual";
 export type ProgramStatus = "Active" | "Draft" | "Archived";
@@ -95,6 +100,7 @@ export interface SavedProgram {
   cities: string[];
   categories: string[];
   departure_city?: string;
+  ending_city?: string;
   travel_modes?: string[];
   inclusions?: string[];
   exclusions?: string[];
@@ -185,6 +191,7 @@ function normalizeProgram(
     cities: program.cities || [],
     categories: program.categories || [],
     departure_city: program.departure_city,
+    ending_city: program.ending_city,
     travel_modes: program.travel_modes || [],
     inclusions: program.inclusions || [],
     exclusions: program.exclusions || [],

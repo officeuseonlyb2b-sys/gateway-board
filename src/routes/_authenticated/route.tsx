@@ -167,7 +167,7 @@ function AuthenticatedLayout() {
         <main className="min-w-0 flex-1 overflow-auto">
           {masterSync.status === "denied" ||
           masterSync.status === "error" ||
-          masterSync.status === "empty" ? (
+          masterSync.status === "empty" || masterSync.status === "uninitialized" ? (
             <div
               role="alert"
               className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950"
@@ -176,7 +176,9 @@ function AuthenticatedLayout() {
                 ? "Access denied while reading shared costing masters."
                 : masterSync.status === "error"
                   ? "Costing master data could not be loaded."
-                  : "No shared costing master record is visible."}{" "}
+                  : masterSync.status === "uninitialized"
+                    ? "Staging master catalogue not initialized."
+                    : "No shared costing master record is visible."}{" "}
               {masterSync.message}
             </div>
           ) : null}
