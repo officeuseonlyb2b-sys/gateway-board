@@ -11,6 +11,7 @@ export interface ActiveWizard {
   programName: string;
   step: number;
   savedAt: string; // ISO
+  workflowMode?: "quotation" | "brochure";
 }
 
 const isBrowser = () => typeof window !== "undefined";

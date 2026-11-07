@@ -36,6 +36,11 @@ import { miscPerPersonForPax, transportOptionRows } from "./land-pricing";
 import { isSelectedLandServiceValid } from "./land-eligibility";
 import { getQuotationScope } from "@/lib/query-for";
 import {
+  brochureAccommodationForOption,
+  brochureCommercialTotalsFromBase,
+  brochureDepartureRateScenarios,
+} from "@/lib/wizard/brochure-accommodation";
+import {
   escortDayAppliesToPax,
   getEscortBaseForPax,
   getEscortDayCharge,
@@ -469,7 +474,7 @@ export function buildLandPart(draft: QuoteDraft, d: DB, line?: TransportLine): L
     const misc = sumOn(o.misc);
     return {
       day: day.day,
-      date: day.date || addDaysISO(draft.start_date, i),
+      date: draft.has_dates === false ? "" : day.date || addDaysISO(draft.start_date, i),
       route: [from, to].filter(Boolean).join(" → ") || "—",
       city: cityName(day.city_id) || "—",
       tours: tours.length ? tours.join(", ") : day.tour_title || "—",
@@ -745,6 +750,11 @@ export interface RateSheetRow {
   pkg_double: number;
   pkg_triple: number;
   pkg_quad: number;
+  transport_variation_id?: string;
+  brochure_validity_from?: string;
+  brochure_validity_till?: string;
+  /** A mathematical reference only; never eligible for a published Brochure snapshot. */
+  brochure_provisional?: boolean;
 }
 
 export interface RateSheetGroup {
@@ -901,6 +911,37 @@ export function buildRateSheet(
   opt: HotelOption,
   lines: TransportLine[],
 ): RateSheetGroup[] {
+  const initialScope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  if (
+    draft.query_type === "Brochure" &&
+    draft.has_dates === false &&
+    initialScope.accommodationPart
+  ) {
+    const scenarios = brochureDepartureRateScenarios(draft, d);
+    // With no selling-validity window there is deliberately no departure-date
+    // scenario.  Fall through to the shared reference-preview calculation
+    // below: it uses an unambiguous saved Brochure rate, but is marked
+    // provisional and finalisation remains blocked by validation.
+    if (scenarios.length) return scenarios.flatMap((scenario) => {
+      const optionCosting = scenario.options[opt.key];
+      if (!optionCosting || optionCosting.missing > 0) return [];
+      const datedDraft: QuoteDraft = {
+        ...draft,
+        has_dates: true,
+        start_date: scenario.validity_from,
+        routing: draft.routing.map((day) => ({ ...day, date: "" })),
+      };
+      return buildRateSheet(datedDraft, d, opt, lines).map((group) => ({
+        ...group,
+        rows: group.rows.map((row) => ({
+          ...row,
+          transport_variation_id: group.line_id,
+          brochure_validity_from: scenario.validity_from,
+          brochure_validity_till: scenario.validity_to,
+        })),
+      }));
+    });
+  }
   const paxList = paxScale(draft);
   const costingPaxSet = new Set(paxList);
   const transportOptions = transportOptionRows(draft).filter((row) => costingPaxSet.has(row.pax));
@@ -917,16 +958,22 @@ export function buildRateSheet(
     h: hotelsMarkup(draft),
     hg: hotelsGst(draft),
   };
+  const brochureAccommodation = draft.query_type === "Brochure" && includeAccommodation;
+  const actualPax = Math.max(1, effectivePaxForPricing(draft));
+  const brochureCosting = brochureAccommodation
+    ? brochureAccommodationForOption(draft, opt, d)
+    : undefined;
+  if (brochureAccommodation && (!brochureCosting || brochureCosting.previewMissing > 0)) return [];
 
   // Room shares (per person) including room GST slab, then hotels markup/GST.
   // Dynamic nights are priced from their allocated room mix and split across
   // the actual pax count instead of a flat per-category share.
-  const actualPax = Math.max(1, effectivePaxForPricing(draft));
   const splitAccommodation = isSplitAccommodation(draft);
   const splitOptions = splitAccommodation
     ? draft.hotel_options.filter((option) => (option.allocated_pax ?? 0) > 0)
     : [];
-  const isDynamicDay = () => isDynamicAccommodationMode(draft);
+  const isDynamicDay = () =>
+    draft.query_type !== "Brochure" && isDynamicAccommodationMode(draft);
   const roomShare = (pick: (r: HotelNightRow) => number, size: number) => {
     const net = hotels.rows.reduce((s, r) => {
       if (isDynamicDay()) return s;
@@ -937,7 +984,10 @@ export function buildRateSheet(
     return gross(net, mk.h, mk.hg);
   };
 
-  const dynamicMode = includeAccommodation && isDynamicAccommodationMode(draft);
+  const dynamicMode =
+    includeAccommodation &&
+    draft.query_type !== "Brochure" &&
+    isDynamicAccommodationMode(draft);
   const dynamicBase = dynamicMode
     ? splitAccommodation
       ? splitOptions.reduce(
@@ -947,10 +997,26 @@ export function buildRateSheet(
       : dynamicAccommodationBreakdown(draft, opt, d).total
     : 0;
   const dynamicPerPerson = dynamicMode ? gross(dynamicBase / actualPax, mk.h, mk.hg) : 0;
-  const single = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.sgl, 1) : 0;
-  const dbl = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.dbl, 2) : 0;
-  const trp = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.trp, 3) : 0;
-  const quad = includeAccommodation ? dynamicPerPerson + roomShare((r) => r.quad, 4) : 0;
+  const single = brochureAccommodation
+    ? gross(brochureCosting?.single ?? 0, mk.h, mk.hg)
+    : includeAccommodation
+      ? dynamicPerPerson + roomShare((r) => r.sgl, 1)
+      : 0;
+  const dbl = brochureAccommodation
+    ? gross(brochureCosting?.double ?? 0, mk.h, mk.hg)
+    : includeAccommodation
+      ? dynamicPerPerson + roomShare((r) => r.dbl, 2)
+      : 0;
+  const trp = brochureAccommodation
+    ? gross(brochureCosting?.triple ?? 0, mk.h, mk.hg)
+    : includeAccommodation
+      ? dynamicPerPerson + roomShare((r) => r.trp, 3)
+      : 0;
+  const quad = brochureAccommodation
+    ? gross(brochureCosting?.quad ?? 0, mk.h, mk.hg)
+    : includeAccommodation
+      ? dynamicPerPerson + roomShare((r) => r.quad, 4)
+      : 0;
   const splitMealPerPerson = (mealType: "Lunch" | "Dinner") =>
     splitOptions.reduce(
       (sum, option) =>
@@ -1000,25 +1066,24 @@ export function buildRateSheet(
     return Array.from(byOption.entries()).map(([optionId, optionRows]) => {
       const option = draft.transport_options?.find((item) => item.id === optionId);
       const vehicle = option?.name || "Transport option";
-      const min = Math.min(...optionRows.map((row) => row.pax));
-      const max = Math.max(...optionRows.map((row) => row.pax));
-      const base = buildRateSheet(
-        {
-          ...draft,
-          transport: [],
-          transport_options: [],
-          pax_mode: "range",
-          pax_min: min,
-          pax_max: max,
-          pax_range: `${min}-${max}`,
-        },
-        d,
-        opt,
-        [],
-      )[0];
       const rows = optionRows
         .map((transportRow) => {
-          const template = base?.rows.find((row) => row.pax === transportRow.pax) ?? base?.rows[0];
+          // Build each row in its own one-Pax context. A Brochure range must
+          // not collapse to its maximum for hotel, meal, or land calculations.
+          const template = buildRateSheet(
+            {
+              ...draft,
+              transport: [],
+              transport_options: [],
+              pax_mode: "range",
+              pax_min: transportRow.pax,
+              pax_max: transportRow.pax,
+              pax_range: `${transportRow.pax}-${transportRow.pax}`,
+            },
+            d,
+            opt,
+            [],
+          )[0]?.rows[0];
           const transport = includeTransport ? transportRow.per_person : 0;
           if (!template) return null;
           const oldTransport = template.transport;
@@ -1053,6 +1118,26 @@ export function buildRateSheet(
       const maxFit = veh?.max_pax ?? alloc?.max_pax ?? veh?.capacity_persons ?? Infinity;
       const fitting = paxList.filter((p) => p >= minFit && p <= maxFit);
       const rows: RateSheetRow[] = fitting.map((pax) => {
+        const brochurePerPerson = (adultRate: number) => {
+          if (!brochureAccommodation || !brochureCosting) return 0;
+          const childCount = Math.min(pax, draft.children.length);
+          const adultCount = pax - childCount;
+          const childRate = brochureCosting.child;
+          const baseTotal = adultCount * adultRate + childCount * childRate;
+          return brochureCommercialTotalsFromBase(draft, baseTotal, pax).final_per_person;
+        };
+        const rowSingle = brochureAccommodation && brochureCosting
+          ? brochurePerPerson(brochureCosting.single)
+          : single;
+        const rowDouble = brochureAccommodation && brochureCosting
+          ? brochurePerPerson(brochureCosting.double)
+          : dbl;
+        const rowTriple = brochureAccommodation && brochureCosting
+          ? brochurePerPerson(brochureCosting.triple)
+          : trp;
+        const rowQuad = brochureAccommodation && brochureCosting
+          ? brochurePerPerson(brochureCosting.quad)
+          : quad;
         const pp = (v: number) => gross(v / pax, mk.land, mk.lg);
         // Keep each selected transport line independent in the Rate Sheet / Final
         // Costing. When multiple vehicles exist, each vehicle must retain its own
@@ -1091,16 +1176,17 @@ export function buildRateSheet(
           entrances,
           activities,
           misc,
-          single,
-          double: dbl,
-          triple: trp,
-          quad,
+          single: rowSingle,
+          double: rowDouble,
+          triple: rowTriple,
+          quad: rowQuad,
           lunch,
           dinner,
-          pkg_single: landPP + single + meals,
-          pkg_double: landPP + dbl + meals,
-          pkg_triple: landPP + trp + meals,
-          pkg_quad: landPP + quad + meals,
+          pkg_single: landPP + rowSingle + meals,
+          pkg_double: landPP + rowDouble + meals,
+          pkg_triple: landPP + rowTriple + meals,
+          pkg_quad: landPP + rowQuad + meals,
+          brochure_provisional: brochureCosting?.provisional || undefined,
         };
       });
       return { vehicle, line_id: line?.id, rows };

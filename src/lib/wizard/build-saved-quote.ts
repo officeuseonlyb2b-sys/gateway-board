@@ -24,10 +24,20 @@ import { computeScenario, draftForScenarioTransport } from "@/lib/wizard/scenari
 import { getQuotationScope } from "@/lib/query-for";
 import { buildLandPart, buildRateSheet, type SheetOption } from "@/lib/wizard/costsheet";
 import { hotelSelectionForDay, type CostScenario, type QuoteDraft } from "@/lib/wizard/types";
+import { brochureDepartureRateScenarios } from "@/lib/wizard/brochure-accommodation";
 
 type DB = ReturnType<typeof useDB>;
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+function persistedDraftSnapshot(draft: QuoteDraft): QuoteDraft {
+  if (draft.query_type !== "Brochure" || draft.has_dates !== false) return draft;
+  return {
+    ...draft,
+    start_date: "",
+    routing: draft.routing.map((day) => ({ ...day, date: "" })),
+  };
+}
 
 export function buildSavedQuote(
   draft: QuoteDraft,
@@ -36,13 +46,28 @@ export function buildSavedQuote(
   preparedBy?: { employeeId: string; authUserId?: string; name: string; role: string },
   options?: { preview?: boolean },
 ): SavedQuote {
+  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
+  if (
+    !options?.preview &&
+    draft.query_type === "Brochure" &&
+    draft.has_dates === false &&
+    scope.accommodationPart &&
+    (!draft.brochure_validity_from || !draft.brochure_validity_till)
+  ) {
+    throw new Error("Cannot publish provisional Brochure hotel prices while Selling Validity is pending.");
+  }
   const identity = quoteVersionContext(draft);
   const id = uid();
   const now = new Date().toISOString();
   const version = identity.version || 1;
   // Rendering Step 10 must be side-effect free: allocating the official quote
   // number remains part of the successful finalisation path only.
-  const quoteNumber = identity.quote_number || (options?.preview ? "DRAFT" : nextQuoteNumber());
+  const quoteNumber = identity.quote_number || (options?.preview
+    ? "DRAFT"
+    : draft.query_type === "Brochure"
+      ? `BR-${id}`
+      : nextQuoteNumber());
+  const savedDraftSnapshot = persistedDraftSnapshot(draft);
   const routingCities = new Set(
     draft.routing
       .map((r) => d.cities.find((c) => c.id === (r.to_city_id || r.city_id))?.name)
@@ -59,8 +84,9 @@ export function buildSavedQuote(
       ? draft.included_option_keys
       : draft.hotel_options.map((option) => option.key),
   );
-  const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const scenarioOptions = !scope.accommodationPart
+  const scenarioOptions = draft.query_type === "Brochure" && scope.accommodationPart
+    ? draft.hotel_options.slice(0, 4)
+    : !scope.accommodationPart
     ? draft.hotel_options.slice(0, 1)
     : draft.hotel_options.filter((option) => includedKeys.has(option.key));
   const scenarioDefs: CostScenario[] =
@@ -151,7 +177,7 @@ export function buildSavedQuote(
     const gr = gstRateFor;
     return {
       day_number: day.day,
-      date: day.date,
+      date: draft.query_type === "Brochure" && draft.has_dates === false ? "" : day.date,
       city: cityName,
       hotel_name: sel?.no_hotel
         ? sel.accommodation_status === "own_arrangement"
@@ -267,14 +293,28 @@ export function buildSavedQuote(
   const savedRateSheetRows = scenarioOptions.flatMap((option) =>
     buildRateSheet(draft, d, option, draft.transport).flatMap((group) => {
       const selectionKey = `${option.key}|${group.line_id ?? group.vehicle}`;
-      const selectedPax = draft.rate_sheet_rows?.[selectionKey] ?? [];
+      // Brochure publication is range based: retain every genuinely priced
+      // matrix row, without requiring someone to tick 40 individual rows.
+      // Standard B2B/B2C quotations retain their explicit final-row selection.
+      const selectedPax = draft.query_type === "Brochure"
+        ? group.rows
+            .filter((row) => {
+              const occupancyPrices = scope.accommodationPart
+                ? [row.single, row.double, row.triple, row.quad]
+                : [row.pkg_single, row.pkg_double, row.pkg_triple, row.pkg_quad];
+              return occupancyPrices.some((price) => Number.isFinite(price) && price > 0);
+            })
+            .map((row) => row.pax)
+        : (draft.rate_sheet_rows?.[selectionKey] ?? []);
       return group.rows
         .filter((row) => selectedPax.includes(row.pax))
         .map((row) => ({
           option_key: option.key,
           option_label: option.category || option.label || `Option ${option.key}`,
           vehicle: group.vehicle,
-          transport_variation_id: group.line_id,
+          transport_variation_id: row.transport_variation_id ?? group.line_id,
+          brochure_validity_from: row.brochure_validity_from,
+          brochure_validity_till: row.brochure_validity_till,
           pax: row.pax,
           single: row.pkg_single,
           double: row.pkg_double,
@@ -283,6 +323,18 @@ export function buildSavedQuote(
         }));
     }),
   );
+  const brochureRateCoverageGaps =
+    draft.query_type === "Brochure" && draft.has_dates === false
+      ? brochureDepartureRateScenarios(draft, d).flatMap((scenario) =>
+          Object.entries(scenario.options).flatMap(([optionKey, costing]) =>
+            costing && costing.missing > 0
+              ? [
+                  `Option ${optionKey}, departures ${scenario.validity_from}–${scenario.validity_to}: ${costing.missing} hotel night(s) lack full Per Night Brochure Rate coverage.`,
+                ]
+              : [],
+          ),
+        )
+      : [];
   const scenarioRangeValues = rangeResults
     .map((result) => result!.grand_total)
     .filter((value) => Number.isFinite(value) && value > 0);
@@ -296,7 +348,7 @@ export function buildSavedQuote(
 
   const q: SavedQuote = {
     id,
-    query_id: draft.linked_query_id,
+    query_id: draft.query_type === "Brochure" ? undefined : draft.linked_query_id,
     family_id: identity.family_id || id,
     version,
     quote_number: quoteNumber,
@@ -323,12 +375,12 @@ export function buildSavedQuote(
             : "Quotation finalised and locked",
       },
     ],
-    draft_snapshot: JSON.parse(JSON.stringify(draft)) as QuoteDraft,
+    draft_snapshot: JSON.parse(JSON.stringify(savedDraftSnapshot)) as QuoteDraft,
     tour_title: draft.program_name || `${draft.query_type} Tour`,
     cities: Array.from(routingCities),
     total_nights: draft.nights,
-    travel_start: draft.start_date,
-    travel_end: addDaysISO(draft.start_date, draft.nights),
+    travel_start: draft.has_dates === false ? "" : draft.start_date,
+    travel_end: draft.has_dates === false ? "" : addDaysISO(draft.start_date, draft.nights),
     itinerary,
     addons: addonsBlock,
     inclusions: {
@@ -419,6 +471,7 @@ export function buildSavedQuote(
             validity_till: draft.brochure_validity_till,
             pax_min: queryPaxMin,
             pax_max: queryPaxMax,
+            rate_coverage_gaps: brochureRateCoverageGaps,
           },
         }
       : {}),
@@ -527,12 +580,13 @@ export function buildCostingVersionSnapshot(
       grand_dbl: 0,
       grand_trp: 0,
     };
+    const id = uid();
     return {
-      id: uid(),
-      query_id: draft.linked_query_id,
+      id,
+      query_id: draft.query_type === "Brochure" ? undefined : draft.linked_query_id,
       family_id: identity.family_id,
       version: identity.version || 1,
-      quote_number: identity.quote_number || nextQuoteNumber(),
+      quote_number: identity.quote_number || (draft.query_type === "Brochure" ? `BR-${id}` : nextQuoteNumber()),
       status: "In Progress",
       costing_complete: false,
       validation_warnings: [...warnings],
@@ -543,12 +597,12 @@ export function buildCostingVersionSnapshot(
       prepared_by_name: preparedBy.name,
       prepared_by_role: preparedBy.role,
       revision_of_quote_id: identity.revision_of_quote_id,
-      draft_snapshot: JSON.parse(JSON.stringify(draft)) as QuoteDraft,
+      draft_snapshot: JSON.parse(JSON.stringify(persistedDraftSnapshot(draft))) as QuoteDraft,
       tour_title: draft.program_name || "Incomplete costing",
       cities: draft.routing.map((day) => day.to_city || day.from_city || "").filter(Boolean),
       total_nights: draft.nights,
-      travel_start: draft.start_date,
-      travel_end: addDaysISO(draft.start_date, draft.nights),
+      travel_start: draft.has_dates === false ? "" : draft.start_date,
+      travel_end: draft.has_dates === false ? "" : addDaysISO(draft.start_date, draft.nights),
       itinerary: [],
       addons: {
         travels: [],

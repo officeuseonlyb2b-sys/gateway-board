@@ -15,7 +15,7 @@ import {
   listAssignmentCandidates,
   type CrmSnapshot,
 } from "./store";
-import { auth } from "@/lib/auth-mock";
+import { auth, getMyEmployeeProfile, usesStagingEmployeeProfileRpc } from "@/lib/auth-mock";
 import type {
   CrmEvent,
   CrmQuery,
@@ -781,6 +781,15 @@ async function pullAndMerge(run: number) {
 }
 
 async function readEmployeeRows(): Promise<Employee[]> {
+  if (usesStagingEmployeeProfileRpc()) {
+    // This RPC exposes the complete directory only to an active linked Super
+    // Admin; all other employees receive their own row. It keeps Team & Access
+    // functional without a cross-employee browser table policy.
+    const { data, error } = await supabase.rpc("crm_authorized_employee_directory");
+    if (error) throw error;
+    return (data ?? []).map((row) => ({ ...(row.data as Employee), id: row.id }));
+  }
+
   const records: Employee[] = [];
   for (let offset = 0; ; offset += 1000) {
     const result = await supabase

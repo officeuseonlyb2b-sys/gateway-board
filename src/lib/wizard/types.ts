@@ -520,10 +520,15 @@ export interface QuoteDraft {
   program_id?: string;
   program_code?: string;
   program_name: string;
+  /** Authoritative day count copied from Programme Master for Brochure display. */
+  programme_days?: number;
   /** Existing masters are never mutated; this explicitly creates a new copy. */
   save_program_as_new?: boolean;
   new_program_code?: string;
   new_program_name?: string;
+  /** Set only after the explicit Step 5 Programme + Itinerary persistence succeeds. */
+  customized_routing_saved?: boolean;
+  customized_routing_itinerary_id?: string;
 
   // Pax
   adults: number;
@@ -723,6 +728,8 @@ export const emptyDraft = (): QuoteDraft => ({
   save_program_as_new: false,
   new_program_code: "",
   new_program_name: "",
+  customized_routing_saved: false,
+  customized_routing_itinerary_id: undefined,
   adults: 2,
   ss: 0,
   children: [],

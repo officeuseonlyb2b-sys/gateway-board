@@ -199,9 +199,9 @@ function resolveDynamicAccommodationRoomLines(
       missing++;
       return;
     }
-    const date =
-      day.date ||
-      addDaysISO(draft.start_date, day.day === 0 ? -1 : draft.routing.indexOf(day));
+    const date = draft.has_dates === false
+      ? ""
+      : day.date || addDaysISO(draft.start_date, day.day === 0 ? -1 : draft.routing.indexOf(day));
     const allocations = option.dynamic_allocations?.[day.day] ?? [];
     const hotel = d.hotels.find((item) => item.id === selection.hotel_id);
     const blackout = hotel?.blackout_ranges?.some(
@@ -441,7 +441,7 @@ export function calculateMealCostingRows(
   const rows: MealCostingRow[] = [];
 
   draft.routing.forEach((day, i) => {
-    const date = day.date || addDaysISO(draft.start_date, i);
+    const date = draft.has_dates === false ? "" : day.date || addDaysISO(draft.start_date, i);
     const fromName = day.from_city?.trim().toLowerCase();
     const fromCityId = d.cities.find(
       (city) => city.id === day.from_city || city.name.trim().toLowerCase() === fromName,

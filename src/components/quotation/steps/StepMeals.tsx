@@ -134,7 +134,7 @@ export function StepMeals({ draft, set }: StepProps) {
         return {
           day,
           cityIds,
-          date: day.date || addDaysISO(draft.start_date, index),
+          date: draft.has_dates === false ? "" : day.date || addDaysISO(draft.start_date, index),
           route: cityIds
             .map((id) => db.cities.find((city) => city.id === id)?.name)
             .filter(Boolean)

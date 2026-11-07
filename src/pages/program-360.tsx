@@ -127,6 +127,11 @@ export default function Program360() {
             {program.nights} Nights / {program.days} Days
           </p>
         </div>
+        <Button asChild>
+          <Link to="/costing" search={{ programId: program.id } as never}>
+            Create Brochure
+          </Link>
+        </Button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">

@@ -37,6 +37,9 @@ const EVENT_KEY = "mp_crm_events_v2";
 const STANDALONE_REVIEW_KEY = "mp_crm_standalone_quotation_reviews_v1";
 const DATASET_KEY = "mp_crm_query_dataset_revision";
 const LEGACY_QUERY_KEY = "mp_tourism_queries";
+// localStorage is a small, synchronous startup cache. Supabase remains the
+// source of truth, so never try to put a multi-megabyte query collection here.
+const MAX_QUERY_CACHE_BYTES = 2 * 1024 * 1024;
 const isBrowser = () => typeof window !== "undefined";
 
 // ---- helpers ---------------------------------------------------------------
@@ -164,6 +167,26 @@ function serializedQueriesForCache(): string {
   return value;
 }
 
+function persistQueriesCache(): boolean {
+  const value = serializedQueriesForCache();
+  if (value.length * 2 > MAX_QUERY_CACHE_BYTES) {
+    // Do not replace a potentially useful prior cache with a lossy projection.
+    // The complete, RLS-authorized collection is already retained in memory and
+    // is rehydrated from Supabase; this only declines the optional cache write.
+    const signature = `${value.length}:${value.slice(0, 96)}:${value.slice(-96)}`;
+    if (rejectedStorageWrites.get(KEY) !== signature) {
+      rejectedStorageWrites.set(KEY, signature);
+      console.warn("[crm] query cache skipped because it exceeds the localStorage budget", {
+        key: KEY,
+        approximateBytes: value.length * 2,
+        maxBytes: MAX_QUERY_CACHE_BYTES,
+      });
+    }
+    return false;
+  }
+  return safeSetStorage(KEY, value);
+}
+
 function compactTasksForCache(records: CrmTask[]): CrmTask[] {
   const ordered = [
     ...records.filter((task) => !task.query_id),
@@ -258,7 +281,7 @@ function load() {
     queries = clone(IMPORTED_QUERIES).map(normalizeQuery);
     tasks = [...clone(IMPORTED_QUERY_TASKS), ...storedTasks.filter((task) => !task.query_id)];
     events = [...clone(IMPORTED_QUERY_EVENTS), ...storedEvents.filter((event) => !event.query_id)];
-    safeSetStorage(KEY, serializedQueriesForCache());
+    persistQueriesCache();
     safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
     safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
     safeSetStorage(DATASET_KEY, QUERY_TRACKER_DATASET_ID);
@@ -338,7 +361,7 @@ export function hydrateCrm(snapshot: CrmSnapshot) {
   // browser cache, so storage pressure cannot starve employee/reviewer hooks.
   emit();
   if (isBrowser()) {
-    safeSetStorage(KEY, serializedQueriesForCache());
+    persistQueriesCache();
     safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
     safeSetStorage(EMP_KEY, JSON.stringify(employees));
     safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
@@ -353,7 +376,7 @@ export function onCrmPersist(listener: (snapshot: CrmSnapshot) => void) {
 
 function persist() {
   if (!isBrowser()) return;
-  safeSetStorage(KEY, serializedQueriesForCache());
+  persistQueriesCache();
   safeSetStorage(TASK_KEY, JSON.stringify(compactTasksForCache(tasks)));
   safeSetStorage(EMP_KEY, JSON.stringify(employees));
   safeSetStorage(EVENT_KEY, JSON.stringify(events.slice(0, 800)));
@@ -398,7 +421,7 @@ export function replaceQueryFromCloud(record: CrmQuery) {
   const normalized = normalizeQuery(record);
   queries = queries.map((query) => (query.id === normalized.id ? normalized : query));
   if (!queries.some((query) => query.id === normalized.id)) queries.push(normalized);
-  if (isBrowser()) safeSetStorage(KEY, serializedQueriesForCache());
+  if (isBrowser()) persistQueriesCache();
   emit();
 }
 

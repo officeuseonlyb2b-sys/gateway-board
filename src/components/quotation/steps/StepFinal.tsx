@@ -33,6 +33,9 @@ export function Step17({ draft }: StepProps) {
     0,
   );
   const optionalTotal = computeOptionalTotal(draft);
+  const travelSummary = draft.query_type === "Brochure" && draft.has_dates === false
+    ? "Departure date not selected · Day-number itinerary"
+    : `${fmtDateShort(draft.start_date)} – ${fmtDateShort(endDate)}`;
 
   return (
     <div className="space-y-5">
@@ -40,8 +43,7 @@ export function Step17({ draft }: StepProps) {
         <div>
           <h2 className="text-lg font-semibold">Internal Final Review</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Audit the Query, itinerary, component totals and commercial calculations before locking
-            a version.
+            Audit the {draft.query_type === "Brochure" ? "Programme and routing" : "Query and itinerary"}, component totals and commercial calculations before locking a version.
           </p>
         </div>
         <Badge
@@ -60,16 +62,24 @@ export function Step17({ draft }: StepProps) {
         <div className="border-b bg-primary/[0.04] p-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{draft.query_type || "Type pending"}</Badge>
-            <Badge variant="outline">{draft.linked_query_id || "Query not linked"}</Badge>
+            {draft.query_type === "Brochure" ? (
+              <Badge variant="outline">Programme pricing library</Badge>
+            ) : (
+              <Badge variant="outline">{draft.linked_query_id || "Query not linked"}</Badge>
+            )}
             {draft.revision_of_quote_id && (
               <Badge variant="secondary">Revision V{draft.intended_version || 2}</Badge>
             )}
           </div>
           <div className="mt-3 text-xl font-bold">{draft.program_name || "Programme pending"}</div>
           <div className="mt-1 text-sm text-muted-foreground">
-            {customer || "Recipient pending"} · {fmtDateShort(draft.start_date)} –{" "}
-            {fmtDateShort(endDate)} · {draft.nights}N/{draft.nights + 1}D · {pax} pax
+            {customer || "Recipient pending"} · {travelSummary} · {draft.nights}N/{draft.nights + 1}D · {pax} pax
           </div>
+          {draft.query_type === "Brochure" && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Brochure selling validity: {draft.brochure_validity_from ? fmtDateShort(draft.brochure_validity_from) : "—"} – {draft.brochure_validity_till ? fmtDateShort(draft.brochure_validity_till) : "—"}
+            </div>
+          )}
         </div>
         <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
           <Fact

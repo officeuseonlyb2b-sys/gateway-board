@@ -146,6 +146,10 @@ export function hotelsForAccommodation<
   };
 }
 
+export function hotelCategoryCoverageMessage(cityName: string, category: string): string {
+  return `No ${category.trim()} hotels configured for ${cityName.trim()} in Hotel Master.`;
+}
+
 export function diagnoseHotelAvailability(
   hotels: HotelAvailabilityRecord[],
   rooms: HotelRoomRecord[],

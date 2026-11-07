@@ -34,6 +34,7 @@ import {
   BriefcaseBusiness,
   RadioTower,
   BookOpenCheck,
+  Map,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -285,12 +286,12 @@ const SECTIONS: Section[] = [
         badgeKey: "drafts",
       },
       {
-        label: "Drafts",
+        label: "Draft Quotations",
         to: "/drafts",
         icon: FolderClock,
       },
       {
-        label: "Recent Quotes",
+        label: "Recent Quotations",
         to: "/quotes",
         icon: FileText,
       },
@@ -299,7 +300,13 @@ const SECTIONS: Section[] = [
   {
     label: "Brochures",
     roles: SALES_ROLES,
-    items: [{ label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck }],
+    items: [
+      { label: "New Brochure Costing", to: "/brochures/new", icon: Calculator },
+      { label: "Draft Brochures", to: "/brochures/drafts", icon: FolderClock },
+      { label: "Itinerary Builder", to: "/brochures/itineraries", icon: Map },
+      { label: "Itinerary Master", to: "/brochures/itinerary-master", icon: Map },
+      { label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck },
+    ],
   },
 
   // =========================================================
@@ -379,7 +386,13 @@ const quotationSection: Section = {
 
 const brochureSection: Section = {
   label: "Brochures",
-  items: [{ label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck }],
+  items: [
+    { label: "New Brochure Costing", to: "/brochures/new", icon: Calculator },
+    { label: "Draft Brochures", to: "/brochures/drafts", icon: FolderClock },
+    { label: "Itinerary Builder", to: "/brochures/itineraries", icon: Map },
+    { label: "Itinerary Master", to: "/brochures/itinerary-master", icon: Map },
+    { label: "Programme-wise Brochures", to: "/brochures", icon: BookOpenCheck },
+  ],
 };
 
 const resourcesSection: Section = {

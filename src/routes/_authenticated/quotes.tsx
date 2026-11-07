@@ -322,18 +322,11 @@ function SavedQuotesPage() {
                                 `Reason for voiding ${qu.display_number || qu.quote_number}:`,
                               );
                               if (!reason?.trim()) return;
-                              try {
-                                voidQuote(qu.id, reason, user?.name || "Unknown");
-                                toast.success(
-                                  "Quotation marked Void. The locked record has been retained.",
-                                );
-                              } catch (error) {
-                                toast.error(
-                                  error instanceof Error
-                                    ? error.message
-                                    : "Could not void quotation",
-                                );
-                              }
+                              void voidQuote(qu.id, reason, user?.name || "Unknown")
+                                .then(() => toast.success("Quotation marked Void. The locked record has been retained."))
+                                .catch((error) => toast.error(
+                                  error instanceof Error ? error.message : "Could not void quotation",
+                                ));
                             }}
                           >
                             <Ban className="h-4 w-4 text-destructive" />

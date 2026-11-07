@@ -24,6 +24,8 @@ import {
 } from "./calc";
 import { buildLandPart } from "./costsheet";
 import { getQuotationScope } from "@/lib/query-for";
+import { brochureAccommodationForOption } from "@/lib/wizard/brochure-accommodation";
+import { brochureAdultRatePerPerson } from "@/lib/brochure-hotel-rates";
 import {
   accommodationNightsForOption,
   isAccommodationNightForOption,
@@ -220,7 +222,10 @@ export function computeScenario(
   const perPersonGst = Array(pax).fill(0) as number[];
   const perPersonTypes: PersonRoomType[][] = Array.from({ length: pax }, () => []);
   let missing = 0;
-  const dynamicMode = includesAccommodation && isDynamicAccommodationMode(draft);
+  const dynamicMode =
+    includesAccommodation &&
+    draft.query_type !== "Brochure" &&
+    isDynamicAccommodationMode(draft);
   const splitAccommodation = dynamicMode && isSplitAccommodation(draft);
   const splitOptions = splitAccommodation
     ? draft.hotel_options.filter((option) => (option.allocated_pax ?? 0) > 0)
@@ -256,7 +261,38 @@ export function computeScenario(
         });
       });
   }
-  if (includesAccommodation)
+  if (includesAccommodation && draft.query_type === "Brochure") {
+    const brochureCosting = brochureAccommodationForOption(draft, opt, d);
+    missing += brochureCosting.missing;
+    // calculationRate is the shared source for both validated date coverage
+    // and the explicitly provisional reference preview.  Validation still
+    // counts missing coverage separately and prevents publication.
+    const nights = brochureCosting.nights.filter(
+      (night) => !night.noHotel && Boolean(night.calculationRate),
+    );
+    const roomTypes = slotsForDay(
+      { ...draft, allocation_mode: "standard", dynamic_days: [] },
+      opt,
+      nights[0]?.day.day ?? 1,
+      pax,
+    );
+    const childCount = Math.min(pax, draft.children.length);
+    for (let person = 0; person < pax; person += 1) {
+      const type: PersonRoomType = person < childCount ? "cwb" : roomTypes[person];
+      nights.forEach((night) => {
+        const rate = night.calculationRate;
+        if (!rate) return;
+        const amount =
+          type === "extra_bed"
+            ? rate.extra_bed
+            : type === "cwb"
+              ? rate.child
+              : brochureAdultRatePerPerson(rate, type);
+        perPersonNet[person] += amount;
+      });
+      if (nights.length) perPersonTypes[person].push(type);
+    }
+  } else if (includesAccommodation)
     draft.routing.forEach((day, i) => {
       if (!isAccommodationNightForOption(opt, day)) return;
       if (dynamicMode) return;

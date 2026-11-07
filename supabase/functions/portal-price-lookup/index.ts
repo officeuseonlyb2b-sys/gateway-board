@@ -1,0 +1,11 @@
+import { clients, json, headers } from "../_shared/employee-auth.ts";
+Deno.serve(async (request) => { if(request.method === "OPTIONS") return new Response(null,{headers}); if(request.method !== "POST") return json({error:"Method not allowed"},405);
+ const {admin}=clients(); const token=request.headers.get("Authorization")?.replace(/^Bearer\s+/i,""); const {data:{user}}=await admin.auth.getUser(token); if(!user)return json({error:"Authentication required"},401);
+ const agent=await admin.from("portal_b2b_agents").select("auth_user_id").eq("auth_user_id",user.id).eq("active",true).maybeSingle(); if(agent.error||!agent.data)return json({error:"Approved B2B agent access required"},403);
+ const q=await request.json() as {packageId:string;pax:number;hotelOptionId:string;transportVariationId?:string;occupancy:string;departureDate:string};
+ if(!q.packageId||!q.pax||!q.hotelOptionId||!q.transportVariationId||!q.occupancy||!q.departureDate)return json({error:"Package, date, pax, hotel option, transport and occupancy are required"},422);
+ const packageRow=await admin.from("portal_packages").select("brochure_version_id,publication_state").eq("id",q.packageId).maybeSingle(); if(packageRow.error||!packageRow.data||packageRow.data.publication_state!=="published")return json({error:"Published package not found"},404);
+ let lookup=admin.from("portal_package_prices").select("selling_price_per_person,currency,validity_from,validity_till,brochure_version_id,scenario_id,transport_description").eq("package_id",q.packageId).eq("brochure_version_id",packageRow.data.brochure_version_id).eq("pax",q.pax).eq("accommodation_option_id",q.hotelOptionId).eq("occupancy",q.occupancy).lte("validity_from",q.departureDate).gte("validity_till",q.departureDate);
+ lookup=lookup.eq("transport_variation_id",q.transportVariationId); const result=await lookup.maybeSingle(); if(result.error)return json({error:"Price lookup failed"},500); if(!result.data)return json({available:false,reason:"PRICE_ON_REQUEST"});
+ return json({available:true,pricePerPerson:result.data.selling_price_per_person,currency:result.data.currency,validFrom:result.data.validity_from,validTill:result.data.validity_till,brochureVersionId:result.data.brochure_version_id,scenarioId:result.data.scenario_id,transport:result.data.transport_description});
+});

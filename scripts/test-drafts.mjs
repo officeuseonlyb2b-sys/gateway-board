@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import { createServer } from "vite";
 
 const values = new Map();
+const sessionValues = new Map();
 globalThis.window = globalThis;
 globalThis.localStorage = {
   getItem: (key) => values.get(key) ?? null,
   setItem: (key, value) => values.set(key, String(value)),
   removeItem: (key) => values.delete(key),
   clear: () => values.clear(),
+};
+globalThis.sessionStorage = {
+  getItem: (key) => sessionValues.get(key) ?? null,
+  setItem: (key, value) => sessionValues.set(key, String(value)),
+  removeItem: (key) => sessionValues.delete(key),
+  clear: () => sessionValues.clear(),
 };
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });

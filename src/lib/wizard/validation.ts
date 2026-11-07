@@ -11,6 +11,7 @@ import {
   splitAccommodationAllocation,
 } from "./calc";
 import { computeScenario, type ScenarioResult } from "./scenario";
+import { buildRateSheet } from "./costsheet";
 import {
   accommodationNightsForOption,
   hotelSelectionForDay,
@@ -20,6 +21,12 @@ import {
 } from "./types";
 import { normalizeQueryFor, getQuotationScope } from "@/lib/query-for";
 import { getEscortPricingMode, isEscortEnabled } from "./guide-pricing";
+import {
+  brochureDepartureRateScenarios,
+  brochureRateForNight,
+} from "./brochure-accommodation";
+import { brochureRateResolutionMessage } from "./brochure-rate-resolution";
+import { resolveAccommodationCity } from "./hotel-availability";
 
 export type ValidationSeverity = "blocker" | "warning";
 export interface QuoteValidationIssue {
@@ -67,7 +74,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   const overnight = tourDays.filter((day) => day.overnight);
   const queryFor = normalizeQueryFor(draft.query_for) || "Package";
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
-  const requiresAccommodation = scope.accommodationPart;
+  // Brochures validate the selected hotel's validity-bounded estimate below.
+  // They never require regular room-contract supplier validation.
+  const requiresAccommodation = scope.accommodationPart && draft.query_type !== "Brochure";
   const requiresLand = scope.landPart;
   const escortMode = getEscortPricingMode(draft);
   const included = new Set(
@@ -184,6 +193,105 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   }
   if (draft.query_type === "B2C" && !draft.guest.name.trim()) {
     issues.push(issue("CLIENT_REQUIRED", "blocker", "Who", "Enter the B2C client details."));
+  }
+  if (draft.query_type === "Brochure" && scope.accommodationPart) {
+    const hasBrochureOvernight = draft.hotel_options.some((option) =>
+      accommodationNightsForOption(draft.routing, option).some(
+        (day) => !hotelSelectionForDay(option, day, true)?.no_hotel,
+      ),
+    );
+    if (
+      draft.has_dates === false &&
+      hasBrochureOvernight &&
+      (!draft.brochure_validity_from || !draft.brochure_validity_till)
+    ) {
+      issues.push(
+        issue(
+          "BROCHURE_SELLING_VALIDITY_PENDING",
+          "blocker",
+          "Accommodation",
+          "Selling validity is required before provisional Brochure hotel reference prices can be published.",
+        ),
+      );
+    }
+    draft.hotel_options.forEach((option) => {
+      const nights = accommodationNightsForOption(draft.routing, option);
+      if (!nights.length && !option.selections.length) return;
+      if (!option.category && nights.length > 0) {
+        issues.push(
+          issue(
+            `BROCHURE_CATEGORY_REQUIRED_${option.key}`,
+            "blocker",
+            "Accommodation",
+            `Option ${option.key}: select a Hotel Category.`,
+          ),
+        );
+      }
+      nights.forEach((day) => {
+        const selection = hotelSelectionForDay(option, day, true);
+        if (selection?.no_hotel) return;
+        if (!selection?.hotel_id) {
+          issues.push(
+            issue(
+              `BROCHURE_HOTEL_REQUIRED_${option.key}_${day.day}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day}: select a Hotel Master record for the overnight city.`,
+            ),
+          );
+          return;
+        }
+        const hotel = db.hotels.find((item) => item.id === selection.hotel_id);
+        const routedCity = resolveAccommodationCity(day, db.cities, db.destination_cities);
+        const cityMatches = routedCity?.id
+          ? hotel?.city_id === routedCity.id
+          : !selection.city_id || hotel?.city_id === selection.city_id;
+        if (!hotel || hotel.hotel_category !== option.category || !cityMatches) {
+          issues.push(
+            issue(
+              `BROCHURE_HOTEL_MISMATCH_${option.key}_${day.day}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day}: the selected hotel no longer matches the routed city and option category. Re-select the hotel.`,
+            ),
+          );
+          return;
+        }
+        const resolution = draft.has_dates === false
+          ? undefined
+          : brochureRateForNight(
+              draft,
+              selection.hotel_id,
+              day,
+              draft.routing.indexOf(day),
+              db.brochure_hotel_rates,
+            );
+        if (resolution && resolution.status !== "covered") {
+          issues.push(
+            issue(
+              `BROCHURE_RATE_COVERAGE_${option.key}_${day.day}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}, Day ${day.day} (${hotel.name}): ${brochureRateResolutionMessage(resolution)}`,
+            ),
+          );
+        }
+      });
+      if (draft.has_dates === false && nights.some((day) => !hotelSelectionForDay(option, day, true)?.no_hotel)) {
+        const bands = brochureDepartureRateScenarios(draft, db);
+        const coveredBands = bands.filter((band) => (band.options[option.key]?.missing ?? 1) === 0);
+        if (!coveredBands.length) {
+          issues.push(
+            issue(
+              `BROCHURE_RATE_COVERAGE_${option.key}`,
+              "blocker",
+              "Accommodation",
+              `Option ${option.key}: no departure-date band in the Brochure selling validity is fully covered by every selected hotel's Per Night rates. See Step 8 for uncovered periods.`,
+            ),
+          );
+        }
+      }
+    });
   }
   if (pax < 1) {
     issues.push(
@@ -309,6 +417,7 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
   }
 
   const splitAccommodation = isSplitAccommodation(draft);
+  const brochureAccommodation = draft.query_type === "Brochure" && scope.accommodationPart;
   const splitAllocation = splitAccommodationAllocation(draft);
   if (requiresAccommodation && splitAccommodation) {
     if (splitAllocation.excess > 0) {
@@ -344,11 +453,13 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       }
     });
   }
-  const selectedOptions = draft.hotel_options.filter(
-    (option) =>
-      (splitAccommodation || included.has(option.key)) &&
-      (!splitAccommodation || effectiveAccommodationPax(draft, option) > 0),
-  );
+  const selectedOptions = brochureAccommodation
+    ? draft.hotel_options.slice(0, 4)
+    : draft.hotel_options.filter(
+        (option) =>
+          (splitAccommodation || included.has(option.key)) &&
+          (!splitAccommodation || effectiveAccommodationPax(draft, option) > 0),
+      );
   if (requiresAccommodation && !selectedOptions.length) {
     issues.push(
       issue(
@@ -362,17 +473,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
 
   if (requiresAccommodation)
     selectedOptions.forEach((option) => {
-      if (draft.query_type === "Brochure" && draft.has_dates === false) {
-        issues.push(
-          issue(
-            `BROCHURE_DEPARTURE_DATE_PENDING_${option.key}`,
-            "warning",
-            "Accommodation",
-            `Option ${option.key}: Hotel Master rates are not validated until a specific Brochure departure date is selected.`,
-          ),
-        );
-        return;
-      }
+      // Brochure hotel-specific approximate rates are resolved above against
+      // their own selling validity; never fall through to supplier room rates.
+      if (draft.query_type === "Brochure") return;
       accommodationNightsForOption(draft.routing, option).forEach((day) => {
         const dynamic = isDynamicAccommodationMode(draft);
         const selection = hotelSelectionForDay(option, day, true);
@@ -541,7 +644,10 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       });
     });
 
-  const scenarioOptions = requiresAccommodation ? selectedOptions : draft.hotel_options.slice(0, 1);
+  const scenarioOptions =
+    requiresAccommodation || brochureAccommodation
+      ? selectedOptions
+      : draft.hotel_options.slice(0, 1);
   const scenarioDefs: CostScenario[] =
     draft.scenarios?.length && !draft.transport_options?.length
       ? draft.scenarios.filter(
@@ -580,7 +686,9 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
     (count, rows) => count + rows.length,
     0,
   );
-  if (selectedRateRows === 0) {
+  // A Brochure snapshot captures every valid matrix row automatically. Its
+  // Pax range is the authorisation, not a B2B/B2C-style checkbox selection.
+  if (draft.query_type !== "Brochure" && selectedRateRows === 0) {
     issues.push(
       issue(
         "RATE_SHEET_ROW_REQUIRED",
@@ -590,7 +698,31 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
       ),
     );
   }
-  validScenarios.forEach((result) => {
+  if (draft.query_type === "Brochure") {
+    const brochureRows = scenarioOptions.flatMap((option) =>
+      buildRateSheet(draft, db, option, draft.transport).flatMap((group) => group.rows),
+    );
+    const validBrochureRows = brochureRows.filter((row) => {
+      const accommodationPrices = [row.single, row.double, row.triple, row.quad];
+      return requiresAccommodation
+        ? accommodationPrices.some((price) => Number.isFinite(price) && price > 0)
+        : [row.pkg_single, row.pkg_double, row.pkg_triple, row.pkg_quad].some(
+            (price) => Number.isFinite(price) && price > 0,
+          );
+    });
+    if (!validBrochureRows.length) {
+      issues.push(
+        issue(
+          "BROCHURE_PRICED_ROW_REQUIRED",
+          "blocker",
+          "Costing",
+          "No fully priced Brochure matrix row is available. Resolve the displayed accommodation or supplier-rate coverage before saving.",
+        ),
+      );
+    }
+  }
+  if (!(draft.query_type === "Brochure" && draft.has_dates === false))
+    validScenarios.forEach((result) => {
     if (!result) return;
     if (result.rate_missing > 0) {
       issues.push(
@@ -622,7 +754,7 @@ export function validateQuoteForFinalization(draft: QuoteDraft, db: DB): QuoteVa
         ),
       );
     }
-  });
+    });
 
   if (draft.revision_of_quote_id && !draft.revision_reason?.trim()) {
     issues.push(
