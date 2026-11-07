@@ -46,6 +46,7 @@ import { Route as AuthenticatedTravelsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedUsersRolesRouteImport } from './routes/_authenticated/users-roles'
 import { Route as AuthenticatedAgentContactsIdRouteImport } from './routes/_authenticated/agent-contacts/$id'
 import { Route as AuthenticatedAgentsIdRouteImport } from './routes/_authenticated/agents/$id'
+import { Route as AuthenticatedBrochuresItineraryMasterRouteImport } from './routes/_authenticated/brochures/itinerary-master'
 import { Route as AuthenticatedClientsIdRouteImport } from './routes/_authenticated/clients/$id'
 import { Route as AuthenticatedHotelsIndexRouteImport } from './routes/_authenticated/hotels/index'
 import { Route as AuthenticatedHotelsIdRouteImport } from './routes/_authenticated/hotels/$id'
@@ -264,6 +265,12 @@ const AuthenticatedAgentsIdRoute = AuthenticatedAgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AuthenticatedAgentsRoute,
 } as any)
+const AuthenticatedBrochuresItineraryMasterRoute =
+  AuthenticatedBrochuresItineraryMasterRouteImport.update({
+    id: '/itinerary-master',
+    path: '/itinerary-master',
+    getParentRoute: () => AuthenticatedBrochuresRoute,
+  } as any)
 const AuthenticatedClientsIdRoute = AuthenticatedClientsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -399,7 +406,7 @@ export interface FileRoutesByFullPath {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/brochures': typeof AuthenticatedBrochuresRoute
+  '/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -430,6 +437,7 @@ export interface FileRoutesByFullPath {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -459,7 +467,7 @@ export interface FileRoutesByTo {
   '/activities': typeof AuthenticatedActivitiesRoute
   '/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/brochures': typeof AuthenticatedBrochuresRoute
+  '/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/clients': typeof AuthenticatedClientsRouteWithChildren
   '/costing': typeof AuthenticatedCostingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -490,6 +498,7 @@ export interface FileRoutesByTo {
   '/users-roles': typeof AuthenticatedUsersRolesRoute
   '/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -521,7 +530,7 @@ export interface FileRoutesById {
   '/_authenticated/activities': typeof AuthenticatedActivitiesRoute
   '/_authenticated/admin-console': typeof AuthenticatedAdminConsoleRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRouteWithChildren
-  '/_authenticated/brochures': typeof AuthenticatedBrochuresRoute
+  '/_authenticated/brochures': typeof AuthenticatedBrochuresRouteWithChildren
   '/_authenticated/clients': typeof AuthenticatedClientsRouteWithChildren
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
@@ -552,6 +561,7 @@ export interface FileRoutesById {
   '/_authenticated/users-roles': typeof AuthenticatedUsersRolesRoute
   '/_authenticated/agent-contacts/$id': typeof AuthenticatedAgentContactsIdRoute
   '/_authenticated/agents/$id': typeof AuthenticatedAgentsIdRoute
+  '/_authenticated/brochures/itinerary-master': typeof AuthenticatedBrochuresItineraryMasterRoute
   '/_authenticated/clients/$id': typeof AuthenticatedClientsIdRoute
   '/_authenticated/hotels/$id': typeof AuthenticatedHotelsIdRoute
   '/_authenticated/queries/$id': typeof AuthenticatedQueriesIdRoute
@@ -614,6 +624,7 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/agent-contacts/$id'
     | '/agents/$id'
+    | '/brochures/itinerary-master'
     | '/clients/$id'
     | '/hotels/$id'
     | '/queries/$id'
@@ -674,6 +685,7 @@ export interface FileRouteTypes {
     | '/users-roles'
     | '/agent-contacts/$id'
     | '/agents/$id'
+    | '/brochures/itinerary-master'
     | '/clients/$id'
     | '/hotels/$id'
     | '/queries/$id'
@@ -735,6 +747,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users-roles'
     | '/_authenticated/agent-contacts/$id'
     | '/_authenticated/agents/$id'
+    | '/_authenticated/brochures/itinerary-master'
     | '/_authenticated/clients/$id'
     | '/_authenticated/hotels/$id'
     | '/_authenticated/queries/$id'
@@ -1026,6 +1039,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAgentsIdRouteImport
       parentRoute: typeof AuthenticatedAgentsRoute
     }
+    '/_authenticated/brochures/itinerary-master': {
+      id: '/_authenticated/brochures/itinerary-master'
+      path: '/itinerary-master'
+      fullPath: '/brochures/itinerary-master'
+      preLoaderRoute: typeof AuthenticatedBrochuresItineraryMasterRouteImport
+      parentRoute: typeof AuthenticatedBrochuresRoute
+    }
     '/_authenticated/clients/$id': {
       id: '/_authenticated/clients/$id'
       path: '/$id'
@@ -1194,6 +1214,21 @@ const AuthenticatedAgentsRouteChildren: AuthenticatedAgentsRouteChildren = {
 const AuthenticatedAgentsRouteWithChildren =
   AuthenticatedAgentsRoute._addFileChildren(AuthenticatedAgentsRouteChildren)
 
+interface AuthenticatedBrochuresRouteChildren {
+  AuthenticatedBrochuresItineraryMasterRoute: typeof AuthenticatedBrochuresItineraryMasterRoute
+}
+
+const AuthenticatedBrochuresRouteChildren: AuthenticatedBrochuresRouteChildren =
+  {
+    AuthenticatedBrochuresItineraryMasterRoute:
+      AuthenticatedBrochuresItineraryMasterRoute,
+  }
+
+const AuthenticatedBrochuresRouteWithChildren =
+  AuthenticatedBrochuresRoute._addFileChildren(
+    AuthenticatedBrochuresRouteChildren,
+  )
+
 interface AuthenticatedClientsRouteChildren {
   AuthenticatedClientsIdRoute: typeof AuthenticatedClientsIdRoute
 }
@@ -1223,7 +1258,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivitiesRoute: typeof AuthenticatedActivitiesRoute
   AuthenticatedAdminConsoleRoute: typeof AuthenticatedAdminConsoleRoute
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRouteWithChildren
-  AuthenticatedBrochuresRoute: typeof AuthenticatedBrochuresRoute
+  AuthenticatedBrochuresRoute: typeof AuthenticatedBrochuresRouteWithChildren
   AuthenticatedClientsRoute: typeof AuthenticatedClientsRouteWithChildren
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
@@ -1279,7 +1314,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivitiesRoute: AuthenticatedActivitiesRoute,
   AuthenticatedAdminConsoleRoute: AuthenticatedAdminConsoleRoute,
   AuthenticatedAgentsRoute: AuthenticatedAgentsRouteWithChildren,
-  AuthenticatedBrochuresRoute: AuthenticatedBrochuresRoute,
+  AuthenticatedBrochuresRoute: AuthenticatedBrochuresRouteWithChildren,
   AuthenticatedClientsRoute: AuthenticatedClientsRouteWithChildren,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,

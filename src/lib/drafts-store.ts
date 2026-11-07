@@ -5,6 +5,7 @@ import { normalizeDraft } from "./wizard/store";
 import { getQuotationScope } from "./query-for";
 
 const KEY = "mp_tourism_drafts";
+const SESSION_KEY = "mp_tourism_drafts_session";
 const LEGACY_KEY = "mp_tourism_draft_quote";
 
 export interface DraftRecord {
@@ -51,6 +52,18 @@ const isBrowser = () => typeof window !== "undefined";
 const listeners = new Set<() => void>();
 let cache: DraftRecord[] = [];
 let inited = false;
+let lastStorageNotice: string | null = null;
+
+export function getDraftStorageNotice(): string | null {
+  return lastStorageNotice;
+}
+
+function isQuotaError(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+  );
+}
 
 function read(): DraftRecord[] {
   if (!isBrowser()) {
@@ -58,7 +71,13 @@ function read(): DraftRecord[] {
   }
   if (inited) return cache;
   try {
-    const list = JSON.parse(localStorage.getItem(KEY) || "[]") as DraftRecord[];
+    // A session copy is newer only when localStorage could not accept the last
+    // write. Prefer it so a refresh does not silently roll back that draft.
+    const raw =
+      (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(SESSION_KEY) : null) ||
+      localStorage.getItem(KEY) ||
+      "[]";
+    const list = JSON.parse(raw) as DraftRecord[];
     cache = Array.isArray(list) ? list : [];
     inited = true;
     return cache;
@@ -77,7 +96,29 @@ function getSnapshot(): DraftRecord[] {
 
 function writeAll(list: DraftRecord[]) {
   if (!isBrowser()) return;
-  localStorage.setItem(KEY, JSON.stringify(list));
+  const serialized = JSON.stringify(list);
+  try {
+    localStorage.setItem(KEY, serialized);
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(SESSION_KEY);
+    lastStorageNotice = null;
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+    try {
+      // Do not delete or overwrite old local drafts to make room. This keeps
+      // the current edit recoverable for the rest of the browser session.
+      if (typeof sessionStorage === "undefined") throw error;
+      sessionStorage.setItem(SESSION_KEY, serialized);
+      lastStorageNotice =
+        "Browser local storage is full. This draft is saved for this browser session only; export it or free storage before closing the browser.";
+    } catch (sessionError) {
+      if (isQuotaError(sessionError)) {
+        throw new Error(
+          "Draft storage is full. Your existing drafts were not changed and this save could not be stored. Export or remove unneeded browser data, then try again.",
+        );
+      }
+      throw sessionError;
+    }
+  }
   cache = list;
   inited = true;
   listeners.forEach((listener) => listener());
@@ -106,27 +147,31 @@ export function upsertDraft(state: QuoteDraft, id?: string, name?: string): stri
   if (id) {
     const idx = list.findIndex((d) => d.id === id);
     if (idx >= 0) {
-      list[idx] = {
+      const next = [...list];
+      next[idx] = {
         ...list[idx],
         draft_name: name || list[idx].draft_name || deriveName(state),
         updated_at: now,
         last_step: completedStepForScope(list[idx], state),
         wizard_state: cloneDraft(state),
       };
-      writeAll(list);
+      writeAll(next);
       return id;
     }
   }
   const newId = id || uid();
-  list.unshift({
-    id: newId,
-    draft_name: name || deriveName(state),
-    created_at: now,
-    updated_at: now,
-    last_step: state.step,
-    wizard_state: cloneDraft(state),
-  });
-  writeAll(list);
+  const next = [
+    {
+      id: newId,
+      draft_name: name || deriveName(state),
+      created_at: now,
+      updated_at: now,
+      last_step: state.step,
+      wizard_state: cloneDraft(state),
+    },
+    ...list,
+  ];
+  writeAll(next);
   return newId;
 }
 

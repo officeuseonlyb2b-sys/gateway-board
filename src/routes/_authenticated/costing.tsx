@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
@@ -76,6 +76,7 @@ import {
   deleteDraft,
   migrateLegacyDraft,
   completedStepForScope,
+  getDraftStorageNotice,
   type DraftRecord,
 } from "@/lib/drafts-store";
 import { addNotification } from "@/lib/notifications-store";
@@ -91,13 +92,22 @@ import type {
 import { accommodationNightsForOption, hotelSelectionForDay } from "@/lib/wizard/types";
 import { emptyDraft } from "@/lib/wizard/types";
 import {
-  addProgram,
+  brochureDraftFromProgramme,
+  prepareBrochureProgrammeSelection,
+  routingFromProgramme,
+} from "@/lib/wizard/brochure-program";
+import {
   getPrograms,
-  nextProgramCode,
   useAgents,
   usePrograms,
   type Agent,
+  type ProgramRoutingRow,
 } from "@/lib/wizard/agents-store";
+import {
+  customizedRoutingSaveErrors,
+  saveCustomizedRoutingToItineraryMaster,
+} from "@/lib/wizard/customized-routing-save";
+import { listExplicitlySavedRoutingProgrammes } from "@/lib/itineraries-store";
 import {
   computeAddonsTotal,
   totalPax,
@@ -128,16 +138,14 @@ import {
 import { computeScenario } from "@/lib/wizard/scenario";
 import { buildLandPart } from "@/lib/wizard/costsheet";
 import { isRoutingReady, validateQuoteForFinalization } from "@/lib/wizard/validation";
+import { brochureSellingValidityError } from "@/lib/wizard/brochure-validation";
 
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { getSavedQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
 import { createBrochureFromQuote } from "@/lib/brochures-store";
 import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
-import {
-  getQueryQuotationDraft,
-  upsertQueryQuotationDraft,
-} from "@/lib/crm/store";
+import { getQueryQuotationDraft, upsertQueryQuotationDraft } from "@/lib/crm/store";
 import { finalizeQuotationVersion } from "@/lib/crm/crm-remote";
 import { useAccessProfile, useAccessibleQueries } from "@/lib/crm/access";
 import type { CrmQuery } from "@/lib/crm/types";
@@ -182,11 +190,15 @@ import { mapQueryToQuotationTravellers } from "@/lib/wizard/query-quotation-map"
 
 export const Route = createFileRoute("/_authenticated/costing")({
   head: () => ({ meta: [{ title: "New Quotation — MP Tourism Hub" }] }),
-  validateSearch: (s: Record<string, unknown>): { id?: string; queryId?: string } => ({
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { id?: string; queryId?: string; programId?: string; step?: number } => ({
     id: typeof s.id === "string" ? s.id : undefined,
     queryId: typeof s.queryId === "string" ? s.queryId : undefined,
+    programId: typeof s.programId === "string" ? s.programId : undefined,
+    step: Number(s.step) === 5 ? 5 : undefined,
   }),
-  component: WizardPage,
+  component: () => <WizardPage workflowMode="quotation" />,
 });
 
 // ============================================================
@@ -262,100 +274,6 @@ const CATEGORY_TAGS = [
   "Honeymoon",
   "Family",
 ];
-function ensureProgramInMaster(
-  draft: QuoteDraft,
-  db: ReturnType<typeof useDB>,
-  savedBy: string,
-  persist = true,
-): QuoteDraft {
-  const saveCustomizedCopy = draft.program_mode === "existing" && draft.save_program_as_new;
-  const shouldCreate = draft.program_mode === "new" || saveCustomizedCopy;
-  const targetName = (
-    saveCustomizedCopy || draft.program_mode === "new" ? draft.new_program_name : draft.program_name
-  )?.trim();
-  if (!shouldCreate || !targetName) return draft;
-  const duplicateName = getPrograms().find(
-    (program) => program.name.trim().toLocaleLowerCase() === targetName.toLocaleLowerCase(),
-  );
-  if (duplicateName) {
-    throw new Error(
-      `Programme “${duplicateName.name}” already exists (${duplicateName.code}). Select it instead of creating a duplicate.`,
-    );
-  }
-  const requestedCode = (
-    (saveCustomizedCopy ? draft.new_program_code : draft.program_code) || nextProgramCode()
-  )
-    .trim()
-    .toUpperCase();
-  // A new/customized routing never overwrites a master, even if somebody
-  // manually reuses an existing code.
-  const conflict = getPrograms().find((program) => program.code === requestedCode);
-  const code = conflict ? nextProgramCode() : requestedCode;
-  if (conflict)
-    toast.warning(
-      `${requestedCode} already belongs to “${conflict.name}”. Saved the new routing as ${code}.`,
-    );
-  const cityName = (id?: string) => db.cities.find((city) => city.id === id)?.name || "";
-  const cities = Array.from(
-    new Set(
-      draft.routing
-        .flatMap((day) => [
-          cityName(day.city_id),
-          cityName(day.to_city_id),
-          day.from_city || "",
-          day.to_city || "",
-        ])
-        .filter(Boolean),
-    ),
-  );
-  const routing = draft.routing.map((day) => ({
-    day: day.day,
-    overnight_city: day.overnight ? cityName(day.city_id) || day.to_city || null : null,
-    program_text: day.program || "",
-    from_city: day.from_city,
-    destination_city: cityName(day.to_city_id) || day.to_city,
-  }));
-  const routingSummary =
-    cities.join(" → ") ||
-    draft.routing
-      .map((day) => day.program)
-      .filter(Boolean)
-      .join(" · ");
-  if (persist) {
-    addProgram({
-      id: code,
-      code,
-      name: targetName,
-      nights: draft.nights,
-      days: Math.max(1, draft.nights + 1),
-      duration_label: `${draft.nights} Nights & ${draft.nights + 1} Days`,
-      routing_summary: routingSummary,
-      routing,
-      cities,
-      categories: draft.categories,
-      departure_city: cityName(draft.departure_city) || draft.departure_city,
-      travel_modes: draft.travel_modes,
-      inclusions: draft.inclusions,
-      exclusions: draft.exclusions,
-      source: "Quotation Builder",
-      status: "Active",
-      created_by: savedBy,
-    });
-  }
-  const updated = {
-    ...draft,
-    program_id: code,
-    program_code: code,
-    program_name: targetName,
-    program_mode: "existing" as const,
-    save_program_as_new: false,
-    new_program_code: "",
-    new_program_name: "",
-  };
-  if (persist) writeDraft(updated);
-  return updated;
-}
-
 /** Major Indian cities available for "Guest Travelling From" */
 const INDIAN_CITIES = [
   "Agra",
@@ -463,6 +381,9 @@ const INTERNATIONAL_CITIES = [
 // Root
 // ============================================================
 function syncLinkedQueryPaxRange(draft: QuoteDraft, linkedQuery?: CrmQuery): QuoteDraft {
+  // Legacy Brochure drafts may retain a historic query link, but their
+  // Programme/routing/range identity must never be hydrated from CRM.
+  if (draft.query_type === "Brochure") return draft;
   if (!draft.linked_query_id) return draft;
   // A persisted explicit mode is authoritative; do not overwrite a user's
   // deliberate Exact selection from the linked Query during reload.
@@ -515,13 +436,20 @@ function quotationOperationDiagnostic(operation: string, error: unknown) {
   return `Quotation Builder · ${operation} failed (${kind}${reference ? `, ${reference}` : ""}). ${rawMessage}`;
 }
 
-function WizardPage() {
+export function WizardPage({
+  workflowMode = "quotation",
+}: {
+  workflowMode?: "quotation" | "brochure";
+}) {
   const draft = useDraft();
   const dbData = useDB();
   const user = useAuth();
   const access = useAccessProfile();
   const accessibleQueries = useAccessibleQueries();
-  const search = Route.useSearch();
+  const search = useRouterState({
+    select: (state) =>
+      state.location.search as { id?: string; queryId?: string; programId?: string; step?: number },
+  });
   const navigate = useNavigate();
 
   const [showBanner, setShowBanner] = useState(false);
@@ -531,21 +459,45 @@ function WizardPage() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isDraftSaving, setIsDraftSaving] = useState(false);
   const saveInFlightRef = useRef(false);
+  const routingSaveInFlightRef = useRef(false);
   const [lastSavedDraftFingerprint, setLastSavedDraftFingerprint] = useState<string | null>(null);
   const [reviewDraft, setReviewDraft] = useState<DraftRecord | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [sub, setSub] = useState(0);
+  const startNewDraft = () => {
+    if (workflowMode !== "brochure") {
+      initDraft();
+      return;
+    }
+    const next = emptyDraft();
+    writeDraft({
+      ...next,
+      query_type: "Brochure",
+      query_for: "Package",
+      commercial_mode: "package",
+      has_dates: false,
+      tour_type: "Brochure",
+      brochure: { ...next.brochure, tour_type: "Brochure" },
+    });
+  };
   const scope = useMemo(
     () => getQuotationScope(draft?.query_for, draft?.commercial_mode),
     [draft?.query_for, draft?.commercial_mode],
   );
   const workflowSteps = scope.workflowSteps;
   const workflowStepSet = new Set<number>(workflowSteps);
+  const step = resolveQuotationStep(draft?.step ?? 1, workflowSteps);
   const visibleSteps = workflowSteps.map((stepNumber) =>
     stepNumber === 8 && scope.mealsPart && !scope.accommodationPart
       ? { n: 8, label: "Meals", subs: undefined }
-      : STEPS[stepNumber - 1],
+      : workflowMode === "brochure" && stepNumber === 2
+        ? { ...STEPS[stepNumber - 1], label: "Program" }
+        : workflowMode === "brochure" && stepNumber === 4
+          ? { ...STEPS[stepNumber - 1], label: "Program Review" }
+          : STEPS[stepNumber - 1],
   );
+  const currentStepLabel =
+    visibleSteps.find((item) => item.n === step)?.label ?? STEPS[step - 1].label;
   const visibleFlowGroups = FLOW_GROUPS.map((group) => ({
     ...group,
     label: !scope.program && group.label === "Program & Routing" ? "Routing" : group.label,
@@ -555,7 +507,6 @@ function WizardPage() {
         : group.description,
     steps: group.steps.filter((stepNumber) => workflowStepSet.has(stepNumber)),
   })).filter((group) => group.steps.length > 0);
-  const step = resolveQuotationStep(draft?.step ?? 1, workflowSteps);
   const stepPosition = workflowSteps.findIndex((candidate) => candidate === step) + 1;
   const activeDraftRecord = currentDraftId ? getDraft(currentDraftId) : null;
   const reachedThroughStep = draft ? completedStepForScope(activeDraftRecord, draft) : step;
@@ -576,11 +527,12 @@ function WizardPage() {
     () => (draft ? validateQuoteForFinalization(draft, dbData) : null),
     [draft, dbData],
   );
-  const linkedQuery = draft?.linked_query_id
-    ? accessibleQueries.find(
-        (query) => query.query_id === draft.linked_query_id || query.id === draft.linked_query_id,
-      )
-    : undefined;
+  const linkedQuery =
+    draft?.query_type !== "Brochure" && draft?.linked_query_id
+      ? accessibleQueries.find(
+          (query) => query.query_id === draft.linked_query_id || query.id === draft.linked_query_id,
+        )
+      : undefined;
   const programmes = usePrograms();
   const duplicateProgramme =
     draft?.program_mode === "new" && draft.new_program_name?.trim()
@@ -616,29 +568,40 @@ function WizardPage() {
       : []),
   ];
   const isBrochure = draft?.query_type === "Brochure";
-  const finalizationBlockers = isBrochure ? [
-    ...(!draft?.program_id ? ["Programme: Select a canonical Programme before saving a Brochure pricing snapshot."] : []),
-    ...(unchangedFromSavedVersion ? ["Snapshot: This exact Brochure draft is already saved. Change the draft before saving another snapshot."] : []),
-  ] : [
-    ...(!access.employee
-      ? [
-          "Permission: An active linked CRM employee is required to save an official costing version.",
-        ]
-      : []),
-    ...(!draft?.linked_query_id
-      ? ["Linked Query: Link this quotation to a CRM Query before saving a costing version."]
-      : []),
-    ...(draft?.linked_query_id && !linkedQuery
-      ? [
-          "Linked Query: The canonical CRM Query record could not be resolved. Refresh and try again.",
-        ]
-      : []),
-    ...(unchangedFromSavedVersion
-      ? [
-          "Snapshot: This exact costing is already saved. Change the draft before creating the next version.",
-        ]
-      : []),
-  ];
+  const brochureValidityError = draft ? brochureSellingValidityError(draft) : undefined;
+  const finalizationBlockers = isBrochure
+    ? [
+        ...(!draft?.program_id
+          ? ["Programme: Select a canonical Programme before saving a Brochure pricing snapshot."]
+          : []),
+        ...(unchangedFromSavedVersion
+          ? [
+              "Snapshot: This exact Brochure draft is already saved. Change the draft before saving another snapshot.",
+            ]
+          : []),
+        ...(brochureValidityError ? [brochureValidityError] : []),
+        ...(finalizationReview?.blockers.map((item) => `${item.section}: ${item.message}`) ?? []),
+      ]
+    : [
+        ...(!access.employee
+          ? [
+              "Permission: An active linked CRM employee is required to save an official costing version.",
+            ]
+          : []),
+        ...(!draft?.linked_query_id
+          ? ["Linked Query: Link this quotation to a CRM Query before saving a costing version."]
+          : []),
+        ...(draft?.linked_query_id && !linkedQuery
+          ? [
+              "Linked Query: The canonical CRM Query record could not be resolved. Refresh and try again.",
+            ]
+          : []),
+        ...(unchangedFromSavedVersion
+          ? [
+              "Snapshot: This exact costing is already saved. Change the draft before creating the next version.",
+            ]
+          : []),
+      ];
   const canFinalize = step === 10 && finalizationBlockers.length === 0;
   const nextOfficialVersion = linkedQuery
     ? Math.max(0, ...(linkedQuery.costing_versions ?? []).map((item) => item.version)) + 1
@@ -671,7 +634,24 @@ function WizardPage() {
   useEffect(() => {
     if (initialized) return;
     migrateLegacyDraft();
-    if (search.queryId) {
+    if (search.programId && workflowMode === "brochure") {
+      const programme = getPrograms().find((candidate) => candidate.id === search.programId);
+      if (!programme) {
+        toast.error("The selected Programme Master record is no longer available.");
+      } else {
+        const cityIdForName = (name: string | null | undefined) =>
+          name
+            ? dbData.cities.find(
+                (city) => city.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+              )?.id || ""
+            : "";
+        writeDraft(brochureDraftFromProgramme(programme, cityIdForName));
+        setCurrentDraftId(null);
+        setInitialized(true);
+        return;
+      }
+    }
+    if (search.queryId && workflowMode === "quotation") {
       const query = accessibleQueries.find(
         (candidate) => candidate.query_id === search.queryId || candidate.id === search.queryId,
       );
@@ -742,6 +722,18 @@ function WizardPage() {
     if (search.id) {
       const rec = getDraft(search.id);
       if (rec) {
+        if ((rec.wizard_state.query_type === "Brochure") !== (workflowMode === "brochure")) {
+          toast.error(
+            rec.wizard_state.query_type === "Brochure"
+              ? "This is a Brochure draft. Open it from Draft Brochures."
+              : "This is a quotation draft. Open it from Draft Quotations.",
+          );
+          navigate({
+            to: rec.wizard_state.query_type === "Brochure" ? "/brochures/drafts" : "/drafts",
+          });
+          setInitialized(true);
+          return;
+        }
         const synced = syncLinkedQueryPaxRange(
           rec.wizard_state,
           accessibleQueries.find(
@@ -750,13 +742,21 @@ function WizardPage() {
               query.id === rec.wizard_state.linked_query_id,
           ),
         );
-        writeDraft(synced);
+        writeDraft(search.step === 5 ? { ...synced, step: 5 } : synced);
         setCurrentDraftId(rec.id);
         setInitialized(true);
         return;
       }
       const cloudDraft = getQueryQuotationDraft(search.id);
       if (cloudDraft) {
+        if (workflowMode === "brochure" || cloudDraft.draft_data.query_type === "Brochure") {
+          toast.error("This draft belongs to the other costing workspace.");
+          navigate({
+            to: cloudDraft.draft_data.query_type === "Brochure" ? "/brochures/drafts" : "/drafts",
+          });
+          setInitialized(true);
+          return;
+        }
         const synced = syncLinkedQueryPaxRange(
           cloudDraft.draft_data,
           accessibleQueries.find(
@@ -765,28 +765,52 @@ function WizardPage() {
               query.id === cloudDraft.draft_data.linked_query_id,
           ),
         );
-        writeDraft(synced);
-        upsertDraft(synced, cloudDraft.id, cloudDraft.draft_name);
+        const resumed = search.step === 5 ? { ...synced, step: 5 } : synced;
+        writeDraft(resumed);
+        upsertDraft(resumed, cloudDraft.id, cloudDraft.draft_name);
         setCurrentDraftId(cloudDraft.id);
         setInitialized(true);
         return;
       }
     }
     const existing = draft || loadDraft();
-    if (existing) {
+    if (existing && (existing.query_type === "Brochure") === (workflowMode === "brochure")) {
       const hydrated = syncLinkedQueryPaxRange(
         existing,
         accessibleQueries.find(
-          (query) => query.query_id === existing.linked_query_id || query.id === existing.linked_query_id,
+          (query) =>
+            query.query_id === existing.linked_query_id || query.id === existing.linked_query_id,
         ),
       );
       if (hydrated !== existing) writeDraft(hydrated);
       setShowBanner(true);
     } else {
-      initDraft();
+      const next = emptyDraft();
+      if (workflowMode === "brochure") {
+        writeDraft({
+          ...next,
+          query_type: "Brochure",
+          query_for: "Package",
+          commercial_mode: "package",
+          has_dates: false,
+          tour_type: "Brochure",
+          brochure: { ...next.brochure, tour_type: "Brochure" },
+        });
+      } else startNewDraft();
     }
     setInitialized(true);
-  }, [initialized, search.id, search.queryId, draft, accessibleQueries]);
+  }, [
+    initialized,
+    search.id,
+    search.queryId,
+    search.programId,
+    search.step,
+    draft,
+    accessibleQueries,
+    workflowMode,
+    dbData.cities,
+    startNewDraft,
+  ]);
 
   useEffect(() => {
     if (!draft) return;
@@ -796,6 +820,7 @@ function WizardPage() {
     }
     setActiveWizard({
       draftId: currentDraftId,
+      workflowMode,
       programName:
         draft.program_name ||
         (draft.query_type === "B2B"
@@ -807,7 +832,7 @@ function WizardPage() {
       step,
       savedAt: draft.updated_at,
     });
-  }, [draft, currentDraftId, step]);
+  }, [draft, currentDraftId, step, workflowMode]);
 
   // Keep a resumable named draft in sync after the recipient is known. The
   // generated quote is written separately and is never used as an editable draft.
@@ -815,10 +840,16 @@ function WizardPage() {
     if (!initialized || !draft || (step < 2 && !currentDraftId)) return;
     const timer = window.setTimeout(() => {
       const state = draft.step === step ? draft : { ...draft, step };
-      const id = upsertDraft(state, currentDraftId ?? undefined);
-      if (!currentDraftId) setCurrentDraftId(id);
+      let id: string;
+      try {
+        id = upsertDraft(state, currentDraftId ?? undefined);
+        if (!currentDraftId) setCurrentDraftId(id);
+      } catch (error) {
+        console.warn("Background draft save failed", error);
+        return;
+      }
       const employee = access.employee;
-      if (state.linked_query_id && employee) {
+      if (state.query_type !== "Brochure" && state.linked_query_id && employee) {
         const existing = getQueryQuotationDraft(id);
         upsertQueryQuotationDraft(state.linked_query_id, {
           id,
@@ -845,14 +876,46 @@ function WizardPage() {
   if (!draft) {
     return (
       <div className="p-8">
-        <Button onClick={() => initDraft()}>Start Quotation</Button>
+        <Button onClick={startNewDraft}>
+          Start {workflowMode === "brochure" ? "Brochure Costing" : "Quotation"}
+        </Button>
       </div>
     );
   }
 
   const set = (patch: Partial<QuoteDraft>) => {
     const current = loadDraft() ?? draft;
-    const next = { ...current, ...patch };
+    const customizedRoutingFields: (keyof QuoteDraft)[] = [
+      "new_program_name",
+      "new_program_code",
+      "program_name",
+      "program_code",
+      "program_id",
+      "categories",
+      "tour_start_city",
+      "tour_end_city",
+      "departure_city",
+      "nights",
+      "routing",
+    ];
+    const customizedRoutingChanged = Boolean(
+      current.customized_routing_saved &&
+      customizedRoutingFields.some(
+        (key) =>
+          patch[key] !== undefined && JSON.stringify(patch[key]) !== JSON.stringify(current[key]),
+      ),
+    );
+    const next = {
+      ...current,
+      ...patch,
+      ...(customizedRoutingChanged && patch.customized_routing_saved !== true
+        ? {
+            customized_routing_saved: false,
+            customized_routing_itinerary_id: undefined,
+            program_id: undefined,
+          }
+        : {}),
+    };
     const tripDatesChanged =
       (patch.start_date !== undefined && patch.start_date !== current.start_date) ||
       (patch.nights !== undefined && patch.nights !== current.nights) ||
@@ -873,13 +936,16 @@ function WizardPage() {
     );
   };
 
-  const persistToDrafts = (nextState: QuoteDraft, opts?: { silent?: boolean; name?: string }) => {
+  const persistToDrafts = (
+    nextState: QuoteDraft,
+    opts?: { silent?: boolean; name?: string; id?: string },
+  ) => {
     flushDraftPersistence();
-    const id = upsertDraft(nextState, currentDraftId ?? undefined, opts?.name);
+    const id = upsertDraft(nextState, opts?.id ?? currentDraftId ?? undefined, opts?.name);
     if (!getDraft(id)) throw new Error("Draft could not be verified after saving.");
     if (!currentDraftId) setCurrentDraftId(id);
     const employee = access.employee;
-    if (nextState.linked_query_id && employee) {
+    if (nextState.query_type !== "Brochure" && nextState.linked_query_id && employee) {
       const existing = getQueryQuotationDraft(id);
       upsertQueryQuotationDraft(nextState.linked_query_id, {
         id,
@@ -909,7 +975,89 @@ function WizardPage() {
         href: "/drafts",
       });
     }
+    const storageNotice = getDraftStorageNotice();
+    if (storageNotice && !opts?.silent) toast.warning(storageNotice);
     return id;
+  };
+
+  const saveCustomizedRouting = async () => {
+    if (routingSaveInFlightRef.current || workflowMode !== "quotation") return;
+    const latest = loadDraft() ?? draft;
+    const errors = customizedRoutingSaveErrors(latest, dbData.cities, programmes);
+    if (errors.length) {
+      toast.error(errors.join(" "));
+      return;
+    }
+    if (
+      !window.confirm(
+        "Save this routing as a canonical Programme and create or link its Itinerary Master draft? This does not complete Brochure Costing or publish anything.",
+      )
+    )
+      return;
+
+    routingSaveInFlightRef.current = true;
+    try {
+      flushDraftPersistence();
+      let sourceQuotationId =
+        currentDraftId || `routing-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`;
+      try {
+        sourceQuotationId = persistToDrafts(latest, {
+          silent: true,
+          id: currentDraftId || undefined,
+        });
+      } catch (cacheError) {
+        console.warn("Routing save continuing without an optional draft-cache write.", cacheError);
+        toast.warning("Draft cache is full; saving the routing to Itinerary Master continues.");
+      }
+      const result = await saveCustomizedRoutingToItineraryMaster(
+        latest,
+        dbData.cities,
+        access.employee?.name || user?.name || "Quotation author",
+        sourceQuotationId,
+      );
+      writeDraft(result.draft);
+      const persistedDraftId = persistToDrafts(result.draft, {
+        silent: true,
+        id: sourceQuotationId,
+        name: result.program.name,
+      });
+      const persistedDraft = getDraft(persistedDraftId);
+      if (
+        persistedDraft?.wizard_state.customized_routing_saved !== true ||
+        persistedDraft.wizard_state.program_id !== result.program.id
+      ) {
+        throw new Error("The quotation’s saved Programme association could not be verified.");
+      }
+      toast.success(
+        `Routing saved to Itinerary Master: ${result.program.name} · ${result.program.code}.`,
+      );
+    } catch (error) {
+      const diagnostic = quotationOperationDiagnostic(
+        "Step 5 · save routing to Itinerary Master",
+        error,
+      );
+      console.error(diagnostic);
+      toast.error(diagnostic);
+    } finally {
+      routingSaveInFlightRef.current = false;
+    }
+  };
+
+  const exportDraftBackup = () => {
+    const latest = loadDraft() ?? draft;
+    const filenamePart =
+      (latest.program_name || "brochure-draft")
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, "-")
+        .replace(/^-+|-+$/g, "") || "brochure-draft";
+    const blob = new Blob([JSON.stringify(latest, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filenamePart}-backup.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Brochure draft backup downloaded.");
   };
 
   const finalizeQuote = async () => {
@@ -922,28 +1070,60 @@ function WizardPage() {
     try {
       const employee = access.employee;
       if (latest.query_type === "Brochure") {
-        if (!latest.program_id) throw new Error("Select a canonical Programme before saving a Brochure pricing snapshot.");
-        const reviewWarnings = [
-          ...review.blockers.map((item) => `${item.section}: ${item.message}`),
-          ...review.warnings.map((item) => `${item.section}: ${item.message}`),
-        ];
+        if (!latest.program_id)
+          throw new Error(
+            "Select a canonical Programme before saving a Brochure pricing snapshot.",
+          );
+        const savedRoutingProgrammes = await listExplicitlySavedRoutingProgrammes();
+        if (!savedRoutingProgrammes.some((programme) => programme.id === latest.program_id))
+          throw new Error(
+            "The selected saved routing is no longer available in Itinerary Master. Re-select it in Step 2.",
+          );
+        if (!review.canFinalize)
+          throw new Error(
+            `Resolve Brochure finalisation blockers: ${review.blockers.map((item) => item.message).join(" ")}`,
+          );
         const actor = employee?.name || user?.name || "Brochure author";
-        const quote = buildCostingVersionSnapshot(
+        const quoteDraftSnapshot = buildCostingVersionSnapshot(
           latest,
           dbData,
           actor,
           employee
-            ? { employeeId: employee.id, authUserId: employee.auth_user_id, name: employee.name, role: employee.role }
+            ? {
+                employeeId: employee.id,
+                authUserId: employee.auth_user_id,
+                name: employee.name,
+                role: employee.role,
+              }
             : { employeeId: "local-brochure", name: actor, role: "Brochure author" },
-          reviewWarnings,
+          // The validation gate above already rejected blockers. Warnings are
+          // non-blocking and must not downgrade the immutable final snapshot
+          // to an in-progress costing before library eligibility is checked.
+          [],
         );
-        persistQuote(quote);
-        const brochure = createBrochureFromQuote(quote, actor, latest.program_name || undefined);
-        persistToDrafts(latest, { silent: true, name: latest.program_name || "Brochure draft" });
-        setLastSavedDraftFingerprint(draftFingerprint(latest));
-        toast.success(reviewWarnings.length
-          ? "Brochure library draft saved with unresolved pricing issues. It cannot be published until they are resolved."
-          : `Brochure pricing library draft V${brochure.version} saved under ${brochure.programme_name}.`);
+        // Brochure snapshots use the existing quote-store contract.  There is
+        // deliberately no separate routing-only pricing writer here.
+        persistQuote(quoteDraftSnapshot);
+        const quote = quoteDraftSnapshot;
+        const brochure = await createBrochureFromQuote(
+          quote,
+          actor,
+          latest.program_name || undefined,
+          dbData.cities,
+        );
+        let draftPersistenceWarning = "";
+        let editableDraftSaved = false;
+        try {
+          persistToDrafts(latest, { silent: true, name: latest.program_name || "Brochure draft" });
+          editableDraftSaved = true;
+        } catch (error) {
+          draftPersistenceWarning =
+            error instanceof Error ? error.message : "The editable draft could not be refreshed.";
+        }
+        if (editableDraftSaved) setLastSavedDraftFingerprint(draftFingerprint(latest));
+        toast.success(
+          `Final Brochure pricing snapshot V${brochure.version} saved under ${brochure.programme_name} in this browser (IndexedDB; not synced to cloud).${draftPersistenceWarning ? ` Editable draft warning: ${draftPersistenceWarning}` : ""}`,
+        );
         return;
       }
       if (!employee)
@@ -1081,7 +1261,7 @@ function WizardPage() {
               variant="outline"
               onClick={() => {
                 clearDraft();
-                initDraft();
+                startNewDraft();
                 setCurrentDraftId(null);
                 setShowBanner(false);
               }}
@@ -1168,7 +1348,7 @@ function WizardPage() {
                 if (message && !confirm(message)) return;
                 clearDraft();
                 setActiveWizard(null);
-                navigate({ to: "/drafts" });
+                navigate({ to: workflowMode === "brochure" ? "/brochures/drafts" : "/drafts" });
               }}
             >
               <X className="h-3.5 w-3.5 mr-1.5" /> Discard
@@ -1176,11 +1356,11 @@ function WizardPage() {
           </div>
         </div>
         <div className="grid gap-px overflow-hidden rounded-b-xl border bg-border/60 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+          <QuoteContextItem label="Current step" value={`${stepPosition}. ${currentStepLabel}`} />
           <QuoteContextItem
-            label="Current step"
-            value={`${stepPosition}. ${STEPS[step - 1].label}`}
+            label={draft.query_type === "Brochure" ? "Specific departure" : "Travel"}
+            value={dateLabel}
           />
-          <QuoteContextItem label={draft.query_type === "Brochure" ? "Specific departure" : "Travel"} value={dateLabel} />
           <QuoteContextItem
             label="Travellers"
             value={
@@ -1239,7 +1419,7 @@ function WizardPage() {
                     {activeFlowGroup?.label || "Quotation workspace"}
                   </div>
                   <div className="text-sm font-semibold text-foreground">
-                    Step {stepPosition} of {workflowSteps.length} · {STEPS[step - 1].label}
+                    Step {stepPosition} of {workflowSteps.length} · {currentStepLabel}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1267,6 +1447,7 @@ function WizardPage() {
                 <StepContent
                   draft={draft}
                   set={set}
+                  workflowMode={workflowMode}
                   step={step}
                   sub={sub}
                   setSub={setSub}
@@ -1276,10 +1457,23 @@ function WizardPage() {
                   nextOfficialVersion={nextOfficialVersion}
                   isFinalizing={isFinalizing}
                   onFinalize={finalizeQuote}
+                  onSaveCustomizedRouting={saveCustomizedRouting}
                   onSaveDraft={() => {
-                    persistToDrafts(draft, { silent: true });
-                    toast.success("Draft saved successfully.");
+                    try {
+                      persistToDrafts(draft, { silent: false });
+                      const storageNotice = getDraftStorageNotice();
+                      toast.success(
+                        storageNotice
+                          ? "Brochure draft saved for this browser session."
+                          : "Draft saved successfully.",
+                      );
+                    } catch (error) {
+                      const diagnostic = quotationOperationDiagnostic("save draft", error);
+                      console.error(diagnostic);
+                      toast.error(diagnostic);
+                    }
                   }}
+                  onExportDraft={exportDraftBackup}
                   onRequestReview={() => {
                     const id = persistToDrafts(draft, { silent: true });
                     setReviewDraft(getDraft(id));
@@ -1300,8 +1494,8 @@ function WizardPage() {
               >
                 {continueBlocker ||
                   (subCount > 0
-                    ? `${STEPS[step - 1].subs?.[sub] || STEPS[step - 1].label} · ${sub + 1} of ${subCount}`
-                    : STEPS[step - 1].label)}
+                    ? `${STEPS[step - 1].subs?.[sub] || currentStepLabel} · ${sub + 1} of ${subCount}`
+                    : currentStepLabel)}
               </div>
               {stepPosition < workflowSteps.length || sub < subCount - 1 ? (
                 <Button onClick={goNext} disabled={!canProceed}>
@@ -1550,7 +1744,7 @@ function validate(d: QuoteDraft, step: number): boolean {
     case 2:
       if (d.query_type === "B2B") return !!d.agent.agent_id;
       if (d.query_type === "B2C") return !!d.guest.name;
-      if (d.query_type === "Brochure") return !!d.brochure.tour_type;
+      if (d.query_type === "Brochure") return !!d.program_id;
       return false;
     case 3: {
       const paxOk =
@@ -1564,14 +1758,20 @@ function validate(d: QuoteDraft, step: number): boolean {
       if (!d.tour_start_city && !d.departure_city) return false;
       if (!d.tour_end_city) return false;
       if (d.nights < 1) return false;
-      if (d.query_type === "Brochure")
-        return !!d.brochure_validity_from && !!d.brochure_validity_till;
+      // Selling validity controls final publication, not movement through an
+      // unfinished brochure draft. No-departure-date brochures never need a
+      // fabricated travel date to review their saved routing.
+      if (d.query_type === "Brochure") return true;
       if (!d.query_for) return false;
       if (d.has_dates === false) return true;
       return !!d.start_date;
     }
     case 4:
-      return d.program_mode === "existing" ? !!d.program_id : d.categories.length > 0;
+      return d.query_type === "Brochure"
+        ? !!d.program_id
+        : d.program_mode === "existing"
+          ? !!d.program_id
+          : d.categories.length > 0;
     case 5: {
       // Routing
       return isRoutingReady(d);
@@ -1603,9 +1803,10 @@ function routingStepError(draft: QuoteDraft): string {
 // ============================================================
 // Step router — maps slot → component (renumbered)
 // ============================================================
-function StepContent({
+export function StepContent({
   draft,
   set,
+  workflowMode,
   step,
   sub,
   setSub,
@@ -1615,11 +1816,14 @@ function StepContent({
   nextOfficialVersion,
   isFinalizing,
   onFinalize,
+  onSaveCustomizedRouting,
   onSaveDraft,
+  onExportDraft,
   onRequestReview,
 }: {
   draft: QuoteDraft;
   set: (p: Partial<QuoteDraft>) => void;
+  workflowMode: "quotation" | "brochure";
   step: number;
   sub: number;
   setSub: (n: number) => void;
@@ -1629,7 +1833,9 @@ function StepContent({
   nextOfficialVersion: number;
   isFinalizing: boolean;
   onFinalize: () => void | Promise<void>;
-  onSaveDraft: () => void;
+  onSaveCustomizedRouting: () => void | Promise<void>;
+  onSaveDraft: () => void | Promise<void>;
+  onExportDraft: () => void;
   onRequestReview: () => void;
 }) {
   const scope = getQuotationScope(draft.query_for, draft.commercial_mode);
@@ -1639,15 +1845,25 @@ function StepContent({
   const inner = (() => {
     switch (step) {
       case 1:
-        return <Step1 draft={draft} set={set} />;
+        return <Step1 draft={draft} set={set} workflowMode={workflowMode} />;
       case 2:
-        return <Step2 draft={draft} set={set} />;
+        return <Step2 draft={draft} set={set} workflowMode={workflowMode} />;
       case 3:
         return <StepTripBasics draft={draft} set={set} />;
       case 4:
-        return <Step4 draft={draft} set={set} />;
+        return workflowMode === "brochure" ? (
+          <BrochureProgrammeReview draft={draft} />
+        ) : (
+          <Step4 draft={draft} set={set} />
+        );
       case 5:
-        return <Step9 draft={draft} set={set} />; // Routing
+        return (
+          <CustomizedRoutingEditor
+            draft={draft}
+            set={set}
+            onSaveCustomizedRouting={onSaveCustomizedRouting}
+          />
+        ); // Routing
       case 6:
         return <MarkupGstSettings draft={draft} set={set} />;
       case 7: {
@@ -1685,6 +1901,7 @@ function StepContent({
             costingWarnings={costingWarnings}
             version={nextOfficialVersion}
             onSaveDraft={onSaveDraft}
+            onExportDraft={onExportDraft}
             onFinalize={onFinalize}
             onRequestReview={onRequestReview}
           />
@@ -1768,7 +1985,11 @@ type StepProps = { draft: QuoteDraft; set: (p: Partial<QuoteDraft>) => void };
 // ============================================================
 // STEP 1 — Query Type
 // ============================================================
-function Step1({ draft, set }: StepProps) {
+function Step1({
+  draft,
+  set,
+  workflowMode = "quotation",
+}: StepProps & { workflowMode?: "quotation" | "brochure" }) {
   // Linkable Queries must obey the active employee's existing CRM scope.
   // The quotation workflow stays shared; only unauthorized Query records are
   // excluded from this selector.
@@ -1776,7 +1997,6 @@ function Step1({ draft, set }: StepProps) {
   const opts: { key: QueryType; title: string; desc: string; icon: typeof Building2 }[] = [
     { key: "B2B", title: "B2B", desc: "Travel Agent Quotation", icon: Building2 },
     { key: "B2C", title: "B2C", desc: "Direct Guest Quotation", icon: User },
-    { key: "Brochure", title: "Brochure", desc: "Group / Package / Event", icon: Users },
   ];
   const linkQuery = (queryId: string) => {
     const query = queries.find((item) => item.query_id === queryId);
@@ -1833,47 +2053,62 @@ function Step1({ draft, set }: StepProps) {
     });
   };
 
+  if (workflowMode === "brochure") {
+    return (
+      <Card className="border-primary/20 bg-primary/[0.03] p-5">
+        <Badge className="mb-2">Brochure costing</Badge>
+        <h2 className="text-lg font-semibold">Programme-based package pricing</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          This workspace is locked to Brochure costing. Select a canonical Programme in the next
+          step; CRM Query and recipient details are not used.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <Card className="border-primary/20 bg-primary/[0.03] p-4">
-        <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
-          <div>
-            <div className="text-sm font-semibold">
-              Link an existing Query{" "}
-              <span className="font-normal text-muted-foreground">(optional)</span>
+      {draft.query_type !== "Brochure" && (
+        <Card className="border-primary/20 bg-primary/[0.03] p-4">
+          <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+            <div>
+              <div className="text-sm font-semibold">
+                Link an existing Query{" "}
+                <span className="font-normal text-muted-foreground">(optional)</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Leave this blank for a standalone quotation. Linked Queries continue to auto-fill
+                the quotation.
+              </p>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Leave this blank for a standalone quotation. Linked Queries continue to auto-fill the
-              quotation.
-            </p>
+            <Select
+              value={draft.linked_query_id || "__none__"}
+              onValueChange={(value) =>
+                value === "__none__"
+                  ? set({
+                      linked_query_id: undefined,
+                      linked_query_name: undefined,
+                      query_for: undefined,
+                    })
+                  : linkQuery(value)
+              }
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="No Query linked" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[360px]">
+                <SelectItem value="__none__">No Query — standalone quotation</SelectItem>
+                {queries.map((query) => (
+                  <SelectItem key={query.query_id} value={query.query_id}>
+                    {query.query_id} · {query.customer} ·{" "}
+                    {query.program_name || query.destination || "Programme pending"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <Select
-            value={draft.linked_query_id || "__none__"}
-            onValueChange={(value) =>
-              value === "__none__"
-                ? set({
-                    linked_query_id: undefined,
-                    linked_query_name: undefined,
-                    query_for: undefined,
-                  })
-                : linkQuery(value)
-            }
-          >
-            <SelectTrigger className="bg-background">
-              <SelectValue placeholder="No Query linked" />
-            </SelectTrigger>
-            <SelectContent className="max-h-[360px]">
-              <SelectItem value="__none__">No Query — standalone quotation</SelectItem>
-              {queries.map((query) => (
-                <SelectItem key={query.query_id} value={query.query_id}>
-                  {query.query_id} · {query.customer} ·{" "}
-                  {query.program_name || query.destination || "Programme pending"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </Card>
+        </Card>
+      )}
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
@@ -1896,7 +2131,22 @@ function Step1({ draft, set }: StepProps) {
             <button
               key={o.key}
               type="button"
-              onClick={() => set({ query_type: o.key })}
+              onClick={() =>
+                set(
+                  o.key === "Brochure"
+                    ? {
+                        query_type: o.key,
+                        linked_query_id: undefined,
+                        linked_query_name: undefined,
+                        query_for: "Package",
+                        commercial_mode: "package",
+                        has_dates: false,
+                        tour_type: "Brochure",
+                        brochure: { ...draft.brochure, tour_type: "Brochure" },
+                      }
+                    : { query_type: o.key },
+                )
+              }
               className={cn(
                 "group relative min-h-[190px] overflow-hidden rounded-xl border p-5 text-left transition-all hover:-translate-y-0.5 hover:shadow-md",
                 active
@@ -1947,7 +2197,11 @@ function Step1({ draft, set }: StepProps) {
 // ============================================================
 // STEP 2 — Identification
 // ============================================================
-function Step2({ draft, set }: StepProps) {
+function Step2({
+  draft,
+  set,
+  workflowMode = "quotation",
+}: StepProps & { workflowMode?: "quotation" | "brochure" }) {
   const agents = useAgents();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -2171,7 +2425,10 @@ function Step2({ draft, set }: StepProps) {
       </div>
     );
   }
-  // Brochure
+  if (workflowMode === "brochure") {
+    return <BrochureProgrammeSelector draft={draft} set={set} />;
+  }
+  // Legacy Brochure state opened outside the dedicated workspace.
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Brochure / Group Tour Details</h2>
@@ -2234,16 +2491,233 @@ function Step2({ draft, set }: StepProps) {
   );
 }
 
+function BrochureProgrammeSelector({ draft, set }: StepProps) {
+  const [programmes, setProgrammes] = useState<
+    Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>
+  >([]);
+  const db = useDB();
+  const [open, setOpen] = useState(false);
+  const refreshProgrammes = () =>
+    listExplicitlySavedRoutingProgrammes()
+      .then(setProgrammes)
+      .catch(() => setProgrammes([]));
+  useEffect(() => {
+    void refreshProgrammes();
+  }, []);
+  const selected = programmes.find((programme) => programme.id === draft.program_id);
+  const cityIdForName = (name: string | null | undefined) =>
+    name
+      ? db.cities.find((city) => city.name.toLocaleLowerCase() === name.toLocaleLowerCase())?.id ||
+        ""
+      : "";
+  const selectProgramme = (programme: (typeof programmes)[number]) => {
+    let result = prepareBrochureProgrammeSelection(draft, programme, cityIdForName);
+    if (result.status === "unchanged") {
+      setOpen(false);
+      return;
+    }
+    if (result.status === "confirmation_required") {
+      const confirmed = confirm(
+        "Changing the Programme replaces routing, day-wise services, hotel selections and dependent costing values. Your Pax range and Brochure selling validity will be preserved. Continue?",
+      );
+      result = prepareBrochureProgrammeSelection(draft, programme, cityIdForName, confirmed);
+    }
+    if (result.status !== "changed") return;
+    set(result.nextDraft);
+    setOpen(false);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold">Program</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Choose a canonical Programme from Routing & Programs. Its saved circuit and duration are
+          copied into this editable Brochure draft.
+        </p>
+      </div>
+      <div>
+        <Label>Canonical Programme</Label>
+        <Popover
+          open={open}
+          onOpenChange={(nextOpen) => {
+            setOpen(nextOpen);
+            if (nextOpen) void refreshProgrammes();
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              className="mt-1 w-full justify-between font-normal"
+            >
+              {selected
+                ? `${selected.code} — ${selected.name}`
+                : "Search programme name, code, route or destination…"}
+              <ChevronRight className="h-4 w-4 rotate-90 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            className="w-[min(720px,var(--radix-popover-content-available-width))] p-0"
+            align="start"
+          >
+            <Command
+              filter={(value, search) => {
+                const programme = programmes.find((item) => item.id === value);
+                if (!programme) return 0;
+                const haystack = [
+                  programme.code,
+                  programme.name,
+                  programme.routing_summary,
+                  programme.departure_city,
+                  ...programme.cities,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+                  .toLowerCase();
+                return haystack.includes(search.toLowerCase()) ? 1 : 0;
+              }}
+            >
+              <CommandInput placeholder="Search name, code, route or destination…" />
+              <CommandList>
+                <CommandEmpty>No canonical Programme found.</CommandEmpty>
+                <CommandGroup>
+                  {programmes
+                    .filter((programme) => programme.status === "Active")
+                    .map((programme) => (
+                      <CommandItem
+                        key={programme.id}
+                        value={programme.id}
+                        onSelect={() => selectProgramme(programme)}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {programme.code} — {programme.name} — {programme.nights}N/
+                            {programme.days}D
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {programme.routing_summary || programme.cities.join(" → ")}
+                          </div>
+                        </div>
+                      </CommandItem>
+                    ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+      {selected && <BrochureProgrammeDetails programme={selected} />}
+    </div>
+  );
+}
+
+function BrochureProgrammeDetails({
+  programme,
+}: {
+  programme: ReturnType<typeof usePrograms>[number];
+}) {
+  return (
+    <Card className="bg-muted/20 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Badge>Canonical Programme</Badge>
+        <span className="font-semibold">{programme.name}</span>
+        <span className="text-sm text-muted-foreground">
+          {programme.code} · {programme.nights}N / {programme.days}D
+        </span>
+      </div>
+      <div className="grid gap-2 text-sm md:grid-cols-2">
+        <div>
+          <span className="text-muted-foreground">Starting city / Ex-point:</span>{" "}
+          {programme.departure_city || "Not stored"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Circuit:</span>{" "}
+          {programme.routing_summary || programme.cities.join(" → ") || "Not stored"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Programme categories:</span>{" "}
+          {programme.categories?.join(", ") || "Not stored"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Travel modes:</span>{" "}
+          {programme.travel_modes?.join(", ") || "Not stored"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Inclusions:</span>{" "}
+          {programme.inclusions?.join(", ") || "Not stored"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Exclusions:</span>{" "}
+          {programme.exclusions?.join(", ") || "Not stored"}
+        </div>
+      </div>
+      <div className="mt-3 space-y-1 text-sm">
+        {programme.routing.map((day) => (
+          <div key={day.day}>
+            Day {day.day}: {day.from_city || "—"} →{" "}
+            {day.destination_city || day.overnight_city || "—"}
+            {day.overnight_city ? ` · Overnight ${day.overnight_city}` : ""}
+            {day.program_text ? ` · ${day.program_text}` : ""}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function BrochureProgrammeReview({ draft }: { draft: QuoteDraft }) {
+  const [programme, setProgramme] =
+    useState<Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>[number]>();
+  useEffect(() => {
+    let active = true;
+    void listExplicitlySavedRoutingProgrammes()
+      .then((items) => active && setProgramme(items.find((item) => item.id === draft.program_id)))
+      .catch(() => active && setProgramme(undefined));
+    return () => {
+      active = false;
+    };
+  }, [draft.program_id]);
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Program Review</h2>
+        <p className="text-sm text-muted-foreground">
+          The Programme was selected in Step 2. Go back to change it.
+        </p>
+      </div>
+      {programme ? (
+        <BrochureProgrammeDetails programme={programme} />
+      ) : (
+        <Card className="p-4 text-sm text-amber-700">
+          This legacy draft has no resolvable canonical Programme. Return to Step 2 to select one.
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // STEP 4 — Program (updated with Program Name & Category)
 // ============================================================
 // STEP 4 — Program (updated with Program Name & Category and Beautiful Preview)
 // ============================================================
 function Step4({ draft, set }: StepProps) {
-  const programs = usePrograms();
+  const [programs, setPrograms] = useState<
+    Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>
+  >([]);
   const db = useDB();
   const [programSearch, setProgramSearch] = useState("");
   const [durationFilter, setDurationFilter] = useState(String(draft.nights));
+  useEffect(() => {
+    let active = true;
+    listExplicitlySavedRoutingProgrammes()
+      .then((records) => active && setPrograms(records))
+      .catch(() => active && setPrograms([]));
+    return () => {
+      active = false;
+    };
+  }, [draft.customized_routing_saved, draft.customized_routing_itinerary_id]);
 
   useEffect(() => {
     if (!draft.program_id) setDurationFilter(String(draft.nights));
@@ -2273,6 +2747,8 @@ function Step4({ draft, set }: StepProps) {
         program_name: "",
         program_mode: "existing",
         save_program_as_new: false,
+        customized_routing_saved: false,
+        customized_routing_itinerary_id: undefined,
         new_program_code: "",
         new_program_name: "",
       });
@@ -2284,30 +2760,40 @@ function Step4({ draft, set }: StepProps) {
       if (!name) return "";
       return db.cities.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id || "";
     };
-    const sourceRouting = p.routing.length
-      ? p.routing
-      : Array.from({ length: Math.max(1, p.days) }, (_, index) => ({
-          day: index + 1,
-          overnight_city: null,
-          program_text: index === 0 ? p.routing_summary : "",
-          from_city: undefined,
-          destination_city: undefined,
-        }));
+    // Eligibility already requires a complete persisted routing snapshot.
+    // Never synthesize a route from a legacy programme title or summary.
+    const sourceRouting: ProgramRoutingRow[] = p.routing;
     const routing: RoutingDay[] = sourceRouting.map((r, i) => ({
       day: r.day,
-      date: addDaysISO(draft.start_date, i),
+      is_day_zero: r.day === 0 || undefined,
+      date: addDaysISO(draft.start_date, r.day === 0 ? -1 : r.day - 1),
       city_id: nameToId(r.overnight_city),
       to_city_id: nameToId(r.destination_city || r.overnight_city),
-      to_city_ids: nameToId(r.destination_city || r.overnight_city)
-        ? [nameToId(r.destination_city || r.overnight_city)]
-        : [],
-      from_city: r.from_city || (i === 0 ? p.departure_city || draft.tour_start_city : undefined),
+      to_city_ids: (r.to_cities?.length
+        ? r.to_cities
+        : [r.destination_city || r.overnight_city || ""]
+      )
+        .map(nameToId)
+        .filter(Boolean),
+      from_city:
+        r.from_city ||
+        (r.day === 1 || i === 0 ? p.departure_city || draft.tour_start_city : undefined),
       to_city: r.destination_city || r.overnight_city || "",
+      tour_title: r.tour_titles?.[0],
+      tours_selected_by_city: r.tour_titles_by_city
+        ? Object.fromEntries(
+            Object.entries(r.tour_titles_by_city)
+              .map(([name, titles]) => [nameToId(name), [...titles]] as [string, string[]])
+              .filter(([cityId]) => Boolean(cityId)),
+          )
+        : undefined,
       day_name: r.program_text || undefined,
       program: r.program_text,
       program_mode: "text",
       overnight: !!r.overnight_city,
+      travel_by: r.travel_mode as RoutingDay["travel_by"],
     }));
+    const lastTouringRow = [...sourceRouting].filter((row) => row.day > 0).at(-1);
     writeDraft({
       ...draft,
       program_id: p.id,
@@ -2315,11 +2801,15 @@ function Step4({ draft, set }: StepProps) {
       program_name: p.name,
       program_mode: "existing",
       save_program_as_new: false,
+      customized_routing_saved: false,
+      customized_routing_itinerary_id: undefined,
       new_program_code: "",
       new_program_name: "",
       nights: p.nights,
       categories: p.categories?.length ? p.categories : draft.categories,
       departure_city: p.departure_city || draft.departure_city,
+      tour_start_city: p.departure_city || draft.tour_start_city || draft.departure_city,
+      tour_end_city: p.ending_city || lastTouringRow?.destination_city || draft.tour_end_city,
       travel_modes: p.travel_modes?.length ? p.travel_modes : draft.travel_modes,
       routing,
       inclusions: p.inclusions?.length ? p.inclusions : draft.inclusions,
@@ -2349,6 +2839,8 @@ function Step4({ draft, set }: StepProps) {
               program_code: "",
               program_name: "",
               save_program_as_new: true,
+              customized_routing_saved: false,
+              customized_routing_itinerary_id: undefined,
             });
           } else {
             set({ program_mode: "existing", save_program_as_new: false });
@@ -2360,7 +2852,9 @@ function Step4({ draft, set }: StepProps) {
           <RadioGroupItem value="existing" id="pm-e" className="mt-1" />
           <div className="flex-1">
             <label htmlFor="pm-e" className="font-medium cursor-pointer">
-              Pre-Select Existing Program
+              {draft.query_type === "Brochure" && !draft.program_id && draft.routing.length > 0
+                ? "Link Existing Programme"
+                : "Pre-Select Existing Program"}
             </label>
             {draft.program_mode === "existing" && (
               <div className="mt-2 space-y-4">
@@ -2403,10 +2897,17 @@ function Step4({ draft, set }: StepProps) {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {visiblePrograms.length} matching programs. Search accepts route abbreviations and
-                  full city names.
+                  {visiblePrograms.length
+                    ? `${visiblePrograms.length} matching saved routing${visiblePrograms.length === 1 ? "" : "s"}. Search accepts route abbreviations and full city names.`
+                    : "No saved Itinerary Master routing available. Create a New Routing / Customized programme and use Save Routing to Itinerary Master to make it reusable."}
                 </p>
-
+                {draft.program_id && !selectedProgram && (
+                  <p role="alert" className="text-xs text-amber-700">
+                    This draft references a legacy Programme that is not an eligible saved Itinerary
+                    Master routing. The draft was preserved; select a saved routing or continue with
+                    a new customized routing.
+                  </p>
+                )}
                 {/* 🔥 ATTRACTIVE & BEAUTIFUL PROGRAM PREVIEW */}
                 {selectedProgram && (
                   <Card className="border-accent/20 shadow-md overflow-hidden mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
@@ -2536,79 +3037,93 @@ function Step4({ draft, set }: StepProps) {
         </div>
 
         {/* ---- New Custom Program ---- */}
-        <div className="flex items-start gap-3 p-4 border rounded-lg">
-          <RadioGroupItem value="new" id="pm-n" className="mt-1" />
-          <div className="flex-1">
-            <label htmlFor="pm-n" className="font-medium cursor-pointer">
-              New Routing / Customized
-            </label>
-            {draft.program_mode === "new" && (
-              <div className="mt-2 space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <Label htmlFor="new-program-name">Programme Name *</Label>
-                    <Input
-                      id="new-program-name"
-                      className="mt-1"
-                      value={draft.new_program_name || ""}
-                      placeholder="Enter a unique Programme name"
-                      onChange={(event) =>
-                        set({ new_program_name: event.target.value, save_program_as_new: true })
-                      }
-                    />
+        {draft.query_type !== "Brochure" && (
+          <div className="flex items-start gap-3 p-4 border rounded-lg">
+            <RadioGroupItem value="new" id="pm-n" className="mt-1" />
+            <div className="flex-1">
+              <label htmlFor="pm-n" className="font-medium cursor-pointer">
+                New Routing / Customized
+              </label>
+              {draft.program_mode === "new" && (
+                <div className="mt-2 space-y-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <Label htmlFor="new-program-name">Program Name *</Label>
+                      <Input
+                        id="new-program-name"
+                        className="mt-1"
+                        value={draft.new_program_name || ""}
+                        placeholder="Enter a unique Programme name"
+                        onChange={(event) =>
+                          set({
+                            new_program_name: event.target.value,
+                            program_name: event.target.value,
+                            save_program_as_new: true,
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="new-program-code">Programme Code</Label>
+                      <Input
+                        id="new-program-code"
+                        className="mt-1"
+                        value={draft.new_program_code || ""}
+                        placeholder="Generated automatically if blank"
+                        onChange={(event) =>
+                          set({
+                            new_program_code: event.target.value.toUpperCase(),
+                            program_code: event.target.value.toUpperCase(),
+                          })
+                        }
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm md:col-span-2">
+                      <Checkbox
+                        checked={draft.save_program_as_new === true}
+                        onCheckedChange={(checked) =>
+                          set({ save_program_as_new: checked === true })
+                        }
+                      />
+                      Save this finalized customized routing as a new Programme
+                    </label>
+                    <p className="text-xs text-muted-foreground md:col-span-2">
+                      This checkbox records your intent only. Continue saves the routing to this
+                      quotation draft; use “Save Routing to Itinerary Master” in Step 5 to
+                      explicitly create or link shared records.
+                    </p>
                   </div>
                   <div>
-                    <Label htmlFor="new-program-code">Programme Code</Label>
-                    <Input
-                      id="new-program-code"
-                      className="mt-1"
-                      value={draft.new_program_code || ""}
-                      placeholder="Generated automatically if blank"
-                      onChange={(event) => set({ new_program_code: event.target.value })}
-                    />
+                    <Label>Program Category</Label>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {CATEGORY_TAGS.map((tag) => {
+                        const on = draft.categories.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => toggleCategory(tag)}
+                            className={cn(
+                              "px-4 py-2 rounded-full border-2 text-sm font-medium transition-colors",
+                              on
+                                ? "bg-accent text-accent-foreground border-accent"
+                                : "bg-background border-border hover:border-primary/40",
+                            )}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Select one or more categories that best describe the tour.
+                    </p>
                   </div>
-                  <label className="flex items-center gap-2 text-sm md:col-span-2">
-                    <Checkbox
-                      checked={draft.save_program_as_new === true}
-                      onCheckedChange={(checked) => set({ save_program_as_new: checked === true })}
-                    />
-                    Save this finalized customized routing as a new Programme
-                  </label>
-                  <p className="text-xs text-muted-foreground md:col-span-2">
-                    The Programme is created only when the official costing saves successfully. An
-                    existing Programme with the same name will not be duplicated.
-                  </p>
                 </div>
-                <div>
-                  <Label>Program Category</Label>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {CATEGORY_TAGS.map((tag) => {
-                      const on = draft.categories.includes(tag);
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => toggleCategory(tag)}
-                          className={cn(
-                            "px-4 py-2 rounded-full border-2 text-sm font-medium transition-colors",
-                            on
-                              ? "bg-accent text-accent-foreground border-accent"
-                              : "bg-background border-border hover:border-primary/40",
-                          )}
-                        >
-                          {tag}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Select one or more categories that best describe the tour.
-                  </p>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </RadioGroup>
     </div>
   );
@@ -2617,8 +3132,15 @@ function Step4({ draft, set }: StepProps) {
 // ============================================================
 // STEP 5 — Routing (was Step9) – unchanged, but included here
 // ============================================================
-function Step9({ draft, set }: StepProps) {
+export function CustomizedRoutingEditor({
+  draft,
+  set,
+  onSaveCustomizedRouting,
+}: StepProps & { onSaveCustomizedRouting: () => void | Promise<void> }) {
   const d = useDB();
+  const programmes = usePrograms();
+  const routingSaveErrors = customizedRoutingSaveErrors(draft, d.cities, programmes);
+  const routingAlreadySaved = draft.customized_routing_saved === true;
   const cityName = (id: string) => d.cities.find((c) => c.id === id)?.name || "";
   const routingDate = (offset: number) =>
     draft.has_dates === false ? "" : addDaysISO(draft.start_date, offset);
@@ -2675,8 +3197,7 @@ function Step9({ draft, set }: StepProps) {
         }
       }
       const normalized = normalizeTourRows(rows);
-      writeDraft({
-        ...draft,
+      set({
         routing: dayZero
           ? [
               {
@@ -3353,52 +3874,91 @@ function Step9({ draft, set }: StepProps) {
           </tbody>
         </table>
       </div>
-      <Card className="border-dashed border-primary/30 bg-primary/[0.03] p-4">
-        <label className="flex cursor-pointer items-start gap-3">
-          <Checkbox
-            checked={!!draft.save_program_as_new}
-            onCheckedChange={(checked) =>
-              set({
-                save_program_as_new: checked === true,
-                new_program_name:
-                  checked === true
-                    ? draft.new_program_name || `${draft.program_name || "Customized routing"}`
-                    : draft.new_program_name,
-              })
-            }
-            className="mt-0.5"
-          />
-          <span>
-            <span className="block text-sm font-semibold">
-              Save the customized routing as a new Program
+      {draft.query_type !== "Brochure" && draft.program_mode === "new" && (
+        <Card className="border-dashed border-primary/30 bg-primary/[0.03] p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <Checkbox
+              checked={!!draft.save_program_as_new}
+              onCheckedChange={(checked) =>
+                set({
+                  save_program_as_new: checked === true,
+                  new_program_name:
+                    checked === true
+                      ? draft.new_program_name || draft.program_name || ""
+                      : draft.new_program_name,
+                })
+              }
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-sm font-semibold">
+                Save this finalized customized routing as a new Programme
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                This checkbox only records intent. It does not save a Programme or Itinerary Master
+                record.
+              </span>
             </span>
-            <span className="block text-xs text-muted-foreground">
-              The selected master program is never overwritten.
-            </span>
-          </span>
-        </label>
-        {draft.save_program_as_new && (
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
-            <div>
-              <Label>New Program Name</Label>
-              <Input
-                value={draft.new_program_name || ""}
-                onChange={(event) => set({ new_program_name: event.target.value })}
-                placeholder="Name the customized program"
-              />
+          </label>
+          {draft.save_program_as_new && (
+            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
+              <div>
+                <Label>Program Name</Label>
+                <Input
+                  value={draft.new_program_name || ""}
+                  onChange={(event) =>
+                    set({
+                      new_program_name: event.target.value,
+                      program_name: event.target.value,
+                    })
+                  }
+                  placeholder="Name the customized program"
+                />
+              </div>
+              <div>
+                <Label>Program Code</Label>
+                <Input
+                  value={draft.new_program_code || ""}
+                  onChange={(event) =>
+                    set({
+                      new_program_code: event.target.value.toUpperCase(),
+                      program_code: event.target.value.toUpperCase(),
+                    })
+                  }
+                  placeholder="Auto-generated"
+                  className="font-mono"
+                />
+              </div>
             </div>
-            <div>
-              <Label>New Program Code</Label>
-              <Input
-                value={draft.new_program_code || ""}
-                onChange={(event) => set({ new_program_code: event.target.value.toUpperCase() })}
-                placeholder="Auto-generated"
-                className="font-mono"
-              />
-            </div>
+          )}
+          {draft.save_program_as_new && !routingAlreadySaved && routingSaveErrors.length > 0 && (
+            <p role="alert" className="mt-3 text-xs text-amber-800">
+              Save requirements: {routingSaveErrors.join(" ")}
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              onClick={() => void onSaveCustomizedRouting()}
+              disabled={
+                !draft.save_program_as_new || routingAlreadySaved || routingSaveErrors.length > 0
+              }
+            >
+              <Save className="mr-2 h-4 w-4" /> Save Routing to Itinerary Master
+            </Button>
+            {routingAlreadySaved && (
+              <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+                Routing Saved · Draft
+              </Badge>
+            )}
           </div>
-        )}
-      </Card>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Continue only saves this routing inside the current quotation. It never creates a shared
+            Programme or Itinerary; saving here does not complete Brochure Costing or publish to the
+            Portal.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }
@@ -4104,7 +4664,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
       ? draft.agent.agency || draft.agent.name
       : draft.query_type === "B2C"
         ? draft.guest.name
-        : draft.brochure.theme;
+        : draft.program_name;
   const recipient =
     draft.query_type === "B2B"
       ? draft.agent.name
@@ -4122,7 +4682,7 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
     ? draft.hotel_options.filter((option) => option.selections.length > 0).length
     : 0;
   const readiness = [
-    { label: "Recipient", ready: !!customer },
+    ...(draft.query_type === "Brochure" ? [] : [{ label: "Recipient", ready: !!customer }]),
     {
       label: "Trip brief",
       ready: draft.nights > 0 && (draft.query_type === "Brochure" || totalPax(draft) > 0),
@@ -4143,7 +4703,8 @@ function SummarySidebar({ draft }: { draft: QuoteDraft }) {
             Live quotation snapshot
           </div>
           <div className="mt-1 truncate text-sm font-bold">
-            {customer || "Recipient not selected"}
+            {customer ||
+              (draft.query_type === "Brochure" ? "Programme pending" : "Recipient not selected")}
           </div>
           {recipient && <div className="mt-0.5 truncate text-xs opacity-80">{recipient}</div>}
         </div>
@@ -4308,38 +4869,40 @@ function StepTripBasics({ draft, set }: StepProps) {
           </div>
         </Card>
       )}
-      <Card className="border-primary/20 bg-primary/[0.03] p-4">
-        <Label>Query For</Label>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Linked Queries are pre-filled; standalone quotations choose the commercial bucket here.
-        </p>
-        <Select
-          value={draft.query_for || ""}
-          onValueChange={(value) =>
-            set({
-              query_for: value as QueryFor,
-              commercial_mode:
-                value === "Accommodation Part"
-                  ? "accommodation_only"
-                  : value === "Land Part"
-                    ? "transport_only"
-                    : "package",
-              ...(value === "Package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}),
-            })
-          }
-        >
-          <SelectTrigger className="mt-2 max-w-sm">
-            <SelectValue placeholder="Select Query For" />
-          </SelectTrigger>
-          <SelectContent>
-            {QUERY_FOR_OPTIONS.map((value) => (
-              <SelectItem key={value} value={value}>
-                {value}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Card>
+      {draft.query_type !== "Brochure" && (
+        <Card className="border-primary/20 bg-primary/[0.03] p-4">
+          <Label>Query For</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Linked Queries are pre-filled; standalone quotations choose the commercial bucket here.
+          </p>
+          <Select
+            value={draft.query_for || ""}
+            onValueChange={(value) =>
+              set({
+                query_for: value as QueryFor,
+                commercial_mode:
+                  value === "Accommodation Part"
+                    ? "accommodation_only"
+                    : value === "Land Part"
+                      ? "transport_only"
+                      : "package",
+                ...(value === "Package" ? { land_gst_percent: 5, hotel_gst_percent: 5 } : {}),
+              })
+            }
+          >
+            <SelectTrigger className="mt-2 max-w-sm">
+              <SelectValue placeholder="Select Query For" />
+            </SelectTrigger>
+            <SelectContent>
+              {QUERY_FOR_OPTIONS.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Card>
+      )}
       <StepPaxType draft={draft} set={set} />
       <div className="border-t pt-6">
         <StepDeparture draft={draft} set={set} />
@@ -4640,6 +5203,11 @@ function StepPaxType({ draft, set }: StepProps) {
 // ============================================================
 function StepDeparture({ draft, set }: StepProps) {
   if (draft.query_type === "Brochure") {
+    const brochureStartOptions = Array.from(
+      new Set(
+        [...BROCHURE_EX_CITIES, draft.tour_start_city || draft.departure_city].filter(Boolean),
+      ),
+    );
     return (
       <div className="space-y-4 max-w-2xl">
         <h2 className="text-lg font-semibold">Brochure Circuit</h2>
@@ -4651,7 +5219,7 @@ function StepDeparture({ draft, set }: StepProps) {
             <SelectValue placeholder="Choose Ex point…" />
           </SelectTrigger>
           <SelectContent>
-            {BROCHURE_EX_CITIES.map((c) => (
+            {brochureStartOptions.map((c) => (
               <SelectItem key={c} value={c}>
                 {c}
               </SelectItem>
@@ -5188,6 +5756,7 @@ function StepDuration({ draft, set }: StepProps) {
               set({
                 ...reconcileTripDateEdit(draft, { source: "duration", value: nights }).patch,
                 ...dateReviewPatch(draft),
+                ...(isBrochure ? { programme_days: nights + 1 } : {}),
               })
             }
             className="max-w-55"
@@ -5195,7 +5764,11 @@ function StepDuration({ draft, set }: StepProps) {
         </div>
         <div>
           <Label>Days</Label>
-          <Input value={draft.nights + 1} readOnly className="bg-muted" />
+          <Input
+            value={isBrochure ? (draft.programme_days ?? draft.nights + 1) : draft.nights + 1}
+            readOnly
+            className="bg-muted"
+          />
         </div>
       </div>
 
