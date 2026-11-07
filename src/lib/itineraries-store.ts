@@ -175,26 +175,46 @@ export function toPortalPackagePayload(record: ItineraryRecord): PortalPackagePa
 }
 
 const DB_NAME = "mp-tourism-itinerary-master";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const RECORDS = "itineraries";
 const BANNERS = "banners";
 
-function openDatabase(): Promise<IDBDatabase> {
+export function openItineraryDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("Persistent browser storage is unavailable."));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
+      // Upgrade additively: existing itineraries and banners are never cleared.
       if (!database.objectStoreNames.contains(RECORDS)) database.createObjectStore(RECORDS, { keyPath: "id" });
       if (!database.objectStoreNames.contains(BANNERS)) database.createObjectStore(BANNERS);
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open itinerary storage."));
+    let settled = false;
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      if (settled) {
+        database.close();
+        return;
+      }
+      settled = true;
+      resolve(database);
+    };
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
+      reject(request.error || new Error("Could not open itinerary storage."));
+    };
+    request.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Itinerary storage upgrade is blocked by another open Hub tab. Close older Hub tabs and retry."));
+    };
   });
 }
 
 async function runTransaction<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  const database = await openDatabase();
+  const database = await openItineraryDatabase();
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(storeName, mode);
