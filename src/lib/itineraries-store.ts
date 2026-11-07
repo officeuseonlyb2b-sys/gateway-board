@@ -335,6 +335,20 @@ export async function listExplicitlySavedRoutingProgrammes(): Promise<SavedProgr
   return [...byId.values()].sort((left, right) => left.code.localeCompare(right.code));
 }
 
+/** Merge only verified local records with RLS-authorized active CRM records. */
+export async function listAuthoritativeSavedRoutingProgrammes(): Promise<SavedProgram[]> {
+  const local = await listExplicitlySavedRoutingProgrammes();
+  try {
+    const { listCloudSavedRoutingProgrammes } = await import("@/lib/itinerary-routing-remote");
+    const cloud = await listCloudSavedRoutingProgrammes();
+    const merged = new Map(local.map((programme) => [programme.id, programme]));
+    for (const programme of cloud) merged.set(programme.id, programme);
+    return [...merged.values()].sort((left, right) => left.code.localeCompare(right.code));
+  } catch {
+    return local;
+  }
+}
+
 export async function saveItinerary(
   record: ItineraryRecord,
   options?: { replaceRoutingSnapshot?: boolean },

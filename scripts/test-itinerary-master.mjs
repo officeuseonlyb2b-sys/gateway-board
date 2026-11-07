@@ -833,8 +833,8 @@ try {
   );
   assert.match(
     stepFourSource,
-    /listExplicitlySavedRoutingProgrammes\(\)/,
-    "New Quotation Step 4 reads only explicit Itinerary Master routing snapshots.",
+    /listAuthoritativeSavedRoutingProgrammes\(\)/,
+    "New Quotation Step 4 reads only explicit Itinerary Master routing snapshots, including authorized CRM records.",
   );
   assert.doesNotMatch(
     stepFourSource,

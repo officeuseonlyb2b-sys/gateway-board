@@ -107,7 +107,7 @@ import {
   customizedRoutingSaveErrors,
   saveCustomizedRoutingToItineraryMaster,
 } from "@/lib/wizard/customized-routing-save";
-import { listExplicitlySavedRoutingProgrammes } from "@/lib/itineraries-store";
+import { listAuthoritativeSavedRoutingProgrammes } from "@/lib/itineraries-store";
 import {
   computeAddonsTotal,
   totalPax,
@@ -1074,7 +1074,7 @@ export function WizardPage({
           throw new Error(
             "Select a canonical Programme before saving a Brochure pricing snapshot.",
           );
-        const savedRoutingProgrammes = await listExplicitlySavedRoutingProgrammes();
+        const savedRoutingProgrammes = await listAuthoritativeSavedRoutingProgrammes();
         if (!savedRoutingProgrammes.some((programme) => programme.id === latest.program_id))
           throw new Error(
             "The selected saved routing is no longer available in Itinerary Master. Re-select it in Step 2.",
@@ -2493,12 +2493,12 @@ function Step2({
 
 function BrochureProgrammeSelector({ draft, set }: StepProps) {
   const [programmes, setProgrammes] = useState<
-    Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>
+    Awaited<ReturnType<typeof listAuthoritativeSavedRoutingProgrammes>>
   >([]);
   const db = useDB();
   const [open, setOpen] = useState(false);
   const refreshProgrammes = () =>
-    listExplicitlySavedRoutingProgrammes()
+    listAuthoritativeSavedRoutingProgrammes()
       .then(setProgrammes)
       .catch(() => setProgrammes([]));
   useEffect(() => {
@@ -2668,10 +2668,10 @@ function BrochureProgrammeDetails({
 
 function BrochureProgrammeReview({ draft }: { draft: QuoteDraft }) {
   const [programme, setProgramme] =
-    useState<Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>[number]>();
+    useState<Awaited<ReturnType<typeof listAuthoritativeSavedRoutingProgrammes>>[number]>();
   useEffect(() => {
     let active = true;
-    void listExplicitlySavedRoutingProgrammes()
+    void listAuthoritativeSavedRoutingProgrammes()
       .then((items) => active && setProgramme(items.find((item) => item.id === draft.program_id)))
       .catch(() => active && setProgramme(undefined));
     return () => {
@@ -2704,14 +2704,14 @@ function BrochureProgrammeReview({ draft }: { draft: QuoteDraft }) {
 // ============================================================
 function Step4({ draft, set }: StepProps) {
   const [programs, setPrograms] = useState<
-    Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>
+    Awaited<ReturnType<typeof listAuthoritativeSavedRoutingProgrammes>>
   >([]);
   const db = useDB();
   const [programSearch, setProgramSearch] = useState("");
   const [durationFilter, setDurationFilter] = useState(String(draft.nights));
   useEffect(() => {
     let active = true;
-    listExplicitlySavedRoutingProgrammes()
+    listAuthoritativeSavedRoutingProgrammes()
       .then((records) => active && setPrograms(records))
       .catch(() => active && setPrograms([]));
     return () => {

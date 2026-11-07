@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { brochurePricingCoverage, useBrochures } from "@/lib/brochures-store";
 import { useDB } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
+import { useAccessProfile } from "@/lib/crm/access";
+import { syncRoutingToCloud } from "@/lib/itinerary-routing-remote";
 import {
   explicitlySavedRoutingItineraries,
   listItineraries,
@@ -138,6 +140,7 @@ function ItineraryMasterPage() {
   const brochures = useBrochures();
   const db = useDB();
   const user = useAuth();
+  const access = useAccessProfile();
   const [records, setRecords] = useState<ItineraryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -145,6 +148,7 @@ function ItineraryMasterPage() {
   const [manualDraft, setManualDraft] = useState<QuoteDraft | null>(null);
   const [editingManualId, setEditingManualId] = useState<string>();
   const [savingManual, setSavingManual] = useState(false);
+  const [syncingId, setSyncingId] = useState<string>();
 
   const newManualDraft = useCallback(
     (): QuoteDraft => ({
@@ -242,6 +246,25 @@ function ItineraryMasterPage() {
       setSavingManual(false);
     }
   }, [db.cities, editingManualId, manualDraft, user?.name]);
+  const syncRecord = useCallback(
+    async (record: ItineraryRecord) => {
+      if (!access.accountReady || access.role !== "Super Admin") return;
+      setSyncingId(record.id);
+      try {
+        await syncRoutingToCloud(record);
+        toast.success("Routing synchronized to CRM Cloud.");
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "CRM routing synchronization failed; local data was not changed.",
+        );
+      } finally {
+        setSyncingId(undefined);
+      }
+    },
+    [access.accountReady, access.role],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -462,6 +485,16 @@ function ItineraryMasterPage() {
                               >
                                 <Pencil className="mr-1 h-3 w-3" />
                                 Edit Routing
+                              </Button>
+                            )}
+                            {access.accountReady && access.role === "Super Admin" && (
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-[10px]"
+                                disabled={syncingId === record.id}
+                                onClick={() => void syncRecord(record)}
+                              >
+                                {syncingId === record.id ? "Syncing…" : "Sync to CRM Cloud"}
                               </Button>
                             )}
                           </div>

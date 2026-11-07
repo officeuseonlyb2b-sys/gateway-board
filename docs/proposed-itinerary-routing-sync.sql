@@ -60,3 +60,11 @@ CREATE POLICY crm_itinerary_routings_admin_write
 -- 3. A client adapter that explicitly offers “Sync this saved routing”, reads
 --    only active rows, and reports every authentication/network/validation
 --    failure. No automatic local IndexedDB import is permitted.
+
+-- Required RPC implementation after review: it must be SECURITY DEFINER,
+-- require is_linked_super_admin(), validate every JSON routing row and
+-- recompute the routing fingerprint server-side. It must lock by both
+-- itinerary_id and programme_id; reject identity/fingerprint conflicts and
+-- stale expected_fingerprint values; and set created_by/updated_by from
+-- auth.uid(). Grant EXECUTE only to authenticated. Do not permit direct
+-- INSERT/UPDATE from the browser, even to a Super Admin.
