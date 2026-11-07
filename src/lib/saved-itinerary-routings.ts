@@ -1,4 +1,5 @@
 import type { ProgramRoutingRow, SavedProgram } from "@/lib/wizard/agents-store";
+import { listItineraries } from "@/lib/itineraries-store";
 
 type RoutingSnapshot = {
   programmeId: string;
@@ -20,9 +21,6 @@ type StoredItinerary = {
   sourceQuotationId?: string;
   routingSnapshot?: RoutingSnapshot;
 };
-
-const DB_NAME = "mp-tourism-itinerary-master";
-const STORE_NAME = "itineraries";
 
 function complete(snapshot: RoutingSnapshot | undefined): snapshot is RoutingSnapshot {
   if (
@@ -89,26 +87,5 @@ export function savedRoutingProgrammes(records: StoredItinerary[]): SavedProgram
 
 export async function listSavedItineraryRoutingProgrammes(): Promise<SavedProgram[]> {
   if (typeof indexedDB === "undefined") return [];
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME);
-    request.onerror = () =>
-      reject(request.error || new Error("Saved itinerary routing storage is unavailable."));
-    request.onsuccess = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.close();
-        resolve([]);
-        return;
-      }
-      const read = database.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).getAll();
-      read.onerror = () => {
-        database.close();
-        reject(read.error || new Error("Saved itinerary routings could not be read."));
-      };
-      read.onsuccess = () => {
-        database.close();
-        resolve(savedRoutingProgrammes(read.result as StoredItinerary[]));
-      };
-    };
-  });
+  return savedRoutingProgrammes(await listItineraries());
 }
