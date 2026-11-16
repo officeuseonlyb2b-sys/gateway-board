@@ -10,17 +10,21 @@ import { useDrafts } from "@/lib/drafts-store";
 import { useSavedQuotes } from "@/lib/quotes-store";
 import { useDB } from "@/lib/mock-store";
 import { useAuth } from "@/lib/auth-mock";
+import { useAccessProfile } from "@/lib/crm/access";
 import { buildProgrammeRoutingRegistry } from "@/lib/brochure-routing-registry";
 import { programmeRoutingFingerprint } from "@/lib/programme-routing-identity";
 import {
   explicitlySavedRoutingItineraries,
   listItineraries,
+  newItinerary,
+  setItineraryCloudSyncStatus,
   type ItineraryRecord,
   type ItineraryRoutingSnapshot,
 } from "@/lib/itineraries-store";
 import { usePrograms } from "@/lib/wizard/agents-store";
 import { emptyDraft, type QuoteDraft, type RoutingDay } from "@/lib/wizard/types";
 import { saveManualRoutingToItineraryMaster } from "@/lib/wizard/customized-routing-save";
+import { listCloudRoutings, setCloudRoutingActive, syncRoutingToCloud, toCloudProgramme, type CloudRouting } from "@/lib/crm-routing-registry";
 import { CustomizedRoutingEditor } from "@/routes/_authenticated/costing";
 import { toast } from "sonner";
 
@@ -50,6 +54,11 @@ function explicitRoutingSnapshot(
     sourceQuotationId: item.sourceQuotationId || "",
     savedAt: item.updatedAt,
   };
+}
+
+function cloudRecord(row: CloudRouting): ItineraryRecord {
+  const programme = toCloudProgramme(row);
+  return { ...newItinerary(programme, "CRM Cloud"), id: row.itinerary_id, title: row.programme_name, code: row.programme_code, programmeId: row.programme_id, programmeName: row.programme_name, programmeCode: row.programme_code, nights: row.nights, daysCount: row.days, startCity: row.start_city, endCity: row.end_city, route: programme.routing_summary, status: "Routing Saved", routingFingerprint: row.routing_fingerprint, sourceQuotationId: "cloud", cloudSyncStatus: "Cloud Synced", cloudSyncedAt: row.updated_at, cloudActive: row.active, routingSnapshot: { programmeId: row.programme_id, programmeName: row.programme_name, programmeCode: row.programme_code, startCity: row.start_city, endCity: row.end_city, nights: row.nights, daysCount: row.days, routingSummary: programme.routing_summary, routingFingerprint: row.routing_fingerprint, routing: row.routing, sourceQuotationId: "cloud", savedAt: row.updated_at } };
 }
 
 function ManualRoutingForm({ draft, set, cities, editing, saving, onSave, onCancel }: {
@@ -93,6 +102,7 @@ function ItineraryMasterPage() {
   const costingDrafts = useDrafts();
   const db = useDB();
   const user = useAuth();
+  const access = useAccessProfile();
   const [records, setRecords] = useState<ItineraryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -100,6 +110,11 @@ function ItineraryMasterPage() {
   const [manualDraft, setManualDraft] = useState<QuoteDraft | null>(null);
   const [editingManualId, setEditingManualId] = useState<string>();
   const [savingManual, setSavingManual] = useState(false);
+  const [syncingExisting, setSyncingExisting] = useState(false);
+  const refreshCloud = useCallback(async () => {
+    const cloud = await listCloudRoutings(true);
+    setRecords(cloud.map(cloudRecord));
+  }, []);
 
   const newManualDraft = useCallback((): QuoteDraft => ({
     ...emptyDraft(), query_type: "B2C", has_dates: false, program_mode: "new", save_program_as_new: true,
@@ -127,20 +142,41 @@ function ItineraryMasterPage() {
     setSavingManual(true);
     try {
       const result = await saveManualRoutingToItineraryMaster(manualDraft, db.cities, user?.name || "Manual routing author", editingManualId);
-      setRecords(await listItineraries()); setExpandedId(result.itinerary.id); setManualDraft(null); setEditingManualId(undefined);
-      toast.success(editingManualId ? "Manual routing updated in Itinerary Master." : "Manual routing saved to Itinerary Master.");
+      await setItineraryCloudSyncStatus(result.itinerary.id, "Local Saved");
+      try { await syncRoutingToCloud(result.itinerary); await setItineraryCloudSyncStatus(result.itinerary.id, "Cloud Synced"); }
+      catch (error) { const message = error instanceof Error ? error.message : "CRM Cloud did not confirm the routing."; await setItineraryCloudSyncStatus(result.itinerary.id, "Sync Failed", message); throw new Error(`Local Saved · Sync Failed: ${message}`); }
+      await refreshCloud(); setExpandedId(result.itinerary.id); setManualDraft(null); setEditingManualId(undefined);
+      toast.success(editingManualId ? "Local Saved · Cloud Synced." : "Local Saved · Cloud Synced.");
     } catch (error) { toast.error(error instanceof Error ? error.message : "Manual routing could not be saved."); }
     finally { setSavingManual(false); }
-  }, [db.cities, editingManualId, manualDraft, user?.name]);
+  }, [db.cities, editingManualId, manualDraft, refreshCloud, user?.name]);
+  const syncExisting = useCallback(async () => {
+    setSyncingExisting(true);
+    try {
+      const local = explicitlySavedRoutingItineraries(await listItineraries()).filter((record) => record.cloudSyncStatus !== "Cloud Synced");
+      if (!local.length) { toast.message("No explicitly saved local routings are available to sync."); return; }
+      for (const record of local) { await setItineraryCloudSyncStatus(record.id, "Local Saved"); try { await syncRoutingToCloud(record); await setItineraryCloudSyncStatus(record.id, "Cloud Synced"); } catch (error) { await setItineraryCloudSyncStatus(record.id, "Sync Failed", error instanceof Error ? error.message : "Cloud sync failed."); throw error; } }
+      await refreshCloud();
+      toast.success(`${local.length} local routing${local.length === 1 ? "" : "s"} verified and Cloud Synced.`);
+    } catch (error) { toast.error(`Sync Failed: ${error instanceof Error ? error.message : "CRM Cloud did not confirm the routing."}`); }
+    finally { setSyncingExisting(false); }
+  }, [refreshCloud]);
+  const changeCloudStatus = useCallback(async (record: ItineraryRecord, active: boolean) => {
+    if (!record.cloudSyncedAt) return;
+    try {
+      await setCloudRoutingActive(record.programmeId, active, record.cloudSyncedAt);
+      await refreshCloud();
+      toast.success(active ? "Programme reactivated in CRM Cloud." : "Programme deactivated in CRM Cloud.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Programme status could not be changed."); }
+  }, [refreshCloud]);
 
   useEffect(() => {
     let mounted = true;
-    listItineraries()
-      .then((items) => mounted && setRecords(items))
+    refreshCloud()
       .catch(() => mounted && setRecords([]))
       .finally(() => mounted && setLoading(false));
     return () => { mounted = false; };
-  }, []);
+  }, [refreshCloud]);
 
   const programmeRegistry = useMemo(
     () => buildProgrammeRoutingRegistry(programmes, quotes, brochures, costingDrafts, db.cities),
@@ -172,6 +208,7 @@ function ItineraryMasterPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="h-9 text-xs" disabled={syncingExisting} onClick={() => void syncExisting()}>{syncingExisting ? "Syncing…" : "Sync Existing Saved Routings to CRM Cloud"}</Button>
             <Button className="h-9 text-xs" onClick={() => startManualRouting()}><Plus className="mr-2 h-4 w-4" />Create Manual Routing</Button>
             <Link to="/brochures/itineraries"><Button variant="outline" className="h-9 text-xs"><BookOpen className="mr-2 h-4 w-4" />Open Itinerary Builder</Button></Link>
           </div>
@@ -235,6 +272,7 @@ function ItineraryMasterPage() {
                         <td className="p-2"><Badge variant={itineraryStatus === "Published" ? "default" : "secondary"}>{itineraryStatus}</Badge></td>
                         <td className="p-2"><div className="flex flex-wrap gap-1">
                           <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => setExpandedId(expanded ? "" : record.id)}><Eye className="mr-1 h-3 w-3" />{expanded ? "Hide Routing" : "View Routing"}</Button>
+                          {access.role === "Super Admin" && <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => void changeCloudStatus(record, !record.cloudActive)}>{record.cloudActive ? "Deactivate" : "Reactivate"}</Button>}
                           {routing.sourceType === "manual" ? <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => startManualRouting(record)}><Pencil className="mr-1 h-3 w-3" />Edit Routing</Button> : routing.sourceQuotationId ? <Link to="/costing" search={{ id: routing.sourceQuotationId, step: 5 } as never}><Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"><Pencil className="mr-1 h-3 w-3" />Edit Routing</Button></Link> : <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled title="The source quotation draft is unavailable."><Pencil className="mr-1 h-3 w-3" />Edit Routing</Button>}
                           <Link to="/brochures/itineraries" search={{ itineraryId: record.id }}><Button size="sm" className="h-7 px-2 text-[10px]">Complete Itinerary</Button></Link>
                         </div></td>
