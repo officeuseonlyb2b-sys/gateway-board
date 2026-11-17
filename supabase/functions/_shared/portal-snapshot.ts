@@ -1,10 +1,19 @@
 export type SubmittedSnapshot = Record<string, unknown>;
-const stable = (value: unknown): string => {
- if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
- if (value && typeof value === 'object') { const row=value as Record<string,unknown>; return `{${Object.keys(row).sort().map((key)=>`${JSON.stringify(key)}:${stable(row[key])}`).join(',')}}`; }
- return JSON.stringify(value);
-};
-export async function snapshotHash(snapshot: SubmittedSnapshot) { const bytes = new TextEncoder().encode(stable(snapshot)); const digest = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(digest)].map((n) => n.toString(16).padStart(2, '0')).join(''); }
+/** The canonical hash is calculated by PostgreSQL over jsonb::text. Browser
+ * serialization must never be used to verify an authoritative database hash. */
+export async function serverSnapshotHash(admin: { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: string | null; error: { message: string } | null }> }, snapshot: SubmittedSnapshot) {
+ const result=await admin.rpc('authoritative_jsonb_sha256',{p_payload:snapshot});
+ if(result.error||!result.data||!/^[a-f0-9]{64}$/.test(result.data)) throw new Error(result.error?.message||'Authoritative snapshot hash failed');
+ return result.data;
+}
+export const canonicalBrochureSnapshot = (snapshot: SubmittedSnapshot) => JSON.parse(JSON.stringify(snapshot)) as SubmittedSnapshot;
+export function authoritativeBrochureErrors(snapshot: SubmittedSnapshot) {
+ const errors=snapshotErrors(snapshot); const id=String(snapshot.id || ''); const brochureId=String(snapshot.brochure_id || '');
+ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(brochureId)) errors.push('Brochure and version IDs must be immutable UUIDs.');
+ if (!snapshot.source_quote_id || !snapshot.source_quote_hash) errors.push('Immutable source identity is required.');
+ if (!Array.isArray(snapshot.scenarios) || !snapshot.scenarios.length) errors.push('Complete pricing coverage is required.');
+ return [...new Set(errors)];
+}
 export function snapshotErrors(snapshot: SubmittedSnapshot) {
  const scenarios = snapshot.scenarios as Array<Record<string, unknown>> | undefined; const errors:string[]=[];
  if (!snapshot.id || !snapshot.programme_id || !snapshot.route_fingerprint || !snapshot.version) errors.push('Snapshot identity, Programme, routing and version are required.');

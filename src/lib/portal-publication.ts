@@ -1,9 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getItineraryBanner, toPortalPackagePayload, type ItineraryRecord } from "@/lib/itineraries-store";
 import type { BrochureVersion } from "@/lib/brochures-store";
+import type { SavedQuote } from "@/lib/quotes-store";
 
 export type PortalPublicationReceipt = { packageId: string; slug: string; version: number; url: string; status: "published" };
 export type PortalSnapshotStatus = { id: string; status: "Pending" | "Approved" | "Rejected"; version: number; submittedAt?: string; approvedAt?: string; snapshot?: Record<string, unknown> };
+export type PortalApprovalQueueItem = { id: string; brochure_version_id: string; programme_id: string; route_fingerprint: string; version: number; snapshot_hash: string; submitted_at: string };
 const asBase64 = async (blob: Blob) => {
   const buffer = await blob.arrayBuffer(); let binary = ""; new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte); }); return btoa(binary);
 };
@@ -15,7 +17,7 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
   return data as T;
 }
 export async function submitPortalBrochureSnapshot(brochure: BrochureVersion): Promise<PortalSnapshotStatus> {
-  const data = await invoke<{ snapshotId: string; status: PortalSnapshotStatus["status"]; version?: number; submittedAt?: string }>("submit-portal-brochure-snapshot", { snapshot: brochure });
+  const data = await invoke<{ snapshotId: string; status: PortalSnapshotStatus["status"]; version?: number; submittedAt?: string }>("submit-portal-brochure-snapshot", { brochureVersionId: brochure.id });
   if (!data.snapshotId || !data.status) throw new Error("Snapshot submission was not confirmed by the server.");
   return { id: data.snapshotId, status: data.status, version: data.version ?? brochure.version, submittedAt: data.submittedAt };
 }
@@ -24,10 +26,17 @@ export async function getPortalBrochureSnapshot(snapshotId: string): Promise<Por
   if (!data.snapshot?.id || !data.snapshot.status) throw new Error("Snapshot status was not confirmed by the server.");
   return data.snapshot;
 }
-export async function approvePortalBrochureSnapshot(snapshotId: string, verificationMethod: string, attestationReference: string, reviewerRemarks?: string): Promise<PortalSnapshotStatus> {
-  const data = await invoke<{ snapshotId: string; status: PortalSnapshotStatus["status"]; version: number; approvedAt?: string }>("approve-portal-brochure-snapshot", { snapshotId, verificationMethod, attestationReference, reviewerRemarks });
-  if (!data.snapshotId || data.status !== "Approved") throw new Error("Snapshot approval was not confirmed by the server.");
+export async function approvePortalBrochureSnapshot(snapshotId: string, verificationMethod: string, attestationReference: string, reviewerRemarks?: string, decision: "Approved" | "Rejected" = "Approved", rejectionReason?: string): Promise<PortalSnapshotStatus> {
+  const data = await invoke<{ snapshotId: string; status: PortalSnapshotStatus["status"]; version: number; approvedAt?: string }>("approve-portal-brochure-snapshot", { snapshotId, decision, verificationMethod, attestationReference, reviewerRemarks, rejectionReason });
+  if (!data.snapshotId || data.status !== decision) throw new Error("Snapshot review was not confirmed by the server.");
   return { id: data.snapshotId, status: data.status, version: data.version, approvedAt: data.approvedAt };
+}
+export async function persistAuthoritativeBrochureVersion(brochure: BrochureVersion, sourceQuote: SavedQuote): Promise<void> {
+  const data = await invoke<{ brochureVersionId: string; snapshotHash: string }>("persist-brochure-version", { brochure, sourceQuote });
+  if (data.brochureVersionId !== brochure.id || !data.snapshotHash) throw new Error("Authoritative Brochure persistence was not confirmed by the server.");
+}
+export async function listPortalBrochureApprovalQueue(): Promise<PortalApprovalQueueItem[]> {
+  const data = await invoke<{ snapshots: PortalApprovalQueueItem[] }>("list-portal-brochure-approval-queue", {}); return data.snapshots || [];
 }
 export async function publishItineraryToPortal(record: ItineraryRecord, brochure: BrochureVersion, approvedSnapshotId: string): Promise<PortalPublicationReceipt> {
   if (!record.banner) throw new Error("A package banner is required before publication.");

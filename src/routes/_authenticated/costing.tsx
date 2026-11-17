@@ -144,6 +144,7 @@ import { brochureSellingValidityError } from "@/lib/wizard/brochure-validation";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { getSavedQuote, saveBrochureQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { persistAuthoritativeBrochureVersion } from "@/lib/portal-publication";
 import { createBrochureFromQuote } from "@/lib/brochures-store";
 import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
 import { getQueryQuotationDraft, upsertQueryQuotationDraft } from "@/lib/crm/store";
@@ -1092,6 +1093,8 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
           latest.program_name || undefined,
           dbData.cities,
         );
+        try { await persistAuthoritativeBrochureVersion(brochure, quote); }
+        catch (error) { toast.warning(`Brochure remains safely stored in this browser; cloud persistence failed and can be retried: ${error instanceof Error ? error.message : "unknown error"}`); }
         let draftPersistenceWarning = "";
         let editableDraftSaved = false;
         try {
@@ -1102,7 +1105,7 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
         }
         if (editableDraftSaved) setLastSavedDraftFingerprint(draftFingerprint(latest));
         toast.success(
-          `Final Brochure pricing snapshot V${brochure.version} saved under ${brochure.programme_name} in this browser (IndexedDB; not synced to cloud).${draftPersistenceWarning ? ` Editable draft warning: ${draftPersistenceWarning}` : ""}`,
+          `Final Brochure pricing snapshot V${brochure.version} saved under ${brochure.programme_name}. Local IndexedDB was preserved.${draftPersistenceWarning ? ` Editable draft warning: ${draftPersistenceWarning}` : ""}`,
         );
         return;
       }

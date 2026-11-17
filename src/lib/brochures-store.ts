@@ -171,7 +171,9 @@ export function savedBrochureCostingEligibility(
 const KEY = "mp_tourism_brochure_library_v1";
 const listeners = new Set<() => void>();
 const browser = () => typeof window !== "undefined";
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+// Cloud-authoritative brochure_versions.id is UUID-backed.  Use the same UUID
+// locally so a finalized record can be persisted without substituting identity.
+const uid = () => crypto.randomUUID();
 const EMPTY_BROCHURES: BrochureVersion[] = [];
 let cachedSnapshot: BrochureVersion[] = EMPTY_BROCHURES;
 let cacheInitialized = false;

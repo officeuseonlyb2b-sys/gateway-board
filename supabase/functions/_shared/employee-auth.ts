@@ -58,3 +58,15 @@ export async function requireSuperAdmin(
     ? data.user
     : null;
 }
+export async function requireActiveEmployee(request: Request, admin: ReturnType<typeof clients>["admin"]) {
+  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  const { data, error } = await admin.auth.getUser(token); if (error || !data.user) return null;
+  const result = await admin.from("crm_employees").select("id,data").eq("data->>auth_user_id", data.user.id).maybeSingle();
+  const employee = result.data?.data as EmployeeRecord | undefined;
+  return !result.error && activeEmployee(employee) ? { id: data.user.id, employee } : null;
+}
+export async function requirePortalPricingApprover(request: Request, admin: ReturnType<typeof clients>["admin"]) {
+  const actor = await requireActiveEmployee(request, admin);
+  return actor?.employee.portal_pricing_approver === true ? actor : null;
+}
