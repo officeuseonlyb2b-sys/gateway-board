@@ -59,6 +59,11 @@ export interface ItineraryRecord {
   updatedBy: string;
   sourceQuotationId?: string;
   routingSnapshot?: ItineraryRoutingSnapshot;
+  /** Local replication evidence; it never makes a Programme globally available. */
+  cloudSyncStatus?: "Local Saved" | "Cloud Synced" | "Sync Failed";
+  cloudSyncError?: string;
+  cloudSyncedAt?: string;
+  cloudActive?: boolean;
   importIdentity?: string;
   importedAt?: string;
   importWarnings?: string[];
@@ -299,6 +304,14 @@ export async function saveItinerary(record: ItineraryRecord, options?: { replace
       }
     : record;
   await runTransaction<IDBValidKey>(RECORDS, "readwrite", (store) => store.put(saved));
+}
+
+export async function setItineraryCloudSyncStatus(id: string, status: NonNullable<ItineraryRecord["cloudSyncStatus"]>, error?: string): Promise<ItineraryRecord> {
+  const record = await runTransaction<ItineraryRecord | undefined>(RECORDS, "readonly", (store) => store.get(id));
+  if (!record) throw new Error("Local Itinerary Master record was not found.");
+  const updated = { ...record, cloudSyncStatus: status, cloudSyncError: error, cloudSyncedAt: status === "Cloud Synced" ? new Date().toISOString() : record.cloudSyncedAt, updatedAt: new Date().toISOString() };
+  await saveItinerary(updated, { replaceRoutingSnapshot: true });
+  return updated;
 }
 
 export async function saveItineraryBanner(assetKey: string, file: Blob): Promise<void> {

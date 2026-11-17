@@ -57,7 +57,7 @@ import {
 import type { SavedProgram } from "@/lib/wizard/agents-store";
 import { listExplicitlySavedRoutingProgrammes } from "@/lib/itineraries-store";
 import { createItineraryPdf, itineraryPdfFilename, type ItineraryPdfMode } from "@/lib/itinerary-pdf";
-import { approvePortalBrochureSnapshot, getPortalBrochureSnapshot, publishItineraryToPortal, submitPortalBrochureSnapshot } from "@/lib/portal-publication";
+import { approvePortalBrochureSnapshot, getPortalBrochureSnapshot, listPortalBrochureApprovalQueue, publishItineraryToPortal, submitPortalBrochureSnapshot, type PortalApprovalQueueItem, type PortalSnapshotStatus } from "@/lib/portal-publication";
 
 export const Route = createFileRoute("/_authenticated/brochures/itineraries")({
   head: () => ({ meta: [{ title: "Itinerary Builder — MP Tourism Hub" }] }),
@@ -124,6 +124,8 @@ function ItineraryMasterPage() {
   const [verificationMethod, setVerificationMethod] = useState("");
   const [attestationReference, setAttestationReference] = useState("");
   const [reviewerRemarks, setReviewerRemarks] = useState("");
+  const [approvalQueue, setApprovalQueue] = useState<PortalApprovalQueueItem[]>([]);
+  const [queueSnapshot, setQueueSnapshot] = useState<PortalSnapshotStatus | null>(null);
   const [pricePax, setPricePax] = useState("");
   const [priceHotel, setPriceHotel] = useState("");
   const [priceTransport, setPriceTransport] = useState("");
@@ -170,6 +172,12 @@ function ItineraryMasterPage() {
     }).catch(() => undefined);
     return () => { active = false; };
   }, [record.id, record.portalSnapshot?.id]);
+
+  useEffect(() => {
+    let active = true;
+    void listPortalBrochureApprovalQueue().then((items) => active && setApprovalQueue(items)).catch(() => active && setApprovalQueue([]));
+    return () => { active = false; };
+  }, [authLifecycle.employee?.auth_user_id]);
 
   // Itinerary Builder links only the canonical records explicitly persisted by
   // Itinerary Master; the analytics catalogue must never masquerade as a
@@ -372,6 +380,15 @@ function ItineraryMasterPage() {
   const approveSnapshot = async () => {
     if (!record.portalSnapshot?.id) return;
     try { const server = await approvePortalBrochureSnapshot(record.portalSnapshot.id, verificationMethod, attestationReference, reviewerRemarks); const updated = { ...record, portalSnapshot: { ...record.portalSnapshot, status: server.status, version: server.version, approvedAt: server.approvedAt } }; await saveItinerary(updated); setRecord(updated); setRecords((items) => items.map((item) => item.id === updated.id ? updated : item)); toast.success("Snapshot independently approved."); } catch (error) { toast.error(error instanceof Error ? error.message : "Snapshot approval failed."); }
+  };
+  const openQueueSnapshot = async (snapshotId: string) => {
+    try { setQueueSnapshot(await getPortalBrochureSnapshot(snapshotId)); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Could not open the authoritative snapshot."); }
+  };
+  const approveQueueSnapshot = async () => {
+    if (!queueSnapshot?.id) return;
+    try { await approvePortalBrochureSnapshot(queueSnapshot.id, verificationMethod, attestationReference, reviewerRemarks); setApprovalQueue((items) => items.filter((item) => item.id !== queueSnapshot.id)); setQueueSnapshot(null); toast.success("Authoritative snapshot independently approved."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Snapshot approval failed."); }
   };
   const uploadBanner = async (file?: File) => {
     if (!file) return;
@@ -825,6 +842,8 @@ function ItineraryMasterPage() {
               <p className="mt-1 text-[10px] text-slate-500">Brochure finalization and independent Portal approval are separate controls.</p>
               {record.portalSnapshot ? <dl className="mt-2 space-y-1 text-[10px]"><InfoLine label="Server snapshot" value={record.portalSnapshot.id} /><InfoLine label="Brochure version" value={`V${record.portalSnapshot.version}`} /><InfoLine label="Portal approval" value={record.portalSnapshot.status} /><InfoLine label="Submitted" value={record.portalSnapshot.submittedAt || "Server timestamp unavailable"} /></dl> : <p className="mt-2 text-[10px] text-amber-700">No server-confirmed snapshot has been submitted.</p>}
               <Button variant="outline" className="mt-3 h-8 w-full text-xs" disabled={submittingSnapshot || !linkedPricingVersion || record.portalSnapshot?.status === "Approved"} onClick={() => void submitSnapshot()}>{submittingSnapshot ? "Submitting…" : record.portalSnapshot ? "Refresh / submit exact snapshot" : "Submit Brochure Pricing for Approval"}</Button>
+              {approvalQueue.length > 0 && <div className="mt-3 space-y-2 border-t pt-3"><p className="text-[10px] font-semibold">Portal Pricing Approval Queue</p>{approvalQueue.map((item) => <Button key={item.id} variant="outline" className="h-auto w-full justify-start whitespace-normal p-2 text-left text-[10px]" onClick={() => void openQueueSnapshot(item.id)}>{item.programme_id} · V{item.version} · {item.snapshot_hash.slice(0, 12)}</Button>)}</div>}
+              {queueSnapshot?.snapshot && <div className="mt-3 space-y-2 border-t pt-3"><p className="text-[10px] font-semibold">Authoritative server snapshot</p><pre className="max-h-40 overflow-auto rounded bg-slate-950 p-2 text-[9px] text-slate-100">{JSON.stringify(queueSnapshot.snapshot, null, 2)}</pre><Input className="h-8 text-xs" placeholder="Verification method *" value={verificationMethod} onChange={(event) => setVerificationMethod(event.target.value)} /><Input className="h-8 text-xs" placeholder="Attestation reference *" value={attestationReference} onChange={(event) => setAttestationReference(event.target.value)} /><Textarea className="min-h-16 text-xs" placeholder="Reviewer remarks" value={reviewerRemarks} onChange={(event) => setReviewerRemarks(event.target.value)} /><Button className="h-8 w-full text-xs" disabled={!verificationMethod.trim() || !attestationReference.trim()} onClick={() => void approveQueueSnapshot()}>Approve authoritative snapshot</Button></div>}
               {authLifecycle.employee?.role === "Super Admin" && record.portalSnapshot?.status === "Pending" && <div className="mt-3 space-y-2 border-t pt-3"><p className="text-[10px] font-semibold">Independent Super Admin review</p><Input className="h-8 text-xs" placeholder="Verification method *" value={verificationMethod} onChange={(event) => setVerificationMethod(event.target.value)} /><Input className="h-8 text-xs" placeholder="Attestation reference *" value={attestationReference} onChange={(event) => setAttestationReference(event.target.value)} /><Textarea className="min-h-16 text-xs" placeholder="Reviewer remarks" value={reviewerRemarks} onChange={(event) => setReviewerRemarks(event.target.value)} /><Button className="h-8 w-full text-xs" disabled={!verificationMethod.trim() || !attestationReference.trim()} onClick={() => void approveSnapshot()}>Approve server snapshot</Button><p className="text-[10px] text-slate-500">The server rejects self-approval and revalidates the immutable price matrix.</p></div>}
               {record.portalPublication && <p className="mt-2 text-[10px] text-emerald-700">Portal package {record.portalPublication.packageId} · revision {record.portalPublication.revision} · {record.portalPublication.url}</p>}
             </section>

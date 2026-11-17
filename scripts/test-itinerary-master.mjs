@@ -460,7 +460,7 @@ try {
 
   const costingSource = await fs.readFile("src/routes/_authenticated/costing.tsx", "utf8");
   const stepFourSource = costingSource.slice(costingSource.indexOf("function Step4("), costingSource.indexOf("export function CustomizedRoutingEditor"));
-  assert.match(stepFourSource, /listSavedItineraryRoutingProgrammes\(\)/, "New Quotation Step 4 reads only saved Itinerary Master routing snapshots.");
+  assert.match(stepFourSource, /listCloudRoutingProgrammes\(\)/, "New Quotation Step 4 reads the authorized shared CRM Cloud registry.");
   assert.doesNotMatch(stepFourSource, /usePrograms\(|getPrograms\(/, "New Quotation Step 4 never falls back to the legacy Programme Master catalogue.");
   assert.match(stepFourSource, /No saved Itinerary Master routing available\./, "An empty saved-routing collection has an explicit no-fallback message.");
   assert.doesNotMatch(costingSource, /ensureProgramInMaster|addProgram\(/, "Ordinary Continue, draft autosave and Step 10 contain no shared Programme writer.");
@@ -469,6 +469,11 @@ try {
   const stepThreeValidation = costingSource.slice(costingSource.indexOf("case 3:"), costingSource.indexOf("case 4:"));
   assert.match(stepThreeValidation, /if \(d\.query_type === "Brochure"\) return true;/, "A valid no-date Brochure draft can continue from Step 3 without selling validity dates.");
   assert.match(costingSource, /brochureSellingValidityError/, "Final Brochure publication keeps an explicit selling-validity gate.");
+  const registrySource = await fs.readFile("src/lib/crm-routing-registry.ts", "utf8");
+  const masterSource = await fs.readFile("src/routes/_authenticated/brochures/itinerary-master.tsx", "utf8");
+  assert.match(registrySource, /listCloudRoutings/, "Brochure and quotation can resolve the shared registry through one cloud client.");
+  assert.match(masterSource, /setCloudRoutingActive/, "Itinerary Master has a cloud deactivate/reactivate operation.");
+  assert.match(masterSource, /cloudSyncStatus/, "Local records retain explicit Local Saved/Cloud Synced/Sync Failed evidence.");
 
   try {
     const exampleBuffer = await fs.readFile("C:/Users/Acer/Downloads/EXBHP03.xlsx");

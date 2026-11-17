@@ -10,5 +10,9 @@ verify_jwt = false
 # Validates the user JWT using Auth and the linked Employee Master row itself.
 verify_jwt = false
 
+[functions.crm-routing-registry]
+# Validates the JWT and linked Employee Master row inside the function.
+verify_jwt = false
+
 [functions.invite-employee]
 verify_jwt = false

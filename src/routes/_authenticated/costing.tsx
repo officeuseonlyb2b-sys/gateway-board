@@ -103,12 +103,12 @@ import {
   type Agent,
   type ProgramRoutingRow,
 } from "@/lib/wizard/agents-store";
-import { listSavedItineraryRoutingProgrammes } from "@/lib/saved-itinerary-routings";
+import { listCloudRoutingProgrammes, syncRoutingToCloud } from "@/lib/crm-routing-registry";
 import {
   customizedRoutingSaveErrors,
   saveCustomizedRoutingToItineraryMaster,
 } from "@/lib/wizard/customized-routing-save";
-import { listExplicitlySavedRoutingProgrammes } from "@/lib/itineraries-store";
+import { setItineraryCloudSyncStatus } from "@/lib/itineraries-store";
 import {
   computeAddonsTotal,
   totalPax,
@@ -144,6 +144,7 @@ import { brochureSellingValidityError } from "@/lib/wizard/brochure-validation";
 import { findRatePlan, availableMealPlans } from "@/lib/wizard/rate-lookup";
 import { defaultsForCategory } from "@/lib/wizard/category-defaults";
 import { getSavedQuote, saveBrochureQuote, saveQuote as persistQuote, type SavedQuote } from "@/lib/quotes-store";
+import { persistAuthoritativeBrochureVersion } from "@/lib/portal-publication";
 import { createBrochureFromQuote } from "@/lib/brochures-store";
 import { buildCostingVersionSnapshot } from "@/lib/wizard/build-saved-quote";
 import { getQueryQuotationDraft, upsertQueryQuotationDraft } from "@/lib/crm/store";
@@ -993,6 +994,17 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
         access.employee?.name || user?.name || "Quotation author",
         sourceQuotationId,
       );
+      await setItineraryCloudSyncStatus(result.itinerary.id, "Local Saved");
+      try {
+        await syncRoutingToCloud(result.itinerary);
+        await setItineraryCloudSyncStatus(result.itinerary.id, "Cloud Synced");
+      } catch (error) {
+        // Local routing remains saved, but cannot be represented as shared
+        // until the authenticated CRM Cloud readback has succeeded.
+        const message = error instanceof Error ? error.message : "CRM Cloud did not confirm the routing.";
+        await setItineraryCloudSyncStatus(result.itinerary.id, "Sync Failed", message);
+        throw new Error(`Local Saved · Sync Failed: ${message}`);
+      }
       writeDraft(result.draft);
       const persistedDraftId = persistToDrafts(result.draft, {
         silent: true,
@@ -1047,7 +1059,7 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
           throw new Error(
             "Select a canonical Programme before saving a Brochure pricing snapshot.",
           );
-        const savedRoutingProgrammes = await listExplicitlySavedRoutingProgrammes();
+        const savedRoutingProgrammes = await listCloudRoutingProgrammes();
         if (!savedRoutingProgrammes.some((programme) => programme.id === latest.program_id))
           throw new Error(
             "The selected saved routing is no longer available in Itinerary Master. Re-select it in Step 2.",
@@ -1081,6 +1093,8 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
           latest.program_name || undefined,
           dbData.cities,
         );
+        try { await persistAuthoritativeBrochureVersion(brochure, quote); }
+        catch (error) { toast.warning(`Brochure remains safely stored in this browser; cloud persistence failed and can be retried: ${error instanceof Error ? error.message : "unknown error"}`); }
         let draftPersistenceWarning = "";
         let editableDraftSaved = false;
         try {
@@ -1091,7 +1105,7 @@ export function WizardPage({ workflowMode = "quotation" }: { workflowMode?: "quo
         }
         if (editableDraftSaved) setLastSavedDraftFingerprint(draftFingerprint(latest));
         toast.success(
-          `Final Brochure pricing snapshot V${brochure.version} saved under ${brochure.programme_name} in this browser (IndexedDB; not synced to cloud).${draftPersistenceWarning ? ` Editable draft warning: ${draftPersistenceWarning}` : ""}`,
+          `Final Brochure pricing snapshot V${brochure.version} saved under ${brochure.programme_name}. Local IndexedDB was preserved.${draftPersistenceWarning ? ` Editable draft warning: ${draftPersistenceWarning}` : ""}`,
         );
         return;
       }
@@ -2449,11 +2463,11 @@ function Step2({ draft, set, workflowMode = "quotation" }: StepProps & { workflo
 }
 
 function BrochureProgrammeSelector({ draft, set }: StepProps) {
-  const [programmes, setProgrammes] = useState<Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>>([]);
+  const [programmes, setProgrammes] = useState<Awaited<ReturnType<typeof listCloudRoutingProgrammes>>>([]);
   const db = useDB();
   const [open, setOpen] = useState(false);
   const refreshProgrammes = () =>
-    listExplicitlySavedRoutingProgrammes()
+    listCloudRoutingProgrammes()
       .then(setProgrammes)
       .catch(() => setProgrammes([]));
   useEffect(() => {
@@ -2557,10 +2571,10 @@ function BrochureProgrammeDetails({ programme }: { programme: ReturnType<typeof 
 }
 
 function BrochureProgrammeReview({ draft }: { draft: QuoteDraft }) {
-  const [programme, setProgramme] = useState<Awaited<ReturnType<typeof listExplicitlySavedRoutingProgrammes>>[number]>();
+  const [programme, setProgramme] = useState<Awaited<ReturnType<typeof listCloudRoutingProgrammes>>[number]>();
   useEffect(() => {
     let active = true;
-    void listExplicitlySavedRoutingProgrammes()
+    void listCloudRoutingProgrammes()
       .then((items) => active && setProgramme(items.find((item) => item.id === draft.program_id)))
       .catch(() => active && setProgramme(undefined));
     return () => { active = false; };
@@ -2579,13 +2593,13 @@ function BrochureProgrammeReview({ draft }: { draft: QuoteDraft }) {
 // STEP 4 — Program (updated with Program Name & Category and Beautiful Preview)
 // ============================================================
 function Step4({ draft, set }: StepProps) {
-  const [programs, setPrograms] = useState<Awaited<ReturnType<typeof listSavedItineraryRoutingProgrammes>>>([]);
+  const [programs, setPrograms] = useState<Awaited<ReturnType<typeof listCloudRoutingProgrammes>>>([]);
   const db = useDB();
   const [programSearch, setProgramSearch] = useState("");
   const [durationFilter, setDurationFilter] = useState(String(draft.nights));
   useEffect(() => {
     let active = true;
-    listSavedItineraryRoutingProgrammes()
+    listCloudRoutingProgrammes()
       .then((items) => active && setPrograms(items))
       .catch(() => active && setPrograms([]));
     return () => { active = false; };
